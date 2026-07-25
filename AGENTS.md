@@ -9,8 +9,8 @@ Guidance for automated agents (and humans) working in this repository.
 and a jco host (browser Web Crypto API). It is a sibling of
 `lann:webrtc-datachannels` and deliberately mirrors its architecture — prefer
 clarity and correctness over features, and keep the implementations
-behaviourally in sync (the `crypto-demo` guest's 13 checks are the current
-cross-implementation gate; a conformance suite is planned but not yet built).
+behaviourally in sync (the conformance suite and the `crypto-demo` guest's
+checks are the cross-implementation gate).
 See [`README.md`](README.md) for the design.
 
 Before designing WIT or touching async/stream plumbing, consult
@@ -133,8 +133,8 @@ Run the recipes that cover what you changed, and fix anything they report.
 
 Behavioral changes must keep all three implementations in sync: the
 conformance suite (`just conformance`) is the gate for the wasmtime and
-wasip3-guest targets, and the same guest component must report the same
-`13 checks passed` under `just test` (Wasmtime), `just test-node` (jco), and
+wasip3-guest targets, and the same guest component must report every check
+passing under `just test` (Wasmtime), `just test-node` (jco), and
 `just test-webcrypto-composed` (in-guest). The jco conformance targets
 rejoin the gate when the upstream jco runtime fix lands (see the
 `conformance` recipe); until then `just test-node` is the jco behavioral
@@ -142,11 +142,17 @@ gate. When adding behavior, extend the conformance corpus (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
 its vector suite exists (see conformance/README.md, "Growing the corpus").
 
-## Code comments
+## Code comments and docs
 
 Code comments describe **what** something is or does, not the process by which
 it was arrived at. Rationale like "we removed X because Y" belongs in commit
 messages or PR descriptions, not in source files.
+
+Docs state invariants, not inventories. Never embed values a build or test
+run computes — corpus sizes, check counts, probe indexes. If a number
+matters, a gate asserts it (e.g. the demo harness's expected-summary check);
+if it doesn't, omit it. Machine-derived counts belong only in generated
+artifacts like `conformance/matrix.md`.
 
 ## Direction (designed, not yet built)
 
