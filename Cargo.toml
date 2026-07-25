@@ -5,5 +5,9 @@ members = [
     "examples/crypto-demo",
     "examples/demo-driver",
     "examples/wasmtime-demo",
+    "conformance/guest",
+    "conformance/adapters/wasmtime",
+    "conformance/adapters/wasip3-driver",
+    "conformance/runner",
 ]
 resolver = "2"

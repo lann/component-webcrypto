@@ -60,6 +60,11 @@ examples/
                         #   extractability — 13 checks, one per behavior
   demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
+conformance/            # cross-implementation conformance suite: vendored
+                        #   Wycheproof vectors + translation policy, a shared
+                        #   conformance guest (584 tests incl. chunking
+                        #   schedules and API-contract probes), per-target
+                        #   adapters, and a runner rendering matrix.md
 ```
 
 Demo components pull the shared package in through `wit/deps/lann-webcrypto`
@@ -77,12 +82,16 @@ just demo-wasmtime           # run the guest under the Wasmtime (RustCrypto) hos
 just test-node               # transpile and run the same guest under the jco host
 just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
                              #   and run the whole thing under `wasmtime run`
+just conformance             # the Wycheproof-derived conformance corpus over the
+                             #   enabled targets; renders conformance/matrix.md
 just ci                      # everything CI runs
 ```
 
-All three implementations run the identical `crypto-demo.component.wasm` and
-must print the same `13 checks passed` summary — that is the
-cross-implementation claim, and the seed of a future conformance suite.
+All three implementations run identical guest components. The conformance
+suite (584 tests: Wycheproof HMAC-SHA-256 and AES-GCM vectors under multiple
+stream-chunking schedules, plus API-contract probes) gates the wasmtime and
+wasip3-guest targets; the 13-check `crypto-demo` additionally covers the jco
+host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time
 guarantees, so [`wasip3-impl/README.md`](wasip3-impl/README.md) classifies
@@ -90,3 +99,23 @@ algorithms by how exploitable their timing channels are in wasm (classes A–D)
 and enforces the policy structurally — class D algorithms (e.g. RSA
 private-key ops) are simply never exported by it, so compositions that need
 them fail at `wac plug` time instead of running quietly degraded.
+
+## Findings
+
+- **jco component-model-async guest-heap corruption.** Running the full
+  conformance corpus in one instance under jco (JSPI, Node 24) corrupts the
+  guest's heap — surfacing as `memory access out of bounds` in dlmalloc
+  during async event delivery — while the *identical* guest binary runs all
+  584 tests clean under Wasmtime, both natively and fully composed. The
+  trigger involves many drain-input-then-reject stream operations followed
+  by async imports returning `result<list<u8>>`; failure is deterministic
+  per corpus window but layout-dependent (a superset window can pass while
+  its subset fails), i.e. the corruption is planted silently and detonates
+  elsewhere. The jco conformance targets are non-gating until the upstream
+  fix lands (see the `conformance` justfile recipe); the diagnosis and
+  bisection log live with the jco checkout (`GUEST-HEAP-CORRUPTION-DEBUG.md`).
+- **Streams-only interfaces make delivery schedules part of the contract.**
+  Running every vector under multiple chunking schedules (whole / 1-byte /
+  block-straddling / split-absorb) tests a claim a buffer-based API could
+  never even express — and precisely this corpus shape is what surfaced the
+  runtime bug above.

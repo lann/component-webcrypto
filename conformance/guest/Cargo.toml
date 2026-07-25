@@ -1,0 +1,17 @@
+[package]
+name = "conformance-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The shared conformance guest: executes the Wycheproof-derived vector corpus and the API-contract probes against whichever lann:webcrypto implementation the target provides."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.59", features = ["async"] }
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+# Parsing the vendored Wycheproof JSON compiled into the guest.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"

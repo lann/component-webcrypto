@@ -1,0 +1,18 @@
+[package]
+name = "conformance-wasip3-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CLI driver component for the wasip3-guest conformance target: imports conformance:webcrypto/tests, exports an async wasi:cli/run, and prints the results JSON on stdout."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:cli/run` export.
+wasip3 = { version = "0.7", features = ["async-spawn"] }
+# Pinned to the wit-bindgen version the `wasip3` crate uses (see
+# examples/demo-driver).
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

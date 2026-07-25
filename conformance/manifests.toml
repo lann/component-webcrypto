@@ -1,0 +1,25 @@
+# Per-target expectations for the conformance corpus.
+#
+# Each target lists test ids (or id prefixes ending in `*`) it is EXPECTED to
+# fail, with a reason. The runner classifies results as pass, fail,
+# expected-fail, or unexpected-pass (an expected failure that passed —
+# treated as an error so stale entries get pruned). Expectations here encode
+# *policy* divergence (e.g. a future FIPS-profile target expected-failing the
+# short-key HMAC vectors), not bugs: bugs get fixed, not manifested.
+
+[targets.wasmtime]
+expected-fail = []
+
+[targets.wasip3-guest]
+expected-fail = []
+
+# The jco targets are enumerated but TEMPORARILY produce no results (the
+# runner warns rather than fails): jco's component-model-async runtime
+# corrupts the guest heap under this corpus. See the `conformance` recipe in
+# the justfile. Their empty expectations below are the post-fix state.
+
+[targets.jco-node]
+expected-fail = []
+
+[targets.jco-browser]
+expected-fail = []

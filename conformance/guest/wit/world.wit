@@ -1,0 +1,47 @@
+// The shared conformance guest world. One guest binary runs the whole corpus
+// against whichever `lann:webcrypto` implementation the target under test
+// provides: the Wasmtime host, the jco host (Node and browser), or the
+// composed wasip3 provider.
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/lann-webcrypto` symlink.
+package conformance:webcrypto@0.1.0;
+
+/// The conformance corpus, executed in-guest.
+interface tests {
+    /// One executed conformance test.
+    record test-result {
+        /// Stable identity: `<suite>/<source>/<case>/<schedule>` for
+        /// vector-driven tests (e.g. `aes-gcm/wycheproof/tc42/bytes`) or
+        /// `probe/<name>` for hand-written API-contract probes.
+        id: string,
+        /// Whether the observed behavior matched the expected outcome.
+        passed: bool,
+        /// Failure detail; empty when passed.
+        detail: string,
+    }
+
+    /// The number of tests in the corpus (stable for a given guest build).
+    count: func() -> u32;
+
+    /// Run the entire corpus and report per-test results. Equivalent to
+    /// `run-slice(0, count())`.
+    run-all: async func() -> list<test-result>;
+
+    /// Run `take` tests starting at `skip`, in corpus order.
+    ///
+    /// A harness-debugging aid: running a window of the corpus is how a
+    /// misbehaving target gets bisected (it is how the jco runtime issue
+    /// blocking the jco conformance targets was isolated). Gating targets
+    /// run `run-all`.
+    run-slice: async func(skip: u32, take: u32) -> list<test-result>;
+}
+
+world conformance-guest {
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/hmac@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+
+    export tests;
+}

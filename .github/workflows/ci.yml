@@ -52,6 +52,12 @@ jobs:
       - name: Run composed in-guest test
         run: just test-webcrypto-composed
 
+      # The cross-implementation conformance suite over the enabled targets
+      # (wasmtime + wasip3-guest; the jco targets are blocked on an upstream
+      # jco runtime bug — see the `conformance` recipe).
+      - name: Run conformance suite
+        run: just conformance
+
   # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
   jco:
