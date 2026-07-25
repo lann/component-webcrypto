@@ -27,8 +27,9 @@ wit/                    # lann:webcrypto package: types (structural),
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
-jco-impl/               # jco host: webcrypto.js implements the imports over
-                        #   the browser-compatible Web Crypto API ONLY
+jco-impl/               # jco host LIBRARY: webcrypto.js implements the
+                        #   imports over the browser-compatible Web Crypto
+                        #   API ONLY; no dependencies, no demo code
 wasip3-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
                         #   crate: wasip3-webcrypto — see its README for the
@@ -40,6 +41,10 @@ examples/
                         #   fully in-guest demo
   wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker
                         #   + the integration test (tests/demo.rs)
+  jco-demo/             # Node 24+ driver for the jco host: transpiles
+                        #   crypto-demo with jco (the --async-*/--map flags
+                        #   live in its package.json) and runs it against
+                        #   jco-impl/webcrypto.js
 conformance/            # cross-implementation conformance suite — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
@@ -82,7 +87,7 @@ bindgen configs (`wasmtime-impl/src/bindings.rs`,
 `examples/wasmtime-demo/src/lib.rs`), the wasip3 provider world and bindings
 (`wasip3-impl/`), the driver's inline world
 (`examples/demo-driver/src/lib.rs`), and the `jco transpile`
-`--async-exports`/`--async-imports`/`--map` flags in `jco-impl/package.json`.
+`--async-exports`/`--async-imports`/`--map` flags in `examples/jco-demo/package.json`.
 
 ### The wasip3 provider's timing-channel policy
 
@@ -126,7 +131,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `wasip3-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
 | `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime and wasip3-guest targets; the jco targets are temporarily non-gating (upstream jco runtime bug — run `just conformance-jco-node` to check a fix). |
-| `just transpile` | anything affecting the component's interfaces, or the jco flags in `jco-impl/package.json`. |
+| `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
