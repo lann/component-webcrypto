@@ -37,6 +37,8 @@ fn build_component(workspace_root: &Path) -> PathBuf {
         ],
     );
     let component = workspace_root.join("examples/crypto-demo/build/crypto-demo.component.wasm");
+    std::fs::create_dir_all(component.parent().unwrap())
+        .expect("failed to create the component build directory");
     run(
         workspace_root,
         "wasm-tools",
