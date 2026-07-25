@@ -1,0 +1,23 @@
+[package]
+name = "wasip3-webcrypto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "In-guest wasm component implementation of the lann:webcrypto interfaces, backed by RustCrypto; exports the package surface for composition via `wac plug`."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# `async` pulls in the component-model `stream`/`future` runtime support and
+# the `wit_stream` helpers; `async-spawn` provides `wit_bindgen::spawn`, used
+# to feed returned byte streams after an export has returned.
+wit-bindgen = { version = "0.59", features = ["async", "async-spawn"] }
+# RustCrypto backing implementations. The soft (fixsliced, table-free) AES
+# backend is what makes AES-256-GCM acceptable in-guest — see the README's
+# timing-channel classification.
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+# Key generation, via the target's WASI random backend.
+getrandom = "0.3"

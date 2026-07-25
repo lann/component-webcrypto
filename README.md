@@ -1,8 +1,9 @@
 # `lann:webcrypto`
 
 A WebCrypto-flavored WIT package plus multiple implementations that run the
-*same* guest component: a Wasmtime host backed by RustCrypto and a jco host
-backed by the browser Web Crypto API. A sibling of
+*same* guest component: a Wasmtime host backed by RustCrypto, a jco host
+backed by the browser Web Crypto API, and an in-guest wasm component
+(RustCrypto compiled to wasm, composable via `wac plug`). A sibling of
 [`lann:webrtc-datachannels`](https://github.com/lann/webrtc-datachannels),
 following the same architecture.
 
@@ -49,10 +50,15 @@ wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
 jco-impl/               # jco host (Node 24+), browser-compatible Web Crypto
                         #   API only (crypto.subtle / getRandomValues)
+wasip3-impl/            # in-guest wasm component: RustCrypto in wasm,
+                        #   EXPORTS the package surface, composable via
+                        #   `wac plug` — see its README for the wasm
+                        #   timing-channel classification & export policy
 examples/
   crypto-demo/          # guest component: RFC 4231 + NIST GCM known-answer
                         #   vectors, chunked streams, error taxonomy,
                         #   extractability — 13 checks, one per behavior
+  demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
 ```
 
@@ -66,12 +72,21 @@ Prerequisites: Rust (via rustup; the toolchain and wasm target are pinned in
 async ABI uses JSPI). `./scripts/setup.sh` installs the rest.
 
 ```sh
-just test           # Rust tests, incl. the guest-under-Wasmtime integration test
-just demo-wasmtime  # run the guest under the Wasmtime (RustCrypto) host
-just test-node      # transpile and run the same guest under the jco host
-just ci             # everything CI runs
+just test                    # Rust tests, incl. the guest-under-Wasmtime integration test
+just demo-wasmtime           # run the guest under the Wasmtime (RustCrypto) host
+just test-node               # transpile and run the same guest under the jco host
+just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
+                             #   and run the whole thing under `wasmtime run`
+just ci                      # everything CI runs
 ```
 
-Both hosts run the identical `crypto-demo.component.wasm` and must print the
-same `13 checks passed` summary — that is the cross-implementation claim, and
-the seed of a future conformance suite.
+All three implementations run the identical `crypto-demo.component.wasm` and
+must print the same `13 checks passed` summary — that is the
+cross-implementation claim, and the seed of a future conformance suite.
+
+A note on the in-guest provider: wasm offers no portable constant-time
+guarantees, so [`wasip3-impl/README.md`](wasip3-impl/README.md) classifies
+algorithms by how exploitable their timing channels are in wasm (classes A–D)
+and enforces the policy structurally — class D algorithms (e.g. RSA
+private-key ops) are simply never exported by it, so compositions that need
+them fail at `wac plug` time instead of running quietly degraded.

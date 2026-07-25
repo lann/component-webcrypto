@@ -29,9 +29,15 @@ wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
 jco-impl/               # jco host: webcrypto.js implements the imports over
                         #   the browser-compatible Web Crypto API ONLY
+wasip3-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
+                        #   package surface; composable via `wac plug`;
+                        #   crate: wasip3-webcrypto — see its README for the
+                        #   timing-channel classification and export policy
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
     wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package
+  demo-driver/          # CLI driver (async wasi:cli/run) for the composed
+                        #   fully in-guest demo
   wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker
                         #   + the integration test (tests/demo.rs)
 scripts/setup.sh        # one-shot dependency setup (idempotent; used by CI)
@@ -58,8 +64,21 @@ The layering is a design invariant, not a convention:
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`wasmtime-impl/src/bindings.rs`,
-`examples/wasmtime-demo/src/lib.rs`), and the `jco transpile`
+`examples/wasmtime-demo/src/lib.rs`), the wasip3 provider world and bindings
+(`wasip3-impl/`), the driver's inline world
+(`examples/demo-driver/src/lib.rs`), and the `jco transpile`
 `--async-exports`/`--async-imports`/`--map` flags in `jco-impl/package.json`.
+
+### The wasip3 provider's timing-channel policy
+
+`wasip3-impl/README.md` carries the timing-channel classification (classes
+A–D) and this provider's policy: only class A–C algorithms are exported,
+always via constant-time-variant implementations; class D algorithm
+interfaces (RSA private-key ops, ECDSA signing, …) are **never** exported by
+the in-guest provider, so compositions requiring them fail at `wac plug`
+time. Secret-free operations (hashing public data, signature *verification*)
+are exempt from the classes. Keep the classification table in sync when
+adding algorithms, and keep class D out of the provider's world.
 
 ### The jco host must stay browser-compatible
 
@@ -90,15 +109,17 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just validate-wit` | any `.wit` file. |
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
+| `just test-webcrypto-composed` | the `wasip3-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `jco-impl/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
-Behavioral changes must keep both hosts in sync: the same guest component must
-report the same `13 checks passed` under `just test` (Wasmtime) and
-`just test-node` (jco). When adding behavior, extend the guest's checks — it
-is the cross-implementation gate until a conformance suite exists.
+Behavioral changes must keep all three implementations in sync: the same
+guest component must report the same `13 checks passed` under `just test`
+(Wasmtime), `just test-node` (jco), and `just test-webcrypto-composed`
+(in-guest). When adding behavior, extend the guest's checks — it is the
+cross-implementation gate until a conformance suite exists.
 
 ## Code comments
 
@@ -110,11 +131,15 @@ messages or PR descriptions, not in source files.
 
 - `digest` primitive kind (mac minus keys) and more algorithms per kind — each
   is a new key-minting interface plus constructors, never a generic change.
+  ChaCha20-Poly1305 is the planned next AEAD and the recommended one for the
+  in-guest provider (class A + B).
 - `stream-aead`: a segmented AEAD primitive kind (libsodium
   `secretstream`-style) for unbounded content with O(segment) memory;
   single-message `aead.open` deliberately buffers-and-verifies and must not be
   relaxed to stream unverified plaintext.
-- A `wasip3-impl` in-guest provider component (RustCrypto compiled to wasm,
-  exporting the package surface, composable via `wac plug`) and a
-  cross-implementation conformance suite, both following the sibling
-  repository's shape.
+- A `signature` primitive kind whose `verify` (secret-free — e.g. JWT
+  validation) is exportable by the in-guest provider even for algorithms whose
+  `sign` is class D.
+- A timing lab (dudect-style statistical tests of the composed provider under
+  wasmtime, targeting class B/C surfaces) and a cross-implementation
+  conformance suite, both following the sibling repository's lab shape.

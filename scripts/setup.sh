@@ -8,6 +8,10 @@
 #     guest component compiles to, as declared in rust-toolchain.toml
 #   - wasm-tools, used to wrap guest modules into components and validate WIT
 #   - just, the command runner used for development and CI recipes
+#   - wac, the component linker used to compose the crypto-demo guest with the
+#     wasip3 provider (`just compose-demo`)
+#   - wasmtime, the host runtime that runs the composed in-guest crypto
+#     integration test (`just test-webcrypto-composed`)
 #   - the Node host's npm dependencies (jco)
 #
 # Prerequisites (not installed here): a Rust toolchain via rustup, and — for
@@ -25,6 +29,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WASM_TOOLS_VERSION="${WASM_TOOLS_VERSION:-1.247.0}"
 JUST_VERSION="${JUST_VERSION:-1.40.0}"
+WAC_VERSION="${WAC_VERSION:-0.10.1}"
+WASMTIME_VERSION="${WASMTIME_VERSION:-47.0.1}"
 
 log() { printf '\n==> %s\n' "$1"; }
 
@@ -50,6 +56,16 @@ fi
 if ! have just; then
     log "Installing just ${JUST_VERSION}"
     cargo binstall -y --force "just@${JUST_VERSION}"
+fi
+
+if ! have wac; then
+    log "Installing wac ${WAC_VERSION}"
+    cargo binstall -y --force "wac-cli@${WAC_VERSION}"
+fi
+
+if ! have wasmtime; then
+    log "Installing wasmtime ${WASMTIME_VERSION}"
+    cargo binstall -y --force "wasmtime-cli@${WASMTIME_VERSION}"
 fi
 
 if [ "${SKIP_NODE:-}" != "1" ]; then

@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "wasmtime-impl",
+    "wasip3-impl",
     "examples/crypto-demo",
+    "examples/demo-driver",
     "examples/wasmtime-demo",
 ]
 resolver = "2"

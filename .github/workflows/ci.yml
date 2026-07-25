@@ -47,6 +47,11 @@ jobs:
       - name: Run tests
         run: just test
 
+      # Compose the crypto-demo guest with the wasip3 provider and the CLI
+      # driver (`wac plug`) and run the fully in-guest demo under wasmtime.
+      - name: Run composed in-guest test
+        run: just test-webcrypto-composed
+
   # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
   jco:

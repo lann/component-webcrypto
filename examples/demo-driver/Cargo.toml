@@ -1,0 +1,18 @@
+[package]
+name = "crypto-demo-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CLI driver component for the fully in-guest crypto demo: imports demo:webcrypto-demo/demo, exports an async wasi:cli/run, and reports the run's summary on stdout."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:cli/run` export (a synchronous `run` cannot await the async
+# `demo.run` import).
+wasip3 = { version = "0.7", features = ["async-spawn"] }
+# Pinned to the wit-bindgen version the `wasip3` crate uses: this crate shares
+# wit-bindgen runtime types with wasip3, and mixing two runtime versions in one
+# component is unsupported. Upgrade together with the wasip3 dependency.
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }

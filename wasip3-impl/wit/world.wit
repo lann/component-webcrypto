@@ -1,0 +1,30 @@
+// The `wasip3-webcrypto` component world.
+//
+// This is the third implementation of `lann:webcrypto`, alongside the
+// `wasmtime-impl` (RustCrypto, native) and `jco-impl` (browser Web Crypto)
+// hosts. Unlike those two, this implementation is itself a **wasm component**:
+// it runs RustCrypto in-guest and *exports* the package surface.
+//
+// Because it exports the package surface and needs no crypto capability from
+// the host (key generation uses the WASI random imports the standard library
+// links in), it can be composed (`wac plug`) with any consumer component that
+// imports these interfaces, producing a single self-contained component whose
+// cryptography runs entirely in wasm.
+//
+// This provider deliberately exports only algorithms whose constant-time
+// story survives wasm's lack of timing guarantees (see the crate README's
+// classification); algorithm interfaces that cannot meet that bar are simply
+// not exported, so a composition requiring them fails at `wac plug` time.
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/lann-webcrypto` symlink, exactly like the
+// demo components do.
+package wasip3:webcrypto;
+
+/// The composable in-guest WebCrypto provider.
+world provider {
+    export lann:webcrypto/mac@0.1.0;
+    export lann:webcrypto/aead@0.1.0;
+    export lann:webcrypto/hmac@0.1.0;
+    export lann:webcrypto/aes-gcm@0.1.0;
+}
