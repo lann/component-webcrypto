@@ -143,3 +143,14 @@ messages or PR descriptions, not in source files.
 - A timing lab (dudect-style statistical tests of the composed provider under
   wasmtime, targeting class B/C surfaces) and a cross-implementation
   conformance suite, both following the sibling repository's lab shape.
+- A FIPS 140-3 profile, kept *possible* (not implemented): everything needed
+  is additive — an internal-nonce seal (`seal-internal-nonce`, since SP
+  800-38D forbids externally supplied GCM encryption IVs in approved mode; a
+  FIPS provider offers caller-nonce `seal` only as a non-approved service), a
+  `module` interface for ISO 19790's mandatory services (show version, show
+  status, self-test, zeroization) plus approved-service indication, and
+  wrapped key export. Do not reintroduce WIT contracts that *mandate*
+  non-approved behavior (the HMAC import doc deliberately permits
+  policy-based rejection of short keys for this reason); a FIPS profile is
+  then just a provider exporting only approved algorithm interfaces —
+  enforced at `wac plug` time like the timing-channel class D policy.

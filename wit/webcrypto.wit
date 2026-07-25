@@ -162,9 +162,12 @@ interface hmac {
     use types.{error};
     use mac.{mac-key};
 
-    /// Import raw key material as an HMAC-SHA-256 key. Any non-empty length
-    /// is accepted (per RFC 2104; keys longer than the block size are hashed
-    /// first).
+    /// Import raw key material as an HMAC-SHA-256 key. Empty keys are
+    /// rejected with `error.invalid-key`. Implementations generally accept
+    /// any non-empty length (per RFC 2104; keys longer than the block size
+    /// are hashed first), but an implementation enforcing a security policy
+    /// (for example FIPS 140-3 approved mode, which requires keys of at
+    /// least 112 bits) MAY reject shorter keys with `error.invalid-key`.
     import-hmac-sha256-key: async func(raw: list<u8>, extractable: bool) -> result<mac-key, error>;
 
     /// Generate a fresh random HMAC-SHA-256 key (32 bytes of key material).
