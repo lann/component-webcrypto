@@ -1,5 +1,5 @@
 // Host implementation of the `lann:webcrypto` imports (`mac`, `aead`, `hmac`,
-// `aes-gcm`) for the demo component.
+// `aes-gcm`) for jco-transpiled components.
 //
 // This is the "browser-first" host: it is written against the standard Web
 // Crypto API only — `globalThis.crypto.subtle` and

@@ -36,16 +36,16 @@ test:
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 build-component:
-    cd jco-impl && npm run build:component
+    cd examples/jco-demo && npm run build:component
 
 # Transpile the crypto-demo component for the Node host (runs build-component).
 transpile: build-component
-    cd jco-impl && npm run transpile
+    cd examples/jco-demo && npm run transpile
 
 # Run the Node (browser-compatible WebCrypto) host. Needs Node 24+ (jco's
 # async ABI uses JSPI, which Node exposes behind --experimental-wasm-jspi).
 test-node: transpile
-    cd jco-impl && npm test
+    cd examples/jco-demo && npm test
 
 # Run the Wasmtime (native, RustCrypto) host demo.
 demo-wasmtime: build-component

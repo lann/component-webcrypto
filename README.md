@@ -50,8 +50,9 @@ RustCrypto's `aes-gcm` produces identically).
 wit/                    # the lann:webcrypto package (defined once, here)
 wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
-jco-impl/               # jco host (Node 24+), browser-compatible Web Crypto
-                        #   API only (crypto.subtle / getRandomValues)
+jco-impl/               # jco host library: webcrypto.js, browser-compatible
+                        #   Web Crypto API only (crypto.subtle /
+                        #   getRandomValues); no dependencies
 wasip3-impl/            # in-guest wasm component: RustCrypto in wasm,
                         #   EXPORTS the package surface, composable via
                         #   `wac plug` — see its README for the wasm
@@ -62,6 +63,8 @@ examples/
                         #   extractability — one check per behavior
   demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
+  jco-demo/             # Node 24+ driver: transpiles crypto-demo with jco
+                        #   against the jco-impl host and runs it
 conformance/            # cross-implementation conformance suite: vendored
                         #   Wycheproof vectors + translation policy, a shared
                         #   conformance guest (vectors under chunking

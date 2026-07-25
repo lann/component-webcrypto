@@ -12,7 +12,7 @@
 #     wasip3 provider (`just compose-demo`)
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
 #     integration test (`just test-webcrypto-composed`)
-#   - the Node host's npm dependencies (jco)
+#   - the jco demo driver's npm dependencies (jco)
 #
 # Prerequisites (not installed here): a Rust toolchain via rustup, and — for
 # the jco host — Node 24+ with npm (jco's async ABI uses JSPI, which Node
@@ -21,7 +21,7 @@
 # Environment overrides:
 #   WASM_TOOLS_VERSION   version of wasm-tools to install (default below)
 #   JUST_VERSION         version of just to install (default below)
-#   SKIP_NODE=1          skip installing the Node host's npm dependencies
+#   SKIP_NODE=1          skip installing the jco demo driver's npm dependencies
 
 set -euo pipefail
 
@@ -69,8 +69,8 @@ if ! have wasmtime; then
 fi
 
 if [ "${SKIP_NODE:-}" != "1" ]; then
-    log "Installing the Node host's npm dependencies (jco-impl)"
-    (cd "$REPO_ROOT/jco-impl" && npm install)
+    log "Installing the jco demo driver's npm dependencies (examples/jco-demo)"
+    (cd "$REPO_ROOT/examples/jco-demo" && npm install)
 fi
 
 log "Done."
