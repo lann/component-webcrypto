@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Native Rust checks: formatting, lints, WIT validation, and the
+  # guest-under-Wasmtime integration test.
+  rust-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        # The toolchain version, wasm target, and rustfmt/clippy components are
+        # pinned in rust-toolchain.toml; `rustup show` installs exactly those.
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-checks
+          cache-all-crates: true
+
+      - name: Install dependencies
+        run: SKIP_NODE=1 ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Check formatting
+        run: just fmt-check
+
+      - name: Validate WIT
+        run: just validate-wit
+
+      - name: Run clippy
+        run: just clippy
+
+      - name: Run tests
+        run: just test
+
+  # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
+  # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
+  jco:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: jco
+          cache-all-crates: true
+
+      - name: Install dependencies
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Run the jco host test
+        run: just test-node

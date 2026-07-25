@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "wasmtime-impl",
+    "examples/crypto-demo",
+    "examples/wasmtime-demo",
+]
+resolver = "2"

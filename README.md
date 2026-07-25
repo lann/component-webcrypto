@@ -1,0 +1,77 @@
+# `lann:webcrypto`
+
+A WebCrypto-flavored WIT package plus multiple implementations that run the
+*same* guest component: a Wasmtime host backed by RustCrypto and a jco host
+backed by the browser Web Crypto API. A sibling of
+[`lann:webrtc-datachannels`](https://github.com/lann/webrtc-datachannels),
+following the same architecture.
+
+## Design
+
+The package ([`wit/webcrypto.wit`](wit/webcrypto.wit)) is layered by *primitive
+kind*, not by algorithm:
+
+- **Generic primitive interfaces** (`mac`, `aead`; later `digest`,
+  `stream-aead`, …) each own the algorithm-agnostic resources. Adding an
+  algorithm never touches them.
+- **Algorithm interfaces** (`hmac`, `aes-gcm`) contain only *key minting*
+  (`import-*`/`generate-*`). Everything else hangs off the key resource, so a
+  key can never be used with the wrong algorithm.
+- **Keys are resources — capabilities.** A world importing only `mac` can use
+  key handles it is granted but cannot mint keys; only a world importing
+  `hmac` can. `extractable: false` keys refuse `export` (on the jco host the
+  platform `CryptoKey` itself enforces this).
+- **Byte `stream`s are the only bulk data path** (no buffer-taking `update`
+  functions), so implementations have exactly one ingestion path and results
+  are chunking-invariant. On Wasmtime the host consumes bytes directly from
+  guest memory (`StreamConsumer`); between composed components a stream write
+  is a direct memory-to-memory copy.
+- **`aead` is honest about being a single-message primitive**: `open` resolves
+  only after the whole ciphertext is drained and verified — `ok(stream)` *is*
+  the authentication statement, and unverified plaintext is never observable.
+  The returned stream still lets plaintext live outside the caller's linear
+  memory (the practical ceiling moves from wasm32's 4 GiB to host RAM).
+  Truly unbounded content belongs to a future segmented `stream-aead`
+  primitive kind (libsodium-`secretstream`-style), not to a relaxation of
+  `open`.
+- **Consuming statics** (`finalize`/`verify` take `this`) make
+  use-after-finalize unrepresentable rather than a runtime error.
+
+Current algorithms: **HMAC-SHA-256** and **AES-256-GCM** (12-byte nonces,
+16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire format, which
+RustCrypto's `aes-gcm` produces identically).
+
+## Layout
+
+```
+wit/                    # the lann:webcrypto package (defined once, here)
+wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
+                        #   WasiWebcryptoView; crate: wasmtime-webcrypto
+jco-impl/               # jco host (Node 24+), browser-compatible Web Crypto
+                        #   API only (crypto.subtle / getRandomValues)
+examples/
+  crypto-demo/          # guest component: RFC 4231 + NIST GCM known-answer
+                        #   vectors, chunked streams, error taxonomy,
+                        #   extractability — 13 checks, one per behavior
+  wasmtime-demo/        # thin native host + the integration test
+```
+
+Demo components pull the shared package in through `wit/deps/lann-webcrypto`
+symlinks back to the root `wit/`, so there is a single copy to edit.
+
+## Build & run
+
+Prerequisites: Rust (via rustup; the toolchain and wasm target are pinned in
+`rust-toolchain.toml`), `wasm-tools`, and — for the jco host — Node 24+ (jco's
+async ABI uses JSPI). `./scripts/setup.sh` installs the rest.
+
+```sh
+just test           # Rust tests, incl. the guest-under-Wasmtime integration test
+just demo-wasmtime  # run the guest under the Wasmtime (RustCrypto) host
+just test-node      # transpile and run the same guest under the jco host
+just ci             # everything CI runs
+```
+
+Both hosts run the identical `crypto-demo.component.wasm` and must print the
+same `13 checks passed` summary — that is the cross-implementation claim, and
+the seed of a future conformance suite.

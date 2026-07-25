@@ -1,0 +1,188 @@
+package lann:webcrypto@0.1.0;
+
+/// Shared structural types for the WebCrypto-style interfaces.
+///
+/// Every non-resource type used by the package lives here. Structural types
+/// carry no host-side identity, so a single composition can freely share these
+/// definitions across multiple components. The stateful objects — keys and
+/// in-progress computations — live in the per-primitive-kind interfaces
+/// (`mac`, `aead`, …), since a resource is always owned by the one component
+/// that implements it.
+interface types {
+    /// Errors surfaced by key creation and cryptographic operations.
+    ///
+    /// Failures that indicate misuse of the API (for example absorbing into a
+    /// finalized computation) are unrepresentable by construction and so have
+    /// no variant here.
+    variant error {
+        /// The supplied key material is invalid for the algorithm (for
+        /// example, a wrong-length raw key). The string is human-readable.
+        invalid-key(string),
+        /// The supplied nonce is invalid for the algorithm (for example, a
+        /// wrong-length AES-GCM nonce). The string is human-readable.
+        invalid-nonce(string),
+        /// Authenticated decryption failed: the ciphertext or its associated
+        /// data did not verify under the key and nonce. Deliberately carries
+        /// no detail, so implementations cannot leak *why* verification
+        /// failed.
+        authentication-failed,
+        /// The key was created with `extractable` false, so its material
+        /// cannot be exported.
+        not-extractable,
+        /// An implementation-specific failure. The string is human-readable.
+        other(string),
+    }
+}
+
+/// The `mac` primitive kind: message-authentication codes.
+///
+/// This interface is algorithm-agnostic. Keys are minted by per-algorithm
+/// interfaces (such as `hmac`) and returned as `mac-key` resources bound to
+/// their algorithm at creation; every operation then hangs off the key, so a
+/// key can never be used with the wrong algorithm.
+///
+/// A component whose world imports only this interface can *use* any
+/// `mac-key` handle it is granted but cannot mint or import keys; only a
+/// world importing a key-minting interface (such as `hmac`) can create them.
+/// Key handles are therefore capabilities.
+interface mac {
+    use types.{error};
+
+    /// A MAC key: an unforgeable capability, bound to one algorithm at
+    /// creation.
+    ///
+    /// Note on extractability: `extractable` is an API property, not a
+    /// physical one — the *implementation* of this interface necessarily
+    /// holds the key material. The guarantee is that components holding only
+    /// the handle cannot obtain the material through this API.
+    resource mac-key {
+        /// Begin a new MAC computation keyed by this key.
+        start: func() -> mac;
+
+        /// The algorithm this key is bound to, e.g. `"HMAC-SHA-256"`.
+        algorithm: func() -> string;
+
+        /// The raw key material. Fails with `error.not-extractable` unless
+        /// the key was created with `extractable` true.
+        %export: async func() -> result<list<u8>, error>;
+    }
+
+    /// One in-progress MAC computation.
+    ///
+    /// The bulk data path is a byte `stream`; there is deliberately no
+    /// buffer-taking update function, so every implementation has exactly one
+    /// ingestion path. `finalize` and `verify` consume the resource, making
+    /// use-after-finalize unrepresentable rather than a runtime error.
+    resource mac {
+        /// Absorb an entire byte stream into the computation. Resolves once
+        /// the stream is fully drained (its writer dropped). May be called
+        /// multiple times sequentially; the absorbed streams are
+        /// concatenated. Implementations may process the bytes incrementally
+        /// or buffer until `finalize`/`verify` — the result is
+        /// chunking-invariant either way.
+        absorb: async func(data: stream<u8>);
+
+        /// Consume the computation and return the authentication tag.
+        finalize: static async func(this: mac) -> list<u8>;
+
+        /// Consume the computation and verify `tag` against the computed tag
+        /// in constant time.
+        verify: static async func(this: mac, tag: list<u8>) -> bool;
+
+        /// The algorithm of the key this computation was started from.
+        algorithm: func() -> string;
+    }
+}
+
+/// The `aead` primitive kind: single-message authenticated encryption with
+/// associated data.
+///
+/// This is deliberately a *single-message* primitive, mirroring
+/// `crypto.subtle.encrypt`/`decrypt`: one nonce, one tag, and memory
+/// proportional to the message somewhere in the implementation. Streaming
+/// *transport* is still used for the bulk data paths — which lets the
+/// plaintext or ciphertext live outside the caller's linear memory — but
+/// `open` never releases unverified plaintext, so it necessarily buffers the
+/// whole message internally before its result resolves. Content too large
+/// for that contract belongs to a future segmented `stream-aead` primitive
+/// kind, not to a relaxation of this one.
+///
+/// `seal`/`open` are stateless per call, so there is no separate computation
+/// resource: the key resource carries the operations directly.
+interface aead {
+    use types.{error};
+
+    /// An AEAD key: an unforgeable capability, bound to one algorithm at
+    /// creation. See `mac-key` for the capability and extractability notes,
+    /// which apply identically here.
+    resource aead-key {
+        /// Encrypt and authenticate `plaintext` under `nonce` with the
+        /// associated data `aad`.
+        ///
+        /// The returned stream carries the ciphertext followed by the
+        /// authentication tag (the `crypto.subtle.encrypt` wire format).
+        /// Implementations may produce it incrementally (tag last) or buffer
+        /// and emit it whole; `async` here only *allows* blocking before the
+        /// stream is returned.
+        ///
+        /// The caller is responsible for nonce uniqueness per key; nonce
+        /// misuse defeats the algorithm's guarantees.
+        ///
+        /// The plaintext stream is fully drained even when the result is an
+        /// error, so a caller feeding the stream concurrently never observes
+        /// its writer failing instead of the error.
+        seal: async func(nonce: list<u8>, aad: list<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
+
+        /// Decrypt and verify `ciphertext` (ciphertext followed by tag, as
+        /// produced by `seal`) under `nonce` and `aad`.
+        ///
+        /// Resolves only after the ciphertext stream is fully drained and the
+        /// tag verified: `ok(stream)` *is* the authentication statement, and
+        /// unverified plaintext is never observable. Fails with
+        /// `error.authentication-failed` if verification fails.
+        ///
+        /// Like `seal`, the ciphertext stream is fully drained even when the
+        /// result is an error.
+        open: async func(nonce: list<u8>, aad: list<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
+
+        /// The algorithm this key is bound to, e.g. `"AES-256-GCM"`.
+        algorithm: func() -> string;
+
+        /// The raw key material. Fails with `error.not-extractable` unless
+        /// the key was created with `extractable` true.
+        %export: async func() -> result<list<u8>, error>;
+    }
+}
+
+/// HMAC key minting (RFC 2104), one function pair per underlying hash.
+///
+/// Adding an algorithm touches only an interface like this one: the generic
+/// `mac` surface is closed. Keys returned here drive `mac.mac-key.start`.
+interface hmac {
+    use types.{error};
+    use mac.{mac-key};
+
+    /// Import raw key material as an HMAC-SHA-256 key. Any non-empty length
+    /// is accepted (per RFC 2104; keys longer than the block size are hashed
+    /// first).
+    import-hmac-sha256-key: async func(raw: list<u8>, extractable: bool) -> result<mac-key, error>;
+
+    /// Generate a fresh random HMAC-SHA-256 key (32 bytes of key material).
+    generate-hmac-sha256-key: async func(extractable: bool) -> mac-key;
+}
+
+/// AES-GCM key minting (NIST SP 800-38D), one function pair per key size.
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
+/// and 16-byte tags.
+interface aes-gcm {
+    use types.{error};
+    use aead.{aead-key};
+
+    /// Import 32 bytes of raw key material as an AES-256-GCM key. Fails with
+    /// `error.invalid-key` for any other length.
+    import-aes256-gcm-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random AES-256-GCM key.
+    generate-aes256-gcm-key: async func(extractable: bool) -> aead-key;
+}

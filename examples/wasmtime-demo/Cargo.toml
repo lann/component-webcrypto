@@ -1,0 +1,18 @@
+[package]
+name = "wasmtime-webcrypto-demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Thin native host running the crypto-demo component over wasmtime-webcrypto's add_to_linker."
+
+[[bin]]
+name = "wasmtime-webcrypto-host"
+path = "src/main.rs"
+
+[dependencies]
+# The `lann:webcrypto` host implementation lives in this crate; the binary
+# obtains its imports from its `add_to_linker`.
+wasmtime-webcrypto = { path = "../../wasmtime-impl" }
+wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+anyhow = "1"

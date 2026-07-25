@@ -1,0 +1,16 @@
+// The `imports` world enumerates the `lann:webcrypto` interfaces this crate
+// implements on the host side, so `bindgen!` can generate the corresponding
+// `Host` traits and per-interface `add_to_linker` helpers.
+//
+// The package itself lives once at the repository root `wit/` and is pulled in
+// through the `deps/lann-webcrypto` symlink, exactly like the demo components
+// do.
+package wasmtime:webcrypto-host;
+
+/// The set of `lann:webcrypto` imports satisfied by this crate.
+world imports {
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/hmac@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+}
