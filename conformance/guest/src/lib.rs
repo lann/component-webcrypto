@@ -8,9 +8,9 @@
 //! reported as failures, never traps, so a single run always yields the full
 //! result list.
 //!
-//! The corpus is indexable (`count` + `run-slice`) so a harness can split one
-//! run across several fresh component instances; `run-all` is
-//! `run-slice(0, count())`.
+//! The corpus is indexable (`count`/`list-tests` + `run-slice`/`run-many`) so
+//! a harness can split one run across several fresh component instances or
+//! select an arbitrary subset; `run-all` is `run-slice(0, count())`.
 
 wit_bindgen::generate!({
     path: "wit",
@@ -24,12 +24,87 @@ mod util;
 mod vectors;
 
 use exports::conformance::webcrypto::tests::{Guest, TestResult};
+use translate::{GcmCase, HmacCase};
 
 struct Component;
 
+/// The materialized corpus, in corpus order.
+struct Corpus {
+    hmac: Vec<HmacCase>,
+    gcm: Vec<GcmCase>,
+}
+
+/// One corpus entry: a vector case or a probe index.
+enum Test<'a> {
+    Hmac(&'a HmacCase),
+    Gcm(&'a GcmCase),
+    Probe(usize),
+}
+
+impl Corpus {
+    fn load() -> Self {
+        Corpus {
+            hmac: translate::hmac_cases(),
+            gcm: translate::gcm_cases(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.hmac.len() + self.gcm.len() + probes::NAMES.len()
+    }
+
+    /// The test at corpus index `index`.
+    fn test(&self, index: usize) -> Option<Test<'_>> {
+        let mut index = index;
+        if index < self.hmac.len() {
+            return Some(Test::Hmac(&self.hmac[index]));
+        }
+        index -= self.hmac.len();
+        if index < self.gcm.len() {
+            return Some(Test::Gcm(&self.gcm[index]));
+        }
+        index -= self.gcm.len();
+        (index < probes::NAMES.len()).then_some(Test::Probe(index))
+    }
+}
+
+impl Test<'_> {
+    fn id(&self) -> String {
+        match self {
+            Test::Hmac(case) => format!(
+                "hmac-sha256/wycheproof/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            ),
+            Test::Gcm(case) => format!(
+                "aes-gcm/wycheproof/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            ),
+            Test::Probe(index) => format!("probe/{}", probes::NAMES[*index]),
+        }
+    }
+
+    async fn run(&self) -> TestResult {
+        let outcome = match self {
+            Test::Hmac(case) => vectors::run_hmac_case(case).await,
+            Test::Gcm(case) => vectors::run_gcm_case(case).await,
+            Test::Probe(index) => probes::run_one(*index).await,
+        };
+        to_result(self.id(), outcome)
+    }
+}
+
 impl Guest for Component {
     fn count() -> u32 {
-        (translate::hmac_cases().len() + translate::gcm_cases().len() + probes::NAMES.len()) as u32
+        Corpus::load().len() as u32
+    }
+
+    fn list_tests() -> Vec<String> {
+        let corpus = Corpus::load();
+        (0..corpus.len())
+            .map(|index| corpus.test(index).unwrap().id())
+            .collect()
     }
 
     async fn run_all() -> Vec<TestResult> {
@@ -39,53 +114,36 @@ impl Guest for Component {
     async fn run_slice(skip: u32, take: u32) -> Vec<TestResult> {
         run_slice_impl(skip, take).await
     }
+
+    async fn run_many(tests: Vec<String>) -> Vec<TestResult> {
+        let corpus = Corpus::load();
+        let by_id: std::collections::HashMap<String, usize> = (0..corpus.len())
+            .map(|index| (corpus.test(index).unwrap().id(), index))
+            .collect();
+        let mut results = Vec::with_capacity(tests.len());
+        for id in tests {
+            results.push(match by_id.get(&id) {
+                Some(&index) => corpus.test(index).unwrap().run().await,
+                None => TestResult {
+                    id,
+                    passed: false,
+                    detail: "no test with this id in the corpus".into(),
+                },
+            });
+        }
+        results
+    }
 }
 
 /// Run the corpus tests with global indices in `[skip, skip + take)`.
 async fn run_slice_impl(skip: u32, take: u32) -> Vec<TestResult> {
-    let skip = skip as usize;
-    let end = skip.saturating_add(take as usize);
-    let hmac_cases = translate::hmac_cases();
-    let gcm_cases = translate::gcm_cases();
-
-    let mut results = Vec::new();
-    let mut index = 0usize;
-    let selected = |index: usize| index >= skip && index < end;
-
-    for case in &hmac_cases {
-        if selected(index) {
-            let id = format!(
-                "hmac-sha256/wycheproof/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            );
-            results.push(to_result(id, vectors::run_hmac_case(case).await));
-        }
-        index += 1;
+    let corpus = Corpus::load();
+    let skip = (skip as usize).min(corpus.len());
+    let end = skip.saturating_add(take as usize).min(corpus.len());
+    let mut results = Vec::with_capacity(end - skip);
+    for index in skip..end {
+        results.push(corpus.test(index).unwrap().run().await);
     }
-
-    for case in &gcm_cases {
-        if selected(index) {
-            let id = format!(
-                "aes-gcm/wycheproof/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            );
-            results.push(to_result(id, vectors::run_gcm_case(case).await));
-        }
-        index += 1;
-    }
-
-    for (probe, name) in probes::NAMES.iter().enumerate() {
-        if selected(index) {
-            results.push(to_result(
-                format!("probe/{name}"),
-                probes::run_one(probe).await,
-            ));
-        }
-        index += 1;
-    }
-
     results
 }
 

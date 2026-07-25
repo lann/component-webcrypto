@@ -24,9 +24,21 @@ interface tests {
     /// The number of tests in the corpus (stable for a given guest build).
     count: func() -> u32;
 
+    /// The ids of every test in the corpus, in corpus order
+    /// (`list-tests()[i]` is the test `run-slice(i, 1)` runs).
+    list-tests: func() -> list<string>;
+
     /// Run the entire corpus and report per-test results. Equivalent to
     /// `run-slice(0, count())`.
     run-all: async func() -> list<test-result>;
+
+    /// Run the named tests (ids as reported by `list-tests`), in the order
+    /// given. An unknown id yields a failed `test-result` for that id.
+    ///
+    /// Like `run-slice`, a harness-debugging aid: it selects an arbitrary
+    /// subset of the corpus, where `run-slice` can only select a contiguous
+    /// window.
+    run-many: async func(tests: list<string>) -> list<test-result>;
 
     /// Run `take` tests starting at `skip`, in corpus order.
     ///
