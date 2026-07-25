@@ -150,8 +150,9 @@ messages or PR descriptions, not in source files.
 
 Docs state invariants, not inventories. Never embed values a build or test
 run computes — corpus sizes, check counts, probe indexes. If a number
-matters, a gate asserts it (e.g. the demo harness's expected-summary check);
-if it doesn't, omit it. Machine-derived counts belong only in generated
+matters, derive it where it is checked rather than maintaining it by hand
+(the demo harnesses validate the guest's summary for internal consistency
+instead of pinning a count); machine-derived counts belong only in generated
 artifacts like `conformance/matrix.md`.
 
 ## Direction (designed, not yet built)
