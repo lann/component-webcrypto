@@ -40,7 +40,10 @@ examples/
                         #   fully in-guest demo
   wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker
                         #   + the integration test (tests/demo.rs)
-conformance/            # cross-implementation conformance suite
+conformance/            # cross-implementation conformance suite — see
+                        #   conformance/README.md for its architecture and
+                        #   the rationale for how it deliberately diverges
+                        #   from the WebRTC sibling's suite
   vectors/              #   vendored Wycheproof JSON + the translation policy
   guest/                #   the shared conformance guest (vectors compiled in)
   adapters/             #   per-target drivers: wasmtime, wasip3-driver (for
@@ -134,7 +137,8 @@ wasip3-guest targets, and the same guest component must report the same
 rejoin the gate when the upstream jco runtime fix lands (see the
 `conformance` recipe); until then `just test-node` is the jco behavioral
 gate. When adding behavior, extend the conformance corpus (vectors or
-probes), not just the demo guest.
+probes), not just the demo guest — an algorithm interface is not done until
+its vector suite exists (see conformance/README.md, "Growing the corpus").
 
 ## Code comments
 
@@ -151,7 +155,13 @@ messages or PR descriptions, not in source files.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium
   `secretstream`-style) for unbounded content with O(segment) memory;
   single-message `aead.open` deliberately buffers-and-verifies and must not be
-  relaxed to stream unverified plaintext.
+  relaxed to stream unverified plaintext. Design decisions already settled:
+  prefer libsodium's `secretstream_xchacha20poly1305` as the first wire
+  format (well-specified, vectors exist, per-segment WebCrypto calls give the
+  browser host a path) with an AES-GCM-segmented variant later; segment size
+  is a constructor parameter with a sane default (it is on-the-wire — both
+  peers must agree); `open` releases each segment only after its tag
+  verifies, and truncation/tampering ends the stream with an error.
 - A `signature` primitive kind whose `verify` (secret-free — e.g. JWT
   validation) is exportable by the in-guest provider even for algorithms whose
   `sign` is class D.
