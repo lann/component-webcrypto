@@ -22,10 +22,10 @@ interface types {
         /// The supplied nonce is invalid for the algorithm (for example, a
         /// wrong-length AES-GCM nonce). The string is human-readable.
         invalid-nonce(string),
-        /// Authenticated decryption failed: the ciphertext or its associated
-        /// data did not verify under the key and nonce. Deliberately carries
-        /// no detail, so implementations cannot leak *why* verification
-        /// failed.
+        /// Verification failed: the MAC tag, or the ciphertext or its
+        /// associated data, did not verify under the key. Deliberately
+        /// carries no detail, so implementations cannot leak *why*
+        /// verification failed.
         authentication-failed,
         /// The key was created with `extractable` false, so its material
         /// cannot be exported.
@@ -73,8 +73,15 @@ interface mac {
 
         /// Verify `tag` against the tag computed over an entire byte stream
         /// keyed by this key, in constant time. Like `sign`, resolves only
-        /// after the stream is fully drained.
-        verify: async func(data: stream<u8>, tag: list<u8>) -> bool;
+        /// after the stream is fully drained — even when verification fails,
+        /// so a caller feeding the stream concurrently never observes its
+        /// writer failing instead of the error.
+        ///
+        /// Fails with `error.authentication-failed` if the tag does not
+        /// verify (the same fail-closed shape as `aead-key.open`, and
+        /// deliberately not a `bool`: an ignored boolean fails open, a
+        /// dropped `result` does not).
+        verify: async func(data: stream<u8>, tag: list<u8>) -> result<_, error>;
 
         /// The registry name of the algorithm family this key is bound to,
         /// e.g. `"HMAC"` (WebCrypto's `KeyAlgorithm.name`, spelled as the

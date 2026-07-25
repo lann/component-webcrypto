@@ -189,11 +189,9 @@ async fn generated_key_shape() -> Result<(), String> {
     let payload = b"generated-key-shape payload";
     let (tag, fed) = sign(&hmac_key, payload, Schedule::Whole).await;
     fed.map_err(|e| format!("sign data feeder: {e}"))?;
-    let (ok, fed) = verify(&hmac_key, payload, &tag, Schedule::Whole).await;
+    let (verified, fed) = verify(&hmac_key, payload, &tag, Schedule::Whole).await;
     fed.map_err(|e| format!("verify data feeder: {e}"))?;
-    if !ok {
-        return Err("generated HMAC key's tag did not verify".into());
-    }
+    verified.map_err(|e| describe("generated HMAC key's tag did not verify", &e))?;
 
     let aes_key = generate_aes256_gcm_key(true).await;
     let exported = aes_key
@@ -300,10 +298,11 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
         return Err(format!("tag length: got {}, want 32", tag.len()));
     }
 
-    let (ok, fed) = verify(&key, payload, &tag[..31], Schedule::Whole).await;
+    let (verified, fed) = verify(&key, payload, &tag[..31], Schedule::Whole).await;
     fed.map_err(|e| format!("verify data feeder: {e}"))?;
-    if ok {
-        return Err("31-byte prefix of the correct tag verified".into());
+    match verified {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => Err("31-byte prefix of the correct tag verified".into()),
     }
-    Ok(())
 }

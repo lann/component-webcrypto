@@ -9,8 +9,8 @@
 //! | GCM, keySize 256, ivSize 96, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
 //! | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed`. |
 //! | HMAC, tagSize ≠ 256 | Skipped (truncated tags are an application concern). |
-//! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` is true. |
-//! | HMAC, tagSize 256, `invalid` | `verify(tag)` is false. |
+//! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
+//! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
 //!
 //! Every executed vector is emitted once per chunking schedule; a vector whose
 //! stream inputs are all empty runs only `whole` (the other schedules are
@@ -84,8 +84,8 @@ pub struct HmacCase {
     pub key: Vec<u8>,
     pub msg: Vec<u8>,
     pub tag: Vec<u8>,
-    /// `true`: `sign` must equal `tag` and `verify(tag)` must be true.
-    /// `false`: `verify(tag)` must be false.
+    /// `true`: `sign` must equal `tag` and `verify(tag)` must succeed.
+    /// `false`: `verify(tag)` must fail with `authentication-failed`.
     pub valid: bool,
 }
 

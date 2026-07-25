@@ -21,8 +21,8 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | GCM, keySize 256, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
 | HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
-| HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` is true. |
-| HMAC, tagSize 256, `invalid` | `verify(tag)` is false. |
+| HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
+| HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT

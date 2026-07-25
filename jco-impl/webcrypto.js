@@ -52,13 +52,16 @@ export class MacKey {
 
   /**
    * Verify `tag` against the tag computed over an entire byte stream; the
-   * platform performs the constant-time comparison.
+   * platform performs the constant-time comparison. Throws
+   * `{ tag: 'authentication-failed' }` if the tag does not verify.
    * @param {AsyncIterable<unknown> | ReadableStream} data
    * @param {Uint8Array} tag
    */
   async verify(data, tag) {
     const message = await collectByteStream(data);
-    return subtle.verify("HMAC", this.#key, tag, message);
+    if (!(await subtle.verify("HMAC", this.#key, tag, message))) {
+      throw { tag: "authentication-failed" };
+    }
   }
 
   /**

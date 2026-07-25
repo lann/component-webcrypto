@@ -117,15 +117,16 @@ async fn hmac_verify() -> Result<(), String> {
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
 
     let mut tag = unhex(HMAC_TAG);
-    if !verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX).await? {
-        return Err("correct tag did not verify".into());
-    }
+    verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX)
+        .await?
+        .map_err(|e| describe("correct tag did not verify", &e))?;
 
     tag[0] ^= 0x01;
-    if verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await? {
-        return Err("corrupted tag verified".into());
+    match verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await? {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => Err("corrupted tag verified".into()),
     }
-    Ok(())
 }
 
 /// A generated key signs and verifies, and two calls on the same key agree.
@@ -135,7 +136,7 @@ async fn hmac_generated_key() -> Result<(), String> {
     let tag = sign_chunked(&key, b"payload", usize::MAX).await?;
     expect_eq(tag.len(), 32, "tag length")?;
 
-    if !verify_chunked(&key, b"payload", tag, 3).await? {
+    if verify_chunked(&key, b"payload", tag, 3).await?.is_err() {
         return Err("generated key's tag did not verify".into());
     }
 
@@ -314,11 +315,11 @@ async fn verify_chunked(
     data: &[u8],
     tag: Vec<u8>,
     chunk: usize,
-) -> Result<bool, String> {
+) -> Result<Result<(), Error>, String> {
     let (tx, rx) = wit_stream::new();
-    let (ok, fed) = futures::join!(key.verify(rx, tag), feed(tx, data, chunk));
+    let (verified, fed) = futures::join!(key.verify(rx, tag), feed(tx, data, chunk));
     fed?;
-    Ok(ok)
+    Ok(verified)
 }
 
 /// `seal`, feeding the plaintext in `chunk`-byte pieces and collecting the

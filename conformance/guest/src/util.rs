@@ -92,7 +92,7 @@ pub async fn verify(
     data: &[u8],
     tag: &[u8],
     schedule: Schedule,
-) -> (bool, Result<(), String>) {
+) -> (Result<(), Error>, Result<(), String>) {
     let (tx, rx) = crate::wit_stream::new();
     futures::join!(
         key.verify(rx, tag.to_vec()),

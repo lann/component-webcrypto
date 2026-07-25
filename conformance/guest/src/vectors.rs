@@ -17,16 +17,21 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
         fed.map_err(|e| format!("sign data feeder: {e}"))?;
         expect_bytes(&tag, &case.tag, "sign tag")?;
 
-        let (ok, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
+        let (verified, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
         fed.map_err(|e| format!("verify data feeder: {e}"))?;
-        if !ok {
-            return Err("verify(tag) returned false for a valid vector".into());
-        }
+        verified.map_err(|e| describe("verify(tag) failed for a valid vector", &e))?;
     } else {
-        let (ok, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
+        let (verified, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
         fed.map_err(|e| format!("verify data feeder: {e}"))?;
-        if ok {
-            return Err("verify(tag) returned true for an invalid vector".into());
+        match verified {
+            Err(Error::AuthenticationFailed) => {}
+            Err(other) => {
+                return Err(describe(
+                    "verify of an invalid vector: expected authentication-failed, got",
+                    &other,
+                ));
+            }
+            Ok(()) => return Err("verify(tag) succeeded for an invalid vector".into()),
         }
     }
     Ok(())

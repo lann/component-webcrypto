@@ -155,12 +155,14 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<MacKey>,
         data: StreamReader<u8>,
         tag: Vec<u8>,
-    ) -> Result<bool> {
+    ) -> Result<std::result::Result<(), Error>> {
         let mut hmac = accessor.with(|mut access| hmac_for(access.get().table.get(&self_)?))?;
         let bytes = drain_stream(accessor, data).await?;
         hmac.update(&bytes);
         // `verify_slice` compares in constant time, per the WIT contract.
-        Ok(hmac.verify_slice(&tag).is_ok())
+        Ok(hmac
+            .verify_slice(&tag)
+            .map_err(|_| Error::AuthenticationFailed))
     }
 
     async fn export(

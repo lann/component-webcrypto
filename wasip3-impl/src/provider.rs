@@ -106,9 +106,12 @@ impl GuestMacKey for MacKey {
         self.hmac_over(data).await.finalize().into_bytes().to_vec()
     }
 
-    async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> bool {
+    async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
         // `verify_slice` compares in constant time, per the WIT contract.
-        self.hmac_over(data).await.verify_slice(&tag).is_ok()
+        self.hmac_over(data)
+            .await
+            .verify_slice(&tag)
+            .map_err(|_| Error::AuthenticationFailed)
     }
 
     fn algorithm_name(&self) -> String {
