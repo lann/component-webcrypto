@@ -71,8 +71,10 @@ The layering is a design invariant, not a convention:
   operations hang off the key resources, which are capabilities (see the WIT
   doc comments for the exact contracts, including extractability and the
   "input streams are fully drained even on error" rule for `seal`/`open`).
-- `finalize`/`verify` are consuming statics: misuse is unrepresentable, so the
-  `error` variant carries no misuse cases. Keep it that way.
+- Operations are **one-shot calls on immutable key resources** (`sign`/
+  `verify`, `seal`/`open`) — no stateful computation objects — so misuse is
+  unrepresentable and the `error` variant carries no misuse cases. Keep it
+  that way.
 
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host

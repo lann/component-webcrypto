@@ -1,8 +1,8 @@
 //! The exported `lann:webcrypto` resources and key-minting functions, backed
 //! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-256, `aes-gcm` for AES-256-GCM).
 //!
-//! - [`MacKey`] holds raw HMAC key material; `start` seeds a [`MacState`]
-//!   (one in-progress HMAC-SHA-256 computation).
+//! - [`MacKey`] holds raw HMAC key material; `sign` and `verify` are
+//!   one-shot HMAC-SHA-256 computations, stateless per call.
 //! - [`AeadKey`] holds raw AES-256 key material plus its schedule; `seal` and
 //!   `open` are stateless per call.
 //!
@@ -11,8 +11,6 @@
 //! contract for `seal`/`open`), and outgoing streams are fed from a detached
 //! task (`wit_bindgen::spawn`) after the export returns.
 
-use std::cell::RefCell;
-
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hmac::Mac as _;
@@ -20,17 +18,27 @@ use hmac::Mac as _;
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
 use crate::exports::lann::webcrypto::aes_gcm::Guest as AesGcmGuest;
 use crate::exports::lann::webcrypto::hmac::Guest as HmacGuest;
-use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMac, GuestMacKey};
+use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
 use crate::lann::webcrypto::types::Error;
 
-/// The HMAC-SHA-256 incremental state.
+/// The HMAC-SHA-256 state backing one `sign`/`verify` call.
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
-/// The algorithm name reported by HMAC-SHA-256 keys and computations.
-const HMAC_SHA_256: &str = "HMAC-SHA-256";
+/// The `algorithm-name` reported by HMAC-SHA-256 keys and computations
+/// (WebCrypto's `KeyAlgorithm.name`).
+const HMAC_NAME: &str = "HMAC";
 
-/// The algorithm name reported by AES-256-GCM keys.
-const AES_256_GCM: &str = "AES-256-GCM";
+/// The `algorithm-hash` reported by HMAC-SHA-256 keys and computations
+/// (WebCrypto's `HmacKeyAlgorithm.hash`).
+const HMAC_SHA256_HASH: &str = "SHA-256";
+
+/// The `algorithm-name` reported by AES-256-GCM keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+const AES_GCM_NAME: &str = "AES-GCM";
+
+/// The `algorithm-length` reported by AES-256-GCM keys (WebCrypto's
+/// `AesKeyAlgorithm.length`).
+const AES_256_LENGTH: u32 = 256;
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
 /// WIT contract (12-byte nonces, 16-byte tags).
@@ -72,7 +80,6 @@ fn stream_of(bytes: Vec<u8>) -> wit_bindgen::StreamReader<u8> {
 
 impl MacGuest for Component {
     type MacKey = MacKey;
-    type Mac = MacState;
 }
 
 /// An exported `mac-key`: raw HMAC key material bound to HMAC-SHA-256.
@@ -81,19 +88,42 @@ pub struct MacKey {
     extractable: bool,
 }
 
-impl GuestMacKey for MacKey {
-    fn start(&self) -> mac::Mac {
+impl MacKey {
+    /// Build the HMAC state for this key's material, folding in one entire
+    /// drained stream.
+    async fn hmac_over(&self, data: wit_bindgen::StreamReader<u8>) -> HmacSha256 {
         // HMAC accepts key material of any length, so this cannot fail for a
         // key that was accepted at import/generation time.
-        let hmac = <HmacSha256 as hmac::Mac>::new_from_slice(&self.raw)
+        let mut hmac = <HmacSha256 as hmac::Mac>::new_from_slice(&self.raw)
             .expect("HMAC accepts any key length");
-        mac::Mac::new(MacState {
-            hmac: RefCell::new(hmac),
-        })
+        hmac.update(&drain_stream(data).await);
+        hmac
+    }
+}
+
+impl GuestMacKey for MacKey {
+    async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
+        self.hmac_over(data).await.finalize().into_bytes().to_vec()
     }
 
-    fn algorithm(&self) -> String {
-        HMAC_SHA_256.to_string()
+    async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
+        // `verify_slice` compares in constant time, per the WIT contract.
+        self.hmac_over(data)
+            .await
+            .verify_slice(&tag)
+            .map_err(|_| Error::AuthenticationFailed)
+    }
+
+    fn algorithm_name(&self) -> String {
+        HMAC_NAME.to_string()
+    }
+
+    fn algorithm_hash(&self) -> Option<String> {
+        Some(HMAC_SHA256_HASH.to_string())
+    }
+
+    fn algorithm_length(&self) -> u32 {
+        self.raw.len() as u32 * 8
     }
 
     async fn export(&self) -> Result<Vec<u8>, Error> {
@@ -102,44 +132,6 @@ impl GuestMacKey for MacKey {
         } else {
             Err(Error::NotExtractable)
         }
-    }
-}
-
-/// An exported `mac`: one in-progress HMAC-SHA-256 computation.
-pub struct MacState {
-    hmac: RefCell<HmacSha256>,
-}
-
-impl GuestMac for MacState {
-    async fn absorb(&self, data: wit_bindgen::StreamReader<u8>) {
-        let mut data = data;
-        loop {
-            let (status, batch) = data.read(Vec::with_capacity(8 * 1024)).await;
-            self.hmac.borrow_mut().update(&batch);
-            if matches!(
-                status,
-                wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
-            ) {
-                break;
-            }
-        }
-    }
-
-    async fn finalize(this: mac::Mac) -> Vec<u8> {
-        // `finalize` consumes the resource, making use-after-finalize
-        // unrepresentable.
-        let state = this.into_inner::<MacState>();
-        state.hmac.into_inner().finalize().into_bytes().to_vec()
-    }
-
-    async fn verify(this: mac::Mac, tag: Vec<u8>) -> bool {
-        let state = this.into_inner::<MacState>();
-        // `verify_slice` compares in constant time, per the WIT contract.
-        state.hmac.into_inner().verify_slice(&tag).is_ok()
-    }
-
-    fn algorithm(&self) -> String {
-        HMAC_SHA_256.to_string()
     }
 }
 
@@ -222,8 +214,12 @@ impl GuestAeadKey for AeadKey {
         Ok(stream_of(opened))
     }
 
-    fn algorithm(&self) -> String {
-        AES_256_GCM.to_string()
+    fn algorithm_name(&self) -> String {
+        AES_GCM_NAME.to_string()
+    }
+
+    fn algorithm_length(&self) -> u32 {
+        AES_256_LENGTH
     }
 
     async fn export(&self) -> Result<Vec<u8>, Error> {

@@ -19,14 +19,24 @@ use hmac::Hmac;
 use sha2::Sha256;
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
-/// The incremental HMAC-SHA-256 state backing a `mac` computation.
+/// The HMAC-SHA-256 state backing one `sign`/`verify` call.
 pub(crate) type HmacSha256 = Hmac<Sha256>;
 
-/// The algorithm name reported by HMAC-SHA-256 keys and computations.
-pub(crate) const HMAC_SHA_256: &str = "HMAC-SHA-256";
+/// The `algorithm-name` reported by HMAC-SHA-256 keys and computations
+/// (WebCrypto's `KeyAlgorithm.name`).
+pub(crate) const HMAC_NAME: &str = "HMAC";
 
-/// The algorithm name reported by AES-256-GCM keys.
-pub(crate) const AES_256_GCM: &str = "AES-256-GCM";
+/// The `algorithm-hash` reported by HMAC-SHA-256 keys and computations
+/// (WebCrypto's `HmacKeyAlgorithm.hash`).
+pub(crate) const HMAC_SHA256_HASH: &str = "SHA-256";
+
+/// The `algorithm-name` reported by AES-256-GCM keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub(crate) const AES_GCM_NAME: &str = "AES-GCM";
+
+/// The `algorithm-length` reported by AES-256-GCM keys (WebCrypto's
+/// `AesKeyAlgorithm.length`).
+pub(crate) const AES_256_LENGTH: u32 = 256;
 
 /// Configuration and per-store state for the WebCrypto host.
 ///
@@ -77,28 +87,16 @@ impl HasData for WasiWebcrypto {
 /// Backing type for the `mac.mac-key` resource.
 ///
 /// Holds the raw key material and the key's extractability. The algorithm is
-/// fixed at creation (currently always HMAC-SHA-256); `extractable` gates
-/// `%export` only — the material necessarily lives host-side either way.
+/// fixed at creation (currently always HMAC-SHA-256) and derived from the
+/// material on demand; `sign`/`verify` are one-shot and stateless per call,
+/// so the key carries no per-operation state. `extractable` gates `%export`
+/// only — the material necessarily lives host-side either way.
 pub struct MacKey {
-    /// The raw key material, retained for `start` and (when extractable)
-    /// `%export`.
+    /// The raw key material, retained for `sign`/`verify` and (when
+    /// extractable) `%export`.
     pub(crate) raw: Vec<u8>,
     /// Whether `%export` may return the raw material.
     pub(crate) extractable: bool,
-    /// The algorithm this key is bound to, e.g. `"HMAC-SHA-256"`.
-    pub(crate) algorithm: &'static str,
-}
-
-/// Backing type for the `mac.mac` resource: one in-progress MAC computation.
-///
-/// Wraps the incremental RustCrypto HMAC state; `absorb` updates it and
-/// `finalize`/`verify` consume it (removing the table entry, so
-/// use-after-finalize is unrepresentable, matching the WIT contract).
-pub struct MacComputation {
-    /// The incremental HMAC state, updated by each absorbed stream.
-    pub(crate) hmac: HmacSha256,
-    /// The algorithm of the key this computation was started from.
-    pub(crate) algorithm: &'static str,
 }
 
 /// Backing type for the `aead.aead-key` resource.
@@ -113,8 +111,6 @@ pub struct AeadKey {
     pub(crate) raw: Vec<u8>,
     /// Whether `%export` may return the raw material.
     pub(crate) extractable: bool,
-    /// The algorithm this key is bound to, e.g. `"AES-256-GCM"`.
-    pub(crate) algorithm: &'static str,
 }
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate (`types`,

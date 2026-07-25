@@ -9,8 +9,8 @@
 //! | GCM, keySize 256, ivSize 96, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
 //! | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed`. |
 //! | HMAC, tagSize ≠ 256 | Skipped (truncated tags are an application concern). |
-//! | HMAC, tagSize 256, `valid` | `finalize` = `tag`; `verify(tag)` is true. |
-//! | HMAC, tagSize 256, `invalid` | `verify(tag)` is false. |
+//! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
+//! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
 //!
 //! Every executed vector is emitted once per chunking schedule; a vector whose
 //! stream inputs are all empty runs only `whole` (the other schedules are
@@ -27,9 +27,6 @@ pub enum Schedule {
     Bytes,
     /// Alternating 15/17-byte writes, straddling 16-byte block boundaries.
     Straddle,
-    /// MAC only: the input split at its midpoint across two sequential
-    /// `absorb` calls (each half written whole).
-    SplitAbsorb,
 }
 
 impl Schedule {
@@ -39,16 +36,14 @@ impl Schedule {
             Schedule::Whole => "whole",
             Schedule::Bytes => "bytes",
             Schedule::Straddle => "straddle",
-            Schedule::SplitAbsorb => "split-absorb",
         }
     }
 
     /// Split `data` into the write-sized chunks this schedule delivers on a
-    /// single stream. (`split-absorb` splits across *absorb calls*, not
-    /// within a stream, so each of its streams is written whole.)
+    /// single stream.
     pub fn chunks(self, data: &[u8]) -> Vec<Vec<u8>> {
         match self {
-            Schedule::Whole | Schedule::SplitAbsorb => {
+            Schedule::Whole => {
                 if data.is_empty() {
                     Vec::new()
                 } else {
@@ -75,15 +70,11 @@ impl Schedule {
 
 /// The schedule set for a vector whose longest stream input is
 /// `max_input_len` bytes.
-fn schedules(max_input_len: usize, split_absorb: bool) -> Vec<Schedule> {
+fn schedules(max_input_len: usize) -> Vec<Schedule> {
     if max_input_len == 0 {
         return vec![Schedule::Whole];
     }
-    let mut set = vec![Schedule::Whole, Schedule::Bytes, Schedule::Straddle];
-    if split_absorb {
-        set.push(Schedule::SplitAbsorb);
-    }
-    set
+    vec![Schedule::Whole, Schedule::Bytes, Schedule::Straddle]
 }
 
 /// One executed HMAC-SHA-256 vector under one schedule.
@@ -93,8 +84,8 @@ pub struct HmacCase {
     pub key: Vec<u8>,
     pub msg: Vec<u8>,
     pub tag: Vec<u8>,
-    /// `true`: `finalize` must equal `tag` and `verify(tag)` must be true.
-    /// `false`: `verify(tag)` must be false.
+    /// `true`: `sign` must equal `tag` and `verify(tag)` must succeed.
+    /// `false`: `verify(tag)` must fail with `authentication-failed`.
     pub valid: bool,
 }
 
@@ -198,7 +189,7 @@ pub fn hmac_cases() -> Vec<HmacCase> {
             let msg = unhex(&field, &test.msg);
             let tag = unhex(&field, &test.tag);
             let valid = is_valid(&field, &test.result);
-            for schedule in schedules(msg.len(), true) {
+            for schedule in schedules(msg.len()) {
                 cases.push(HmacCase {
                     tc_id: test.tc_id,
                     schedule,
@@ -239,7 +230,7 @@ pub fn gcm_cases() -> Vec<GcmCase> {
             } else {
                 (GcmExpectation::AuthenticationFailed, ct_tag.len())
             };
-            for schedule in schedules(max_input_len, false) {
+            for schedule in schedules(max_input_len) {
                 cases.push(GcmCase {
                     tc_id: test.tc_id,
                     schedule,

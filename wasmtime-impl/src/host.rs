@@ -17,14 +17,12 @@ use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamRead
 use wasmtime::{Result, StoreContextMut};
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
-use crate::bindings::webcrypto::mac::{
-    self, HostMac, HostMacKey, HostMacKeyWithStore, HostMacWithStore,
-};
+use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{aes_gcm as aes_gcm_iface, hmac as hmac_iface};
 use crate::{
-    AeadKey, HmacSha256, MacComputation, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_256_GCM,
-    HMAC_SHA_256,
+    AeadKey, HmacSha256, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_256_LENGTH, AES_GCM_NAME,
+    HMAC_NAME, HMAC_SHA256_HASH,
 };
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
@@ -114,23 +112,59 @@ async fn drain_stream<T: Send>(
 
 impl mac::Host for WasiWebcryptoCtxView<'_> {}
 
+/// Build the HMAC state for `key`'s material.
+fn hmac_for(key: &MacKey) -> Result<HmacSha256> {
+    // HMAC accepts key material of any length, so this cannot fail for a
+    // key that was accepted at import/generation time.
+    <HmacSha256 as hmac::Mac>::new_from_slice(&key.raw)
+        .map_err(|err| wasmtime::Error::msg(format!("HMAC key setup failed: {err}")))
+}
+
 impl HostMacKey for WasiWebcryptoCtxView<'_> {
-    fn start(&mut self, self_: Resource<MacKey>) -> Result<Resource<MacComputation>> {
-        let key = self.table.get(&self_)?;
-        // HMAC accepts key material of any length, so this cannot fail for a
-        // key that was accepted at import/generation time.
-        let hmac = <HmacSha256 as hmac::Mac>::new_from_slice(&key.raw)
-            .map_err(|err| wasmtime::Error::msg(format!("HMAC key setup failed: {err}")))?;
-        let algorithm = key.algorithm;
-        Ok(self.table.push(MacComputation { hmac, algorithm })?)
+    fn algorithm_name(&mut self, self_: Resource<MacKey>) -> Result<String> {
+        self.table.get(&self_)?;
+        Ok(HMAC_NAME.to_string())
     }
 
-    fn algorithm(&mut self, self_: Resource<MacKey>) -> Result<String> {
-        Ok(self.table.get(&self_)?.algorithm.to_string())
+    fn algorithm_hash(&mut self, self_: Resource<MacKey>) -> Result<Option<String>> {
+        self.table.get(&self_)?;
+        Ok(Some(HMAC_SHA256_HASH.to_string()))
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<MacKey>) -> Result<u32> {
+        Ok(self.table.get(&self_)?.raw.len() as u32 * 8)
     }
 }
 
 impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
+    async fn sign(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<MacKey>,
+        data: StreamReader<u8>,
+    ) -> Result<Vec<u8>> {
+        let mut hmac = accessor.with(|mut access| hmac_for(access.get().table.get(&self_)?))?;
+        // Buffer the whole stream, then fold it into the HMAC state; the
+        // result is chunking-invariant either way.
+        let bytes = drain_stream(accessor, data).await?;
+        hmac.update(&bytes);
+        Ok(hmac.finalize().into_bytes().to_vec())
+    }
+
+    async fn verify(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<MacKey>,
+        data: StreamReader<u8>,
+        tag: Vec<u8>,
+    ) -> Result<std::result::Result<(), Error>> {
+        let mut hmac = accessor.with(|mut access| hmac_for(access.get().table.get(&self_)?))?;
+        let bytes = drain_stream(accessor, data).await?;
+        hmac.update(&bytes);
+        // `verify_slice` compares in constant time, per the WIT contract.
+        Ok(hmac
+            .verify_slice(&tag)
+            .map_err(|_| Error::AuthenticationFailed))
+    }
+
     async fn export(
         accessor: &Accessor<T, Self>,
         self_: Resource<MacKey>,
@@ -147,57 +181,6 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
     }
 
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<MacKey>) -> Result<()> {
-        accessor.with(|mut access| {
-            access.get().table.delete(rep)?;
-            Ok(())
-        })
-    }
-}
-
-impl HostMac for WasiWebcryptoCtxView<'_> {
-    fn algorithm(&mut self, self_: Resource<MacComputation>) -> Result<String> {
-        Ok(self.table.get(&self_)?.algorithm.to_string())
-    }
-}
-
-impl<T: Send> HostMacWithStore<T> for WasiWebcrypto {
-    async fn absorb(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<MacComputation>,
-        data: StreamReader<u8>,
-    ) -> Result<()> {
-        // Buffer the whole stream, then fold it into the incremental HMAC
-        // state; the result is chunking-invariant either way.
-        let bytes = drain_stream(accessor, data).await?;
-        accessor.with(|mut access| {
-            access.get().table.get_mut(&self_)?.hmac.update(&bytes);
-            Ok(())
-        })
-    }
-
-    async fn finalize(
-        accessor: &Accessor<T, Self>,
-        this: Resource<MacComputation>,
-    ) -> Result<Vec<u8>> {
-        // `finalize` consumes the computation: remove it from the table so
-        // use-after-finalize is unrepresentable.
-        let computation = accessor
-            .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.delete(this)?))?;
-        Ok(computation.hmac.finalize().into_bytes().to_vec())
-    }
-
-    async fn verify(
-        accessor: &Accessor<T, Self>,
-        this: Resource<MacComputation>,
-        tag: Vec<u8>,
-    ) -> Result<bool> {
-        let computation = accessor
-            .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.delete(this)?))?;
-        // `verify_slice` compares in constant time, per the WIT contract.
-        Ok(computation.hmac.verify_slice(&tag).is_ok())
-    }
-
-    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<MacComputation>) -> Result<()> {
         accessor.with(|mut access| {
             access.get().table.delete(rep)?;
             Ok(())
@@ -223,8 +206,14 @@ fn check_gcm_nonce(nonce: &[u8]) -> std::result::Result<(), Error> {
 }
 
 impl HostAeadKey for WasiWebcryptoCtxView<'_> {
-    fn algorithm(&mut self, self_: Resource<AeadKey>) -> Result<String> {
-        Ok(self.table.get(&self_)?.algorithm.to_string())
+    fn algorithm_name(&mut self, self_: Resource<AeadKey>) -> Result<String> {
+        self.table.get(&self_)?;
+        Ok(AES_GCM_NAME.to_string())
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
+        self.table.get(&self_)?;
+        Ok(AES_256_LENGTH)
     }
 }
 
@@ -335,11 +324,7 @@ impl<T: Send> hmac_iface::HostWithStore<T> for WasiWebcrypto {
                 "HMAC key material must be non-empty".into(),
             )));
         }
-        let key = MacKey {
-            raw,
-            extractable,
-            algorithm: HMAC_SHA_256,
-        };
+        let key = MacKey { raw, extractable };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 
@@ -350,11 +335,7 @@ impl<T: Send> hmac_iface::HostWithStore<T> for WasiWebcrypto {
         let mut raw = vec![0u8; 32];
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
-        let key = MacKey {
-            raw,
-            extractable,
-            algorithm: HMAC_SHA_256,
-        };
+        let key = MacKey { raw, extractable };
         accessor.with(|mut access| Ok(access.get().table.push(key)?))
     }
 }
@@ -376,7 +357,6 @@ fn new_aes256_gcm_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<Ae
         cipher,
         raw,
         extractable,
-        algorithm: AES_256_GCM,
     })
 }
 

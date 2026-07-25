@@ -37,8 +37,8 @@ failures name the direction in `detail`. Matrix rows aggregate by suite
 group, so ids must stay stable as the corpus grows.
 
 Every executed vector runs under multiple **chunking schedules** (`whole`,
-1-byte `bytes`, block-boundary `straddle`, and `split-absorb` across two
-`absorb` calls for MACs; empty stream inputs collapse to `whole`). The
+1-byte `bytes`, and block-boundary `straddle`; empty stream inputs collapse
+to `whole`). The
 streams-only WIT makes delivery schedule observable to implementations, so
 chunking invariance is part of the conformance claim — a class of test a
 buffer-based API could not even express.
