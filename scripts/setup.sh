@@ -42,12 +42,14 @@ fi
 
 if ! have wasm-tools; then
     log "Installing wasm-tools ${WASM_TOOLS_VERSION}"
-    cargo binstall -y "wasm-tools@${WASM_TOOLS_VERSION}"
+    # --force: a restored CI cache can contain cargo's install metadata without
+    # the binary itself, which would otherwise make binstall a no-op.
+    cargo binstall -y --force "wasm-tools@${WASM_TOOLS_VERSION}"
 fi
 
 if ! have just; then
     log "Installing just ${JUST_VERSION}"
-    cargo binstall -y "just@${JUST_VERSION}"
+    cargo binstall -y --force "just@${JUST_VERSION}"
 fi
 
 if [ "${SKIP_NODE:-}" != "1" ]; then
