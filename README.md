@@ -59,13 +59,13 @@ wasip3-impl/            # in-guest wasm component: RustCrypto in wasm,
 examples/
   crypto-demo/          # guest component: RFC 4231 + NIST GCM known-answer
                         #   vectors, chunked streams, error taxonomy,
-                        #   extractability — 13 checks, one per behavior
+                        #   extractability — one check per behavior
   demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
 conformance/            # cross-implementation conformance suite: vendored
                         #   Wycheproof vectors + translation policy, a shared
-                        #   conformance guest (526 tests incl. chunking
-                        #   schedules and API-contract probes), per-target
+                        #   conformance guest (vectors under chunking
+                        #   schedules, plus API-contract probes), per-target
                         #   adapters, and a runner rendering matrix.md
 ```
 
@@ -90,9 +90,9 @@ just ci                      # everything CI runs
 ```
 
 All three implementations run identical guest components. The conformance
-suite (526 tests: Wycheproof HMAC-SHA-256 and AES-GCM vectors under multiple
+suite (Wycheproof HMAC-SHA-256 and AES-GCM vectors under multiple
 stream-chunking schedules, plus API-contract probes) gates the wasmtime and
-wasip3-guest targets; the 13-check `crypto-demo` additionally covers the jco
+wasip3-guest targets; the `crypto-demo` guest additionally covers the jco
 host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time
@@ -107,8 +107,8 @@ them fail at `wac plug` time instead of running quietly degraded.
 - **jco component-model-async guest-heap corruption.** Running the full
   conformance corpus in one instance under jco (JSPI, Node 24) corrupts the
   guest's heap — surfacing as `memory access out of bounds` in dlmalloc
-  during async event delivery — while the *identical* guest binary runs all
-  526 tests clean under Wasmtime, both natively and fully composed. The
+  during async event delivery — while the *identical* guest binary runs the
+  full corpus clean under Wasmtime, both natively and fully composed. The
   trigger involves many drain-input-then-reject stream operations followed
   by async imports returning `result<list<u8>>`; failure is deterministic
   per corpus window but layout-dependent (a superset window can pass while
