@@ -28,6 +28,9 @@ const HMAC_ALGORITHM = { name: "HMAC", hash: "SHA-256" };
  * The `mac-key` resource: an HMAC-SHA-256 key. Holds a `CryptoKey` imported
  * with usages `["sign", "verify"]` and the caller's `extractable` flag;
  * instances are minted only by the `hmac` interface functions below.
+ * `sign`/`verify` are one-shot and stateless per call, matching
+ * `subtle.sign`/`verify` exactly (WebCrypto has no incremental HMAC): each
+ * call collects its entire input stream, then signs or verifies it whole.
  */
 export class MacKey {
   #key;
@@ -37,14 +40,41 @@ export class MacKey {
     this.#key = key;
   }
 
-  /** Begin a new MAC computation keyed by this key. */
-  start() {
-    return new Mac(this.#key);
+  /**
+   * Compute the authentication tag over an entire byte stream, resolving
+   * once the stream is fully drained.
+   * @param {AsyncIterable<unknown> | ReadableStream} data
+   */
+  async sign(data) {
+    const message = await collectByteStream(data);
+    return new Uint8Array(await subtle.sign("HMAC", this.#key, message));
   }
 
-  /** The algorithm this key is bound to. */
-  algorithm() {
-    return "HMAC-SHA-256";
+  /**
+   * Verify `tag` against the tag computed over an entire byte stream; the
+   * platform performs the constant-time comparison.
+   * @param {AsyncIterable<unknown> | ReadableStream} data
+   * @param {Uint8Array} tag
+   */
+  async verify(data, tag) {
+    const message = await collectByteStream(data);
+    return subtle.verify("HMAC", this.#key, tag, message);
+  }
+
+  /**
+   * The algorithm getters: direct projections of the `CryptoKey`'s
+   * `HmacKeyAlgorithm` (`name`, `hash.name`, and `length`).
+   */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmHash() {
+    return this.#key.algorithm.hash?.name;
+  }
+
+  algorithmLength() {
+    return this.#key.algorithm.length;
   }
 
   /**
@@ -55,61 +85,6 @@ export class MacKey {
   async export() {
     if (!this.#key.extractable) throw { tag: "not-extractable" };
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
-  }
-}
-
-/**
- * The `mac` resource: one in-progress MAC computation. Browser WebCrypto has
- * no incremental HMAC, so absorbed bytes are buffered and signed/verified
- * whole on `finalize`/`verify` — the result is chunking-invariant either way.
- */
-export class Mac {
-  #key;
-  /** Absorbed byte chunks, in order. */
-  #chunks = [];
-  #total = 0;
-
-  /** @param {CryptoKey} key */
-  constructor(key) {
-    this.#key = key;
-  }
-
-  /**
-   * Absorb an entire byte stream into the computation, resolving once the
-   * stream is fully drained. Sequential absorbs concatenate.
-   * @param {AsyncIterable<unknown> | ReadableStream} data
-   */
-  async absorb(data) {
-    const bytes = await collectByteStream(data);
-    if (bytes.length) {
-      this.#chunks.push(bytes);
-      this.#total += bytes.length;
-    }
-  }
-
-  /**
-   * Consume the computation and return the authentication tag.
-   * @param {Mac} mac
-   */
-  static async finalize(mac) {
-    const message = concatChunks(mac.#chunks, mac.#total);
-    return new Uint8Array(await subtle.sign("HMAC", mac.#key, message));
-  }
-
-  /**
-   * Consume the computation and verify `tag` against the computed tag; the
-   * platform performs the constant-time comparison.
-   * @param {Mac} mac
-   * @param {Uint8Array} tag
-   */
-  static async verify(mac, tag) {
-    const message = concatChunks(mac.#chunks, mac.#total);
-    return subtle.verify("HMAC", mac.#key, tag, message);
-  }
-
-  /** The algorithm of the key this computation was started from. */
-  algorithm() {
-    return "HMAC-SHA-256";
   }
 }
 
@@ -178,9 +153,16 @@ export class AeadKey {
     return bytesToStream(new Uint8Array(opened));
   }
 
-  /** The algorithm this key is bound to. */
-  algorithm() {
-    return "AES-256-GCM";
+  /**
+   * The algorithm getters: direct projections of the `CryptoKey`'s
+   * `AesKeyAlgorithm` (`name` and `length`).
+   */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmLength() {
+    return this.#key.algorithm.length;
   }
 
   /**

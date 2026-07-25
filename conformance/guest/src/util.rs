@@ -2,7 +2,7 @@
 //! corpus and the API-contract probes.
 
 use crate::lann::webcrypto::aead::AeadKey;
-use crate::lann::webcrypto::mac::Mac;
+use crate::lann::webcrypto::mac::MacKey;
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
 
@@ -77,25 +77,27 @@ pub async fn read_all(mut rx: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
     out
 }
 
-/// Absorb `data` into `mac` under `schedule`. `split-absorb` splits the data
-/// at its midpoint across two sequential `absorb` calls; every other schedule
-/// delivers one stream chunked per the schedule.
-pub async fn absorb(mac: &Mac, data: &[u8], schedule: Schedule) -> Result<(), String> {
-    match schedule {
-        Schedule::SplitAbsorb => {
-            let mid = data.len() / 2;
-            absorb_one(mac, schedule.chunks(&data[..mid])).await?;
-            absorb_one(mac, schedule.chunks(&data[mid..])).await
-        }
-        _ => absorb_one(mac, schedule.chunks(data)).await,
-    }
+/// `sign`, feeding `data` per `schedule` concurrently with the call. Returns
+/// the tag and the feeder's outcome separately, so feeder failures are
+/// distinguishable from the call's own result.
+pub async fn sign(key: &MacKey, data: &[u8], schedule: Schedule) -> (Vec<u8>, Result<(), String>) {
+    let (tx, rx) = crate::wit_stream::new();
+    futures::join!(key.sign(rx), feed(tx, schedule.chunks(data)))
 }
 
-/// One `absorb` call, fed concurrently with the given chunks.
-async fn absorb_one(mac: &Mac, chunks: Vec<Vec<u8>>) -> Result<(), String> {
+/// `verify`, feeding `data` per `schedule` concurrently with the call; same
+/// outcome split as [`sign`].
+pub async fn verify(
+    key: &MacKey,
+    data: &[u8],
+    tag: &[u8],
+    schedule: Schedule,
+) -> (bool, Result<(), String>) {
     let (tx, rx) = crate::wit_stream::new();
-    let ((), fed) = futures::join!(mac.absorb(rx), feed(tx, chunks));
-    fed
+    futures::join!(
+        key.verify(rx, tag.to_vec()),
+        feed(tx, schedule.chunks(data))
+    )
 }
 
 /// `seal`, feeding the plaintext per `schedule` concurrently with the call.

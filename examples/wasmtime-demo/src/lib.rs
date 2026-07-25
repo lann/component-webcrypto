@@ -25,7 +25,6 @@ mod bindings {
         },
         with: {
             "lann:webcrypto/mac.mac-key": wasmtime_webcrypto::MacKey,
-            "lann:webcrypto/mac.mac": wasmtime_webcrypto::MacComputation,
             "lann:webcrypto/aead.aead-key": wasmtime_webcrypto::AeadKey,
         },
     });

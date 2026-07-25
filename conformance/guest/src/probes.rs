@@ -5,10 +5,9 @@
 
 use crate::lann::webcrypto::aes_gcm::{generate_aes256_gcm_key, import_aes256_gcm_key};
 use crate::lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
-use crate::lann::webcrypto::mac::Mac;
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
-use crate::util::{absorb, describe, expect_bytes, open, seal};
+use crate::util::{describe, expect_bytes, open, seal, sign, verify};
 
 /// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
 pub const NAMES: &[&str] = &[
@@ -17,7 +16,6 @@ pub const NAMES: &[&str] = &[
     "seal-drains-on-invalid-nonce",
     "open-drains-on-invalid-nonce",
     "sealed-length",
-    "absorb-concatenation",
     "key-export-roundtrip",
     "not-extractable",
     "generated-key-shape",
@@ -33,12 +31,11 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         2 => seal_drains_on_invalid_nonce().await,
         3 => open_drains_on_invalid_nonce().await,
         4 => sealed_length().await,
-        5 => absorb_concatenation().await,
-        6 => key_export_roundtrip().await,
-        7 => not_extractable().await,
-        8 => generated_key_shape().await,
-        9 => algorithm_names().await,
-        10 => mac_verify_rejects_truncated().await,
+        5 => key_export_roundtrip().await,
+        6 => not_extractable().await,
+        7 => generated_key_shape().await,
+        8 => algorithm_names().await,
+        9 => mac_verify_rejects_truncated().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -130,28 +127,6 @@ async fn sealed_length() -> Result<(), String> {
     Ok(())
 }
 
-/// Three sequential absorbs produce the same tag as one absorb of the
-/// concatenation.
-async fn absorb_concatenation() -> Result<(), String> {
-    let key = import_hmac_sha256_key(b"absorb-concatenation probe key".to_vec(), false)
-        .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
-    let parts: [&[u8]; 3] = [b"first part / ", b"", b"second and third"];
-    let whole: Vec<u8> = parts.concat();
-
-    let mac = key.start();
-    for part in parts {
-        absorb(&mac, part, Schedule::Whole).await?;
-    }
-    let split_tag = Mac::finalize(mac).await;
-
-    let mac = key.start();
-    absorb(&mac, &whole, Schedule::Whole).await?;
-    let whole_tag = Mac::finalize(mac).await;
-
-    expect_bytes(&split_tag, &whole_tag, "3-absorb tag vs 1-absorb tag")
-}
-
 /// Import then export of an extractable key is the identity, for both HMAC
 /// and AES keys.
 async fn key_export_roundtrip() -> Result<(), String> {
@@ -212,12 +187,11 @@ async fn generated_key_shape() -> Result<(), String> {
     }
 
     let payload = b"generated-key-shape payload";
-    let mac = hmac_key.start();
-    absorb(&mac, payload, Schedule::Whole).await?;
-    let tag = Mac::finalize(mac).await;
-    let mac = hmac_key.start();
-    absorb(&mac, payload, Schedule::Whole).await?;
-    if !Mac::verify(mac, tag).await {
+    let (tag, fed) = sign(&hmac_key, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let (ok, fed) = verify(&hmac_key, payload, &tag, Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    if !ok {
         return Err("generated HMAC key's tag did not verify".into());
     }
 
@@ -244,32 +218,73 @@ async fn generated_key_shape() -> Result<(), String> {
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
 }
 
-/// `algorithm()` reports the bound algorithm name on keys and computations.
+/// The algorithm getters report the bound algorithm on keys.
 async fn algorithm_names() -> Result<(), String> {
-    let expect = |got: String, want: &str, what: &str| -> Result<(), String> {
+    fn expect<T: PartialEq + std::fmt::Debug>(got: T, want: T, what: &str) -> Result<(), String> {
         if got == want {
             Ok(())
         } else {
             Err(format!("{what}: got {got:?}, want {want:?}"))
         }
-    };
+    }
 
-    let imported = import_hmac_sha256_key(b"algorithm-names".to_vec(), false)
+    let raw = b"algorithm-names".to_vec();
+    let key_bits = raw.len() as u32 * 8;
+    let imported = import_hmac_sha256_key(raw, false)
         .await
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
-    expect(imported.algorithm(), "HMAC-SHA-256", "imported mac-key")?;
-    let mac = imported.start();
-    expect(mac.algorithm(), "HMAC-SHA-256", "mac computation")?;
-    drop(mac);
+    expect(
+        imported.algorithm_name(),
+        "HMAC".to_string(),
+        "imported mac-key name",
+    )?;
+    expect(
+        imported.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "imported mac-key hash",
+    )?;
+    expect(
+        imported.algorithm_length(),
+        key_bits,
+        "imported mac-key length",
+    )?;
     let generated = generate_hmac_sha256_key(false).await;
-    expect(generated.algorithm(), "HMAC-SHA-256", "generated mac-key")?;
+    expect(
+        generated.algorithm_name(),
+        "HMAC".to_string(),
+        "generated mac-key name",
+    )?;
+    expect(
+        generated.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "generated mac-key hash",
+    )?;
+    expect(
+        generated.algorithm_length(),
+        256,
+        "generated mac-key length",
+    )?;
 
     let imported = import_aes256_gcm_key(vec![0x24u8; 32], false)
         .await
         .map_err(|e| describe("import-aes256-gcm-key", &e))?;
-    expect(imported.algorithm(), "AES-256-GCM", "imported aead-key")?;
+    expect(
+        imported.algorithm_name(),
+        "AES-GCM".to_string(),
+        "imported aead-key name",
+    )?;
+    expect(imported.algorithm_length(), 256, "imported aead-key length")?;
     let generated = generate_aes256_gcm_key(false).await;
-    expect(generated.algorithm(), "AES-256-GCM", "generated aead-key")
+    expect(
+        generated.algorithm_name(),
+        "AES-GCM".to_string(),
+        "generated aead-key name",
+    )?;
+    expect(
+        generated.algorithm_length(),
+        256,
+        "generated aead-key length",
+    )
 }
 
 /// `verify` rejects a 31-byte prefix of the correct tag.
@@ -279,16 +294,15 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
     let payload = b"truncated-tag payload";
 
-    let mac = key.start();
-    absorb(&mac, payload, Schedule::Whole).await?;
-    let tag = Mac::finalize(mac).await;
+    let (tag, fed) = sign(&key, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
     if tag.len() != 32 {
         return Err(format!("tag length: got {}, want 32", tag.len()));
     }
 
-    let mac = key.start();
-    absorb(&mac, payload, Schedule::Whole).await?;
-    if Mac::verify(mac, tag[..31].to_vec()).await {
+    let (ok, fed) = verify(&key, payload, &tag[..31], Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    if ok {
         return Err("31-byte prefix of the correct tag verified".into());
     }
     Ok(())

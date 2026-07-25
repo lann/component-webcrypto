@@ -6,8 +6,8 @@
 //! what demonstrates cross-implementation compatibility. It drives:
 //!
 //!   - HMAC-SHA-256 against an RFC 4231 known-answer vector, with the payload
-//!     absorbed both as one stream and as several small chunked streams (the
-//!     result must be chunking-invariant),
+//!     signed both as one stream write and as several small chunked writes
+//!     (the result must be chunking-invariant),
 //!   - tag verification, positive and negative,
 //!   - AES-256-GCM against a NIST GCM known-answer vector (seal and open),
 //!   - seal/open round trips with a generated key, including tampered
@@ -27,7 +27,7 @@ use exports::demo::webcrypto_demo::demo::Guest;
 use lann::webcrypto::aead::AeadKey;
 use lann::webcrypto::aes_gcm::{generate_aes256_gcm_key, import_aes256_gcm_key};
 use lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
-use lann::webcrypto::mac::Mac;
+use lann::webcrypto::mac::MacKey;
 use lann::webcrypto::types::Error;
 
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
@@ -61,7 +61,7 @@ impl Guest for Component {
         };
 
         check("hmac-known-answer", hmac_known_answer(usize::MAX).await).await?;
-        check("hmac-chunked-absorb", hmac_known_answer(5).await).await?;
+        check("hmac-chunked-sign", hmac_known_answer(5).await).await?;
         check("hmac-verify", hmac_verify().await).await?;
         check("hmac-generated-key", hmac_generated_key().await).await?;
         check("hmac-key-export", hmac_key_export().await).await?;
@@ -91,16 +91,23 @@ async fn hmac_known_answer(chunk: usize) -> Result<(), String> {
         .await
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
     expect_eq(
-        key.algorithm(),
-        "HMAC-SHA-256".to_string(),
-        "mac-key.algorithm",
+        key.algorithm_name(),
+        "HMAC".to_string(),
+        "mac-key.algorithm-name",
+    )?;
+    expect_eq(
+        key.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "mac-key.algorithm-hash",
+    )?;
+    expect_eq(
+        key.algorithm_length(),
+        HMAC_KEY.len() as u32 * 8,
+        "mac-key.algorithm-length",
     )?;
 
-    let mac = key.start();
-    expect_eq(mac.algorithm(), "HMAC-SHA-256".to_string(), "mac.algorithm")?;
-    absorb_chunked(&mac, HMAC_DATA, chunk).await?;
-    let tag = Mac::finalize(mac).await;
-    expect_eq(hex(&tag), HMAC_TAG.to_string(), "finalize tag")
+    let tag = sign_chunked(&key, HMAC_DATA, chunk).await?;
+    expect_eq(hex(&tag), HMAC_TAG.to_string(), "sign tag")
 }
 
 /// `verify` accepts the correct tag and rejects a corrupted one.
@@ -110,34 +117,25 @@ async fn hmac_verify() -> Result<(), String> {
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
 
     let mut tag = unhex(HMAC_TAG);
-    let mac = key.start();
-    absorb_chunked(&mac, HMAC_DATA, usize::MAX).await?;
-    if !Mac::verify(mac, tag.clone()).await {
+    if !verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX).await? {
         return Err("correct tag did not verify".into());
     }
 
     tag[0] ^= 0x01;
-    let mac = key.start();
-    absorb_chunked(&mac, HMAC_DATA, usize::MAX).await?;
-    if Mac::verify(mac, tag).await {
+    if verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await? {
         return Err("corrupted tag verified".into());
     }
     Ok(())
 }
 
-/// A generated key signs and verifies, and two computations from the same key
-/// agree.
+/// A generated key signs and verifies, and two calls on the same key agree.
 async fn hmac_generated_key() -> Result<(), String> {
     let key = generate_hmac_sha256_key(false).await;
 
-    let mac = key.start();
-    absorb_chunked(&mac, b"payload", usize::MAX).await?;
-    let tag = Mac::finalize(mac).await;
+    let tag = sign_chunked(&key, b"payload", usize::MAX).await?;
     expect_eq(tag.len(), 32, "tag length")?;
 
-    let mac = key.start();
-    absorb_chunked(&mac, b"payload", 3).await?;
-    if !Mac::verify(mac, tag).await {
+    if !verify_chunked(&key, b"payload", tag, 3).await? {
         return Err("generated key's tag did not verify".into());
     }
 
@@ -177,10 +175,11 @@ async fn gcm_known_answer_seal() -> Result<(), String> {
         .await
         .map_err(|e| describe("import-aes256-gcm-key", &e))?;
     expect_eq(
-        key.algorithm(),
-        "AES-256-GCM".to_string(),
-        "aead-key.algorithm",
+        key.algorithm_name(),
+        "AES-GCM".to_string(),
+        "aead-key.algorithm-name",
     )?;
+    expect_eq(key.algorithm_length(), 256, "aead-key.algorithm-length")?;
 
     let sealed = seal_chunked(
         &key,
@@ -299,12 +298,27 @@ async fn gcm_key_export() -> Result<(), String> {
 
 // --- stream helpers ----------------------------------------------------------
 
-/// Absorb `data` into `mac`, writing it in `chunk`-byte pieces (one stream per
-/// call; `usize::MAX` writes it whole).
-async fn absorb_chunked(mac: &Mac, data: &[u8], chunk: usize) -> Result<(), String> {
+/// `sign`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`
+/// writes it whole).
+async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
     let (tx, rx) = wit_stream::new();
-    let ((), fed) = futures::join!(mac.absorb(rx), feed(tx, data, chunk));
-    fed
+    let (tag, fed) = futures::join!(key.sign(rx), feed(tx, data, chunk));
+    fed?;
+    Ok(tag)
+}
+
+/// `verify`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`
+/// writes it whole).
+async fn verify_chunked(
+    key: &MacKey,
+    data: &[u8],
+    tag: Vec<u8>,
+    chunk: usize,
+) -> Result<bool, String> {
+    let (tx, rx) = wit_stream::new();
+    let (ok, fed) = futures::join!(key.verify(rx, tag), feed(tx, data, chunk));
+    fed?;
+    Ok(ok)
 }
 
 /// `seal`, feeding the plaintext in `chunk`-byte pieces and collecting the

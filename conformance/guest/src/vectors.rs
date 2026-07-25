@@ -3,10 +3,9 @@
 
 use crate::lann::webcrypto::aes_gcm::import_aes256_gcm_key;
 use crate::lann::webcrypto::hmac::import_hmac_sha256_key;
-use crate::lann::webcrypto::mac::Mac;
 use crate::lann::webcrypto::types::Error;
 use crate::translate::{GcmCase, GcmExpectation, HmacCase};
-use crate::util::{absorb, describe, expect_bytes, open, seal};
+use crate::util::{describe, expect_bytes, open, seal, sign, verify};
 
 /// Run one HMAC-SHA-256 vector under its schedule.
 pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
@@ -14,20 +13,19 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
         .await
         .map_err(|e| describe("import-hmac-sha256-key", &e))?;
     if case.valid {
-        let mac = key.start();
-        absorb(&mac, &case.msg, case.schedule).await?;
-        let tag = Mac::finalize(mac).await;
-        expect_bytes(&tag, &case.tag, "finalize tag")?;
+        let (tag, fed) = sign(&key, &case.msg, case.schedule).await;
+        fed.map_err(|e| format!("sign data feeder: {e}"))?;
+        expect_bytes(&tag, &case.tag, "sign tag")?;
 
-        let mac = key.start();
-        absorb(&mac, &case.msg, case.schedule).await?;
-        if !Mac::verify(mac, case.tag.clone()).await {
+        let (ok, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
+        fed.map_err(|e| format!("verify data feeder: {e}"))?;
+        if !ok {
             return Err("verify(tag) returned false for a valid vector".into());
         }
     } else {
-        let mac = key.start();
-        absorb(&mac, &case.msg, case.schedule).await?;
-        if Mac::verify(mac, case.tag.clone()).await {
+        let (ok, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
+        fed.map_err(|e| format!("verify data feeder: {e}"))?;
+        if ok {
             return Err("verify(tag) returned true for an invalid vector".into());
         }
     }

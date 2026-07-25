@@ -11,9 +11,10 @@ package lann:webcrypto@0.1.0;
 interface types {
     /// Errors surfaced by key creation and cryptographic operations.
     ///
-    /// Failures that indicate misuse of the API (for example absorbing into a
-    /// finalized computation) are unrepresentable by construction and so have
-    /// no variant here.
+    /// Failures that indicate misuse of the API are unrepresentable by
+    /// construction — operations are one-shot calls on immutable key
+    /// resources, so there is no state to misuse — and so have no variant
+    /// here.
     variant error {
         /// The supplied key material is invalid for the algorithm (for
         /// example, a wrong-length raw key). The string is human-readable.
@@ -51,46 +52,52 @@ interface mac {
     /// A MAC key: an unforgeable capability, bound to one algorithm at
     /// creation.
     ///
+    /// `sign`/`verify` are one-shot and stateless per call, mirroring
+    /// `crypto.subtle.sign`/`verify`: there is deliberately no incremental
+    /// computation resource, so misuse of in-progress state (concurrent
+    /// updates, use after finalization) is unrepresentable. The byte
+    /// `stream` is the only ingestion path and also the incremental one —
+    /// implementations may fold each chunk into the computation as it
+    /// arrives or buffer the stream whole; the result is chunking-invariant
+    /// either way.
+    ///
     /// Note on extractability: `extractable` is an API property, not a
     /// physical one — the *implementation* of this interface necessarily
     /// holds the key material. The guarantee is that components holding only
     /// the handle cannot obtain the material through this API.
     resource mac-key {
-        /// Begin a new MAC computation keyed by this key.
-        start: func() -> mac;
+        /// Compute the authentication tag over an entire byte stream keyed
+        /// by this key. Resolves once the stream is fully drained (its
+        /// writer dropped).
+        sign: async func(data: stream<u8>) -> list<u8>;
 
-        /// The algorithm this key is bound to, e.g. `"HMAC-SHA-256"`.
-        algorithm: func() -> string;
+        /// Verify `tag` against the tag computed over an entire byte stream
+        /// keyed by this key, in constant time. Like `sign`, resolves only
+        /// after the stream is fully drained.
+        verify: async func(data: stream<u8>, tag: list<u8>) -> bool;
+
+        /// The registry name of the algorithm family this key is bound to,
+        /// e.g. `"HMAC"` (WebCrypto's `KeyAlgorithm.name`, spelled as the
+        /// W3C Web Cryptography API algorithm registry spells it).
+        ///
+        /// The algorithm's parameters are separate getters
+        /// (`algorithm-hash`, `algorithm-length`), so future parameters are
+        /// new getters rather than changes to a shared type.
+        algorithm-name: func() -> string;
+
+        /// The registry name of the digest this key's algorithm is
+        /// parameterized over, if any — e.g. `"SHA-256"` for HMAC-SHA-256
+        /// (WebCrypto's `HmacKeyAlgorithm.hash`). `none` for MAC algorithms
+        /// not built on a digest.
+        algorithm-hash: func() -> option<string>;
+
+        /// The key length in bits (WebCrypto's `HmacKeyAlgorithm.length`:
+        /// the length of the key material).
+        algorithm-length: func() -> u32;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         %export: async func() -> result<list<u8>, error>;
-    }
-
-    /// One in-progress MAC computation.
-    ///
-    /// The bulk data path is a byte `stream`; there is deliberately no
-    /// buffer-taking update function, so every implementation has exactly one
-    /// ingestion path. `finalize` and `verify` consume the resource, making
-    /// use-after-finalize unrepresentable rather than a runtime error.
-    resource mac {
-        /// Absorb an entire byte stream into the computation. Resolves once
-        /// the stream is fully drained (its writer dropped). May be called
-        /// multiple times sequentially; the absorbed streams are
-        /// concatenated. Implementations may process the bytes incrementally
-        /// or buffer until `finalize`/`verify` — the result is
-        /// chunking-invariant either way.
-        absorb: async func(data: stream<u8>);
-
-        /// Consume the computation and return the authentication tag.
-        finalize: static async func(this: mac) -> list<u8>;
-
-        /// Consume the computation and verify `tag` against the computed tag
-        /// in constant time.
-        verify: static async func(this: mac, tag: list<u8>) -> bool;
-
-        /// The algorithm of the key this computation was started from.
-        algorithm: func() -> string;
     }
 }
 
@@ -145,8 +152,18 @@ interface aead {
         /// result is an error.
         open: async func(nonce: list<u8>, aad: list<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
-        /// The algorithm this key is bound to, e.g. `"AES-256-GCM"`.
-        algorithm: func() -> string;
+        /// The registry name of the algorithm family this key is bound to,
+        /// e.g. `"AES-GCM"` (WebCrypto's `KeyAlgorithm.name`, spelled as
+        /// the W3C Web Cryptography API algorithm registry spells it).
+        ///
+        /// The algorithm's parameters are separate getters (each kind
+        /// exposes only the ones its algorithms define), so future
+        /// parameters are new getters rather than changes to a shared type.
+        algorithm-name: func() -> string;
+
+        /// The key length in bits, e.g. `256` for AES-256-GCM (WebCrypto's
+        /// `AesKeyAlgorithm.length`).
+        algorithm-length: func() -> u32;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
@@ -157,7 +174,8 @@ interface aead {
 /// HMAC key minting (RFC 2104), one function pair per underlying hash.
 ///
 /// Adding an algorithm touches only an interface like this one: the generic
-/// `mac` surface is closed. Keys returned here drive `mac.mac-key.start`.
+/// `mac` surface is closed. Keys returned here drive `mac.mac-key.sign` and
+/// `verify`.
 interface hmac {
     use types.{error};
     use mac.{mac-key};

@@ -20,12 +20,11 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` fail `invalid-nonce` regardless of the vector's own result (the WIT mandates 12-byte nonces; Wycheproof merely *discourages* other sizes). |
 | GCM, keySize 256, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
-| HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `finalize`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
-| HMAC, tagSize 256, `valid` | `finalize` equals `tag`; `verify(tag)` is true. |
+| HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
+| HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` is true. |
 | HMAC, tagSize 256, `invalid` | `verify(tag)` is false. |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
-1-byte writes, block-boundary-straddling writes, and — for MACs — input split
-across sequential `absorb` calls): the streams-only WIT makes delivery
-schedule observable to implementations, so chunking invariance is part of the
-conformance claim.
+1-byte writes, and block-boundary-straddling writes): the streams-only WIT
+makes delivery schedule observable to implementations, so chunking invariance
+is part of the conformance claim.

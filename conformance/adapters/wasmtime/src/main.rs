@@ -53,14 +53,13 @@ mod harness {
             },
             with: {
                 "lann:webcrypto/mac.mac-key": wasmtime_webcrypto::MacKey,
-                "lann:webcrypto/mac.mac": wasmtime_webcrypto::MacComputation,
                 "lann:webcrypto/aead.aead-key": wasmtime_webcrypto::AeadKey,
             },
         });
     }
 
     /// The store state: the WebCrypto host context plus the resource table
-    /// its keys and computations live in.
+    /// its keys live in.
     struct Ctx {
         webcrypto: WasiWebcryptoCtx,
         table: ResourceTable,
