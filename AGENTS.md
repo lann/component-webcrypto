@@ -183,10 +183,16 @@ Open review findings and design decisions live in this repository's GitHub
 issue tracker (`gh issue list`), not in a TODO file. Before starting work
 that touches an area, search the open issues — some encode contract
 decisions (e.g. stream-failure semantics) that the change should resolve,
-not work around. When a change fixes, obsoletes, or invalidates an issue,
-close it as part of landing the change (e.g. `Fixes #N` in the PR); file new
-issues for new findings rather than adding TODO comments or files. Issue
-numbers are never reused, so closed numbers remain stable references.
+not work around.
+
+Close issues through PRs. When a PR fully resolves an issue, put a standard
+closing-keyword line (e.g. `Fixes #N`, `Closes #N`) in the PR description so
+the merge closes it automatically and the cross-reference is recorded. When
+a PR resolves only part of an issue, do not close it: tick the resolved
+checklist items and leave a comment naming the PR, so the issue always
+reflects what actually remains. File new issues for new findings rather
+than adding TODO comments or files. Issue numbers are never reused, so
+closed numbers remain stable references.
 
 ## Direction (designed, not yet built)
 
