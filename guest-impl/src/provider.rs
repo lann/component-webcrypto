@@ -356,7 +356,7 @@ impl GuestAeadKey for AeadKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = zeroize::Zeroizing::new(drain_stream(plaintext).await);
+        let msg = drain_stream(plaintext).await;
         self.cipher.check_nonce(&nonce)?;
         let sealed = self
             .cipher
@@ -702,7 +702,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = zeroize::Zeroizing::new(drain_stream(plaintext).await);
+        let msg = drain_stream(plaintext).await;
         // Count this invocation against the algorithm's nonce budget, per
         // the minting interfaces' SHOULD-enforce contract.
         if let Some(budget) = self.cipher.nonce_budget() {

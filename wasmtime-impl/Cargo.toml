@@ -29,6 +29,6 @@ p256 = { version = "0.13", features = ["ecdsa"] }
 p384 = { version = "0.13", features = ["ecdsa"] }
 # Key generation.
 getrandom = "0.3"
-# Scrub raw key material and sealed plaintext buffers on drop.
+# Scrub raw key material on drop.
 zeroize = "1"
 

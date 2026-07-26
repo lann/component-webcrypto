@@ -433,7 +433,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = zeroize::Zeroizing::new(drain_stream(accessor, plaintext).await?);
+        let msg = drain_stream(accessor, plaintext).await?;
         if let Err(err) = cipher.check_nonce(&nonce) {
             return Ok(Err(err));
         }
@@ -844,7 +844,7 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = zeroize::Zeroizing::new(drain_stream(accessor, plaintext).await?);
+        let msg = drain_stream(accessor, plaintext).await?;
         // Count this invocation against the algorithm's nonce budget before
         // drawing the nonce, per the minting interfaces' SHOULD-enforce
         // contract.
