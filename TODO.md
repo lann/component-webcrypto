@@ -7,9 +7,6 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## WIT (pre-freeze: cheap now, breaking later)
 
-- **Rename `%export`.** It collides with a WIT keyword, so it needs `%`
-  escaping in WIT and special-casing in bindings forever. Rename (e.g.
-  `extract` or `export-key`) on every resource before compatibility freezes.
 - **Nonce-misuse resistance: internal-nonce seal.** Caller-supplied nonces are
   the top real-world AEAD footgun and the API's only defense is a doc comment.
   Add a `seal-internal-nonce` (nonce chosen by the implementation, returned or

@@ -269,7 +269,7 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         variant.verify(&raw, &bytes, &tag)
     }
 
-    async fn export(
+    async fn export_key(
         accessor: &Accessor<T, Self>,
         self_: Resource<MacKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -460,7 +460,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         Ok(Ok(reader))
     }
 
-    async fn export(
+    async fn export_key(
         accessor: &Accessor<T, Self>,
         self_: Resource<AeadKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -894,7 +894,7 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         })
     }
 
-    async fn export(
+    async fn export_key(
         accessor: &Accessor<T, Self>,
         self_: Resource<VerifyingKey>,
     ) -> Result<Vec<u8>> {
@@ -962,7 +962,7 @@ impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
         })
     }
 
-    async fn export(
+    async fn export_key(
         accessor: &Accessor<T, Self>,
         self_: Resource<SigningKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {

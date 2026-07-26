@@ -112,7 +112,7 @@ export class MacKey {
    * was created with `extractable` true (checked on the `CryptoKey` itself
    * rather than relying on the `DOMException` from `exportKey`).
    */
-  async export() {
+  async exportKey() {
     if (!this.#key.extractable) throw { tag: "not-extractable" };
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
@@ -200,7 +200,7 @@ export class AeadKey {
    * was created with `extractable` true (checked on the `CryptoKey` itself
    * rather than relying on the `DOMException` from `exportKey`).
    */
-  async export() {
+  async exportKey() {
     if (!this.#key.extractable) throw { tag: "not-extractable" };
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
@@ -551,7 +551,7 @@ export class VerifyingKey {
    * The public key material (`raw`: 32 bytes for Ed25519, an uncompressed
    * SEC1 point for ECDSA). Public material is always exportable.
    */
-  async export() {
+  async exportKey() {
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
 }
@@ -619,7 +619,7 @@ export class SigningKey {
    * Throws `{ tag: 'not-extractable' }` unless minted with `extractable`
    * true.
    */
-  async export() {
+  async exportKey() {
     if (!this.#extractable) throw { tag: "not-extractable" };
     const jwk = await subtle.exportKey("jwk", this.#privateKey);
     return base64UrlDecode(jwk.d);

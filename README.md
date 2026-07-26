@@ -24,7 +24,7 @@ kind*, not by algorithm:
   declines to host.
 - **Keys are resources — capabilities.** A world importing only `mac` can use
   key handles it is granted but cannot mint keys; only a world importing
-  `hmac` can. `extractable: false` keys refuse `export` (on the jco host the
+  `hmac` can. `extractable: false` keys refuse `export-key` (on the jco host the
   platform `CryptoKey` itself enforces this).
 - **Byte `stream`s are the only bulk data path** (no buffer-taking `update`
   functions), so implementations have exactly one ingestion path and results

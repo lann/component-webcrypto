@@ -190,7 +190,7 @@ async fn hmac_generated_key() -> Result<(), String> {
     }
 
     // A non-extractable key must not export.
-    match key.export().await {
+    match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
         Ok(_) => Err("non-extractable key exported".into()),
@@ -205,7 +205,7 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| describe("import-key", &e))?;
     let exported = key
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("export of extractable key", &e))?;
     expect_eq(exported, HMAC_KEY.to_vec(), "exported key material")?;
@@ -214,7 +214,7 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let exported = generated
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("export of generated key", &e))?;
     expect_eq(exported.len(), 64, "generated key length")
@@ -384,7 +384,7 @@ async fn gcm_key_export() -> Result<(), String> {
         .await
         .map_err(|e| describe("import-key", &e))?;
     let exported = key
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("export of extractable key", &e))?;
     expect_eq(exported, raw, "exported key material")?;
@@ -392,7 +392,7 @@ async fn gcm_key_export() -> Result<(), String> {
     let sealed_key = generate_key(AesVariant::Aes256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    match sealed_key.export().await {
+    match sealed_key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
         Ok(_) => Err("non-extractable key exported".into()),
@@ -585,7 +585,7 @@ async fn ed25519_known_answer() -> Result<(), String> {
 
     let public = key.verifying_key();
     expect_eq(
-        hex(&public.export().await),
+        hex(&public.export_key().await),
         ED25519_PUBLIC.to_string(),
         "derived public key",
     )?;
@@ -633,7 +633,7 @@ async fn ed25519_generated_key() -> Result<(), String> {
         .await?
         .map_err(|e| describe("round-trip signature did not verify", &e))?;
 
-    match key.export().await {
+    match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
         Ok(_) => Err("non-extractable key exported".into()),
@@ -646,7 +646,7 @@ async fn ed25519_key_export() -> Result<(), String> {
         .await
         .map_err(|e| describe("import-signing-key", &e))?;
     expect_eq(key.extractable(), true, "signing-key.extractable")?;
-    let exported = key.export().await.map_err(|e| describe("export", &e))?;
+    let exported = key.export_key().await.map_err(|e| describe("export", &e))?;
     expect_eq(hex(&exported), ED25519_SEED.to_string(), "exported seed")
 }
 

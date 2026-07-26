@@ -130,7 +130,7 @@ interface mac {
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
-        %export: async func() -> result<list<u8>, error>;
+        export-key: async func() -> result<list<u8>, error>;
     }
 }
 
@@ -200,7 +200,7 @@ interface aead {
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
-        %export: async func() -> result<list<u8>, error>;
+        export-key: async func() -> result<list<u8>, error>;
     }
 }
 
@@ -431,7 +431,7 @@ interface signature {
         /// The public key material, in the minting interface's documented
         /// public format. Public material is always exportable — there is
         /// no extractability gate on this resource.
-        %export: async func() -> list<u8>;
+        export-key: async func() -> list<u8>;
     }
 
     /// A private key. `sign` is one-shot on the immutable key, mirroring
@@ -467,7 +467,7 @@ interface signature {
         /// The private key material, in the minting interface's documented
         /// private format. Fails with `error.not-extractable` unless the
         /// key was created with `extractable` true.
-        %export: async func() -> result<list<u8>, error>;
+        export-key: async func() -> result<list<u8>, error>;
     }
 }
 
@@ -495,7 +495,7 @@ interface ed25519-sign {
     use signature.{signing-key};
 
     /// Import a 32-byte raw private key (the RFC 8032 seed). Anything else
-    /// fails with `error.invalid-key`. `signing-key.export` returns this
+    /// fails with `error.invalid-key`. `signing-key.export-key` returns this
     /// same 32-byte seed form.
     import-signing-key: async func(raw: list<u8>, extractable: bool) -> result<signing-key, error>;
 
@@ -530,7 +530,7 @@ interface ecdsa-verify {
     /// Import a public key as an uncompressed SEC1 point (`04 ‖ x ‖ y`;
     /// 65 bytes for P-256, 97 bytes for P-384 — WebCrypto's `raw` format).
     /// Anything else — including compressed points and points not on the
-    /// curve — fails with `error.invalid-key`. `verifying-key.export`
+    /// curve — fails with `error.invalid-key`. `verifying-key.export-key`
     /// returns this same form.
     import-verifying-key: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
 }
@@ -553,7 +553,7 @@ interface ecdsa-sign {
 
     /// Import a private key as the raw big-endian scalar (32 bytes for
     /// P-256, 48 for P-384). Out-of-range or wrong-length scalars fail with
-    /// `error.invalid-key`. `signing-key.export` returns this same form.
+    /// `error.invalid-key`. `signing-key.export-key` returns this same form.
     import-signing-key: async func(%variant: ecdsa-variant, raw: list<u8>, extractable: bool) -> result<signing-key, error>;
 
     /// Generate a fresh random signing key of the declared variant.
