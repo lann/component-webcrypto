@@ -40,28 +40,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Check formatting
-        run: just fmt-check
-
-      - name: Validate WIT
-        run: just validate-wit
-
-      - name: Run clippy
-        run: just clippy
-
-      - name: Run tests
-        run: just test
-
-      # Compose the crypto-demo guest with the in-guest provider and the CLI
-      # driver (`wac plug`) and run the fully in-guest demo under wasmtime.
-      - name: Run composed in-guest test
-        run: just test-webcrypto-composed
-
-      # The cross-implementation conformance suite over the enabled targets
-      # (wasmtime + composed + jco-node; jco-browser needs a Chromium install
-      # — see the `conformance` recipe).
-      - name: Run conformance suite
-        run: just conformance
+      # The whole job body lives in the justfile (`rust-checks`): formatting,
+      # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
+      # integration test), the composed fully in-guest demo, and the
+      # cross-implementation conformance suite. The justfile's `_step` wrapper
+      # emits ::group::/::error:: annotations per recipe.
+      - name: Run rust checks
+        run: just rust-checks
 
   # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
@@ -91,5 +76,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Run the jco host test
-        run: just test-node
+      - name: Run the jco host checks
+        run: just jco-checks
