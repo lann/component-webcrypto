@@ -13,10 +13,9 @@ expected-fail = []
 [targets.composed]
 expected-fail = []
 
-# The jco targets are enumerated but TEMPORARILY produce no results (the
-# runner warns rather than fails): jco's component-model-async runtime
-# corrupts the guest heap under this corpus. See the `conformance` recipe in
-# the justfile. The expectations below are the post-fix state.
+# The jco-node target is gating (part of `just conformance`); jco-browser is
+# enumerated but not gating (it needs a Chromium install and is run manually,
+# so it produces no results in CI and the runner warns rather than fails).
 
 # Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
 # unimplemented), so the jco host declines both `chacha-variant`s as

@@ -3,8 +3,8 @@
 // Chromium (137+, which ships JSPI), and writes
 // `conformance/results/jco-browser.json`.
 //
-// Subject to the same upstream jco-runtime blocker as the Node adapter — see
-// run-node.mjs.
+// Not gating (it needs a Chromium install); run it manually with
+// `just conformance-jco-browser`.
 import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
 import { join, extname } from "node:path";

@@ -43,8 +43,8 @@ interface tests {
     /// Run `take` tests starting at `skip`, in corpus order.
     ///
     /// A harness-debugging aid: running a window of the corpus is how a
-    /// misbehaving target gets bisected (it is how the jco runtime issue
-    /// blocking the jco conformance targets was isolated). Gating targets
+    /// misbehaving target gets bisected (it is how a past jco runtime issue
+    /// affecting the jco conformance targets was isolated). Gating targets
     /// run `run-all`.
     run-slice: async func(skip: u32, take: u32) -> list<test-result>;
 }

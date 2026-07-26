@@ -66,10 +66,15 @@ crypto conformance tests *functions against mathematics*.
 - **The "environment" axis is input adversity × delivery schedule**, not
   network topology: Wycheproof's negative vectors replace hostile networks,
   chunking schedules replace routing scenarios.
-- **Expectations in `manifests.toml` encode policy, not capability**: nothing
-  is expected-fail today; the anticipated entries are profile divergence
-  (e.g. a FIPS-profile target expected-failing the short-key HMAC vectors),
-  not missing features. Bugs get fixed, not manifested.
+- **Expectations in `manifests.toml` encode policy, not capability**: the
+  jco targets expected-fail the ChaCha20-Poly1305 corpus (browser WebCrypto
+  implements no ChaCha20-Poly1305, so the jco host declines those keys as
+  `unsupported` — a missing platform feature a caller routes around with
+  another provider) and the deterministic-ECDSA signing probe (WebCrypto's
+  randomized `k` makes RFC 6979's known-answer bytes unobservable, though the
+  signatures still verify). The anticipated future entries are profile
+  divergence (e.g. a FIPS-profile target expected-failing the short-key HMAC
+  vectors). Bugs get fixed, not manifested.
 
 ## Deliberately deferred
 

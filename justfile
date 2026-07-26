@@ -3,7 +3,7 @@ default:
     @just --list
 
 # Run every CI check locally, in the same order as .github/workflows/ci.yml.
-ci: fmt-check clippy validate-wit test test-webcrypto-composed build-component transpile test-node
+ci: fmt-check validate-wit clippy test test-webcrypto-composed conformance test-node
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests).
 check: fmt-check clippy validate-wit test
@@ -152,8 +152,7 @@ conformance-composed: build-conformance-composed
         > conformance/results/composed.json
 
 # Run the conformance corpus under the jco host on Node (24+; JSPI). Writes
-# conformance/results/jco-node.json. NOT yet part of `just conformance` — see
-# that recipe's comment for the upstream jco blocker this checks for.
+# conformance/results/jco-node.json. Part of `just conformance`.
 conformance-jco-node: build-conformance-guest build-signing-guest
     cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
         timeout {{conformance-timeout}} npm run run:node && \
@@ -161,7 +160,7 @@ conformance-jco-node: build-conformance-guest build-signing-guest
 
 # Run the conformance corpus under the jco host in headless Chromium (137+;
 # auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json.
-# NOT yet part of `just conformance` — same upstream jco blocker as jco-node.
+# Not gating — needs a Chromium install; run it manually.
 conformance-jco-browser: build-conformance-guest
     cd conformance/adapters/jco && npm run transpile && \
         timeout {{conformance-timeout}} npm run run:browser
