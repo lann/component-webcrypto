@@ -220,7 +220,7 @@ impl GuestMacKey for MacKey {
 
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
-            Ok(self.raw.clone())
+            Ok(self.raw.to_vec())
         } else {
             Err(Error::NotExtractable)
         }
@@ -236,7 +236,8 @@ impl AeadGuest for Component {
 /// An exported `aead-key`: raw key material, bound to its algorithm at
 /// minting, with its ready-to-use cipher.
 pub struct AeadKey {
-    raw: Vec<u8>,
+    /// Raw key material; zeroized on drop.
+    raw: zeroize::Zeroizing<Vec<u8>>,
     extractable: bool,
     cipher: AeadCipher,
 }
@@ -355,7 +356,7 @@ impl GuestAeadKey for AeadKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(plaintext).await;
+        let msg = zeroize::Zeroizing::new(drain_stream(plaintext).await);
         self.cipher.check_nonce(&nonce)?;
         let sealed = self
             .cipher
@@ -407,7 +408,7 @@ impl GuestAeadKey for AeadKey {
 
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
-            Ok(self.raw.clone())
+            Ok(self.raw.to_vec())
         } else {
             Err(Error::NotExtractable)
         }
@@ -545,7 +546,7 @@ fn new_aes_gcm_key(variant: AesVariant, raw: Vec<u8>, extractable: bool) -> Resu
         }
     };
     Ok(AeadKey {
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
         cipher,
     })
@@ -595,7 +596,7 @@ fn new_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
         ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
     );
     Ok(AeadKey {
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
         cipher,
     })
@@ -608,7 +609,7 @@ fn new_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
         XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
     );
     Ok(AeadKey {
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
         cipher,
     })
@@ -666,7 +667,8 @@ impl AeadInternalNonceGuest for Component {
 /// count to enforce the WIT nonce budget (`error.key-exhausted`) for
 /// 12-byte-nonce algorithms.
 pub struct InternalNonceKey {
-    raw: Vec<u8>,
+    /// Raw key material; zeroized on drop.
+    raw: zeroize::Zeroizing<Vec<u8>>,
     extractable: bool,
     cipher: AeadCipher,
     /// `seal` invocations so far, counted against the nonce budget.
@@ -700,7 +702,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(plaintext).await;
+        let msg = zeroize::Zeroizing::new(drain_stream(plaintext).await);
         // Count this invocation against the algorithm's nonce budget, per
         // the minting interfaces' SHOULD-enforce contract.
         if let Some(budget) = self.cipher.nonce_budget() {
@@ -767,7 +769,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
 
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
-            Ok(self.raw.clone())
+            Ok(self.raw.to_vec())
         } else {
             Err(Error::NotExtractable)
         }
