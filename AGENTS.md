@@ -54,10 +54,11 @@ conformance/            # cross-implementation conformance suite — see
                         #   from the WebRTC sibling's suite
   vectors/              #   vendored Wycheproof JSON + the translation policy
   guest/                #   the shared conformance guest (vectors compiled in)
+  signing-guest/        #   host-only guest for surfaces the in-guest
+                        #     provider does not export (ecdsa-sign)
   adapters/             #   per-target drivers: wasmtime, composed-driver (for
-                        #     the composed target), jco (Node + browser;
-                        #     currently blocked on an upstream jco bug — see
-                        #     the `conformance` justfile recipe)
+                        #     the composed target), jco (Node gates; the
+                        #     browser target needs Chromium and runs manually)
   runner/               #   classifies results against manifests.toml and
                         #     renders conformance/matrix.md
   manifests.toml        #   per-target expectations (policy-driven)

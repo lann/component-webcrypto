@@ -65,3 +65,16 @@ world conformance-guest {
 
     export tests;
 }
+
+/// The host-only signing guest: probes for signature-minting interfaces the
+/// in-guest provider deliberately does not export (`ecdsa-sign` is class D),
+/// which the shared `conformance-guest` therefore cannot import — it must
+/// compose with that provider. This world runs only under the host-backed
+/// targets (wasmtime, jco); the composed target has no results for it.
+world signing-guest {
+    import lann:webcrypto/signature@0.1.0;
+    import lann:webcrypto/ecdsa-verify@0.1.0;
+    import lann:webcrypto/ecdsa-sign@0.1.0;
+
+    export tests;
+}

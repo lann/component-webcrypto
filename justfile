@@ -14,9 +14,10 @@ fmt-check:
 
 # Run clippy across all crates (the wasm crates on their wasm targets).
 clippy:
-    cargo clippy --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
+    cargo clippy --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
     cargo clippy -p crypto-demo --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p conformance-guest --target wasm32-unknown-unknown -- -D warnings
+    cargo clippy -p conformance-signing-guest --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p guest-webcrypto --target wasm32-wasip2 -- -D warnings
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
@@ -33,7 +34,7 @@ validate-wit:
 # Run the Rust tests, including the wasmtime-demo integration test (which
 # builds and runs the crypto-demo guest under the Wasmtime host).
 test:
-    cargo test --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-composed-driver --exclude timing-lab
+    cargo test --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 build-component:
@@ -108,13 +109,27 @@ build-conformance-guest:
         target/wasm32-unknown-unknown/release/conformance_guest.wasm \
         -o conformance/guest/build/conformance-guest.component.wasm
 
-# Run the conformance corpus under the Wasmtime host. Writes
-# conformance/results/wasmtime.json.
-conformance-wasmtime: build-conformance-guest
+# Build the host-only signing guest component (probes for interfaces the
+# in-guest provider deliberately does not export) into
+# conformance/signing-guest/build/.
+build-signing-guest:
+    cargo build --release -p conformance-signing-guest --target wasm32-unknown-unknown
+    mkdir -p conformance/signing-guest/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/conformance_signing_guest.wasm \
+        -o conformance/signing-guest/build/conformance-signing-guest.component.wasm
+
+# Run the conformance corpus under the Wasmtime host (the shared guest plus
+# the host-only signing guest). Writes conformance/results/wasmtime.json and
+# wasmtime-signing.json (both target `wasmtime`; the runner merges them).
+conformance-wasmtime: build-conformance-guest build-signing-guest
     mkdir -p conformance/results
     timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
         --guest conformance/guest/build/conformance-guest.component.wasm \
         --out conformance/results/wasmtime.json
+    timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
+        --guest conformance/signing-guest/build/conformance-signing-guest.component.wasm \
+        --out conformance/results/wasmtime-signing.json
 
 # Build the composed conformance component: the conformance guest
 # plugged with the in-guest provider, under the CLI driver that prints the
@@ -139,9 +154,10 @@ conformance-composed: build-conformance-composed
 # Run the conformance corpus under the jco host on Node (24+; JSPI). Writes
 # conformance/results/jco-node.json. NOT yet part of `just conformance` — see
 # that recipe's comment for the upstream jco blocker this checks for.
-conformance-jco-node: build-conformance-guest
-    cd conformance/adapters/jco && npm run transpile && \
-        timeout {{conformance-timeout}} npm run run:node
+conformance-jco-node: build-conformance-guest build-signing-guest
+    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
+        timeout {{conformance-timeout}} npm run run:node && \
+        timeout {{conformance-timeout}} npm run run:node-signing
 
 # Run the conformance corpus under the jco host in headless Chromium (137+;
 # auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json.

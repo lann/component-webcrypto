@@ -1,0 +1,14 @@
+[package]
+name = "conformance-signing-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The host-only conformance guest: probes for signature-minting interfaces the in-guest provider deliberately does not export (ecdsa-sign), runnable only under the host-backed targets."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.59", features = ["async"] }
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+hex = "0.4"

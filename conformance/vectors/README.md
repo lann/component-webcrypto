@@ -45,7 +45,7 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 | SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
 | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
-| Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes (Ed25519 round trips; ECDSA signing is not importable by this guest — the in-guest provider does not export `ecdsa-sign`, so a guest importing it could not compose). |
+| Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT
