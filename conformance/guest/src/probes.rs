@@ -264,9 +264,22 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
     }
 }
 
-/// Sealed output is exactly plaintext length + the 16-byte tag.
+/// Sealed output is exactly plaintext length + the 16-byte tag, and the
+/// size getters agree with the observed contract.
 async fn sealed_length() -> Result<(), String> {
     let key = generate_key_256(false).await?;
+    if key.nonce_size() != 12 {
+        return Err(format!(
+            "aead-key.nonce-size: got {}, want 12",
+            key.nonce_size()
+        ));
+    }
+    if key.tag_size() != 16 {
+        return Err(format!(
+            "aead-key.tag-size: got {}, want 16",
+            key.tag_size()
+        ));
+    }
     for len in [0usize, 1, 15, 16, 17, 1024] {
         let plaintext = vec![0xa5u8; len];
         let (sealed, fed) = seal(&key, &[1u8; 12], b"", &plaintext, Schedule::Whole).await;
@@ -872,6 +885,10 @@ async fn internal_nonce_shape() -> Result<(), String> {
         ));
     }
 
+    let before = key
+        .seals_remaining()
+        .ok_or("AES-GCM internal-nonce key reports no nonce budget")?;
+
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(1024 + 7).collect();
     let (sealed, fed) = in_seal(&key, b"shape aad", &plaintext, Schedule::Straddle).await;
     fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
@@ -889,6 +906,17 @@ async fn internal_nonce_shape() -> Result<(), String> {
     fed.map_err(|e| format!("open sealed feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open", &e))?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
+
+    // The budget hint decreases as seals consume it: permitting N further
+    // seals before means permitting at most N - 1 after.
+    let after = key
+        .seals_remaining()
+        .ok_or("nonce budget disappeared after sealing")?;
+    if after >= before {
+        return Err(format!(
+            "seals-remaining did not decrease: {before} -> {after}"
+        ));
+    }
 
     // A second seal draws a fresh nonce.
     let (resealed, fed) = in_seal(&key, b"shape aad", &plaintext, Schedule::Whole).await;

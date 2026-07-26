@@ -7,10 +7,6 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## WIT (pre-freeze: cheap now, breaking later)
 
-- **Does `aead` need a nonce-length getter?** A component holding only an
-  `aead-key` (capability-style) cannot learn the nonce length its algorithm
-  requires; `algorithm-name` forces string matching. An
-  `algorithm-nonce-length` getter would be additive-before-freeze.
 - **Split `wit/webcrypto.wit` into multiple files.** The package is one long
   file; WIT packages can span files in a directory. Organize by layer
   (types/kinds/minting) before it grows further.

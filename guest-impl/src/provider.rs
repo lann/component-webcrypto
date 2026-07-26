@@ -277,6 +277,12 @@ impl AeadCipher {
         }
     }
 
+    /// The tag length every algorithm this implementation serves trails
+    /// its ciphertext with.
+    fn tag_len(&self) -> usize {
+        16
+    }
+
     /// The internal-nonce seal budget for this cipher's algorithm: the WIT
     /// contract's 2^32-invocation bound for 12-byte-nonce algorithms (SP
     /// 800-38D SS8.2.2's repeat-probability bound); `none` for 24-byte
@@ -332,6 +338,14 @@ impl AeadCipher {
 }
 
 impl GuestAeadKey for AeadKey {
+    fn nonce_size(&self) -> u32 {
+        self.cipher.nonce_len() as u32
+    }
+
+    fn tag_size(&self) -> u32 {
+        self.cipher.tag_len() as u32
+    }
+
     async fn seal(
         &self,
         nonce: Vec<u8>,
@@ -672,6 +686,12 @@ fn into_internal_nonce_key(key: AeadKey) -> InternalNonceKey {
 }
 
 impl GuestInternalNonceKey for InternalNonceKey {
+    fn seals_remaining(&self) -> Option<u64> {
+        self.cipher
+            .nonce_budget()
+            .map(|budget| budget.saturating_sub(self.sealed.get()))
+    }
+
     async fn seal(
         &self,
         aad: Vec<u8>,

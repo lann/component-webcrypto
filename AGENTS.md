@@ -190,7 +190,9 @@ the change should resolve, not work around.
   peers must agree); `open` releases each segment only after its tag
   verifies, and truncation/tampering ends the stream with an error.
 - More `signature` algorithms (RSA-PSS/RSASSA-PKCS1-v1_5 need an
-  `algorithm-length` getter — additive — and SPKI/PKCS#8 formats); the
+  `algorithm-length` getter — a semver-minor package bump: new resource
+  methods are subtyping-compatible for existing compositions, but providers
+  must update to serve them — and SPKI/PKCS#8 formats); the
   per-algorithm `-verify`/`-sign` minting split already carries the class-D
   policy (the in-guest provider exports `ecdsa-verify` but not `ecdsa-sign`).
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'

@@ -276,6 +276,8 @@ async fn gcm_known_answer_seal() -> Result<(), String> {
         "aead-key.algorithm-name",
     )?;
     expect_eq(key.algorithm_length(), 256, "aead-key.algorithm-length")?;
+    expect_eq(key.nonce_size(), 12, "aead-key.nonce-size")?;
+    expect_eq(key.tag_size(), 16, "aead-key.tag-size")?;
 
     let sealed = seal_chunked(
         &key,
@@ -420,6 +422,10 @@ async fn gcm_internal_nonce() -> Result<(), String> {
         "internal-nonce-key.algorithm-length",
     )?;
 
+    let before = key
+        .seals_remaining()
+        .ok_or("AES-GCM internal-nonce key reports no nonce budget")?;
+
     let aad = b"internal-nonce aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2 * 1024 + 9).collect();
 
@@ -433,6 +439,13 @@ async fn gcm_internal_nonce() -> Result<(), String> {
         .await
         .map_err(|e| describe("open", &e))?;
     expect_eq(opened == plaintext, true, "round-tripped plaintext")?;
+
+    // The budget hint decreases as seals consume it: if the key permits N
+    // further seals, after one it permits at most N - 1.
+    let after = key
+        .seals_remaining()
+        .ok_or("nonce budget disappeared after sealing")?;
+    expect_eq(after < before, true, "seals-remaining decreased")?;
 
     // A second seal of the same plaintext must draw a fresh nonce.
     let resealed = in_seal_chunked(&key, aad, &plaintext, usize::MAX)
