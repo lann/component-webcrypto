@@ -19,7 +19,9 @@ arithmetic, and the JIT is a second optimizer that is free to reintroduce
 exactly the transformations the source fought off — a `select` over secret
 data can legally become a branch. No portable guarantee exists; empirical
 verification is per-runtime, per-hardware, and fragile across runtime
-upgrades.
+upgrades. The repository's `timing-lab/` provides a first empirical check of
+this provider's surfaces (see its README for methodology and, crucially, its
+detection limits).
 
 Two facts frame the residual risk:
 

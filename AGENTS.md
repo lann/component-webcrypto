@@ -60,6 +60,9 @@ conformance/            # cross-implementation conformance suite — see
   runner/               #   classifies results against manifests.toml and
                         #     renders conformance/matrix.md
   manifests.toml        #   per-target expectations (policy-driven)
+timing-lab/             # dudect-style statistical timing tests of the
+                        #   composed wasip3 provider (non-gating; see its
+                        #   README for methodology and detection limits)
 scripts/setup.sh        # one-shot dependency setup (idempotent; used by CI)
 ```
 
@@ -178,9 +181,8 @@ artifacts like `conformance/matrix.md`.
 - A `signature` primitive kind whose `verify` (secret-free — e.g. JWT
   validation) is exportable by the in-guest provider even for algorithms whose
   `sign` is class D.
-- A timing lab (dudect-style statistical tests of the composed provider under
-  wasmtime, targeting class B/C surfaces) and a cross-implementation
-  conformance suite, both following the sibling repository's lab shape.
+- Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'
+  fine-grained leaks (its README documents the current detection limits).
 - A FIPS 140-3 profile, kept *possible* (not implemented): everything needed
   is additive — an internal-nonce seal (`seal-internal-nonce`, since SP
   800-38D forbids externally supplied GCM encryption IVs in approved mode; a
