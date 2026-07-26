@@ -7,11 +7,6 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## WIT (pre-freeze: cheap now, breaking later)
 
-- **Consider dropping `chacha-variant` in favor of separate interfaces.**
-  The two ChaCha20-Poly1305 constructions differ in nonce contract, not key
-  shape; per-construction minting interfaces (like the `-verify`/`-sign`
-  split) may carve better than a variant enum. Decide before the surface
-  freezes.
 - **Does `aead` need a nonce-length getter?** A component holding only an
   `aead-key` (capability-style) cannot learn the nonce length its algorithm
   requires; `algorithm-name` forces string matching. An

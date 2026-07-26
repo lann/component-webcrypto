@@ -164,7 +164,6 @@ pub struct ChaChaCase {
 #[derive(Clone, Copy)]
 pub enum InternalNonceAlg {
     AesGcm,
-    ChaCha20Poly1305,
     XChaCha20Poly1305,
 }
 
@@ -173,7 +172,6 @@ impl InternalNonceAlg {
     pub fn name(self) -> &'static str {
         match self {
             InternalNonceAlg::AesGcm => "aes-gcm-internal-nonce",
-            InternalNonceAlg::ChaCha20Poly1305 => "chacha20-poly1305-internal-nonce",
             InternalNonceAlg::XChaCha20Poly1305 => "xchacha20-poly1305-internal-nonce",
         }
     }
@@ -241,13 +239,15 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
     };
     push(InternalNonceAlg::AesGcm, 96, &gcm, &mut cases);
     for (alg, text) in CHACHA_VECTORS {
+        // Only XChaCha has an internal-nonce minting interface (see the WIT:
+        // nothing forces the 12-byte construction into a package-defined
+        // wire format).
+        if !matches!(alg, ChaChaAlg::XChaCha20Poly1305) {
+            continue;
+        }
         let file: VectorFile<AeadGroup> = serde_json::from_str(text)
             .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
-        let (in_alg, iv_bits) = match alg {
-            ChaChaAlg::ChaCha20Poly1305 => (InternalNonceAlg::ChaCha20Poly1305, 96),
-            ChaChaAlg::XChaCha20Poly1305 => (InternalNonceAlg::XChaCha20Poly1305, 192),
-        };
-        push(in_alg, iv_bits, &file, &mut cases);
+        push(InternalNonceAlg::XChaCha20Poly1305, 192, &file, &mut cases);
     }
     cases
 }

@@ -429,48 +429,54 @@ interface aes-gcm {
     generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
 }
 
-/// The ChaCha20-Poly1305 family's shared parameterization. Interfaces
-/// minting ChaCha-based keys (`chacha20-poly1305`,
-/// `chacha20-poly1305-internal-nonce`, …) declare their construction from
-/// this one closed set (the `sha2` pattern: one definition per family).
-interface chacha {
-    /// The ChaCha20-Poly1305 constructions. Both use 256-bit keys and differ
-    /// only in nonce construction, so unlike `aes-variant` the declared
-    /// variant selects the accepted nonce length, not the key length.
-    enum chacha-variant {
-        /// The IETF construction (RFC 8439): 12-byte nonces. The nonce space
-        /// is too small to draw nonces at random; callers need a
-        /// deterministic uniqueness scheme (such as a counter).
-        chacha20-poly1305,
-        /// The extended-nonce construction (draft-irtf-cfrg-xchacha, as
-        /// deployed ubiquitously by libsodium): 24-byte nonces, large enough
-        /// to be chosen at random. Not IETF-standardized.
-        xchacha20-poly1305,
-    }
-}
-
-/// ChaCha20-Poly1305 key minting (RFC 8439, and the XChaCha20-Poly1305
-/// extension of draft-irtf-cfrg-xchacha).
+/// ChaCha20-Poly1305 key minting (RFC 8439): the IETF construction, with
+/// 12-byte nonces.
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags,
-/// the `ciphertext ‖ tag` wire format, and the variant's nonce length.
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
+/// and the `ciphertext ‖ tag` wire format. The 12-byte nonce space is too
+/// small to draw nonces at random; callers need a deterministic uniqueness
+/// scheme (such as a counter). For random nonces, use
+/// `xchacha20-poly1305`; to stop managing nonces entirely, use
+/// `xchacha20-poly1305-internal-nonce`.
+///
+/// This interface and `xchacha20-poly1305` are deliberately separate (not a
+/// variant enum): platform-backed providers systematically serve one
+/// without the other (browser WebCrypto's proposed ChaCha support, Apple
+/// CryptoKit, OpenSSL, and Conscrypt implement only the IETF construction,
+/// while libsodium-lineage providers center XChaCha), so the support
+/// boundary belongs at the interface, where a composition that needs the
+/// missing one fails at `wac plug` time rather than at minting.
 interface chacha20-poly1305 {
     use types.{error};
     use aead.{aead-key};
-    use chacha.{chacha-variant};
 
-    /// Import raw key material as the declared variant.
-    ///
-    /// Both variants take exactly 32 bytes of key material; anything else
-    /// fails with `error.invalid-key`. An implementation not serving the
-    /// variant (for example, browser WebCrypto implements no
-    /// ChaCha20-Poly1305) fails with `error.unsupported`.
-    import-key: async func(%variant: chacha-variant, raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+    /// Import exactly 32 bytes of raw key material; anything else fails
+    /// with `error.invalid-key`.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
 
-    /// Generate a fresh random 256-bit key of the declared variant. Fails
-    /// with `error.unsupported` if this implementation does not serve the
-    /// variant.
-    generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<aead-key, error>;
+    /// Generate a fresh random 256-bit key.
+    generate-key: async func(extractable: bool) -> result<aead-key, error>;
+}
+
+/// XChaCha20-Poly1305 key minting (draft-irtf-cfrg-xchacha, as deployed
+/// ubiquitously by libsodium): the extended-nonce construction, with
+/// 24-byte nonces — large enough to be chosen at random. Not
+/// IETF-standardized.
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
+/// and the `ciphertext ‖ tag` wire format. See `chacha20-poly1305` for why
+/// the two constructions are separate interfaces rather than a variant
+/// enum.
+interface xchacha20-poly1305 {
+    use types.{error};
+    use aead.{aead-key};
+
+    /// Import exactly 32 bytes of raw key material; anything else fails
+    /// with `error.invalid-key`.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random 256-bit key.
+    generate-key: async func(extractable: bool) -> result<aead-key, error>;
 }
 
 /// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
@@ -481,8 +487,7 @@ interface chacha20-poly1305 {
 /// A key's nonce budget is 2^32 `seal` invocations (§8.2.2's
 /// repeat-probability bound). Implementations SHOULD enforce it with
 /// `error.key-exhausted`; a FIPS 140-3 profile MUST. For workloads that
-/// could approach the bound, prefer `chacha20-poly1305-internal-nonce` with
-/// `xchacha20-poly1305`.
+/// could approach the bound, prefer `xchacha20-poly1305-internal-nonce`.
 ///
 /// This interface is deliberately separate from `aes-gcm` (caller-nonce
 /// minting) so a security profile can serve one nonce discipline without
@@ -514,34 +519,32 @@ interface aes-gcm-internal-nonce {
     generate-key: async func(%variant: aes-variant, extractable: bool) -> result<internal-nonce-key, error>;
 }
 
-/// ChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce` keys
-/// drawing each nonce from the implementation's random source.
+/// XChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce`
+/// keys drawing a fresh random 24-byte nonce per seal.
 ///
-/// Sealed messages are `nonce ‖ ciphertext ‖ tag` (16-byte tag; 12- or
-/// 24-byte nonce per the declared variant).
+/// Sealed messages are `nonce ‖ ciphertext ‖ tag` (24-byte nonce, 16-byte
+/// tag).
 ///
-/// The `xchacha20-poly1305` variant is the recommended internal-nonce
-/// algorithm: with 24-byte random nonces the repeat probability is
-/// negligible for any realistic invocation count, so there is no practical
-/// nonce budget. The 12-byte `chacha20-poly1305` variant carries the same
-/// 2^32-invocation budget as `aes-gcm-internal-nonce`, and the same
-/// SHOULD-enforce expectation.
-interface chacha20-poly1305-internal-nonce {
+/// This is the recommended internal-nonce algorithm: at 24 bytes the nonce
+/// repeat probability is negligible for any realistic invocation count, so
+/// there is no practical nonce budget (implementations still MAY signal
+/// `error.key-exhausted` under an explicit policy). There is deliberately
+/// no IETF-ChaCha20-Poly1305 internal-nonce interface: the internal-nonce
+/// wire format is this package's own, so nothing forces the 12-byte
+/// construction here, and every provider position is better served by this
+/// interface or `aes-gcm-internal-nonce`.
+interface xchacha20-poly1305-internal-nonce {
     use types.{error};
     use aead-internal-nonce.{internal-nonce-key};
-    use chacha.{chacha-variant};
 
-    /// Import raw key material as an internal-nonce key of the declared
-    /// variant (both take exactly 32 bytes; anything else fails with
-    /// `error.invalid-key`). See `aes-gcm-internal-nonce.import-key` for
-    /// the shared-material caveat and policy-rejection allowance, which
-    /// apply identically here.
-    import-key: async func(%variant: chacha-variant, raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+    /// Import exactly 32 bytes of raw key material as an internal-nonce
+    /// key; anything else fails with `error.invalid-key`. See
+    /// `aes-gcm-internal-nonce.import-key` for the shared-material caveat
+    /// and policy-rejection allowance, which apply identically here.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
 
-    /// Generate a fresh random internal-nonce key of the declared variant.
-    /// Fails with `error.unsupported` if this implementation does not serve
-    /// the variant.
-    generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<internal-nonce-key, error>;
+    /// Generate a fresh random internal-nonce key.
+    generate-key: async func(extractable: bool) -> result<internal-nonce-key, error>;
 }
 
 /// The `signature` primitive kind: asymmetric signing and verification.

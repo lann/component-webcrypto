@@ -23,10 +23,7 @@ use crate::exports::lann::webcrypto::aead_internal_nonce::{
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
-use crate::exports::lann::webcrypto::chacha20_poly1305::{
-    ChachaVariant, Guest as ChaChaPoly1305Guest,
-};
-use crate::exports::lann::webcrypto::chacha20_poly1305_internal_nonce::Guest as ChachaInternalNonceGuest;
+use crate::exports::lann::webcrypto::chacha20_poly1305::Guest as ChaChaPoly1305Guest;
 use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
 use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
@@ -37,6 +34,8 @@ use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestVerifyingKey,
 };
+use crate::exports::lann::webcrypto::xchacha20_poly1305::Guest as XChaChaPoly1305Guest;
+use crate::exports::lann::webcrypto::xchacha20_poly1305_internal_nonce::Guest as XChachaInternalNonceGuest;
 use crate::lann::webcrypto::types::Error;
 
 /// The `algorithm-name` reported by HMAC keys and computations
@@ -560,30 +559,40 @@ impl AesGcmGuest for Component {
     }
 }
 
-// --- chacha20-poly1305 (key minting) -----------------------------------------
+// --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 
-/// Build an [`AeadKey`] from raw material declared as `variant`, rendering
-/// the WIT `invalid-key` error when the material is not the 32 bytes both
-/// variants require.
-fn new_chacha_key(
-    variant: ChachaVariant,
-    raw: Vec<u8>,
-    extractable: bool,
-) -> Result<AeadKey, Error> {
-    if raw.len() != CHACHA_KEY_LEN {
-        return Err(Error::InvalidKey(format!(
-            "{variant:?} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
+/// Validate ChaCha key material (32 bytes for either construction),
+/// rendering the WIT `invalid-key` error otherwise.
+fn check_chacha_key(name: &str, raw: &[u8]) -> Result<(), Error> {
+    if raw.len() == CHACHA_KEY_LEN {
+        Ok(())
+    } else {
+        Err(Error::InvalidKey(format!(
+            "{name} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
             raw.len()
-        )));
+        )))
     }
-    let cipher = match variant {
-        ChachaVariant::Chacha20Poly1305 => AeadCipher::ChaCha20Poly1305(
-            ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        ),
-        ChachaVariant::Xchacha20Poly1305 => AeadCipher::XChaCha20Poly1305(
-            XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        ),
-    };
+}
+
+/// Build an IETF ChaCha20-Poly1305 [`AeadKey`] from raw material.
+fn new_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
+    check_chacha_key(CHACHA20_POLY1305_NAME, &raw)?;
+    let cipher = AeadCipher::ChaCha20Poly1305(
+        ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+    );
+    Ok(AeadKey {
+        raw,
+        extractable,
+        cipher,
+    })
+}
+
+/// Build an XChaCha20-Poly1305 [`AeadKey`] from raw material.
+fn new_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
+    check_chacha_key(XCHACHA20_POLY1305_NAME, &raw)?;
+    let cipher = AeadCipher::XChaCha20Poly1305(
+        XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+    );
     Ok(AeadKey {
         raw,
         extractable,
@@ -593,22 +602,40 @@ fn new_chacha_key(
 
 impl ChaChaPoly1305Guest for Component {
     async fn import_key(
-        variant: ChachaVariant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
-        let key = new_chacha_key(variant, raw, extractable)?;
+        let key = new_chacha_key(raw, extractable)?;
         Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
     }
 
     async fn generate_key(
-        variant: ChachaVariant,
         extractable: bool,
     ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
         let mut raw = vec![0u8; CHACHA_KEY_LEN];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
-        let key = new_chacha_key(variant, raw, extractable)
-            .expect("generated key material always matches the variant");
+        let key =
+            new_chacha_key(raw, extractable).expect("generated key material is always 32 bytes");
+        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+}
+
+impl XChaChaPoly1305Guest for Component {
+    async fn import_key(
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+        let key = new_xchacha_key(raw, extractable)?;
+        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+
+    async fn generate_key(
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw).expect("WASI random source is always available");
+        let key =
+            new_xchacha_key(raw, extractable).expect("generated key material is always 32 bytes");
         Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
     }
 }
@@ -753,27 +780,24 @@ impl AesGcmInternalNonceGuest for Component {
     }
 }
 
-// --- chacha20-poly1305-internal-nonce (key minting) -------------------------------
+// --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
 
-impl ChachaInternalNonceGuest for Component {
+impl XChachaInternalNonceGuest for Component {
     async fn import_key(
-        variant: ChachaVariant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
-        let key = into_internal_nonce_key(new_chacha_key(variant, raw, extractable)?);
+        let key = into_internal_nonce_key(new_xchacha_key(raw, extractable)?);
         Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
     }
 
     async fn generate_key(
-        variant: ChachaVariant,
         extractable: bool,
     ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
         let mut raw = vec![0u8; CHACHA_KEY_LEN];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
         let key = into_internal_nonce_key(
-            new_chacha_key(variant, raw, extractable)
-                .expect("generated key material always matches the variant"),
+            new_xchacha_key(raw, extractable).expect("generated key material is always 32 bytes"),
         );
         Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
     }

@@ -223,11 +223,15 @@ where
         linker,
         T::webcrypto,
     )?;
+    bindings::webcrypto::xchacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
     bindings::webcrypto::aes_gcm_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
         T::webcrypto,
     )?;
-    bindings::webcrypto::chacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
+    bindings::webcrypto::xchacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
         T::webcrypto,
     )?;
