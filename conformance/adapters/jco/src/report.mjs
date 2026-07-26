@@ -18,13 +18,15 @@ function toJson({ id, passed, detail }) {
 }
 
 /**
- * Write `conformance/results/<target>.json` for `results` (the array returned
- * by the guest's `tests.run-all`) and print the pass/total summary line.
+ * Write `conformance/results/<basename ?? target>.json` for `results` (the
+ * array returned by the guest's `tests.run-all`) and print the pass/total
+ * summary line. `basename` lets several guests report into the same target
+ * (the runner merges every results file by its embedded `target` field).
  */
-export async function writeReport(target, results) {
+export async function writeReport(target, results, basename) {
   const report = { target, results: results.map(toJson) };
   await mkdir(RESULTS_DIR, { recursive: true });
-  const outPath = join(RESULTS_DIR, `${target}.json`);
+  const outPath = join(RESULTS_DIR, `${basename ?? target}.json`);
   await writeFile(outPath, `${JSON.stringify(report, null, 2)}\n`);
 
   const passed = report.results.filter((r) => r.passed).length;

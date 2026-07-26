@@ -136,9 +136,8 @@ them fail at `wac plug` time instead of running quietly degraded.
   by async imports returning `result<list<u8>>`; failure is deterministic
   per corpus window but layout-dependent (a superset window can pass while
   its subset fails), i.e. the corruption is planted silently and detonates
-  elsewhere. The jco conformance targets are non-gating until the upstream
-  fix lands (see the `conformance` justfile recipe); the diagnosis and
-  bisection log live with the jco checkout (`GUEST-HEAP-CORRUPTION-DEBUG.md`).
+  elsewhere. Diagnosed here, fixed upstream (jco #1768, released in 1.26.0);
+  the jco-node conformance target gates again since the fix.
 - **Streams-only interfaces make delivery schedules part of the contract.**
   Running every vector under multiple chunking schedules (whole / 1-byte /
   block-straddling) tests a claim a buffer-based API could

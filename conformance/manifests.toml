@@ -28,6 +28,11 @@ expected-fail = [
     "chacha20-poly1305/*",
     "xchacha20-poly1305/*",
     "probe/chacha-*",
+    # WebCrypto signs ECDSA with a randomized k (RFC 6979's deterministic k
+    # is unobservable there), so the deterministic known-answer probe from
+    # the host-only signing guest cannot pass. The signatures still verify;
+    # only exact-bytes reproduction differs.
+    "probe/ecdsa-sign-deterministic-rfc6979",
 ]
 
 [targets.jco-browser]
@@ -35,4 +40,5 @@ expected-fail = [
     "chacha20-poly1305/*",
     "xchacha20-poly1305/*",
     "probe/chacha-*",
+    "probe/ecdsa-sign-deterministic-rfc6979",
 ]

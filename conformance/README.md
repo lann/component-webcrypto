@@ -14,13 +14,17 @@ vectors/           # vendored Wycheproof JSON + the translation policy
 guest/             # the conformance guest: vectors compiled in (no I/O
                    #   imports, so the composed target runs under a
                    #   plain `wasmtime run`); exports count/run-all/run-slice
+signing-guest/     # host-only guest: probes for interfaces the in-guest
+                   #   provider deliberately does not export (ecdsa-sign);
+                   #   runs under the wasmtime and jco targets only, results
+                   #   merged into the same per-target files
 adapters/
   wasmtime/        # native adapter over wasmtime-webcrypto's add_to_linker
   composed-driver/   # CLI driver for the composed in-guest target (guest +
                    #   in-guest provider via `wac plug`); prints results JSON
   jco/             # Node + headless-Chromium adapters over jco-impl's
-                   #   webcrypto.js (currently non-gating; see the
-                   #   `conformance` justfile recipe)
+                   #   webcrypto.js (jco-node gates; the browser target
+                   #   needs a Chromium install and is run manually)
 runner/            # classification + matrix.md rendering
 ```
 

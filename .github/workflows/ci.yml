@@ -30,8 +30,13 @@ jobs:
           shared-key: rust-checks
           cache-all-crates: true
 
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install dependencies
-        run: SKIP_NODE=1 ./scripts/setup.sh
+        run: ./scripts/setup.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -53,8 +58,8 @@ jobs:
         run: just test-webcrypto-composed
 
       # The cross-implementation conformance suite over the enabled targets
-      # (wasmtime + composed; the jco targets are blocked on an upstream
-      # jco runtime bug — see the `conformance` recipe).
+      # (wasmtime + composed + jco-node; jco-browser needs a Chromium install
+      # — see the `conformance` recipe).
       - name: Run conformance suite
         run: just conformance
 

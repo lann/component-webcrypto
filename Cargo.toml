@@ -6,6 +6,7 @@ members = [
     "examples/demo-driver",
     "examples/wasmtime-demo",
     "conformance/guest",
+    "conformance/signing-guest",
     "conformance/adapters/wasmtime",
     "conformance/adapters/composed-driver",
     "conformance/runner",

@@ -11,6 +11,6 @@
     "test": "node --experimental-wasm-jspi src/run.mjs"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "^1.19.0"
+    "@bytecodealliance/jco": "^1.26.0"
   }
 }
