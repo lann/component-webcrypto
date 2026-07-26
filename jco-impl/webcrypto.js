@@ -92,7 +92,7 @@ export class MacKey {
 }
 
 /**
- * The `aead-key` resource: an AES-256-GCM key. Holds a `CryptoKey` imported
+ * The `aead-key` resource: an AES-GCM key. Holds a `CryptoKey` imported
  * with usages `["encrypt", "decrypt"]` and the caller's `extractable` flag;
  * instances are minted only by the `aes-gcm` interface functions below.
  */
@@ -109,7 +109,7 @@ export class AeadKey {
    * Returns a `ReadableStream` carrying ciphertext followed by the 16-byte
    * authentication tag (the `crypto.subtle.encrypt` wire format). Throws
    * `{ tag: 'invalid-nonce', val }` for a nonce that is not exactly 12 bytes
-   * (AES-256-GCM per this package's WIT; WebCrypto itself would accept other
+   * (AES-GCM per this package's WIT; WebCrypto itself would accept other
    * lengths). The plaintext stream is drained before any failure is raised,
    * so the guest's writer always completes rather than blocking on an
    * unread stream.
@@ -207,14 +207,40 @@ export async function generateHmacSha256Key(extractable) {
 }
 
 /**
- * Import 32 bytes of raw key material as an AES-256-GCM key; any other
- * length throws `{ tag: 'invalid-key', val }`.
+ * The raw key length in bytes for each served `aes-variant` enum case (jco
+ * lowers WIT enums as their kebab-case names). AES-192 is absent: this
+ * implementation declines it (browsers do not reliably serve it — Chromium
+ * implements no AES-192; see the WIT `aes-variant` doc).
+ */
+const AES_VARIANT_BYTES = { aes128: 16, aes256: 32 };
+
+/**
+ * The raw key length in bytes declared by `variant`, throwing
+ * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ */
+function aesVariantByteLength(variant) {
+  const expected = AES_VARIANT_BYTES[variant];
+  if (expected === undefined) {
+    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+  }
+  return expected;
+}
+
+/**
+ * Import raw key material as the declared AES variant. A variant this
+ * implementation declines throws `{ tag: 'unsupported', val }`; material
+ * whose length disagrees with `variant` throws `{ tag: 'invalid-key', val }`.
+ * @param {string} variant
  * @param {Uint8Array} raw
  * @param {boolean} extractable
  */
-export async function importAes256GcmKey(raw, extractable) {
-  if (raw.length !== 32) {
-    throw { tag: "invalid-key", val: `AES-256-GCM requires 32 key bytes, got ${raw.length}` };
+export async function importKey(variant, raw, extractable) {
+  const expected = aesVariantByteLength(variant);
+  if (raw.length !== expected) {
+    throw {
+      tag: "invalid-key",
+      val: `${variant} requires ${expected} key bytes, got ${raw.length}`,
+    };
   }
   let key;
   try {
@@ -229,26 +255,28 @@ export async function importAes256GcmKey(raw, extractable) {
 }
 
 /**
- * Generate a fresh random AES-256-GCM key.
+ * Generate a fresh random AES key of the declared variant. A variant this
+ * implementation declines throws `{ tag: 'unsupported', val }`.
+ * @param {string} variant
  * @param {boolean} extractable
  */
-export async function generateAes256GcmKey(extractable) {
-  const raw = globalThis.crypto.getRandomValues(new Uint8Array(32));
-  const key = await subtle.importKey("raw", raw, { name: "AES-GCM" }, extractable, [
-    "encrypt",
-    "decrypt",
-  ]);
+export async function generateKey(variant, extractable) {
+  const key = await subtle.generateKey(
+    { name: "AES-GCM", length: aesVariantByteLength(variant) * 8 },
+    extractable,
+    ["encrypt", "decrypt"],
+  );
   return new AeadKey(key);
 }
 
 /**
  * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes
- * AES-256-GCM specifies in this package's WIT.
+ * AES-GCM specifies in this package's WIT.
  * @param {Uint8Array} nonce
  */
 function requireGcmNonce(nonce) {
   if (nonce.length !== 12) {
-    throw { tag: "invalid-nonce", val: `AES-256-GCM requires a 12-byte nonce, got ${nonce.length}` };
+    throw { tag: "invalid-nonce", val: `AES-GCM requires a 12-byte nonce, got ${nonce.length}` };
   }
 }
 

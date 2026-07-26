@@ -13,6 +13,7 @@ pub fn describe(context: &str, error: &Error) -> String {
         Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
         Error::AuthenticationFailed => "authentication-failed".to_string(),
         Error::NotExtractable => "not-extractable".to_string(),
+        Error::Unsupported(detail) => format!("unsupported: {detail}"),
         Error::Other(detail) => format!("other: {detail}"),
     };
     format!("{context}: {rendered}")

@@ -8,7 +8,7 @@
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
 //! and calls [`add_to_linker`] to satisfy the `types`, `mac`, `aead`, `hmac`,
-//! and `aes-gcm` imports with HMAC-SHA-256 and AES-256-GCM implementations.
+//! and `aes-gcm` imports with HMAC-SHA-256 and AES-GCM implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
@@ -30,13 +30,9 @@ pub(crate) const HMAC_NAME: &str = "HMAC";
 /// (WebCrypto's `HmacKeyAlgorithm.hash`).
 pub(crate) const HMAC_SHA256_HASH: &str = "SHA-256";
 
-/// The `algorithm-name` reported by AES-256-GCM keys (WebCrypto's
+/// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub(crate) const AES_GCM_NAME: &str = "AES-GCM";
-
-/// The `algorithm-length` reported by AES-256-GCM keys (WebCrypto's
-/// `AesKeyAlgorithm.length`).
-pub(crate) const AES_256_LENGTH: u32 = 256;
 
 /// Configuration and per-store state for the WebCrypto host.
 ///
@@ -101,12 +97,12 @@ pub struct MacKey {
 
 /// Backing type for the `aead.aead-key` resource.
 ///
-/// Holds the ready-to-use AES-256-GCM cipher alongside the raw key material
+/// Holds the ready-to-use AES-GCM cipher alongside the raw key material
 /// (for `%export` on extractable keys). `seal`/`open` are stateless per call,
 /// so the key carries no per-operation state.
 pub struct AeadKey {
-    /// The AES-256-GCM cipher keyed by `raw`.
-    pub(crate) cipher: aes_gcm::Aes256Gcm,
+    /// The AES-GCM cipher keyed by `raw`, dispatching on key size.
+    pub(crate) cipher: crate::host::AesGcmCipher,
     /// The raw key material, retained for `%export` on extractable keys.
     pub(crate) raw: Vec<u8>,
     /// Whether `%export` may return the raw material.

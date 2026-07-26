@@ -17,7 +17,9 @@ interface types {
     /// here.
     variant error {
         /// The supplied key material is invalid for the algorithm (for
-        /// example, a wrong-length raw key). The string is human-readable.
+        /// example, a wrong-length raw key, or one rejected by an
+        /// implementation's key-length policy). The string is
+        /// human-readable.
         invalid-key(string),
         /// The supplied nonce is invalid for the algorithm (for example, a
         /// wrong-length AES-GCM nonce). The string is human-readable.
@@ -30,6 +32,11 @@ interface types {
         /// The key was created with `extractable` false, so its material
         /// cannot be exported.
         not-extractable,
+        /// The request was well-formed, but this implementation does not
+        /// serve the requested algorithm parameters (for example, a key
+        /// size the platform's crypto API declines). The string is
+        /// human-readable.
+        unsupported(string),
         /// An implementation-specific failure. The string is human-readable.
         other(string),
     }
@@ -199,7 +206,7 @@ interface hmac {
     generate-hmac-sha256-key: async func(extractable: bool) -> mac-key;
 }
 
-/// AES-GCM key minting (NIST SP 800-38D), one function pair per key size.
+/// AES-GCM key minting (NIST SP 800-38D).
 ///
 /// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
 /// and 16-byte tags.
@@ -207,10 +214,31 @@ interface aes-gcm {
     use types.{error};
     use aead.{aead-key};
 
-    /// Import 32 bytes of raw key material as an AES-256-GCM key. Fails with
-    /// `error.invalid-key` for any other length.
-    import-aes256-gcm-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+    /// The AES variants, distinguished by key size: AES closes this set, so
+    /// it is an enum, not a number. (Each algorithm interface names its
+    /// closed set of parameterizations `<algorithm>-variant`.)
+    enum aes-variant {
+        aes128,
+        /// Not widely supported: browsers decline AES-192, and no current
+        /// implementation of this package serves it — expect
+        /// `error.unsupported` unless composed with a provider that
+        /// specifically offers it.
+        aes192,
+        aes256,
+    }
 
-    /// Generate a fresh random AES-256-GCM key.
-    generate-aes256-gcm-key: async func(extractable: bool) -> aead-key;
+    /// Import raw key material as the declared AES variant.
+    ///
+    /// `variant` is deliberately redundant with `raw`'s length: material of
+    /// any other length fails with `error.invalid-key`, so malformed
+    /// material (for example, key bytes accidentally left hex-encoded)
+    /// cannot silently mint a key of an unintended size. An implementation
+    /// not serving the variant (for example, browsers decline AES-192)
+    /// fails with `error.unsupported`.
+    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random key of the given AES variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
 }

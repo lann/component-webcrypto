@@ -1,7 +1,7 @@
 //! Execution of the normalized Wycheproof cases against the imported
 //! `lann:webcrypto` interfaces.
 
-use crate::lann::webcrypto::aes_gcm::import_aes256_gcm_key;
+use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
 use crate::lann::webcrypto::hmac::import_hmac_sha256_key;
 use crate::lann::webcrypto::types::Error;
 use crate::translate::{GcmCase, GcmExpectation, HmacCase};
@@ -39,9 +39,9 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
 
 /// Run one AES-256-GCM vector under its schedule.
 pub async fn run_gcm_case(case: &GcmCase) -> Result<(), String> {
-    let key = import_aes256_gcm_key(case.key.clone(), false)
+    let key = import_key(AesVariant::Aes256, case.key.clone(), false)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     match case.expectation {
         GcmExpectation::InvalidNonce => {
             let (sealed, fed) = seal(&key, &case.iv, &case.aad, &case.msg, case.schedule).await;

@@ -16,7 +16,7 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 
 | Vector property | Our expectation |
 | --- | --- |
-| GCM, keySize ≠ 256 | **Skipped** — `import-aes256-gcm-key` rejects the key before any vector semantics apply; import rejection is covered by dedicated probes. |
+| GCM, keySize ≠ 256 | **Skipped** — `aes-gcm.import-key` rejects the key before any vector semantics apply; import rejection is covered by dedicated probes. |
 | GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` fail `invalid-nonce` regardless of the vector's own result (the WIT mandates 12-byte nonces; Wycheproof merely *discourages* other sizes). |
 | GCM, keySize 256, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
