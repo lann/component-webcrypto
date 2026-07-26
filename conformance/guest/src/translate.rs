@@ -159,6 +159,99 @@ pub struct ChaChaCase {
     pub expectation: AeadExpectation,
 }
 
+/// The algorithm behind an [`InternalNonceCase`], as named in test ids
+/// (the minting interface's name).
+#[derive(Clone, Copy)]
+pub enum InternalNonceAlg {
+    AesGcm,
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
+}
+
+impl InternalNonceAlg {
+    /// The algorithm's name as used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            InternalNonceAlg::AesGcm => "aes-gcm-internal-nonce",
+            InternalNonceAlg::ChaCha20Poly1305 => "chacha20-poly1305-internal-nonce",
+            InternalNonceAlg::XChaCha20Poly1305 => "xchacha20-poly1305-internal-nonce",
+        }
+    }
+}
+
+/// One executed internal-nonce AEAD vector under one schedule: the vector's
+/// `iv || ct || tag` as a sealed message, driven through the `open`
+/// direction (the only deterministic one; `seal` draws a random nonce).
+pub struct InternalNonceCase {
+    pub alg: InternalNonceAlg,
+    pub tc_id: u64,
+    pub schedule: Schedule,
+    pub key: Vec<u8>,
+    pub aad: Vec<u8>,
+    pub msg: Vec<u8>,
+    /// The vector's IV, ciphertext, and tag in the sealed wire format.
+    pub sealed: Vec<u8>,
+    /// `true`: `open` must recover `msg`. `false`: `open` must fail
+    /// `authentication-failed` (an invalid vector, or one whose IV length
+    /// is not the algorithm's — the sealed prefix misparses).
+    pub valid: bool,
+}
+
+/// The normalized internal-nonce corpus, derived from the same AEAD vector
+/// files as the caller-nonce suites: `open(iv || ct || tag)` must recover
+/// `msg` exactly when the vector is valid and its IV is the algorithm's
+/// nonce length; every other case must fail `authentication-failed` (there
+/// is no invalid-nonce case -- the nonce is carried in-band, so a
+/// wrong-length IV is just a malformed sealed message).
+pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
+    let mut cases = Vec::new();
+    let gcm: VectorFile<AeadGroup> =
+        serde_json::from_str(GCM_VECTORS).expect("parsing aes_gcm_test.json");
+    let push = |alg: InternalNonceAlg,
+                valid_iv_bits: u32,
+                file: &VectorFile<AeadGroup>,
+                cases: &mut Vec<InternalNonceCase>| {
+        for group in &file.test_groups {
+            if group.key_size != 256 {
+                continue;
+            }
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                let key = unhex(&field, &test.key);
+                let aad = unhex(&field, &test.aad);
+                let msg = unhex(&field, &test.msg);
+                let mut sealed = unhex(&field, &test.iv);
+                sealed.extend(unhex(&field, &test.ct));
+                sealed.extend(unhex(&field, &test.tag));
+                let valid = is_valid(&field, &test.result) && group.iv_size == valid_iv_bits;
+                for schedule in schedules(sealed.len()) {
+                    cases.push(InternalNonceCase {
+                        alg,
+                        tc_id: test.tc_id,
+                        schedule,
+                        key: key.clone(),
+                        aad: aad.clone(),
+                        msg: msg.clone(),
+                        sealed: sealed.clone(),
+                        valid,
+                    });
+                }
+            }
+        }
+    };
+    push(InternalNonceAlg::AesGcm, 96, &gcm, &mut cases);
+    for (alg, text) in CHACHA_VECTORS {
+        let file: VectorFile<AeadGroup> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        let (in_alg, iv_bits) = match alg {
+            ChaChaAlg::ChaCha20Poly1305 => (InternalNonceAlg::ChaCha20Poly1305, 96),
+            ChaChaAlg::XChaCha20Poly1305 => (InternalNonceAlg::XChaCha20Poly1305, 192),
+        };
+        push(in_alg, iv_bits, &file, &mut cases);
+    }
+    cases
+}
+
 const HMAC_VECTORS: &str = include_str!("../../vectors/hmac_sha256_test.json");
 const GCM_VECTORS: &str = include_str!("../../vectors/aes_gcm_test.json");
 const CHACHA_VECTORS: [(ChaChaAlg, &str); 2] = [

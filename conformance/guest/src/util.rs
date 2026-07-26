@@ -2,6 +2,7 @@
 //! corpus and the API-contract probes.
 
 use crate::lann::webcrypto::aead::AeadKey;
+use crate::lann::webcrypto::aead_internal_nonce::InternalNonceKey;
 use crate::lann::webcrypto::digest::Digest;
 use crate::lann::webcrypto::mac::MacKey;
 use crate::lann::webcrypto::types::Error;
@@ -119,6 +120,46 @@ pub async fn compute(
 ) -> (Vec<u8>, Result<(), String>) {
     let (tx, rx) = crate::wit_stream::new();
     futures::join!(digest.compute(rx), feed(tx, schedule.chunks(data)))
+}
+
+/// `internal-nonce-key.seal`, feeding the plaintext per `schedule`
+/// concurrently with the call; same outcome split as [`seal`].
+pub async fn in_seal(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    plaintext: &[u8],
+    schedule: Schedule,
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    let (tx, rx) = crate::wit_stream::new();
+    let (sealed, fed) = futures::join!(
+        key.seal(aad.to_vec(), rx),
+        feed(tx, schedule.chunks(plaintext))
+    );
+    let sealed = match sealed {
+        Ok(stream) => Ok(read_all(stream).await),
+        Err(err) => Err(err),
+    };
+    (sealed, fed)
+}
+
+/// `internal-nonce-key.open`, feeding the sealed message per `schedule`
+/// concurrently with the call; same outcome split as [`seal`].
+pub async fn in_open(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    sealed: &[u8],
+    schedule: Schedule,
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    let (tx, rx) = crate::wit_stream::new();
+    let (opened, fed) = futures::join!(
+        key.open(aad.to_vec(), rx),
+        feed(tx, schedule.chunks(sealed))
+    );
+    let opened = match opened {
+        Ok(stream) => Ok(read_all(stream).await),
+        Err(err) => Err(err),
+    };
+    (opened, fed)
 }
 
 /// `seal`, feeding the plaintext per `schedule` concurrently with the call.

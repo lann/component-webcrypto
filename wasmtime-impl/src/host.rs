@@ -17,19 +17,23 @@ use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamRead
 use wasmtime::{Result, StoreContextMut};
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
+use crate::bindings::webcrypto::aead_internal_nonce::{
+    self, HostInternalNonceKey, HostInternalNonceKeyWithStore,
+};
 use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
-    aes_gcm as aes_gcm_iface, bytes as bytes_iface, chacha20_poly1305 as chacha_iface,
+    aes_gcm as aes_gcm_iface, aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
+    chacha20_poly1305 as chacha_iface, chacha20_poly1305_internal_nonce as chacha_in_iface,
     digest as digest_iface, ecdsa_sign as ecdsa_sign_iface, ecdsa_verify as ecdsa_verify_iface,
     ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
     hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface, signature as signature_iface,
 };
 use crate::{
-    AeadKey, Digest, MacKey, SigningKey, VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
-    AES_GCM_NAME, CHACHA20_POLY1305_NAME, ECDSA_NAME, ED25519_NAME, HMAC_NAME,
-    XCHACHA20_POLY1305_NAME,
+    AeadKey, Digest, InternalNonceKey, MacKey, SigningKey, VerifyingKey, WasiWebcrypto,
+    WasiWebcryptoCtxView, AES_GCM_NAME, CHACHA20_POLY1305_NAME, ECDSA_NAME, ED25519_NAME,
+    HMAC_NAME, XCHACHA20_POLY1305_NAME,
 };
 
 // --- types -------------------------------------------------------------------
@@ -333,6 +337,18 @@ impl AeadCipher {
         match self {
             Self::XChaCha20Poly1305(_) => 24,
             _ => 12,
+        }
+    }
+
+    /// The internal-nonce seal budget for this cipher's algorithm: the WIT
+    /// contract's 2^32-invocation bound for 12-byte-nonce algorithms (SP
+    /// 800-38D SS8.2.2's repeat-probability bound); `none` for 24-byte
+    /// nonces, whose repeat probability is negligible at any realistic
+    /// count.
+    fn nonce_budget(&self) -> Option<u64> {
+        match self.nonce_len() {
+            12 => Some(1 << 32),
+            _ => None,
         }
     }
 
@@ -739,6 +755,220 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
         let key = new_chacha_key(variant, raw, extractable)
+            .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+// --- aead-internal-nonce -------------------------------------------------------
+
+impl aead_internal_nonce::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<InternalNonceKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.cipher.name().to_string())
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<InternalNonceKey>) -> Result<u32> {
+        Ok(self.table.get(&self_)?.cipher.length_bits())
+    }
+}
+
+impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
+    async fn seal(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<InternalNonceKey>,
+        aad: Vec<u8>,
+        plaintext: StreamReader<u8>,
+    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let cipher = accessor.with(|mut access| {
+            Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
+        })?;
+        // Per the WIT contract, the input stream is fully drained even when
+        // the call resolves with an error, so the caller's writer always
+        // completes.
+        let msg = drain_stream(accessor, plaintext).await?;
+        // Count this invocation against the algorithm's nonce budget before
+        // drawing the nonce, per the minting interfaces' SHOULD-enforce
+        // contract.
+        let exhausted = accessor.with(|mut access| {
+            let key = access.get().table.get_mut(&self_)?;
+            Ok::<_, wasmtime::Error>(match key.cipher.nonce_budget() {
+                Some(budget) if key.sealed >= budget => true,
+                _ => {
+                    key.sealed += 1;
+                    false
+                }
+            })
+        })?;
+        if exhausted {
+            return Ok(Err(Error::KeyExhausted));
+        }
+        // The SP 800-38D SS8.2.2 RBG-based construction: a fresh random
+        // nonce per seal, carried as the sealed message's prefix
+        // (`nonce || ciphertext || tag`, per the minting interface docs).
+        let mut sealed = vec![0u8; cipher.nonce_len()];
+        getrandom::fill(&mut sealed)
+            .map_err(|err| wasmtime::Error::msg(format!("nonce generation failed: {err}")))?;
+        let body = match cipher.encrypt(
+            &sealed,
+            Payload {
+                msg: &msg,
+                aad: &aad,
+            },
+        ) {
+            Ok(body) => body,
+            Err(_) => {
+                return Ok(Err(Error::Other(format!(
+                    "{} encryption failed",
+                    cipher.name()
+                ))))
+            }
+        };
+        sealed.extend(body);
+        let reader = accessor.with(|access| StreamReader::new(access, sealed))?;
+        Ok(Ok(reader))
+    }
+
+    async fn open(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<InternalNonceKey>,
+        aad: Vec<u8>,
+        sealed: StreamReader<u8>,
+    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let cipher = accessor.with(|mut access| {
+            Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
+        })?;
+        // Per the WIT contract, the input stream is fully drained even when
+        // the call resolves with an error, and buffering the whole message
+        // is inherent to `open`: no unverified plaintext may be observable.
+        let msg = drain_stream(accessor, sealed).await?;
+        // Any failure -- input too short to carry the wire format, a bad
+        // tag, wrong key, wrong associated data -- reports
+        // `authentication-failed` with no detail, per the WIT contract.
+        if msg.len() < cipher.nonce_len() {
+            return Ok(Err(Error::AuthenticationFailed));
+        }
+        let (nonce, body) = msg.split_at(cipher.nonce_len());
+        let opened = match cipher.decrypt(
+            nonce,
+            Payload {
+                msg: body,
+                aad: &aad,
+            },
+        ) {
+            Ok(opened) => opened,
+            Err(_) => return Ok(Err(Error::AuthenticationFailed)),
+        };
+        let reader = accessor.with(|access| StreamReader::new(access, opened))?;
+        Ok(Ok(reader))
+    }
+
+    async fn export_key(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<InternalNonceKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        accessor.with(|mut access| {
+            let view = access.get();
+            let key = view.table.get(&self_)?;
+            Ok(if key.extractable {
+                Ok(key.raw.clone())
+            } else {
+                Err(Error::NotExtractable)
+            })
+        })
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<InternalNonceKey>) -> Result<()> {
+        accessor.with(|mut access| {
+            access.get().table.delete(rep)?;
+            Ok(())
+        })
+    }
+}
+
+// --- aes-gcm-internal-nonce (key minting) ----------------------------------------
+
+impl aes_gcm_in_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// Wrap a caller-nonce [`AeadKey`] build as an [`InternalNonceKey`] (the
+/// cipher and validation are identical; only the nonce discipline differs).
+fn into_internal_nonce_key(key: AeadKey) -> InternalNonceKey {
+    InternalNonceKey {
+        cipher: key.cipher,
+        raw: key.raw,
+        extractable: key.extractable,
+        sealed: 0,
+    }
+}
+
+impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key(
+        accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
+        let key = match new_aes_gcm_key(variant, raw, extractable) {
+            Ok(key) => into_internal_nonce_key(key),
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
+        use aes_gcm_iface::AesVariant;
+        let len = match variant {
+            AesVariant::Aes128 => 16,
+            AesVariant::Aes192 => {
+                return Ok(Err(Error::Unsupported(
+                    "AES-192 is not served by this implementation".into(),
+                )))
+            }
+            AesVariant::Aes256 => 32,
+        };
+        let mut raw = vec![0u8; len];
+        getrandom::fill(&mut raw)
+            .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
+        let key = new_aes_gcm_key(variant, raw, extractable)
+            .map(into_internal_nonce_key)
+            .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+// --- chacha20-poly1305-internal-nonce (key minting) -------------------------------
+
+impl chacha_in_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> chacha_in_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key(
+        accessor: &Accessor<T, Self>,
+        variant: chacha_iface::ChachaVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
+        let key = match new_chacha_key(variant, raw, extractable) {
+            Ok(key) => into_internal_nonce_key(key),
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: chacha_iface::ChachaVariant,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw)
+            .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
+        let key = new_chacha_key(variant, raw, extractable)
+            .map(into_internal_nonce_key)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }

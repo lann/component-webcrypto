@@ -11,12 +11,15 @@ package wasmtime:webcrypto-host;
 world imports {
     import lann:webcrypto/mac@0.1.0;
     import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/aead-internal-nonce@0.1.0;
     import lann:webcrypto/digest@0.1.0;
     import lann:webcrypto/bytes@0.1.0;
     import lann:webcrypto/sha2@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
     import lann:webcrypto/chacha20-poly1305@0.1.0;
+    import lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
+    import lann:webcrypto/chacha20-poly1305-internal-nonce@0.1.0;
     import lann:webcrypto/signature@0.1.0;
     import lann:webcrypto/ed25519-verify@0.1.0;
     import lann:webcrypto/ed25519-sign@0.1.0;

@@ -31,7 +31,9 @@ wit_bindgen::generate!({
 
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann::webcrypto::aead::AeadKey;
+use lann::webcrypto::aead_internal_nonce::InternalNonceKey;
 use lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
+use lann::webcrypto::aes_gcm_internal_nonce::generate_key as generate_internal_nonce_key;
 use lann::webcrypto::bytes::constant_time_equal;
 use lann::webcrypto::digest::Digest;
 use lann::webcrypto::ecdsa_verify::{
@@ -111,6 +113,7 @@ impl Guest for Component {
         check("gcm-invalid-key", gcm_invalid_key().await).await?;
         check("gcm-invalid-nonce", gcm_invalid_nonce().await).await?;
         check("gcm-key-export", gcm_key_export().await).await?;
+        check("gcm-internal-nonce", gcm_internal_nonce().await).await?;
         check("ed25519-known-answer", ed25519_known_answer().await).await?;
         check("ed25519-verify", ed25519_verify_check().await).await?;
         check("ed25519-generated-key", ed25519_generated_key().await).await?;
@@ -399,6 +402,55 @@ async fn gcm_key_export() -> Result<(), String> {
     }
 }
 
+/// The internal-nonce discipline end to end: sealed messages are
+/// self-contained (`iv ‖ ciphertext ‖ tag`), round-trip under the same key,
+/// draw a fresh nonce per seal, and fail closed on wrong associated data.
+async fn gcm_internal_nonce() -> Result<(), String> {
+    let key = generate_internal_nonce_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key (internal nonce)", &e))?;
+    expect_eq(
+        key.algorithm_name(),
+        "AES-GCM".to_string(),
+        "internal-nonce-key.algorithm-name",
+    )?;
+    expect_eq(
+        key.algorithm_length(),
+        256,
+        "internal-nonce-key.algorithm-length",
+    )?;
+
+    let aad = b"internal-nonce aad";
+    let plaintext: Vec<u8> = (0..=255u8).cycle().take(2 * 1024 + 9).collect();
+
+    let sealed = in_seal_chunked(&key, aad, &plaintext, 512)
+        .await
+        .map_err(|e| describe("seal", &e))?;
+    // 12-byte IV prefix + ciphertext + 16-byte tag.
+    expect_eq(sealed.len(), plaintext.len() + 12 + 16, "sealed length")?;
+
+    let opened = in_open_chunked(&key, aad, &sealed, 512)
+        .await
+        .map_err(|e| describe("open", &e))?;
+    expect_eq(opened == plaintext, true, "round-tripped plaintext")?;
+
+    // A second seal of the same plaintext must draw a fresh nonce.
+    let resealed = in_seal_chunked(&key, aad, &plaintext, usize::MAX)
+        .await
+        .map_err(|e| describe("second seal", &e))?;
+    expect_eq(
+        sealed[..12] != resealed[..12],
+        true,
+        "distinct nonces across seals",
+    )?;
+
+    match in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(_) => Err("wrong aad opened".into()),
+    }
+}
+
 // --- stream helpers ----------------------------------------------------------
 
 /// `sign`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`
@@ -465,6 +517,34 @@ async fn open_chunked(
         key.open(nonce.to_vec(), aad.to_vec(), rx),
         feed(tx, ciphertext, chunk)
     );
+    fed.map_err(Error::Other)?;
+    Ok(read_all(opened?).await)
+}
+
+/// `internal-nonce-key.seal`, feeding the plaintext in `chunk`-byte pieces
+/// and collecting the returned sealed-message stream.
+async fn in_seal_chunked(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    plaintext: &[u8],
+    chunk: usize,
+) -> Result<Vec<u8>, Error> {
+    let (tx, rx) = wit_stream::new();
+    let (sealed, fed) = futures::join!(key.seal(aad.to_vec(), rx), feed(tx, plaintext, chunk));
+    fed.map_err(Error::Other)?;
+    Ok(read_all(sealed?).await)
+}
+
+/// `internal-nonce-key.open`, feeding the sealed message in `chunk`-byte
+/// pieces and collecting the returned plaintext stream.
+async fn in_open_chunked(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    sealed: &[u8],
+    chunk: usize,
+) -> Result<Vec<u8>, Error> {
+    let (tx, rx) = wit_stream::new();
+    let (opened, fed) = futures::join!(key.open(aad.to_vec(), rx), feed(tx, sealed, chunk));
     fed.map_err(Error::Other)?;
     Ok(read_all(opened?).await)
 }

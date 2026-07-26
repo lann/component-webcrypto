@@ -4,10 +4,14 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
+use crate::lann::webcrypto::aes_gcm_internal_nonce::{
+    generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
+};
 use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::chacha20_poly1305::{
     generate_key as generate_chacha_key, import_key as import_chacha_key, ChachaVariant,
 };
+use crate::lann::webcrypto::chacha20_poly1305_internal_nonce::generate_key as generate_chacha_internal_nonce_key;
 use crate::lann::webcrypto::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
@@ -21,7 +25,9 @@ use crate::lann::webcrypto::hmac_sha2::{
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
-use crate::util::{compute, describe, expect_bytes, open, seal, sig_verify, sign, verify};
+use crate::util::{
+    compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
+};
 
 /// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
 pub const NAMES: &[&str] = &[
@@ -47,6 +53,8 @@ pub const NAMES: &[&str] = &[
     "sig-key-metadata",
     "sig-import-invalid",
     "verifying-key-export-roundtrip",
+    "internal-nonce-shape",
+    "chacha-internal-nonce-roundtrip",
 ];
 
 /// Run the probe at `index` (into [`NAMES`]).
@@ -74,6 +82,8 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         19 => sig_key_metadata().await,
         20 => sig_import_invalid().await,
         21 => verifying_key_export_roundtrip().await,
+        22 => internal_nonce_shape().await,
+        23 => chacha_internal_nonce_roundtrip().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -808,4 +818,135 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     let (verified, fed) = sig_verify(&reimported, payload, &sig, Schedule::Whole).await;
     fed?;
     verified.map_err(|e| describe("re-imported key did not verify", &e))
+}
+
+/// The internal-nonce API contract the vectors cannot express: sealed
+/// messages carry the algorithm's wire format (nonce-prefix length), each
+/// seal draws a fresh nonce, minting validates key material, and
+/// extractability gates `export-key` exactly as for `aead-key`.
+async fn internal_nonce_shape() -> Result<(), String> {
+    // Wrong-length material is rejected at minting, as for `aes-gcm`.
+    match import_internal_nonce_key(AesVariant::Aes256, vec![0u8; 16], false).await {
+        Err(Error::InvalidKey(_)) => {}
+        Err(other) => return Err(describe("expected invalid-key, got", &other)),
+        Ok(_) => return Err("16-byte key imported as AES-256 (internal nonce)".into()),
+    }
+
+    let key = generate_internal_nonce_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    if key.algorithm_name() != "AES-GCM" {
+        return Err(format!(
+            "algorithm-name: got {:?}, want \"AES-GCM\"",
+            key.algorithm_name()
+        ));
+    }
+    if key.algorithm_length() != 256 {
+        return Err(format!(
+            "algorithm-length: got {}, want 256",
+            key.algorithm_length()
+        ));
+    }
+
+    let plaintext: Vec<u8> = (0..=255u8).cycle().take(1024 + 7).collect();
+    let (sealed, fed) = in_seal(&key, b"shape aad", &plaintext, Schedule::Straddle).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    // 12-byte IV prefix + ciphertext + 16-byte tag.
+    if sealed.len() != plaintext.len() + 12 + 16 {
+        return Err(format!(
+            "sealed length: got {}, want {}",
+            sealed.len(),
+            plaintext.len() + 12 + 16
+        ));
+    }
+
+    let (opened, fed) = in_open(&key, b"shape aad", &sealed, Schedule::Bytes).await;
+    fed.map_err(|e| format!("open sealed feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open", &e))?;
+    expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
+
+    // A second seal draws a fresh nonce.
+    let (resealed, fed) = in_seal(&key, b"shape aad", &plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("second seal feeder: {e}"))?;
+    let resealed = resealed.map_err(|e| describe("second seal", &e))?;
+    if sealed[..12] == resealed[..12] {
+        return Err("two seals drew the same nonce".into());
+    }
+
+    // Wrong associated data fails closed, with no unverified plaintext.
+    let (opened, fed) = in_open(&key, b"wrong aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("wrong-aad open feeder: {e}"))?;
+    match opened {
+        Err(Error::AuthenticationFailed) => {}
+        Err(other) => return Err(describe("expected authentication-failed, got", &other)),
+        Ok(_) => return Err("wrong aad opened".into()),
+    }
+
+    // Input too short to carry the wire format is authentication-failed.
+    let (opened, fed) = in_open(&key, b"", &sealed[..8], Schedule::Whole).await;
+    fed.map_err(|e| format!("short-input open feeder: {e}"))?;
+    match opened {
+        Err(Error::AuthenticationFailed) => {}
+        Err(other) => {
+            return Err(describe(
+                "short input: expected authentication-failed, got",
+                &other,
+            ))
+        }
+        Ok(_) => return Err("8-byte sealed message opened".into()),
+    }
+
+    // A non-extractable key refuses export-key.
+    match key.export_key().await {
+        Err(Error::NotExtractable) => {}
+        Err(other) => return Err(describe("expected not-extractable, got", &other)),
+        Ok(_) => return Err("non-extractable key exported".into()),
+    }
+
+    // An extractable generated key exports 32 bytes.
+    let key = generate_internal_nonce_key(AesVariant::Aes256, true)
+        .await
+        .map_err(|e| describe("generate-key (extractable)", &e))?;
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    if exported.len() != 32 {
+        return Err(format!(
+            "exported key length: got {}, want 32",
+            exported.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Both ChaCha internal-nonce variants round-trip with their variant's
+/// nonce length prefixed (12 bytes for the IETF construction, 24 for
+/// XChaCha).
+async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
+    for (variant, nonce_len) in [
+        (ChachaVariant::Chacha20Poly1305, 12usize),
+        (ChachaVariant::Xchacha20Poly1305, 24),
+    ] {
+        let key = generate_chacha_internal_nonce_key(variant, false)
+            .await
+            .map_err(|e| describe(&format!("{variant:?} generate-key"), &e))?;
+        let plaintext = b"chacha internal-nonce payload".to_vec();
+        let (sealed, fed) = in_seal(&key, b"aad", &plaintext, Schedule::Whole).await;
+        fed.map_err(|e| format!("{variant:?} seal feeder: {e}"))?;
+        let sealed = sealed.map_err(|e| describe(&format!("{variant:?} seal"), &e))?;
+        if sealed.len() != plaintext.len() + nonce_len + 16 {
+            return Err(format!(
+                "{variant:?} sealed length: got {}, want {}",
+                sealed.len(),
+                plaintext.len() + nonce_len + 16
+            ));
+        }
+        let (opened, fed) = in_open(&key, b"aad", &sealed, Schedule::Whole).await;
+        fed.map_err(|e| format!("{variant:?} open feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe(&format!("{variant:?} open"), &e))?;
+        expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
+    }
+    Ok(())
 }

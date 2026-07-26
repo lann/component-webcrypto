@@ -24,7 +24,7 @@ mod util;
 mod vectors;
 
 use exports::conformance::webcrypto::tests::{Guest, TestResult};
-use translate::{ChaChaCase, GcmCase, HmacCase, Sha2Case, SigCase};
+use translate::{ChaChaCase, GcmCase, HmacCase, InternalNonceCase, Sha2Case, SigCase};
 
 struct Component;
 
@@ -33,6 +33,7 @@ struct Corpus {
     hmac: Vec<HmacCase>,
     gcm: Vec<GcmCase>,
     chacha: Vec<ChaChaCase>,
+    internal_nonce: Vec<InternalNonceCase>,
     sha2: Vec<Sha2Case>,
     sig: Vec<SigCase>,
 }
@@ -42,6 +43,7 @@ enum Test<'a> {
     Hmac(&'a HmacCase),
     Gcm(&'a GcmCase),
     ChaCha(&'a ChaChaCase),
+    InternalNonce(&'a InternalNonceCase),
     Sha2(&'a Sha2Case),
     Sig(&'a SigCase),
     Probe(usize),
@@ -53,6 +55,7 @@ impl Corpus {
             hmac: translate::hmac_cases(),
             gcm: translate::gcm_cases(),
             chacha: translate::chacha_cases(),
+            internal_nonce: translate::internal_nonce_cases(),
             sha2: translate::sha2_cases(),
             sig: translate::sig_cases(),
         }
@@ -62,6 +65,7 @@ impl Corpus {
         self.hmac.len()
             + self.gcm.len()
             + self.chacha.len()
+            + self.internal_nonce.len()
             + self.sha2.len()
             + self.sig.len()
             + probes::NAMES.len()
@@ -82,6 +86,10 @@ impl Corpus {
             return Some(Test::ChaCha(&self.chacha[index]));
         }
         index -= self.chacha.len();
+        if index < self.internal_nonce.len() {
+            return Some(Test::InternalNonce(&self.internal_nonce[index]));
+        }
+        index -= self.internal_nonce.len();
         if index < self.sha2.len() {
             return Some(Test::Sha2(&self.sha2[index]));
         }
@@ -113,6 +121,12 @@ impl Test<'_> {
                 case.tc_id,
                 case.schedule.name()
             ),
+            Test::InternalNonce(case) => format!(
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
+                case.tc_id,
+                case.schedule.name()
+            ),
             Test::Sha2(case) => format!(
                 "sha2/nist-cavp/{}-len{}/{}",
                 case.alg.name(),
@@ -134,6 +148,7 @@ impl Test<'_> {
             Test::Hmac(case) => vectors::run_hmac_case(case).await,
             Test::Gcm(case) => vectors::run_gcm_case(case).await,
             Test::ChaCha(case) => vectors::run_chacha_case(case).await,
+            Test::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
             Test::Sha2(case) => vectors::run_sha2_case(case).await,
             Test::Sig(case) => vectors::run_sig_case(case).await,
             Test::Probe(index) => probes::run_one(*index).await,

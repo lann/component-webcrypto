@@ -31,6 +31,8 @@ mod generated {
             "lann:webcrypto/mac@0.1.0.[method]mac-key.algorithm-length": trappable,
             "lann:webcrypto/aead@0.1.0.[method]aead-key.algorithm-name": trappable,
             "lann:webcrypto/aead@0.1.0.[method]aead-key.algorithm-length": trappable,
+            "lann:webcrypto/aead-internal-nonce@0.1.0.[method]internal-nonce-key.algorithm-name": trappable,
+            "lann:webcrypto/aead-internal-nonce@0.1.0.[method]internal-nonce-key.algorithm-length": trappable,
             "lann:webcrypto/digest@0.1.0.[method]digest.algorithm-name": trappable,
             "lann:webcrypto/sha2@0.1.0.make-digest": trappable,
             "lann:webcrypto/bytes@0.1.0.constant-time-equal": trappable,
@@ -46,6 +48,7 @@ mod generated {
         with: {
             "lann:webcrypto/mac.mac-key": crate::MacKey,
             "lann:webcrypto/aead.aead-key": crate::AeadKey,
+            "lann:webcrypto/aead-internal-nonce.internal-nonce-key": crate::InternalNonceKey,
             "lann:webcrypto/digest.digest": crate::Digest,
             "lann:webcrypto/signature.verifying-key": crate::VerifyingKey,
             "lann:webcrypto/signature.signing-key": crate::SigningKey,

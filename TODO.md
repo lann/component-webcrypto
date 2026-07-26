@@ -20,17 +20,6 @@ sections. See AGENTS.md ("Maintaining TODO.md").
   file; WIT packages can span files in a directory. Organize by layer
   (types/kinds/minting) before it grows further.
 
-## Implementation
-
-- **Implement `aead-internal-nonce`.** The WIT landed ahead of its
-  implementations: wasmtime-impl, guest-impl, and jco-impl (AES-GCM only —
-  browser WebCrypto has no ChaCha), plus demo checks and the conformance
-  corpus (round-trip and format probes; seal is randomized, so this is the
-  case the deferred golden-artifact hand-off was reserved for — a
-  cross-target seal-here-open-there check becomes meaningful). Includes the
-  nonce-budget counter (SHOULD-enforce `key-exhausted` at 2^32 for 12-byte
-  nonces) and the composed provider's world gaining the new exports.
-
 ## Implementation hardening
 
 - **Zeroize key material.** Key structs in `wasmtime-impl` and `guest-impl`

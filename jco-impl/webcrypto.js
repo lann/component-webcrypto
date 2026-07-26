@@ -394,6 +394,157 @@ export const chacha20Poly1305 = {
 };
 
 /**
+ * The `internal-nonce-key` resource: an AES-GCM key whose nonce is generated
+ * here per `seal` (the SP 800-38D §8.2.2 RBG-based construction: 96 random
+ * bits from `getRandomValues`) and carried as the sealed message's prefix
+ * (`iv ‖ ciphertext ‖ tag`, per the `aes-gcm-internal-nonce` interface
+ * docs). Only AES-GCM keys exist on this host: browser WebCrypto implements
+ * no ChaCha20-Poly1305, so the ChaCha minting interface declines below.
+ *
+ * The key counts its `seal` invocations against the WIT nonce budget (2^32
+ * for 12-byte nonces) and throws `{ tag: 'key-exhausted' }` beyond it.
+ */
+export class InternalNonceKey {
+  #key;
+  #sealed = 0n;
+
+  /** The 12-byte AES-GCM IV length. */
+  static #IV_BYTES = 12;
+
+  /** The WIT nonce budget for 12-byte nonces: 2^32 seal invocations. */
+  static #NONCE_BUDGET = 1n << 32n;
+
+  /** @param {CryptoKey} key */
+  constructor(key) {
+    this.#key = key;
+  }
+
+  /**
+   * Encrypt and authenticate the plaintext stream under a fresh random IV
+   * with `aad`, returning `iv ‖ ciphertext ‖ tag`. The plaintext stream is
+   * drained before any failure is raised, per the WIT drain rule.
+   * @param {Uint8Array} aad
+   * @param {AsyncIterable<unknown> | ReadableStream} plaintext
+   */
+  async seal(aad, plaintext) {
+    const message = await collectByteStream(plaintext);
+    if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
+      throw { tag: "key-exhausted" };
+    }
+    this.#sealed += 1n;
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
+    const body = new Uint8Array(
+      await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
+    );
+    const sealed = new Uint8Array(iv.length + body.length);
+    sealed.set(iv, 0);
+    sealed.set(body, iv.length);
+    return bytesToStream(sealed);
+  }
+
+  /**
+   * Decrypt and verify a sealed message (`iv ‖ ciphertext ‖ tag`) under
+   * `aad`. Any failure — input too short to carry the wire format, a bad
+   * tag, wrong associated data — throws `{ tag: 'authentication-failed' }`
+   * with no detail, per the WIT contract. The input stream is drained
+   * before any failure is raised.
+   * @param {Uint8Array} aad
+   * @param {AsyncIterable<unknown> | ReadableStream} sealed
+   */
+  async open(aad, sealed) {
+    const message = await collectByteStream(sealed);
+    if (message.length < InternalNonceKey.#IV_BYTES) {
+      throw { tag: "authentication-failed" };
+    }
+    const iv = message.subarray(0, InternalNonceKey.#IV_BYTES);
+    const body = message.subarray(InternalNonceKey.#IV_BYTES);
+    let opened;
+    try {
+      opened = await subtle.decrypt(
+        { name: "AES-GCM", iv, additionalData: aad },
+        this.#key,
+        body,
+      );
+    } catch {
+      throw { tag: "authentication-failed" };
+    }
+    return bytesToStream(new Uint8Array(opened));
+  }
+
+  /** The algorithm getters: direct `AesKeyAlgorithm` projections. */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmLength() {
+    return this.#key.algorithm.length;
+  }
+
+  /**
+   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
+   * key was created with `extractable` true.
+   */
+  async exportKey() {
+    if (!this.#key.extractable) throw { tag: "not-extractable" };
+    return new Uint8Array(await subtle.exportKey("raw", this.#key));
+  }
+}
+
+/**
+ * Import raw key material as an internal-nonce AES-GCM key of the declared
+ * variant. Same variant/length contract as `aesGcm.importKey`.
+ * @param {string} variant
+ * @param {Uint8Array} raw
+ * @param {boolean} extractable
+ */
+async function importAesInternalNonceKey(variant, raw, extractable) {
+  const expected = aesVariantByteLength(variant);
+  if (raw.length !== expected) {
+    throw {
+      tag: "invalid-key",
+      val: `${variant} requires ${expected} key bytes, got ${raw.length}`,
+    };
+  }
+  let key;
+  try {
+    key = await subtle.importKey("raw", raw, { name: "AES-GCM" }, extractable, [
+      "encrypt",
+      "decrypt",
+    ]);
+  } catch (err) {
+    throw { tag: "invalid-key", val: String(err) };
+  }
+  return new InternalNonceKey(key);
+}
+
+/**
+ * Generate a fresh random internal-nonce AES-GCM key of the declared
+ * variant.
+ * @param {string} variant
+ * @param {boolean} extractable
+ */
+async function generateAesInternalNonceKey(variant, extractable) {
+  const key = await subtle.generateKey(
+    { name: "AES-GCM", length: aesVariantByteLength(variant) * 8 },
+    extractable,
+    ["encrypt", "decrypt"],
+  );
+  return new InternalNonceKey(key);
+}
+
+/** The `lann:webcrypto/aes-gcm-internal-nonce` interface (`--map '…#aesGcmInternalNonce'`). */
+export const aesGcmInternalNonce = {
+  importKey: importAesInternalNonceKey,
+  generateKey: generateAesInternalNonceKey,
+};
+
+/** The `lann:webcrypto/chacha20-poly1305-internal-nonce` interface (`--map '…#chachaInternalNonce'`): declined like `chacha20Poly1305`. */
+export const chachaInternalNonce = {
+  importKey: async (variant) => unsupportedChacha(variant),
+  generateKey: async (variant) => unsupportedChacha(variant),
+};
+
+/**
  * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes
  * AES-GCM specifies in this package's WIT.
  * @param {Uint8Array} nonce

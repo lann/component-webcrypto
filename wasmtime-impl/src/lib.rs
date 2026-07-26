@@ -118,6 +118,24 @@ pub struct AeadKey {
     pub(crate) extractable: bool,
 }
 
+/// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
+///
+/// Like [`AeadKey`], but the nonce is generated here per `seal` (the SP
+/// 800-38D §8.2.2 RBG-based construction) and carried in the sealed output.
+/// The key tracks its seal count to enforce the WIT nonce budget
+/// (`error.key-exhausted`) for 12-byte-nonce algorithms.
+pub struct InternalNonceKey {
+    /// The cipher keyed by `raw`, bound to its algorithm at minting.
+    pub(crate) cipher: crate::host::AeadCipher,
+    /// The raw key material, retained for `export-key` on extractable keys.
+    pub(crate) raw: Vec<u8>,
+    /// Whether `export-key` may return the raw material.
+    pub(crate) extractable: bool,
+    /// The number of `seal` invocations so far, counted against the
+    /// algorithm's nonce budget.
+    pub(crate) sealed: u64,
+}
+
 /// Backing type for the `digest.digest` resource.
 ///
 /// A digest holds no key material — just the SHA-2 variant it is bound to;
@@ -194,10 +212,22 @@ where
     bindings::webcrypto::bytes::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::mac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::aead_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
     bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::aes_gcm_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::chacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
         T::webcrypto,
     )?;
