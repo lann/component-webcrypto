@@ -481,7 +481,7 @@ async fn compute_chunked(digest: &Digest, data: &[u8], chunk: usize) -> Result<V
     let (tx, rx) = wit_stream::new();
     let (got, fed) = futures::join!(digest.compute(rx), feed(tx, data, chunk));
     fed?;
-    Ok(got)
+    got.map_err(|e| describe("digest.compute", &e))
 }
 
 /// `verify`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`

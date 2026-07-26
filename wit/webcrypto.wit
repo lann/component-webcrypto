@@ -316,6 +316,8 @@ interface aead-internal-nonce {
 /// component whose world imports only this interface can use any digest it
 /// is granted but cannot choose algorithms.
 interface digest {
+    use types.{error};
+
     /// A digest algorithm, bound at creation.
     ///
     /// `compute` is one-shot and stateless per call (the resource is
@@ -332,7 +334,12 @@ interface digest {
     resource digest {
         /// Digest an entire byte stream. Resolves once the stream is fully
         /// drained (its writer dropped).
-        compute: async func(data: stream<u8>) -> list<u8>;
+        ///
+        /// Fails only for operational reasons (`error.other`, e.g. an
+        /// external digest engine backing this resource that cannot
+        /// complete the operation) — never for misuse, which is
+        /// unrepresentable.
+        compute: async func(data: stream<u8>) -> result<list<u8>, error>;
 
         /// The registry name of the algorithm this resource is bound to,
         /// e.g. `"SHA-256"` (as `crypto.subtle.digest` spells it). For a

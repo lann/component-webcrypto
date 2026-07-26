@@ -429,11 +429,15 @@ pub struct Digest {
 }
 
 impl GuestDigest for Digest {
-    async fn compute(&self, data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
+    async fn compute(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
         // Buffer the whole stream, then hash it; the result is
         // chunking-invariant either way.
+        //
+        // The WIT `err` case exists for operational failures (e.g. an
+        // external digest engine); this implementation computes in-process,
+        // so it never errs.
         let bytes = drain_stream(data).await;
-        self.variant.digest(&bytes)
+        Ok(self.variant.digest(&bytes))
     }
 
     fn algorithm_name(&self) -> String {

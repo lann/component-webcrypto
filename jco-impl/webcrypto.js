@@ -273,7 +273,9 @@ export class Digest {
 
   /**
    * Digest an entire byte stream, resolving once the stream is fully
-   * drained.
+   * drained. Never throws the WIT `error`: its `err` case exists for
+   * operational failures (e.g. an external digest engine), and this
+   * implementation computes via the in-process platform digest.
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async compute(data) {
