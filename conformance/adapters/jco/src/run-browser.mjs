@@ -3,8 +3,9 @@
 // Chromium (137+, which ships JSPI), and writes
 // `conformance/results/jco-browser.json`.
 //
-// Not gating (it needs a Chromium install); run it manually with
-// `just conformance-jco-browser`.
+// Gates in CI (the Actions runner image ships Chrome); locally it needs a
+// Chrome/Chromium install — run it with CONFORMANCE_BROWSER=1 just
+// conformance, or directly with `just conformance-jco-browser`.
 import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
 import { join, extname } from "node:path";

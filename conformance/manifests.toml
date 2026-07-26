@@ -13,9 +13,11 @@ expected-fail = []
 [targets.composed]
 expected-fail = []
 
-# The jco-node target is gating (part of `just conformance`); jco-browser is
-# enumerated but not gating (it needs a Chromium install and is run manually,
-# so it produces no results in CI and the runner warns rather than fails).
+# The jco-node target is gating everywhere (part of `just conformance`).
+# jco-browser gates in CI (the Actions runner ships Chrome); locally it needs
+# a Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so the runner warns rather than fails on a missing
+# results file.
 
 # Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
 # unimplemented), so the jco host declines both `chacha-variant`s as
