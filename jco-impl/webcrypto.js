@@ -1,6 +1,6 @@
 // Host implementation of the `lann:webcrypto` imports (`mac`, `aead`,
-// `digest`, `bytes`, `hmac-sha2`, `aes-gcm`, `sha2`) for jco-transpiled
-// components.
+// `digest`, `bytes`, `hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, `sha2`)
+// for jco-transpiled components.
 //
 // This is the "browser-first" host: it is written against the standard Web
 // Crypto API only — `globalThis.crypto.subtle` and
@@ -12,8 +12,8 @@
 // `aead`, and `digest` resource interfaces map to the module itself (the
 // `MacKey`, `AeadKey`, and `Digest` class exports), while the minting and
 // utility interfaces map to named exports (`--map '…=./webcrypto.js#hmacSha2'`,
-// `#aesGcm`, `#sha2`, `#bytes`) since the minting names would otherwise
-// collide. Errors are surfaced to the guest by throwing the WIT
+// `#aesGcm`, `#chacha20Poly1305`, `#sha2`, `#bytes`) since the minting names
+// would otherwise collide. Errors are surfaced to the guest by throwing the WIT
 // `error` variant value (for example `{ tag: 'invalid-key', val }` or
 // `{ tag: 'authentication-failed' }`), which jco lifts into the
 // `result<_, error>` the WIT declares.
@@ -374,6 +374,24 @@ async function generateAesKey(variant, extractable) {
 
 /** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
 export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
+
+/**
+ * Throw `{ tag: 'unsupported', val }` for either `chacha-variant`: browser
+ * WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
+ * unimplemented), so this host declines the whole interface and a
+ * composition needing it must supply another provider (the wasip3 in-guest
+ * provider serves both variants).
+ * @param {string} variant
+ */
+function unsupportedChacha(variant) {
+  throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+}
+
+/** The `lann:webcrypto/chacha20-poly1305` interface (`--map '…#chacha20Poly1305'`). */
+export const chacha20Poly1305 = {
+  importKey: async (variant) => unsupportedChacha(variant),
+  generateKey: async (variant) => unsupportedChacha(variant),
+};
 
 /**
  * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes

@@ -57,6 +57,7 @@ world conformance-guest {
     import lann:webcrypto/sha2@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/chacha20-poly1305@0.1.0;
 
     export tests;
 }

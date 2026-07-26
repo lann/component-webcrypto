@@ -3,8 +3,8 @@
 //! The crate implements the `types` and `bytes` interfaces, the `mac`,
 //! `aead`, and `digest` primitive-kind interfaces (the `mac-key`,
 //! `aead-key`, and `digest` resources), and the `hmac-sha2` / `aes-gcm` /
-//! `sha2` minting interfaces. See [`crate`] for the public API built on top
-//! of these bindings.
+//! `chacha20-poly1305` / `sha2` minting interfaces. See [`crate`] for the
+//! public API built on top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]
 mod generated {

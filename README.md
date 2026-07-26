@@ -15,7 +15,8 @@ kind*, not by algorithm:
 - **Generic primitive interfaces** (`mac`, `aead`, `digest`; later
   `stream-aead`, …) each own the algorithm-agnostic resources. Adding an
   algorithm never touches them.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `sha2`) contain only *key minting*
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
+  `sha2`) contain only *key minting*
   (`import-*`/`generate-*`). Everything else hangs off the key resource, so a
   key can never be used with the wrong algorithm.
 - **Keys are resources — capabilities.** A world importing only `mac` can use
@@ -41,9 +42,11 @@ kind*, not by algorithm:
   streams, not from resource state.
 
 Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
-(SHA-256/384/512), and **AES-GCM** (128/256-bit keys, 12-byte nonces,
-16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire format, which
-RustCrypto's `aes-gcm` produces identically), plus the
+(SHA-256/384/512), **AES-GCM** (128/256-bit keys, 12-byte nonces), and
+**ChaCha20-Poly1305** (both the RFC 8439 construction and XChaCha20-Poly1305
+with 24-byte nonces; browsers implement neither, so the jco host declines
+them) — the AEADs share 16-byte tags and the `ciphertext ‖ tag` wire format
+(`crypto.subtle`'s, which RustCrypto produces identically) — plus the
 `bytes.constant-time-equal` utility. The variant enums also declare cases no
 implementation here serves (`aes192`, the truncated SHA-2 variants) — each
 algorithm's spec closes its set — which fail `unsupported`; a composition
@@ -98,9 +101,9 @@ just ci                      # everything CI runs
 ```
 
 All three implementations run identical guest components. The conformance
-suite (Wycheproof HMAC-SHA-256 and AES-GCM vectors and NIST CAVP SHA-2
-vectors under multiple stream-chunking schedules, plus API-contract probes)
-gates the wasmtime and
+suite (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
+NIST CAVP SHA-2 vectors under multiple stream-chunking schedules, plus
+API-contract probes) gates the wasmtime and
 wasip3-guest targets; the `crypto-demo` guest additionally covers the jco
 host end to end.
 

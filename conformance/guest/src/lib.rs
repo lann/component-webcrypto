@@ -24,7 +24,7 @@ mod util;
 mod vectors;
 
 use exports::conformance::webcrypto::tests::{Guest, TestResult};
-use translate::{GcmCase, HmacCase, Sha2Case};
+use translate::{ChaChaCase, GcmCase, HmacCase, Sha2Case};
 
 struct Component;
 
@@ -32,6 +32,7 @@ struct Component;
 struct Corpus {
     hmac: Vec<HmacCase>,
     gcm: Vec<GcmCase>,
+    chacha: Vec<ChaChaCase>,
     sha2: Vec<Sha2Case>,
 }
 
@@ -39,6 +40,7 @@ struct Corpus {
 enum Test<'a> {
     Hmac(&'a HmacCase),
     Gcm(&'a GcmCase),
+    ChaCha(&'a ChaChaCase),
     Sha2(&'a Sha2Case),
     Probe(usize),
 }
@@ -48,12 +50,13 @@ impl Corpus {
         Corpus {
             hmac: translate::hmac_cases(),
             gcm: translate::gcm_cases(),
+            chacha: translate::chacha_cases(),
             sha2: translate::sha2_cases(),
         }
     }
 
     fn len(&self) -> usize {
-        self.hmac.len() + self.gcm.len() + self.sha2.len() + probes::NAMES.len()
+        self.hmac.len() + self.gcm.len() + self.chacha.len() + self.sha2.len() + probes::NAMES.len()
     }
 
     /// The test at corpus index `index`.
@@ -67,6 +70,10 @@ impl Corpus {
             return Some(Test::Gcm(&self.gcm[index]));
         }
         index -= self.gcm.len();
+        if index < self.chacha.len() {
+            return Some(Test::ChaCha(&self.chacha[index]));
+        }
+        index -= self.chacha.len();
         if index < self.sha2.len() {
             return Some(Test::Sha2(&self.sha2[index]));
         }
@@ -88,6 +95,12 @@ impl Test<'_> {
                 case.tc_id,
                 case.schedule.name()
             ),
+            Test::ChaCha(case) => format!(
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
+                case.tc_id,
+                case.schedule.name()
+            ),
             Test::Sha2(case) => format!(
                 "sha2/nist-cavp/{}-len{}/{}",
                 case.alg.name(),
@@ -102,6 +115,7 @@ impl Test<'_> {
         let outcome = match self {
             Test::Hmac(case) => vectors::run_hmac_case(case).await,
             Test::Gcm(case) => vectors::run_gcm_case(case).await,
+            Test::ChaCha(case) => vectors::run_chacha_case(case).await,
             Test::Sha2(case) => vectors::run_sha2_case(case).await,
             Test::Probe(index) => probes::run_one(*index).await,
         };

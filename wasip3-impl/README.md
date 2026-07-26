@@ -72,8 +72,10 @@ marks where secrets flow.
 | --- | --- | --- | --- |
 | HMAC-SHA-2 (256/384/512) | A | `hmac` + `sha2` (pure ARX-style arithmetic; constant-time `verify_slice`) | None beyond compiler correctness. |
 | AES-GCM (128/256) | C + B | `aes-gcm` with the soft **fixsliced** AES backend (bitsliced, table-free) + masked-multiply GHASH | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
+| ChaCha20-Poly1305 / XChaCha20-Poly1305 | A + B | `chacha20poly1305` (portable software backend: ChaCha20 is pure ARX by construction; Poly1305 is limb-based multiply-accumulate) | Constant-latency integer multiply (Poly1305 only). |
 | SHA-2 digests (256/384/512) | exempt (secret-free) | `sha2` | The `digest` primitive is unkeyed — hashing public data carries no secret to leak. `bytes.constant-time-equal` (via `subtle`) is exported for callers comparing digests against untrusted values. |
 
-When a ChaCha20-Poly1305 algorithm interface is added (class A + B), it will
-be the *recommended* AEAD for in-guest use — it is the construction designed
-for exactly this situation.
+ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
+constant time by construction rather than by countermeasure, it is the
+cipher designed for exactly this situation. AES-GCM's class C is a heroic
+implementation working against the algorithm's nature.

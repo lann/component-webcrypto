@@ -8,8 +8,9 @@
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
 //! and calls [`add_to_linker`] to satisfy the `types`, `bytes`, `mac`,
-//! `aead`, `digest`, `hmac-sha2`, `aes-gcm`, and `sha2` imports with
-//! HMAC-SHA-2, AES-GCM, and SHA-2 implementations.
+//! `aead`, `digest`, `hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, and `sha2`
+//! imports with HMAC-SHA-2, AES-GCM, ChaCha20-Poly1305, and SHA-2
+//! implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
@@ -25,6 +26,13 @@ pub(crate) const HMAC_NAME: &str = "HMAC";
 /// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub(crate) const AES_GCM_NAME: &str = "AES-GCM";
+
+/// The `algorithm-name` reported by ChaCha20-Poly1305 keys (the spelling of
+/// the WICG WebCrypto proposal; the algorithm is not in the W3C registry).
+pub(crate) const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
+
+/// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
+pub(crate) const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
 
 /// Configuration and per-store state for the WebCrypto host.
 ///
@@ -90,12 +98,12 @@ pub struct MacKey {
 
 /// Backing type for the `aead.aead-key` resource.
 ///
-/// Holds the ready-to-use AES-GCM cipher alongside the raw key material
+/// Holds the ready-to-use cipher alongside the raw key material
 /// (for `%export` on extractable keys). `seal`/`open` are stateless per call,
 /// so the key carries no per-operation state.
 pub struct AeadKey {
-    /// The AES-GCM cipher keyed by `raw`, dispatching on key size.
-    pub(crate) cipher: crate::host::AesGcmCipher,
+    /// The cipher keyed by `raw`, bound to its algorithm at minting.
+    pub(crate) cipher: crate::host::AeadCipher,
     /// The raw key material, retained for `%export` on extractable keys.
     pub(crate) raw: Vec<u8>,
     /// Whether `%export` may return the raw material.
@@ -113,8 +121,8 @@ pub struct Digest {
 }
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate (`types`,
-/// `bytes`, `mac`, `aead`, `digest`, `hmac-sha2`, `aes-gcm`, and `sha2`) to
-/// the provided [`Linker`].
+/// `bytes`, `mac`, `aead`, `digest`, `hmac-sha2`, `aes-gcm`,
+/// `chacha20-poly1305`, and `sha2`) to the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebcryptoView`]. The
 /// engine's [`Config`](wasmtime::Config) must have
@@ -159,6 +167,10 @@ where
     bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }

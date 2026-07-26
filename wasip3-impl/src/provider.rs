@@ -1,10 +1,11 @@
 //! The exported `lann:webcrypto` resources and key-minting functions, backed
-//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-2, `aes-gcm` for AES-GCM).
+//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-2 and SHA-2, `aes-gcm` for
+//! AES-GCM, `chacha20poly1305` for ChaCha20-Poly1305).
 //!
 //! - [`MacKey`] holds raw HMAC key material; `sign` and `verify` are
 //!   one-shot HMAC computations over the key's SHA-2 variant, stateless per call.
-//! - [`AeadKey`] holds raw AES key material plus its schedule; `seal` and
-//!   `open` are stateless per call.
+//! - [`AeadKey`] holds raw key material plus its ready-to-use cipher; `seal`
+//!   and `open` are stateless per call.
 //!
 //! Byte `stream`s are the only bulk data path: incoming streams are drained
 //! to completion (even when the operation resolves with an error, per the WIT
@@ -12,11 +13,15 @@
 //! task (`wit_bindgen::spawn`) after the export returns.
 
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
-use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
+use aes_gcm::{Aes128Gcm, Aes256Gcm};
+use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
+use crate::exports::lann::webcrypto::chacha20_poly1305::{
+    ChachaVariant, Guest as ChaChaPoly1305Guest,
+};
 use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
@@ -31,9 +36,15 @@ const HMAC_NAME: &str = "HMAC";
 /// `KeyAlgorithm.name`).
 const AES_GCM_NAME: &str = "AES-GCM";
 
-/// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
-/// WIT contract (12-byte nonces, 16-byte tags).
-const GCM_NONCE_LEN: usize = 12;
+/// The `algorithm-name` reported by ChaCha20-Poly1305 keys (the spelling of
+/// the WICG WebCrypto proposal; the algorithm is not in the W3C registry).
+const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
+
+/// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
+const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
+
+/// The length in bytes of a ChaCha20-Poly1305 key (either variant).
+const CHACHA_KEY_LEN: usize = 32;
 
 pub struct Component;
 
@@ -201,58 +212,89 @@ impl AeadGuest for Component {
     type AeadKey = AeadKey;
 }
 
-/// An exported `aead-key`: raw AES key material, bound to AES-GCM, with its
-/// expanded key schedule.
+/// An exported `aead-key`: raw key material, bound to its algorithm at
+/// minting, with its ready-to-use cipher.
 pub struct AeadKey {
     raw: Vec<u8>,
     extractable: bool,
-    cipher: AesGcmCipher,
+    cipher: AeadCipher,
 }
 
-/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. Only
-/// the WIT `aes-variant` cases this implementation serves appear here:
+/// The cipher backing an [`AeadKey`], bound to its algorithm at minting.
+/// Only the WIT variant cases this implementation serves appear here:
 /// AES-192 is declined at minting (see the WIT `aes-variant` doc).
-enum AesGcmCipher {
-    Aes128(Aes128Gcm),
-    Aes256(Aes256Gcm),
+enum AeadCipher {
+    Aes128Gcm(Aes128Gcm),
+    Aes256Gcm(Aes256Gcm),
+    ChaCha20Poly1305(ChaCha20Poly1305),
+    XChaCha20Poly1305(XChaCha20Poly1305),
 }
 
-impl AesGcmCipher {
+impl AeadCipher {
+    /// The algorithm name reported by `aead-key.algorithm-name`.
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Aes128Gcm(_) | Self::Aes256Gcm(_) => AES_GCM_NAME,
+            Self::ChaCha20Poly1305(_) => CHACHA20_POLY1305_NAME,
+            Self::XChaCha20Poly1305(_) => XCHACHA20_POLY1305_NAME,
+        }
+    }
+
     /// The key length in bits (WebCrypto's `AesKeyAlgorithm.length`).
     fn length_bits(&self) -> u32 {
         match self {
-            Self::Aes128(_) => 128,
-            Self::Aes256(_) => 256,
+            Self::Aes128Gcm(_) => 128,
+            Self::Aes256Gcm(_) | Self::ChaCha20Poly1305(_) | Self::XChaCha20Poly1305(_) => 256,
+        }
+    }
+
+    /// The nonce length this cipher's algorithm specifies.
+    fn nonce_len(&self) -> usize {
+        match self {
+            Self::XChaCha20Poly1305(_) => 24,
+            _ => 12,
+        }
+    }
+
+    /// Validate a nonce's length, rendering the WIT `invalid-nonce` error
+    /// for anything but the algorithm's nonce length.
+    fn check_nonce(&self, nonce: &[u8]) -> Result<(), Error> {
+        if nonce.len() == self.nonce_len() {
+            Ok(())
+        } else {
+            Err(Error::InvalidNonce(format!(
+                "{} requires a {}-byte nonce, got {} bytes",
+                self.name(),
+                self.nonce_len(),
+                nonce.len()
+            )))
         }
     }
 
     fn encrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> Result<Vec<u8>, aes_gcm::Error> {
-        let nonce = Nonce::from_slice(nonce);
         match self {
-            Self::Aes128(cipher) => cipher.encrypt(nonce, payload),
-            Self::Aes256(cipher) => cipher.encrypt(nonce, payload),
+            Self::Aes128Gcm(cipher) => cipher.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::Aes256Gcm(cipher) => cipher.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::ChaCha20Poly1305(cipher) => {
+                cipher.encrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
+            }
+            Self::XChaCha20Poly1305(cipher) => {
+                cipher.encrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
+            }
         }
     }
 
     fn decrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> Result<Vec<u8>, aes_gcm::Error> {
-        let nonce = Nonce::from_slice(nonce);
         match self {
-            Self::Aes128(cipher) => cipher.decrypt(nonce, payload),
-            Self::Aes256(cipher) => cipher.decrypt(nonce, payload),
+            Self::Aes128Gcm(cipher) => cipher.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::Aes256Gcm(cipher) => cipher.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::ChaCha20Poly1305(cipher) => {
+                cipher.decrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
+            }
+            Self::XChaCha20Poly1305(cipher) => {
+                cipher.decrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
+            }
         }
-    }
-}
-
-/// Validate an AES-GCM nonce length, rendering the WIT `invalid-nonce` error
-/// for anything but 12 bytes.
-fn check_gcm_nonce(nonce: &[u8]) -> Result<(), Error> {
-    if nonce.len() == GCM_NONCE_LEN {
-        Ok(())
-    } else {
-        Err(Error::InvalidNonce(format!(
-            "AES-GCM requires a {GCM_NONCE_LEN}-byte nonce, got {} bytes",
-            nonce.len()
-        )))
     }
 }
 
@@ -267,7 +309,7 @@ impl GuestAeadKey for AeadKey {
         // the call resolves with an error, so the caller's writer always
         // completes.
         let msg = drain_stream(plaintext).await;
-        check_gcm_nonce(&nonce)?;
+        self.cipher.check_nonce(&nonce)?;
         let sealed = self
             .cipher
             .encrypt(
@@ -277,7 +319,7 @@ impl GuestAeadKey for AeadKey {
                     aad: &aad,
                 },
             )
-            .map_err(|_| Error::Other("AES-GCM encryption failed".into()))?;
+            .map_err(|_| Error::Other(format!("{} encryption failed", self.cipher.name())))?;
         Ok(stream_of(sealed))
     }
 
@@ -291,7 +333,7 @@ impl GuestAeadKey for AeadKey {
         // message is inherent to `open`: no unverified plaintext may be
         // observable.
         let msg = drain_stream(ciphertext).await;
-        check_gcm_nonce(&nonce)?;
+        self.cipher.check_nonce(&nonce)?;
         // Any decryption failure — truncated input, bad tag, wrong key,
         // wrong associated data — reports `authentication-failed` with no
         // detail, per the WIT contract.
@@ -309,7 +351,7 @@ impl GuestAeadKey for AeadKey {
     }
 
     fn algorithm_name(&self) -> String {
-        AES_GCM_NAME.to_string()
+        self.cipher.name().to_string()
     }
 
     fn algorithm_length(&self) -> u32 {
@@ -448,11 +490,11 @@ fn new_aes_gcm_key(variant: AesVariant, raw: Vec<u8>, extractable: bool) -> Resu
     }
     let cipher = match variant {
         AesVariant::Aes128 => {
-            AesGcmCipher::Aes128(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
+            AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
         }
         AesVariant::Aes192 => unreachable!("rejected above"),
         AesVariant::Aes256 => {
-            AesGcmCipher::Aes256(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
+            AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
         }
     };
     Ok(AeadKey {
@@ -479,6 +521,59 @@ impl AesGcmGuest for Component {
         let mut raw = vec![0u8; variant_len(variant)?];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
         let key = new_aes_gcm_key(variant, raw, extractable)
+            .expect("generated key material always matches the variant");
+        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+}
+
+// --- chacha20-poly1305 (key minting) -----------------------------------------
+
+/// Build an [`AeadKey`] from raw material declared as `variant`, rendering
+/// the WIT `invalid-key` error when the material is not the 32 bytes both
+/// variants require.
+fn new_chacha_key(
+    variant: ChachaVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<AeadKey, Error> {
+    if raw.len() != CHACHA_KEY_LEN {
+        return Err(Error::InvalidKey(format!(
+            "{variant:?} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
+            raw.len()
+        )));
+    }
+    let cipher = match variant {
+        ChachaVariant::Chacha20Poly1305 => AeadCipher::ChaCha20Poly1305(
+            ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+        ),
+        ChachaVariant::Xchacha20Poly1305 => AeadCipher::XChaCha20Poly1305(
+            XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+        ),
+    };
+    Ok(AeadKey {
+        raw,
+        extractable,
+        cipher,
+    })
+}
+
+impl ChaChaPoly1305Guest for Component {
+    async fn import_key(
+        variant: ChachaVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+        let key = new_chacha_key(variant, raw, extractable)?;
+        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+
+    async fn generate_key(
+        variant: ChachaVariant,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw).expect("WASI random source is always available");
+        let key = new_chacha_key(variant, raw, extractable)
             .expect("generated key material always matches the variant");
         Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
     }
