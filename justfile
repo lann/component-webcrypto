@@ -2,8 +2,37 @@
 default:
     @just --list
 
-# Run every CI check locally, in the same order as .github/workflows/ci.yml.
-ci: fmt-check validate-wit clippy test test-webcrypto-composed conformance test-node
+# Run every CI check locally: each CI job runs exactly one job recipe below.
+ci: rust-checks jco-checks
+
+# Everything the rust-checks CI job runs, in order.
+rust-checks:
+    @just _step fmt-check
+    @just _step validate-wit
+    @just _step clippy
+    @just _step test
+    @just _step test-webcrypto-composed
+    @just _step conformance
+
+# Everything the jco CI job runs.
+jco-checks:
+    @just _step test-node
+
+# Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
+# error annotation naming the recipe) when running under Actions; a plain
+# `just <recipe>` otherwise.
+_step recipe:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    gha=; [ "${GITHUB_ACTIONS:-}" = "true" ] && gha=1
+    [ -n "$gha" ] && echo "::group::just {{recipe}}"
+    just {{recipe}}
+    status=$?
+    [ -n "$gha" ] && echo "::endgroup::"
+    if [ $status -ne 0 ] && [ -n "$gha" ]; then
+        echo "::error title=just {{recipe}} failed::exit status $status"
+    fi
+    exit $status
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests).
 check: fmt-check clippy validate-wit test
