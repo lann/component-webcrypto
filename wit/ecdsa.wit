@@ -1,0 +1,58 @@
+package lann:webcrypto@0.1.0;
+
+/// ECDSA verification-key minting (FIPS 186-5).
+///
+/// The variant binds curve and digest together at mint — unlike WebCrypto,
+/// where the hash is a per-operation parameter — so a granted key cannot be
+/// used with a weaker digest than its minter chose. Keys report
+/// `algorithm-name` `"ECDSA"` plus the variant's curve and hash.
+///
+/// Signatures are fixed-width `r ‖ s` (IEEE P1363, WebCrypto's format):
+/// 64 bytes for P-256, 96 bytes for P-384. ASN.1 DER signatures are not
+/// accepted.
+interface ecdsa-verify {
+    use types.{error};
+    use signature.{verifying-key};
+
+    /// The served curve/digest pairings — the matched pairs of FIPS 186-5
+    /// deployment practice. Mixed pairings (e.g. P-256 with SHA-384) are
+    /// deliberately unrepresentable.
+    enum ecdsa-variant {
+        /// NIST P-256 (secp256r1) with SHA-256.
+        p256-sha256,
+        /// NIST P-384 (secp384r1) with SHA-384.
+        p384-sha384,
+    }
+
+    /// Import a public key as an uncompressed SEC1 point (`04 ‖ x ‖ y`;
+    /// 65 bytes for P-256, 97 bytes for P-384 — WebCrypto's `raw` format).
+    /// Anything else — including compressed points and points not on the
+    /// curve — fails with `error.invalid-key`. `verifying-key.export-key`
+    /// returns this same form.
+    import-verifying-key: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
+}
+
+/// ECDSA signing-key minting (FIPS 186-5).
+///
+/// Split from `ecdsa-verify` because ECDSA signing handles a per-signature
+/// secret nonce whose timing leakage is key-recovering — class D in the
+/// in-guest provider's classification, so that provider never exports this
+/// interface and compositions requiring it fail at `wac plug` time.
+/// Host-backed providers (Wasmtime, browser WebCrypto) serve it.
+///
+/// Note the signature is not deterministic across implementations: RFC 6979
+/// (deterministic) and randomized-k implementations both verify, but
+/// produce different bytes for the same input.
+interface ecdsa-sign {
+    use types.{error};
+    use signature.{signing-key};
+    use ecdsa-verify.{ecdsa-variant};
+
+    /// Import a private key as the raw big-endian scalar (32 bytes for
+    /// P-256, 48 for P-384). Out-of-range or wrong-length scalars fail with
+    /// `error.invalid-key`. `signing-key.export-key` returns this same form.
+    import-signing-key: async func(%variant: ecdsa-variant, raw: list<u8>, extractable: bool) -> result<signing-key, error>;
+
+    /// Generate a fresh random signing key of the declared variant.
+    generate-key: async func(%variant: ecdsa-variant, extractable: bool) -> result<signing-key, error>;
+}

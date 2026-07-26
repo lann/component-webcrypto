@@ -1,0 +1,79 @@
+package lann:webcrypto@0.1.0;
+
+/// ChaCha20-Poly1305 key minting (RFC 8439): the IETF construction, with
+/// 12-byte nonces.
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
+/// and the `ciphertext ‖ tag` wire format. The 12-byte nonce space is too
+/// small to draw nonces at random; callers need a deterministic uniqueness
+/// scheme (such as a counter). For random nonces, use
+/// `xchacha20-poly1305`; to stop managing nonces entirely, use
+/// `xchacha20-poly1305-internal-nonce`.
+///
+/// This interface and `xchacha20-poly1305` are deliberately separate (not a
+/// variant enum): platform-backed providers systematically serve one
+/// without the other (browser WebCrypto's proposed ChaCha support, Apple
+/// CryptoKit, OpenSSL, and Conscrypt implement only the IETF construction,
+/// while libsodium-lineage providers center XChaCha), so the support
+/// boundary belongs at the interface, where a composition that needs the
+/// missing one fails at `wac plug` time rather than at minting.
+interface chacha20-poly1305 {
+    use types.{error};
+    use aead.{aead-key};
+
+    /// Import exactly 32 bytes of raw key material; anything else fails
+    /// with `error.invalid-key`.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random 256-bit key.
+    generate-key: async func(extractable: bool) -> result<aead-key, error>;
+}
+
+/// XChaCha20-Poly1305 key minting (draft-irtf-cfrg-xchacha, as deployed
+/// ubiquitously by libsodium): the extended-nonce construction, with
+/// 24-byte nonces — large enough to be chosen at random. Not
+/// IETF-standardized.
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
+/// and the `ciphertext ‖ tag` wire format. See `chacha20-poly1305` for why
+/// the two constructions are separate interfaces rather than a variant
+/// enum.
+interface xchacha20-poly1305 {
+    use types.{error};
+    use aead.{aead-key};
+
+    /// Import exactly 32 bytes of raw key material; anything else fails
+    /// with `error.invalid-key`.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random 256-bit key.
+    generate-key: async func(extractable: bool) -> result<aead-key, error>;
+}
+
+/// XChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce`
+/// keys drawing a fresh random 24-byte nonce per seal.
+///
+/// Sealed messages are `nonce ‖ ciphertext ‖ tag` (24-byte nonce, 16-byte
+/// tag).
+///
+/// This is the recommended internal-nonce algorithm: at 24 bytes the nonce
+/// repeat probability is negligible for any realistic invocation count, so
+/// there is no practical nonce budget (implementations still MAY signal
+/// `error.key-exhausted` under an explicit policy). There is deliberately
+/// no IETF-ChaCha20-Poly1305 internal-nonce interface: the internal-nonce
+/// wire format is this package's own, so nothing forces the 12-byte
+/// construction here, and every provider position is better served by this
+/// interface or `aes-gcm-internal-nonce`.
+interface xchacha20-poly1305-internal-nonce {
+    use types.{error};
+    use aead-internal-nonce.{internal-nonce-key};
+
+    /// Import exactly 32 bytes of raw key material as an internal-nonce
+    /// key; anything else fails with `error.invalid-key`. See
+    /// `aes-gcm-internal-nonce.import-key` for the shared-material caveat
+    /// and policy-rejection allowance, which apply identically here.
+    import-key: async func(raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+
+    /// Generate a fresh random internal-nonce key.
+    generate-key: async func(extractable: bool) -> result<internal-nonce-key, error>;
+}

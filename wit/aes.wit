@@ -1,0 +1,84 @@
+package lann:webcrypto@0.1.0;
+
+/// The AES family's shared parameterization. Interfaces minting AES-based
+/// keys (`aes-gcm`, `aes-gcm-internal-nonce`, …) declare their variant from
+/// this one closed set (the `sha2` pattern: one definition per family).
+interface aes {
+    /// The AES variants, distinguished by key size: AES closes this set, so
+    /// it is an enum, not a number. (Each algorithm interface names its
+    /// closed set of parameterizations `<algorithm>-variant`.)
+    enum aes-variant {
+        aes128,
+        /// Not widely supported: browsers decline AES-192, and no current
+        /// implementation of this package serves it — expect
+        /// `error.unsupported` unless composed with a provider that
+        /// specifically offers it.
+        aes192,
+        aes256,
+    }
+}
+
+/// AES-GCM key minting (NIST SP 800-38D).
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
+/// and 16-byte tags.
+interface aes-gcm {
+    use types.{error};
+    use aead.{aead-key};
+    use aes.{aes-variant};
+
+    /// Import raw key material as the declared AES variant.
+    ///
+    /// `variant` is deliberately redundant with `raw`'s length: material of
+    /// any other length fails with `error.invalid-key`, so malformed
+    /// material (for example, key bytes accidentally left hex-encoded)
+    /// cannot silently mint a key of an unintended size. An implementation
+    /// not serving the variant (for example, browsers decline AES-192)
+    /// fails with `error.unsupported`.
+    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random key of the given AES variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
+}
+
+/// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
+/// SP 800-38D §8.2.2 RBG-based IV construction (96 random bits per seal).
+///
+/// Sealed messages are `iv ‖ ciphertext ‖ tag` (12-byte IV, 16-byte tag).
+///
+/// A key's nonce budget is 2^32 `seal` invocations (§8.2.2's
+/// repeat-probability bound). Implementations SHOULD enforce it with
+/// `error.key-exhausted`; a FIPS 140-3 profile MUST. For workloads that
+/// could approach the bound, prefer `xchacha20-poly1305-internal-nonce`.
+///
+/// This interface is deliberately separate from `aes-gcm` (caller-nonce
+/// minting) so a security profile can serve one nonce discipline without
+/// the other at `wac plug` time — e.g. a FIPS 140-3 approved-mode provider
+/// exports this interface but not `aes-gcm`, whose caller-supplied
+/// encryption IVs SP 800-38D §8 forbids in approved mode.
+interface aes-gcm-internal-nonce {
+    use types.{error};
+    use aead-internal-nonce.{internal-nonce-key};
+    use aes.{aes-variant};
+
+    /// Import raw key material as an internal-nonce AES-GCM key of the
+    /// declared variant (see `aes-gcm.import-key` for the
+    /// variant/`raw`-length contract, which applies identically here).
+    ///
+    /// The nonce-uniqueness guarantee is per key *as managed by this
+    /// implementation*: importing the same material into multiple
+    /// implementations divides the nonce budget among them blindly. An
+    /// implementation MAY reject imported material per its security policy
+    /// (for example, a profile that cannot establish uniqueness for
+    /// externally sourced material) with `error.invalid-key` or
+    /// `error.unsupported`; prefer `generate-key` where interop does not
+    /// require import.
+    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+
+    /// Generate a fresh random internal-nonce AES-GCM key of the declared
+    /// variant. Fails with `error.unsupported` if this implementation does
+    /// not serve the variant.
+    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<internal-nonce-key, error>;
+}
