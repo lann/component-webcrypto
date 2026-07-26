@@ -13,11 +13,6 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## Implementation hardening
 
-- **Zeroize key material.** Key structs in `wasmtime-impl` and `guest-impl`
-  hold raw material in plain `Vec<u8>`, clone it on export, and drop it
-  without scrubbing. Adopt `zeroize` (`ZeroizeOnDrop`) on the key types;
-  consider plaintext buffers too. Retrofitting gets harder once the structs
-  are public API.
 - **jco internals coupling.** `webcrypto.js` throws bare `{ tag: ... }`
   literals and sniffs three stream shapes in `collectByteStream`; both depend
   on undocumented jco conventions. Isolate behind small helpers and note the

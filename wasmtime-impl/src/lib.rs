@@ -96,8 +96,8 @@ impl HasData for WasiWebcrypto {
 /// `%export` only — the material necessarily lives host-side either way.
 pub struct MacKey {
     /// The raw key material, retained for `sign`/`verify` and (when
-    /// extractable) `%export`.
-    pub(crate) raw: Vec<u8>,
+    /// extractable) `%export`; zeroized on drop.
+    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
     /// The SHA-2 variant this key is bound to.
     pub(crate) variant: crate::host::Sha2,
     /// Whether `%export` may return the raw material.
@@ -112,8 +112,9 @@ pub struct MacKey {
 pub struct AeadKey {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
     pub(crate) cipher: crate::host::AeadCipher,
-    /// The raw key material, retained for `%export` on extractable keys.
-    pub(crate) raw: Vec<u8>,
+    /// The raw key material, retained for `%export` on extractable keys;
+    /// zeroized on drop.
+    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
     /// Whether `%export` may return the raw material.
     pub(crate) extractable: bool,
 }
@@ -127,8 +128,9 @@ pub struct AeadKey {
 pub struct InternalNonceKey {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
     pub(crate) cipher: crate::host::AeadCipher,
-    /// The raw key material, retained for `export-key` on extractable keys.
-    pub(crate) raw: Vec<u8>,
+    /// The raw key material, retained for `export-key` on extractable keys;
+    /// zeroized on drop.
+    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
     /// Whether `export-key` may return the raw material.
     pub(crate) extractable: bool,
     /// The number of `seal` invocations so far, counted against the
@@ -166,6 +168,62 @@ pub struct SigningKey {
     pub(crate) private: crate::host::SigPrivate,
     /// Whether `%export` may return the private material.
     pub(crate) extractable: bool,
+}
+
+// Debug is implemented by hand for every key-holding type so that key
+// material can never reach logs: only the algorithm binding and
+// extractability are printed, with the material redacted. (Deriving `Debug`
+// on these types would print `raw`/`private` bytes.)
+
+impl std::fmt::Debug for MacKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MacKey")
+            .field("variant", &self.variant)
+            .field("extractable", &self.extractable)
+            .field("raw", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for AeadKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AeadKey")
+            .field("algorithm", &self.cipher.name())
+            .field("extractable", &self.extractable)
+            .field("raw", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for InternalNonceKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InternalNonceKey")
+            .field("algorithm", &self.cipher.name())
+            .field("extractable", &self.extractable)
+            .field("sealed", &self.sealed)
+            .field("raw", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for SigningKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SigningKey")
+            .field("algorithm", &self.private.name())
+            .field("extractable", &self.extractable)
+            .field("private", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for VerifyingKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Public material is not secret, but printing it wholesale is
+        // rarely useful; identify the key by algorithm only.
+        f.debug_struct("VerifyingKey")
+            .field("algorithm", &self.public.name())
+            .finish()
+    }
 }
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate — `types`,

@@ -20,9 +20,15 @@ sha2 = "0.10"
 hmac = "0.12"
 subtle = "2"
 aes-gcm = "0.10"
+# Zeroize the AES round-key schedule on drop (the `aes-gcm` cipher owns an
+# expanded schedule; `chacha20poly1305` and the signature crates already
+# zeroize their key material by default).
+aes = { version = "0.8", features = ["zeroize"] }
 chacha20poly1305 = "0.10"
 # Key generation, via the target's WASI random backend.
 getrandom = "0.3"
+# Scrub raw key material on drop.
+zeroize = "1"
 # Signature algorithms. Ed25519 signing is constant-time by construction
 # (class A/B — see the README's classification), so both halves are
 # exported; the ECDSA crates back *verification only* (signing is class D

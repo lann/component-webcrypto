@@ -146,7 +146,7 @@ impl mac::Host for WasiWebcryptoCtxView<'_> {}
 /// WIT `sha2-variant` cases this implementation serves appear here: the
 /// truncated variants are declined at minting (see the WIT `sha2-variant`
 /// doc).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Sha2 {
     Sha256,
     Sha384,
@@ -282,7 +282,7 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
             let view = access.get();
             let key = view.table.get(&self_)?;
             Ok(if key.extractable {
-                Ok(key.raw.clone())
+                Ok(key.raw.to_vec())
             } else {
                 Err(Error::NotExtractable)
             })
@@ -317,7 +317,7 @@ pub(crate) enum AeadCipher {
 
 impl AeadCipher {
     /// The algorithm name reported by `aead-key.algorithm-name`.
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Aes128Gcm(_) | Self::Aes256Gcm(_) => AES_GCM_NAME,
             Self::ChaCha20Poly1305(_) => CHACHA20_POLY1305_NAME,
@@ -499,7 +499,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
             let view = access.get();
             let key = view.table.get(&self_)?;
             Ok(if key.extractable {
-                Ok(key.raw.clone())
+                Ok(key.raw.to_vec())
             } else {
                 Err(Error::NotExtractable)
             })
@@ -599,7 +599,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             )));
         }
         let key = MacKey {
-            raw,
+            raw: zeroize::Zeroizing::new(raw),
             variant,
             extractable,
         };
@@ -619,7 +619,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
         let key = MacKey {
-            raw,
+            raw: zeroize::Zeroizing::new(raw),
             variant,
             extractable,
         };
@@ -667,7 +667,7 @@ fn new_aes_gcm_key(
     };
     Ok(AeadKey {
         cipher,
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
     })
 }
@@ -739,7 +739,7 @@ fn new_chacha_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<AeadKe
     );
     Ok(AeadKey {
         cipher,
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
     })
 }
@@ -752,7 +752,7 @@ fn new_xchacha_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<AeadK
     );
     Ok(AeadKey {
         cipher,
-        raw,
+        raw: zeroize::Zeroizing::new(raw),
         extractable,
     })
 }
@@ -929,7 +929,7 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
             let view = access.get();
             let key = view.table.get(&self_)?;
             Ok(if key.extractable {
-                Ok(key.raw.clone())
+                Ok(key.raw.to_vec())
             } else {
                 Err(Error::NotExtractable)
             })
@@ -1043,7 +1043,7 @@ pub(crate) enum SigPublic {
 
 impl SigPublic {
     /// The registry algorithm name (`verifying-key.algorithm-name`).
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Ed25519(_) => ED25519_NAME,
             Self::EcdsaP256(_) | Self::EcdsaP384(_) => ECDSA_NAME,
@@ -1110,6 +1110,14 @@ pub(crate) enum SigPrivate {
 }
 
 impl SigPrivate {
+    /// The registry algorithm name of this key's algorithm family.
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Ed25519(_) => ED25519_NAME,
+            Self::EcdsaP256(_) | Self::EcdsaP384(_) => ECDSA_NAME,
+        }
+    }
+
     /// The corresponding [`SigPublic`].
     fn public(&self) -> SigPublic {
         match self {
@@ -1450,8 +1458,24 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
 
 #[cfg(test)]
 mod tests {
-    use super::ByteCollector;
+    use super::{ByteCollector, Sha2};
+    use crate::MacKey;
     use futures::channel::oneshot;
+
+    /// `Debug` on key-holding types never prints key material: the bytes
+    /// are redacted, so a key reaching a log line cannot leak.
+    #[test]
+    fn debug_redacts_key_material() {
+        let key = MacKey {
+            raw: zeroize::Zeroizing::new(vec![0xAB; 32]),
+            variant: Sha2::Sha256,
+            extractable: true,
+        };
+        let rendered = format!("{key:?}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+        assert!(!rendered.contains("171"), "{rendered}"); // 0xAB
+        assert!(!rendered.to_lowercase().contains("ab, ab"), "{rendered}");
+    }
 
     /// Dropping the collector (Wasmtime's end-of-stream notification)
     /// delivers the collected buffer.
