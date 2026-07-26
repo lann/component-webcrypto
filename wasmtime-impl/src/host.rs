@@ -16,10 +16,16 @@ use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamRead
 use wasmtime::{Result, StoreContextMut};
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
+use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
-use crate::bindings::webcrypto::{aes_gcm as aes_gcm_iface, hmac_sha2 as hmac_sha2_iface};
-use crate::{AeadKey, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME};
+use crate::bindings::webcrypto::{
+    aes_gcm as aes_gcm_iface, bytes as bytes_iface, digest as digest_iface,
+    hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
+};
+use crate::{
+    AeadKey, Digest, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME,
+};
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
 /// WIT contract (12-byte nonces, 16-byte tags).
@@ -28,6 +34,17 @@ const GCM_NONCE_LEN: usize = 12;
 // --- types -------------------------------------------------------------------
 
 impl types::Host for WasiWebcryptoCtxView<'_> {}
+
+// --- bytes ---------------------------------------------------------------------
+
+impl bytes_iface::Host for WasiWebcryptoCtxView<'_> {
+    fn constant_time_equal(&mut self, a: Vec<u8>, b: Vec<u8>) -> Result<bool> {
+        use subtle::ConstantTimeEq as _;
+        // `ct_eq` on slices short-circuits only on length (which is not
+        // secret); the contents are compared in constant time.
+        Ok(a.ct_eq(&b).into())
+    }
+}
 
 // --- stream plumbing ---------------------------------------------------------
 
@@ -113,13 +130,13 @@ impl mac::Host for WasiWebcryptoCtxView<'_> {}
 /// truncated variants are declined at minting (see the WIT `sha2-variant`
 /// doc).
 #[derive(Clone, Copy)]
-pub(crate) enum HmacVariant {
+pub(crate) enum Sha2 {
     Sha256,
     Sha384,
     Sha512,
 }
 
-impl HmacVariant {
+impl Sha2 {
     /// The hash name (WebCrypto's `HmacKeyAlgorithm.hash`).
     fn hash_name(self) -> &'static str {
         match self {
@@ -135,6 +152,18 @@ impl HmacVariant {
         match self {
             Self::Sha256 => 64,
             Self::Sha384 | Self::Sha512 => 128,
+        }
+    }
+
+    /// One-shot digest of `data`.
+    fn digest(self, data: &[u8]) -> Vec<u8> {
+        fn hash<D: sha2::Digest>(data: &[u8]) -> Vec<u8> {
+            D::digest(data).to_vec()
+        }
+        match self {
+            Self::Sha256 => hash::<sha2::Sha256>(data),
+            Self::Sha384 => hash::<sha2::Sha384>(data),
+            Self::Sha512 => hash::<sha2::Sha512>(data),
         }
     }
 
@@ -404,19 +433,66 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
     }
 }
 
+// --- digest --------------------------------------------------------------------
+
+impl digest_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostDigest for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<Digest>) -> Result<String> {
+        Ok(self.table.get(&self_)?.variant.hash_name().to_string())
+    }
+}
+
+impl<T: Send> HostDigestWithStore<T> for WasiWebcrypto {
+    async fn compute(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<Digest>,
+        data: StreamReader<u8>,
+    ) -> Result<Vec<u8>> {
+        let variant = accessor
+            .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.variant))?;
+        // Buffer the whole stream, then hash it; the result is
+        // chunking-invariant either way.
+        let bytes = drain_stream(accessor, data).await?;
+        Ok(variant.digest(&bytes))
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<Digest>) -> Result<()> {
+        accessor.with(|mut access| {
+            access.get().table.delete(rep)?;
+            Ok(())
+        })
+    }
+}
+
+// --- sha2 (digest minting) ---------------------------------------------------
+
+impl sha2_iface::Host for WasiWebcryptoCtxView<'_> {
+    fn make_digest(
+        &mut self,
+        variant: sha2_iface::Sha2Variant,
+    ) -> Result<std::result::Result<Resource<Digest>, Error>> {
+        let variant = match served_sha2(variant) {
+            Ok(variant) => variant,
+            Err(err) => return Ok(Err(err)),
+        };
+        Ok(Ok(self.table.push(Digest { variant })?))
+    }
+}
+
 // --- hmac-sha2 (key minting) -----------------------------------------------------
 
 impl hmac_sha2_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-/// The served [`HmacVariant`] for a WIT `sha2-variant`, or `unsupported` for
-/// one this implementation declines (the truncated variants; see the WIT
-/// `sha2-variant` doc).
-fn hmac_variant(variant: hmac_sha2_iface::Sha2Variant) -> std::result::Result<HmacVariant, Error> {
-    use hmac_sha2_iface::Sha2Variant;
+/// The served [`Sha2`] for a WIT `sha2-variant`, or `unsupported` for one
+/// this implementation declines (the truncated variants; see the WIT
+/// `sha2-variant` doc). Shared by the `sha2` and `hmac-sha2` minting paths.
+fn served_sha2(variant: sha2_iface::Sha2Variant) -> std::result::Result<Sha2, Error> {
+    use sha2_iface::Sha2Variant;
     match variant {
-        Sha2Variant::Sha256 => Ok(HmacVariant::Sha256),
-        Sha2Variant::Sha384 => Ok(HmacVariant::Sha384),
-        Sha2Variant::Sha512 => Ok(HmacVariant::Sha512),
+        Sha2Variant::Sha256 => Ok(Sha2::Sha256),
+        Sha2Variant::Sha384 => Ok(Sha2::Sha384),
+        Sha2Variant::Sha512 => Ok(Sha2::Sha512),
         Sha2Variant::Sha224 | Sha2Variant::Sha512224 | Sha2Variant::Sha512256 => Err(
             Error::Unsupported(format!("{variant:?} is not served by this implementation")),
         ),
@@ -430,7 +506,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let variant = match hmac_variant(variant) {
+        let variant = match served_sha2(variant) {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err)),
         };
@@ -454,7 +530,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         variant: hmac_sha2_iface::Sha2Variant,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let variant = match hmac_variant(variant) {
+        let variant = match served_sha2(variant) {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err)),
         };

@@ -1,5 +1,6 @@
 // Host implementation of the `lann:webcrypto` imports (`mac`, `aead`,
-// `hmac-sha2`, `aes-gcm`) for jco-transpiled components.
+// `digest`, `bytes`, `hmac-sha2`, `aes-gcm`, `sha2`) for jco-transpiled
+// components.
 //
 // This is the "browser-first" host: it is written against the standard Web
 // Crypto API only — `globalThis.crypto.subtle` and
@@ -7,12 +8,12 @@
 // browser. No `node:crypto` imports and no Node-only APIs are used; Node
 // provides the same globals natively.
 //
-// `jco --map` wires this module in as the component's imports: the `mac` and
-// `aead` resource interfaces map to the module itself (the `MacKey` and
-// `AeadKey` class exports), while the key-minting interfaces map to the
-// `hmacSha2` and `aesGcm` named exports (`--map '…=./webcrypto.js#hmacSha2'`)
-// since both mint via `import-key`/`generate-key` and the names would
-// otherwise collide. Errors are surfaced to the guest by throwing the WIT
+// `jco --map` wires this module in as the component's imports: the `mac`,
+// `aead`, and `digest` resource interfaces map to the module itself (the
+// `MacKey`, `AeadKey`, and `Digest` class exports), while the minting and
+// utility interfaces map to named exports (`--map '…=./webcrypto.js#hmacSha2'`,
+// `#aesGcm`, `#sha2`, `#bytes`) since the minting names would otherwise
+// collide. Errors are surfaced to the guest by throwing the WIT
 // `error` variant value (for example `{ tag: 'invalid-key', val }` or
 // `{ tag: 'authentication-failed' }`), which jco lifts into the
 // `result<_, error>` the WIT declares.
@@ -245,6 +246,68 @@ async function generateHmacKey(variant, extractable) {
 
 /** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
 export const hmacSha2 = { importKey: importHmacKey, generateKey: generateHmacKey };
+
+/**
+ * The `digest` resource: a digest algorithm bound at creation. Holds only
+ * the variant's hash name; `compute` is one-shot and stateless per call
+ * (`subtle.digest` exactly), so the resource is reusable. Instances are
+ * minted only by the `sha2` interface function below.
+ */
+export class Digest {
+  #hash;
+
+  /** @param {string} hash */
+  constructor(hash) {
+    this.#hash = hash;
+  }
+
+  /**
+   * Digest an entire byte stream, resolving once the stream is fully
+   * drained.
+   * @param {AsyncIterable<unknown> | ReadableStream} data
+   */
+  async compute(data) {
+    const message = await collectByteStream(data);
+    return new Uint8Array(await subtle.digest(this.#hash, message));
+  }
+
+  /** The registry name of the algorithm, e.g. `"SHA-256"`. */
+  algorithmName() {
+    return this.#hash;
+  }
+}
+
+/**
+ * A `digest` bound to the declared SHA-2 variant. A variant this
+ * implementation declines throws `{ tag: 'unsupported', val }`.
+ * @param {string} variant
+ */
+function makeDigest(variant) {
+  return new Digest(sha2Variant(variant).hash);
+}
+
+/** The `lann:webcrypto/sha2` interface (`--map '…#sha2'`). */
+export const sha2 = { makeDigest };
+
+/**
+ * Whether `a` and `b` are equal, in time independent of their contents
+ * (necessarily dependent on their lengths). WebCrypto has no comparison
+ * primitive and `timingSafeEqual` is Node-only, so this is a hand-rolled
+ * accumulate-then-test XOR loop with no data-dependent branches.
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ */
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff === 0;
+}
+
+/** The `lann:webcrypto/bytes` interface (`--map '…#bytes'`). */
+export const bytes = { constantTimeEqual };
 
 /**
  * The raw key length in bytes for each served `aes-variant` enum case (jco

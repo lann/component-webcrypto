@@ -1,5 +1,6 @@
-//! Translation of the vendored Wycheproof vectors into the `lann:webcrypto`
-//! contract — the authoritative encoding of the policy documented in
+//! Translation of the vendored test vectors (Wycheproof JSON for HMAC and
+//! GCM, NIST CAVP `.rsp` for SHA-2) into the `lann:webcrypto` contract — the
+//! authoritative encoding of the policy documented in
 //! `conformance/vectors/README.md`:
 //!
 //! | Vector property | Our expectation |
@@ -11,6 +12,7 @@
 //! | HMAC, tagSize ≠ 256 | Skipped (truncated tags are an application concern). |
 //! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
 //! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
+//! | SHA-2 ShortMsg case | `compute` = `MD` (every case; there are no invalid digest vectors). |
 //!
 //! Every executed vector is emitted once per chunking schedule; a vector whose
 //! stream inputs are all empty runs only `whole` (the other schedules are
@@ -115,6 +117,51 @@ pub struct GcmCase {
 
 const HMAC_VECTORS: &str = include_str!("../../vectors/hmac_sha256_test.json");
 const GCM_VECTORS: &str = include_str!("../../vectors/aes_gcm_test.json");
+const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
+    (
+        Sha2Alg::Sha256,
+        include_str!("../../vectors/SHA256ShortMsg.rsp"),
+    ),
+    (
+        Sha2Alg::Sha384,
+        include_str!("../../vectors/SHA384ShortMsg.rsp"),
+    ),
+    (
+        Sha2Alg::Sha512,
+        include_str!("../../vectors/SHA512ShortMsg.rsp"),
+    ),
+];
+
+/// A served SHA-2 algorithm, as named in digest vector ids.
+#[derive(Clone, Copy)]
+pub enum Sha2Alg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl Sha2Alg {
+    /// The algorithm's name as used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            Sha2Alg::Sha256 => "sha256",
+            Sha2Alg::Sha384 => "sha384",
+            Sha2Alg::Sha512 => "sha512",
+        }
+    }
+}
+
+/// One executed SHA-2 digest vector under one schedule: `compute(msg)` must
+/// equal `md`.
+pub struct Sha2Case {
+    pub alg: Sha2Alg,
+    /// The vector's `Len` field (the message length in bits), which
+    /// identifies the case within its file.
+    pub len_bits: u64,
+    pub schedule: Schedule,
+    pub msg: Vec<u8>,
+    pub md: Vec<u8>,
+}
 
 #[derive(Deserialize)]
 struct VectorFile<G> {
@@ -241,6 +288,49 @@ pub fn gcm_cases() -> Vec<GcmCase> {
                     ct_tag: ct_tag.clone(),
                     expectation,
                 });
+            }
+        }
+    }
+    cases
+}
+
+/// The normalized SHA-2 digest corpus: every NIST CAVP ShortMsg vector,
+/// expanded over its schedule set. The `.rsp` format is line-oriented
+/// `Field = value` triples (`Len` in bits, `Msg`, `MD`); a zero-length case
+/// spells its message `00`, so `Msg` is truncated to `Len` bits.
+pub fn sha2_cases() -> Vec<Sha2Case> {
+    let mut cases = Vec::new();
+    for (alg, text) in SHA2_VECTORS {
+        let mut len_bits: Option<u64> = None;
+        let mut msg: Option<Vec<u8>> = None;
+        for line in text.lines() {
+            let Some((field, value)) = line.split_once('=') else {
+                continue;
+            };
+            let (field, value) = (field.trim(), value.trim());
+            match field {
+                "Len" => {
+                    len_bits = Some(value.parse().unwrap_or_else(|err| {
+                        panic!("{} vector Len {value:?} is not a number: {err}", alg.name())
+                    }));
+                }
+                "Msg" => msg = Some(unhex(&format!("{} msg", alg.name()), value)),
+                "MD" => {
+                    let len_bits = len_bits.take().expect("MD before Len");
+                    let mut msg = msg.take().expect("MD before Msg");
+                    msg.truncate((len_bits / 8) as usize);
+                    let md = unhex(&format!("{} len{len_bits} md", alg.name()), value);
+                    for schedule in schedules(msg.len()) {
+                        cases.push(Sha2Case {
+                            alg,
+                            len_bits,
+                            schedule,
+                            msg: msg.clone(),
+                            md: md.clone(),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
     }

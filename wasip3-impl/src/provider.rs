@@ -16,8 +16,11 @@ use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
 
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
-use crate::exports::lann::webcrypto::hmac_sha2::{Guest as HmacSha2Guest, Sha2Variant};
+use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
+use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
+use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
+use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 
 /// The `algorithm-name` reported by HMAC keys and computations
@@ -73,7 +76,7 @@ impl MacGuest for Component {
 /// An exported `mac-key`: raw HMAC key material bound to a SHA-2 variant.
 pub struct MacKey {
     raw: Vec<u8>,
-    variant: HmacVariant,
+    variant: Sha2,
     extractable: bool,
 }
 
@@ -82,13 +85,13 @@ pub struct MacKey {
 /// truncated variants are declined at minting (see the WIT `sha2-variant`
 /// doc).
 #[derive(Clone, Copy)]
-enum HmacVariant {
+enum Sha2 {
     Sha256,
     Sha384,
     Sha512,
 }
 
-impl HmacVariant {
+impl Sha2 {
     /// The hash name (WebCrypto's `HmacKeyAlgorithm.hash`).
     fn hash_name(self) -> &'static str {
         match self {
@@ -104,6 +107,18 @@ impl HmacVariant {
         match self {
             Self::Sha256 => 64,
             Self::Sha384 | Self::Sha512 => 128,
+        }
+    }
+
+    /// One-shot digest of `data`.
+    fn digest(self, data: &[u8]) -> Vec<u8> {
+        fn hash<D: sha2::Digest>(data: &[u8]) -> Vec<u8> {
+            D::digest(data).to_vec()
+        }
+        match self {
+            Self::Sha256 => hash::<sha2::Sha256>(data),
+            Self::Sha384 => hash::<sha2::Sha384>(data),
+            Self::Sha512 => hash::<sha2::Sha512>(data),
         }
     }
 
@@ -310,16 +325,62 @@ impl GuestAeadKey for AeadKey {
     }
 }
 
+// --- digest --------------------------------------------------------------------
+
+impl DigestGuest for Component {
+    type Digest = Digest;
+}
+
+/// An exported `digest`: no key material, just the SHA-2 variant it is
+/// bound to. `compute` is one-shot and stateless per call, so the resource
+/// is reusable.
+pub struct Digest {
+    variant: Sha2,
+}
+
+impl GuestDigest for Digest {
+    async fn compute(&self, data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
+        // Buffer the whole stream, then hash it; the result is
+        // chunking-invariant either way.
+        let bytes = drain_stream(data).await;
+        self.variant.digest(&bytes)
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.variant.hash_name().to_string()
+    }
+}
+
+// --- bytes ---------------------------------------------------------------------
+
+impl BytesGuest for Component {
+    fn constant_time_equal(a: Vec<u8>, b: Vec<u8>) -> bool {
+        use subtle::ConstantTimeEq as _;
+        // `ct_eq` on slices short-circuits only on length (which is not
+        // secret); the contents are compared in constant time.
+        a.ct_eq(&b).into()
+    }
+}
+
+// --- sha2 (digest minting) ---------------------------------------------------
+
+impl Sha2Guest for Component {
+    fn make_digest(variant: Sha2Variant) -> Result<digest::Digest, Error> {
+        let variant = served_sha2(variant)?;
+        Ok(digest::Digest::new(Digest { variant }))
+    }
+}
+
 // --- hmac-sha2 (key minting) -----------------------------------------------------
 
-/// The served [`HmacVariant`] for a WIT `sha2-variant`, or `unsupported` for
-/// one this implementation declines (the truncated variants; see the WIT
-/// `sha2-variant` doc).
-fn hmac_variant(variant: Sha2Variant) -> Result<HmacVariant, Error> {
+/// The served [`Sha2`] for a WIT `sha2-variant`, or `unsupported` for one
+/// this implementation declines (the truncated variants; see the WIT
+/// `sha2-variant` doc). Shared by the `sha2` and `hmac-sha2` minting paths.
+fn served_sha2(variant: Sha2Variant) -> Result<Sha2, Error> {
     match variant {
-        Sha2Variant::Sha256 => Ok(HmacVariant::Sha256),
-        Sha2Variant::Sha384 => Ok(HmacVariant::Sha384),
-        Sha2Variant::Sha512 => Ok(HmacVariant::Sha512),
+        Sha2Variant::Sha256 => Ok(Sha2::Sha256),
+        Sha2Variant::Sha384 => Ok(Sha2::Sha384),
+        Sha2Variant::Sha512 => Ok(Sha2::Sha512),
         Sha2Variant::Sha224 | Sha2Variant::Sha512224 | Sha2Variant::Sha512256 => Err(
             Error::Unsupported(format!("{variant:?} is not served by this implementation")),
         ),
@@ -332,7 +393,7 @@ impl HmacSha2Guest for Component {
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<mac::MacKey, Error> {
-        let variant = hmac_variant(variant)?;
+        let variant = served_sha2(variant)?;
         // RFC 2104 accepts any non-empty key length (longer-than-block keys
         // are hashed first); an empty key is rejected as `invalid-key`.
         if raw.is_empty() {
@@ -348,7 +409,7 @@ impl HmacSha2Guest for Component {
     }
 
     async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<mac::MacKey, Error> {
-        let variant = hmac_variant(variant)?;
+        let variant = served_sha2(variant)?;
         let mut raw = vec![0u8; variant.block_len()];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
         Ok(mac::MacKey::new(MacKey {

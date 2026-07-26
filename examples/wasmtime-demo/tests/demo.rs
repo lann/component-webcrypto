@@ -62,7 +62,7 @@ async fn crypto_demo_all_checks_pass() {
         .await
         .expect("run_demo failed");
     assert!(
-        summary.contains("13 checks passed"),
+        summary.contains("16 checks passed"),
         "unexpected summary: {summary}"
     );
 }

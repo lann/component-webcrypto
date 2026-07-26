@@ -185,14 +185,60 @@ interface aead {
     }
 }
 
-/// HMAC key minting (RFC 2104) over the SHA-2 hash family (FIPS 180-4).
+/// The `digest` primitive kind: cryptographic hash functions.
 ///
-/// Adding an algorithm touches only an interface like this one: the generic
-/// `mac` surface is closed. Keys returned here drive `mac.mac-key.sign` and
-/// `verify`.
-interface hmac-sha2 {
+/// `mac` minus keys: there is no key material, so no extractability and no
+/// export. The stateful object is the `digest` resource — an algorithm-bound
+/// capability minted by per-algorithm interfaces (such as `sha2`) — so a
+/// component whose world imports only this interface can use any digest it
+/// is granted but cannot choose algorithms.
+interface digest {
+    /// A digest algorithm, bound at creation.
+    ///
+    /// `compute` is one-shot and stateless per call (the resource is
+    /// reusable), mirroring `crypto.subtle.digest`: there is deliberately no
+    /// incremental computation resource, so misuse of in-progress state is
+    /// unrepresentable. The byte `stream` is the only ingestion path and
+    /// also the incremental one; the result is chunking-invariant.
+    ///
+    /// A digest authenticates nothing by itself. There is deliberately no
+    /// `verify` here: checking untrusted data against a known digest is an
+    /// *integrity* comparison, done with `bytes.constant-time-equal` on
+    /// `compute`'s result — when authenticity is needed, use a `mac-key`.
+    resource digest {
+        /// Digest an entire byte stream. Resolves once the stream is fully
+        /// drained (its writer dropped).
+        compute: async func(data: stream<u8>) -> list<u8>;
+
+        /// The registry name of the algorithm this resource is bound to,
+        /// e.g. `"SHA-256"` (as `crypto.subtle.digest` spells it). For a
+        /// digest the algorithm *is* the hash, so there is no separate
+        /// `algorithm-hash` getter.
+        algorithm-name: func() -> string;
+    }
+}
+
+/// Utility operations on byte strings.
+interface bytes {
+    /// Whether `a` and `b` are equal, in time independent of their
+    /// *contents* (necessarily dependent on their lengths). Use this to
+    /// compare a computed digest or tag against an untrusted expected value
+    /// without creating a timing oracle.
+    ///
+    /// Returns a `bool`, not a `result`: unlike `mac-key.verify`, a byte
+    /// comparison is not an authentication statement, and the caller decides
+    /// what equality means.
+    constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
+}
+
+/// SHA-2 digest minting (FIPS 180-4), and the home of the `sha2-variant`
+/// enum every SHA-2-parameterized interface shares (`hmac-sha2` uses it
+/// too).
+///
+/// Digests returned here drive `digest.digest.compute`.
+interface sha2 {
     use types.{error};
-    use mac.{mac-key};
+    use digest.{digest};
 
     /// The SHA-2 variants: FIPS 180-4 closes this set, so it is an enum.
     /// (Each algorithm interface names its closed set of parameterizations
@@ -211,6 +257,22 @@ interface hmac-sha2 {
         /// Not widely supported (see `sha224`).
         sha512-256,
     }
+
+    /// A `digest` bound to the declared SHA-2 variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    make-digest: func(%variant: sha2-variant) -> result<digest, error>;
+}
+
+/// HMAC key minting (RFC 2104) over the SHA-2 hash family (FIPS 180-4).
+///
+/// Adding an algorithm touches only an interface like this one: the generic
+/// `mac` surface is closed. Keys returned here drive `mac.mac-key.sign` and
+/// `verify`.
+interface hmac-sha2 {
+    use types.{error};
+    use mac.{mac-key};
+    use sha2.{sha2-variant};
 
     /// Import raw key material as an HMAC key over the declared SHA-2
     /// variant. Empty keys are rejected with `error.invalid-key`.

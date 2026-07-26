@@ -24,7 +24,7 @@ mod util;
 mod vectors;
 
 use exports::conformance::webcrypto::tests::{Guest, TestResult};
-use translate::{GcmCase, HmacCase};
+use translate::{GcmCase, HmacCase, Sha2Case};
 
 struct Component;
 
@@ -32,12 +32,14 @@ struct Component;
 struct Corpus {
     hmac: Vec<HmacCase>,
     gcm: Vec<GcmCase>,
+    sha2: Vec<Sha2Case>,
 }
 
 /// One corpus entry: a vector case or a probe index.
 enum Test<'a> {
     Hmac(&'a HmacCase),
     Gcm(&'a GcmCase),
+    Sha2(&'a Sha2Case),
     Probe(usize),
 }
 
@@ -46,11 +48,12 @@ impl Corpus {
         Corpus {
             hmac: translate::hmac_cases(),
             gcm: translate::gcm_cases(),
+            sha2: translate::sha2_cases(),
         }
     }
 
     fn len(&self) -> usize {
-        self.hmac.len() + self.gcm.len() + probes::NAMES.len()
+        self.hmac.len() + self.gcm.len() + self.sha2.len() + probes::NAMES.len()
     }
 
     /// The test at corpus index `index`.
@@ -64,6 +67,10 @@ impl Corpus {
             return Some(Test::Gcm(&self.gcm[index]));
         }
         index -= self.gcm.len();
+        if index < self.sha2.len() {
+            return Some(Test::Sha2(&self.sha2[index]));
+        }
+        index -= self.sha2.len();
         (index < probes::NAMES.len()).then_some(Test::Probe(index))
     }
 }
@@ -81,6 +88,12 @@ impl Test<'_> {
                 case.tc_id,
                 case.schedule.name()
             ),
+            Test::Sha2(case) => format!(
+                "sha2/nist-cavp/{}-len{}/{}",
+                case.alg.name(),
+                case.len_bits,
+                case.schedule.name()
+            ),
             Test::Probe(index) => format!("probe/{}", probes::NAMES[*index]),
         }
     }
@@ -89,6 +102,7 @@ impl Test<'_> {
         let outcome = match self {
             Test::Hmac(case) => vectors::run_hmac_case(case).await,
             Test::Gcm(case) => vectors::run_gcm_case(case).await,
+            Test::Sha2(case) => vectors::run_sha2_case(case).await,
             Test::Probe(index) => probes::run_one(*index).await,
         };
         to_result(self.id(), outcome)

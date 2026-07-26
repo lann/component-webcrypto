@@ -4,7 +4,7 @@
 // Run with:  npm run build:component && npm run transpile && npm test
 import { demo } from "../generated/crypto-demo.js";
 
-const EXPECTED = "13 checks passed";
+const EXPECTED = "16 checks passed";
 
 async function main() {
   // jco represents `result<string, string>` by returning the ok value and

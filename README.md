@@ -12,10 +12,10 @@ following the same architecture.
 The package ([`wit/webcrypto.wit`](wit/webcrypto.wit)) is layered by *primitive
 kind*, not by algorithm:
 
-- **Generic primitive interfaces** (`mac`, `aead`; later `digest`,
+- **Generic primitive interfaces** (`mac`, `aead`, `digest`; later
   `stream-aead`, …) each own the algorithm-agnostic resources. Adding an
   algorithm never touches them.
-- **Algorithm interfaces** (`hmac`, `aes-gcm`) contain only *key minting*
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `sha2`) contain only *key minting*
   (`import-*`/`generate-*`). Everything else hangs off the key resource, so a
   key can never be used with the wrong algorithm.
 - **Keys are resources — capabilities.** A world importing only `mac` can use
@@ -40,13 +40,14 @@ kind*, not by algorithm:
   `error` variant carries no misuse cases — incrementality comes from the
   streams, not from resource state.
 
-Current algorithms: **HMAC-SHA-2** (SHA-256/384/512) and **AES-GCM**
-(128/256-bit keys, 12-byte nonces, 16-byte tags, `ciphertext ‖ tag` — the
-`crypto.subtle` wire format, which RustCrypto's `aes-gcm` produces
-identically). The variant enums also declare cases no implementation here
-serves (`aes192`, the truncated SHA-2 variants) — each algorithm's spec
-closes its set — which fail `unsupported`; a composition needing one must
-supply its own provider.
+Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
+(SHA-256/384/512), and **AES-GCM** (128/256-bit keys, 12-byte nonces,
+16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire format, which
+RustCrypto's `aes-gcm` produces identically), plus the
+`bytes.constant-time-equal` utility. The variant enums also declare cases no
+implementation here serves (`aes192`, the truncated SHA-2 variants) — each
+algorithm's spec closes its set — which fail `unsupported`; a composition
+needing one must supply its own provider.
 
 ## Layout
 
@@ -97,8 +98,9 @@ just ci                      # everything CI runs
 ```
 
 All three implementations run identical guest components. The conformance
-suite (Wycheproof HMAC-SHA-256 and AES-GCM vectors under multiple
-stream-chunking schedules, plus API-contract probes) gates the wasmtime and
+suite (Wycheproof HMAC-SHA-256 and AES-GCM vectors and NIST CAVP SHA-2
+vectors under multiple stream-chunking schedules, plus API-contract probes)
+gates the wasmtime and
 wasip3-guest targets; the `crypto-demo` guest additionally covers the jco
 host end to end.
 

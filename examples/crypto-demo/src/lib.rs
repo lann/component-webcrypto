@@ -1,5 +1,5 @@
 //! `crypto-demo`: an example WebAssembly component that exercises the
-//! `lann:webcrypto` `mac` and `aead` primitive kinds end to end.
+//! `lann:webcrypto` `mac`, `aead`, and `digest` primitive kinds end to end.
 //!
 //! The component is host-agnostic: the same binary runs unchanged under the
 //! Wasmtime (RustCrypto) host and the jco (browser WebCrypto) host, which is
@@ -9,6 +9,8 @@
 //!     signed both as one stream write and as several small chunked writes
 //!     (the result must be chunking-invariant),
 //!   - tag verification, positive and negative,
+//!   - SHA-256 against the FIPS 180-2 "abc" example (whole and chunked) and
+//!     `bytes.constant-time-equal`,
 //!   - AES-256-GCM against a NIST GCM known-answer vector (seal and open),
 //!   - seal/open round trips with a generated key, including tampered
 //!     ciphertext and wrong associated data failing with
@@ -26,10 +28,13 @@ wit_bindgen::generate!({
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann::webcrypto::aead::AeadKey;
 use lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
+use lann::webcrypto::bytes::constant_time_equal;
+use lann::webcrypto::digest::Digest;
 use lann::webcrypto::hmac_sha2::{
-    generate_key as generate_hmac_key, import_key as import_hmac_key, Sha2Variant,
+    generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
 use lann::webcrypto::mac::MacKey;
+use lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use lann::webcrypto::types::Error;
 
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
@@ -67,6 +72,9 @@ impl Guest for Component {
         check("hmac-verify", hmac_verify().await).await?;
         check("hmac-generated-key", hmac_generated_key().await).await?;
         check("hmac-key-export", hmac_key_export().await).await?;
+        check("sha256-digest", sha256_digest(usize::MAX).await).await?;
+        check("sha256-digest-chunked", sha256_digest(5).await).await?;
+        check("constant-time-equal", bytes_equal().await).await?;
         check("gcm-known-answer-seal", gcm_known_answer_seal().await).await?;
         check("gcm-known-answer-open", gcm_known_answer_open().await).await?;
         check("gcm-round-trip", gcm_round_trip().await).await?;
@@ -173,6 +181,46 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| describe("export of generated key", &e))?;
     expect_eq(exported.len(), 64, "generated key length")
+}
+
+// --- digest & bytes checks -----------------------------------------------------
+
+/// The FIPS 180-2 "abc" SHA-256 example digest.
+const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+/// SHA-256 the FIPS example message, feeding it in `chunk`-byte writes, and
+/// compare against the known digest. `usize::MAX` feeds it as one write.
+async fn sha256_digest(chunk: usize) -> Result<(), String> {
+    let digest = make_digest(Sha2Variant::Sha256).map_err(|e| describe("make-digest", &e))?;
+    expect_eq(
+        digest.algorithm_name(),
+        "SHA-256".to_string(),
+        "digest.algorithm-name",
+    )?;
+    let got = compute_chunked(&digest, b"abc", chunk).await?;
+    expect_eq(hex(&got), SHA256_ABC.to_string(), "computed digest")?;
+    // The resource is reusable: a second compute agrees.
+    let again = compute_chunked(&digest, b"abc", chunk).await?;
+    expect_eq(hex(&again), SHA256_ABC.to_string(), "recomputed digest")
+}
+
+/// `constant-time-equal` agrees with plain equality.
+async fn bytes_equal() -> Result<(), String> {
+    let digest = unhex(SHA256_ABC);
+    let mut tampered = digest.clone();
+    tampered[0] ^= 0x01;
+    expect_eq(constant_time_equal(&digest, &digest), true, "equal inputs")?;
+    expect_eq(
+        constant_time_equal(&digest, &tampered),
+        false,
+        "differing inputs",
+    )?;
+    expect_eq(
+        constant_time_equal(&digest, &digest[..31]),
+        false,
+        "different lengths",
+    )?;
+    expect_eq(constant_time_equal(&[], &[]), true, "empty inputs")
 }
 
 // --- aead checks -------------------------------------------------------------
@@ -323,6 +371,15 @@ async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>
     let (tag, fed) = futures::join!(key.sign(rx), feed(tx, data, chunk));
     fed?;
     Ok(tag)
+}
+
+/// `compute`, feeding `data` in `chunk`-byte pieces (one stream;
+/// `usize::MAX` writes it whole).
+async fn compute_chunked(digest: &Digest, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
+    let (tx, rx) = wit_stream::new();
+    let (got, fed) = futures::join!(digest.compute(rx), feed(tx, data, chunk));
+    fed?;
+    Ok(got)
 }
 
 /// `verify`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`

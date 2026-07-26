@@ -6,6 +6,15 @@ Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 - `hmac_sha256_test.json` — HMAC-SHA-256 MAC vectors.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
 
+Vendored from the [NIST CAVP Secure Hashing byte-oriented test
+vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing)
+(`shabytetestvectors.zip`; NIST publications are US-government works, not
+subject to copyright):
+
+- `SHA256ShortMsg.rsp`, `SHA384ShortMsg.rsp`, `SHA512ShortMsg.rsp` —
+  SHA-2 digest vectors (message lengths 0 bits to two block lengths, in
+  byte steps).
+
 ## Translation policy
 
 Wycheproof describes the *algorithms*; the `lann:webcrypto` WIT is
@@ -23,6 +32,7 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
 | HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
 | HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
+| SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT
