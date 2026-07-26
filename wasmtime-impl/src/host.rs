@@ -12,18 +12,14 @@ use std::task::{Context, Poll};
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
 use futures::channel::oneshot;
-use hmac::Mac as _;
 use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamReader, StreamResult};
 use wasmtime::{Result, StoreContextMut};
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
-use crate::bindings::webcrypto::{aes_gcm as aes_gcm_iface, hmac as hmac_iface};
-use crate::{
-    AeadKey, HmacSha256, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME,
-    HMAC_SHA256_HASH,
-};
+use crate::bindings::webcrypto::{aes_gcm as aes_gcm_iface, hmac_sha2 as hmac_sha2_iface};
+use crate::{AeadKey, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME};
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
 /// WIT contract (12-byte nonces, 16-byte tags).
@@ -112,12 +108,74 @@ async fn drain_stream<T: Send>(
 
 impl mac::Host for WasiWebcryptoCtxView<'_> {}
 
-/// Build the HMAC state for `key`'s material.
-fn hmac_for(key: &MacKey) -> Result<HmacSha256> {
-    // HMAC accepts key material of any length, so this cannot fail for a
-    // key that was accepted at import/generation time.
-    <HmacSha256 as hmac::Mac>::new_from_slice(&key.raw)
-        .map_err(|err| wasmtime::Error::msg(format!("HMAC key setup failed: {err}")))
+/// The served SHA-2 variants an HMAC [`MacKey`] can be bound to. Only the
+/// WIT `sha2-variant` cases this implementation serves appear here: the
+/// truncated variants are declined at minting (see the WIT `sha2-variant`
+/// doc).
+#[derive(Clone, Copy)]
+pub(crate) enum HmacVariant {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl HmacVariant {
+    /// The hash name (WebCrypto's `HmacKeyAlgorithm.hash`).
+    fn hash_name(self) -> &'static str {
+        match self {
+            Self::Sha256 => "SHA-256",
+            Self::Sha384 => "SHA-384",
+            Self::Sha512 => "SHA-512",
+        }
+    }
+
+    /// The underlying hash's block length in bytes (the length of a
+    /// generated key, per WebCrypto's `generateKey` default).
+    fn block_len(self) -> usize {
+        match self {
+            Self::Sha256 => 64,
+            Self::Sha384 | Self::Sha512 => 128,
+        }
+    }
+
+    /// One-shot HMAC over `data` with `key` material.
+    fn sign(self, key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+        fn tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+            // HMAC accepts key material of any length, so this cannot fail
+            // for a key that was accepted at import/generation time.
+            let mut hmac = <M as hmac::Mac>::new_from_slice(key)
+                .map_err(|err| wasmtime::Error::msg(format!("HMAC key setup failed: {err}")))?;
+            hmac.update(data);
+            Ok(hmac.finalize().into_bytes().to_vec())
+        }
+        match self {
+            Self::Sha256 => tag::<hmac::Hmac<sha2::Sha256>>(key, data),
+            Self::Sha384 => tag::<hmac::Hmac<sha2::Sha384>>(key, data),
+            Self::Sha512 => tag::<hmac::Hmac<sha2::Sha512>>(key, data),
+        }
+    }
+
+    /// One-shot constant-time HMAC verification of `tag` over `data`.
+    fn verify(self, key: &[u8], data: &[u8], tag: &[u8]) -> Result<std::result::Result<(), Error>> {
+        fn check<M: hmac::Mac + hmac::digest::KeyInit>(
+            key: &[u8],
+            data: &[u8],
+            tag: &[u8],
+        ) -> Result<std::result::Result<(), Error>> {
+            let mut hmac = <M as hmac::Mac>::new_from_slice(key)
+                .map_err(|err| wasmtime::Error::msg(format!("HMAC key setup failed: {err}")))?;
+            hmac.update(data);
+            // `verify_slice` compares in constant time, per the WIT contract.
+            Ok(hmac
+                .verify_slice(tag)
+                .map_err(|_| Error::AuthenticationFailed))
+        }
+        match self {
+            Self::Sha256 => check::<hmac::Hmac<sha2::Sha256>>(key, data, tag),
+            Self::Sha384 => check::<hmac::Hmac<sha2::Sha384>>(key, data, tag),
+            Self::Sha512 => check::<hmac::Hmac<sha2::Sha512>>(key, data, tag),
+        }
+    }
 }
 
 impl HostMacKey for WasiWebcryptoCtxView<'_> {
@@ -127,8 +185,9 @@ impl HostMacKey for WasiWebcryptoCtxView<'_> {
     }
 
     fn algorithm_hash(&mut self, self_: Resource<MacKey>) -> Result<Option<String>> {
-        self.table.get(&self_)?;
-        Ok(Some(HMAC_SHA256_HASH.to_string()))
+        Ok(Some(
+            self.table.get(&self_)?.variant.hash_name().to_string(),
+        ))
     }
 
     fn algorithm_length(&mut self, self_: Resource<MacKey>) -> Result<u32> {
@@ -142,12 +201,14 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<MacKey>,
         data: StreamReader<u8>,
     ) -> Result<Vec<u8>> {
-        let mut hmac = accessor.with(|mut access| hmac_for(access.get().table.get(&self_)?))?;
+        let (variant, raw) = accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok::<_, wasmtime::Error>((key.variant, key.raw.clone()))
+        })?;
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
         let bytes = drain_stream(accessor, data).await?;
-        hmac.update(&bytes);
-        Ok(hmac.finalize().into_bytes().to_vec())
+        variant.sign(&raw, &bytes)
     }
 
     async fn verify(
@@ -156,13 +217,12 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         data: StreamReader<u8>,
         tag: Vec<u8>,
     ) -> Result<std::result::Result<(), Error>> {
-        let mut hmac = accessor.with(|mut access| hmac_for(access.get().table.get(&self_)?))?;
+        let (variant, raw) = accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok::<_, wasmtime::Error>((key.variant, key.raw.clone()))
+        })?;
         let bytes = drain_stream(accessor, data).await?;
-        hmac.update(&bytes);
-        // `verify_slice` compares in constant time, per the WIT contract.
-        Ok(hmac
-            .verify_slice(&tag)
-            .map_err(|_| Error::AuthenticationFailed))
+        variant.verify(&raw, &bytes, &tag)
     }
 
     async fn export(
@@ -344,16 +404,36 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
     }
 }
 
-// --- hmac (key minting) --------------------------------------------------------
+// --- hmac-sha2 (key minting) -----------------------------------------------------
 
-impl hmac_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl hmac_sha2_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-impl<T: Send> hmac_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_hmac_sha256_key(
+/// The served [`HmacVariant`] for a WIT `sha2-variant`, or `unsupported` for
+/// one this implementation declines (the truncated variants; see the WIT
+/// `sha2-variant` doc).
+fn hmac_variant(variant: hmac_sha2_iface::Sha2Variant) -> std::result::Result<HmacVariant, Error> {
+    use hmac_sha2_iface::Sha2Variant;
+    match variant {
+        Sha2Variant::Sha256 => Ok(HmacVariant::Sha256),
+        Sha2Variant::Sha384 => Ok(HmacVariant::Sha384),
+        Sha2Variant::Sha512 => Ok(HmacVariant::Sha512),
+        Sha2Variant::Sha224 | Sha2Variant::Sha512224 | Sha2Variant::Sha512256 => Err(
+            Error::Unsupported(format!("{variant:?} is not served by this implementation")),
+        ),
+    }
+}
+
+impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key(
         accessor: &Accessor<T, Self>,
+        variant: hmac_sha2_iface::Sha2Variant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let variant = match hmac_variant(variant) {
+            Ok(variant) => variant,
+            Err(err) => return Ok(Err(err)),
+        };
         // RFC 2104 accepts any non-empty key length (longer-than-block keys
         // are hashed first); an empty key is rejected as `invalid-key`.
         if raw.is_empty() {
@@ -361,19 +441,32 @@ impl<T: Send> hmac_iface::HostWithStore<T> for WasiWebcrypto {
                 "HMAC key material must be non-empty".into(),
             )));
         }
-        let key = MacKey { raw, extractable };
+        let key = MacKey {
+            raw,
+            variant,
+            extractable,
+        };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 
-    async fn generate_hmac_sha256_key(
+    async fn generate_key(
         accessor: &Accessor<T, Self>,
+        variant: hmac_sha2_iface::Sha2Variant,
         extractable: bool,
-    ) -> Result<Resource<MacKey>> {
-        let mut raw = vec![0u8; 32];
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let variant = match hmac_variant(variant) {
+            Ok(variant) => variant,
+            Err(err) => return Ok(Err(err)),
+        };
+        let mut raw = vec![0u8; variant.block_len()];
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
-        let key = MacKey { raw, extractable };
-        accessor.with(|mut access| Ok(access.get().table.push(key)?))
+        let key = MacKey {
+            raw,
+            variant,
+            extractable,
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 }
 

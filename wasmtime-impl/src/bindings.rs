@@ -2,7 +2,7 @@
 //!
 //! The crate implements the `types` interface, the `mac` interface (the
 //! `mac-key` resource), the `aead` interface (the `aead-key` resource), and
-//! the `hmac` / `aes-gcm` key-minting interfaces. See [`crate`] for the
+//! the `hmac-sha2` / `aes-gcm` key-minting interfaces. See [`crate`] for the
 //! public API built on top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]

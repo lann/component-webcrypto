@@ -18,7 +18,7 @@ interface demo {
 world crypto-demo {
     import lann:webcrypto/mac@0.1.0;
     import lann:webcrypto/aead@0.1.0;
-    import lann:webcrypto/hmac@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
 
     export demo;

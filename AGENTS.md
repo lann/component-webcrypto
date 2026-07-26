@@ -23,7 +23,7 @@ rather than relying on a cached summary.
 ```
 wit/                    # lann:webcrypto package: types (structural),
                         #   mac/aead (generic primitive resources),
-                        #   hmac/aes-gcm (key-minting algorithm interfaces)
+                        #   hmac-sha2/aes-gcm (key-minting algorithm interfaces)
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
@@ -72,7 +72,7 @@ The layering is a design invariant, not a convention:
 
 - **Generic primitive-kind interfaces** (`mac`, `aead`) own the
   algorithm-agnostic resources. Adding an algorithm must not change them.
-- **Algorithm interfaces** (`hmac`, `aes-gcm`) contain only key minting;
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`) contain only key minting;
   operations hang off the key resources, which are capabilities (see the WIT
   doc comments for the exact contracts, including extractability and the
   "input streams are fully drained even on error" rule for `seal`/`open`).

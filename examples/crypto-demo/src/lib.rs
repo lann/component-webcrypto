@@ -26,7 +26,9 @@ wit_bindgen::generate!({
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann::webcrypto::aead::AeadKey;
 use lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
-use lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
+use lann::webcrypto::hmac_sha2::{
+    generate_key as generate_hmac_key, import_key as import_hmac_key, Sha2Variant,
+};
 use lann::webcrypto::mac::MacKey;
 use lann::webcrypto::types::Error;
 
@@ -87,9 +89,9 @@ impl Guest for Component {
 /// HMAC the RFC 4231 payload, feeding it in `chunk`-byte writes, and compare
 /// against the vector's tag. `usize::MAX` feeds the payload as one write.
 async fn hmac_known_answer(chunk: usize) -> Result<(), String> {
-    let key = import_hmac_sha256_key(HMAC_KEY.to_vec(), true)
+    let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     expect_eq(
         key.algorithm_name(),
         "HMAC".to_string(),
@@ -112,9 +114,9 @@ async fn hmac_known_answer(chunk: usize) -> Result<(), String> {
 
 /// `verify` accepts the correct tag and rejects a corrupted one.
 async fn hmac_verify() -> Result<(), String> {
-    let key = import_hmac_sha256_key(HMAC_KEY.to_vec(), false)
+    let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), false)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
 
     let mut tag = unhex(HMAC_TAG);
     verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX)
@@ -131,7 +133,9 @@ async fn hmac_verify() -> Result<(), String> {
 
 /// A generated key signs and verifies, and two calls on the same key agree.
 async fn hmac_generated_key() -> Result<(), String> {
-    let key = generate_hmac_sha256_key(false).await;
+    let key = generate_hmac_key(Sha2Variant::Sha256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
 
     let tag = sign_chunked(&key, b"payload", usize::MAX).await?;
     expect_eq(tag.len(), 32, "tag length")?;
@@ -149,23 +153,26 @@ async fn hmac_generated_key() -> Result<(), String> {
 }
 
 /// `import` → `export` on an extractable key is the identity; a generated
-/// extractable key exports 32 bytes.
+/// extractable key exports the hash's block size of material (WebCrypto's
+/// `generateKey` default: 64 bytes for SHA-256).
 async fn hmac_key_export() -> Result<(), String> {
-    let key = import_hmac_sha256_key(HMAC_KEY.to_vec(), true)
+    let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     let exported = key
         .export()
         .await
         .map_err(|e| describe("export of extractable key", &e))?;
     expect_eq(exported, HMAC_KEY.to_vec(), "exported key material")?;
 
-    let generated = generate_hmac_sha256_key(true).await;
+    let generated = generate_hmac_key(Sha2Variant::Sha256, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     let exported = generated
         .export()
         .await
         .map_err(|e| describe("export of generated key", &e))?;
-    expect_eq(exported.len(), 32, "generated key length")
+    expect_eq(exported.len(), 64, "generated key length")
 }
 
 // --- aead checks -------------------------------------------------------------

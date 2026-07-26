@@ -25,6 +25,6 @@ package wasip3:webcrypto;
 world provider {
     export lann:webcrypto/mac@0.1.0;
     export lann:webcrypto/aead@0.1.0;
-    export lann:webcrypto/hmac@0.1.0;
+    export lann:webcrypto/hmac-sha2@0.1.0;
     export lann:webcrypto/aes-gcm@0.1.0;
 }

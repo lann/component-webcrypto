@@ -70,7 +70,7 @@ marks where secrets flow.
 
 | Algorithm | Class | Implementation | Residual assumptions |
 | --- | --- | --- | --- |
-| HMAC-SHA-256 | A | `hmac` + `sha2` (pure ARX-style arithmetic; constant-time `verify_slice`) | None beyond compiler correctness. |
+| HMAC-SHA-2 (256/384/512) | A | `hmac` + `sha2` (pure ARX-style arithmetic; constant-time `verify_slice`) | None beyond compiler correctness. |
 | AES-GCM (128/256) | C + B | `aes-gcm` with the soft **fixsliced** AES backend (bitsliced, table-free) + masked-multiply GHASH | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 
 When a ChaCha20-Poly1305 algorithm interface is added (class A + B), it will
