@@ -115,8 +115,9 @@ All three implementations run identical guest components. The conformance
 suite (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
 NIST CAVP SHA-2 vectors under multiple stream-chunking schedules, plus
 API-contract probes) gates the wasmtime, composed, and jco-node
-targets; the `crypto-demo` guest additionally covers the jco
-host end to end.
+targets everywhere, and the jco-browser target in CI (locally, opt in
+with `CONFORMANCE_BROWSER=1`; needs Chrome/Chromium 137+); the
+`crypto-demo` guest additionally covers the jco host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time
 guarantees, so [`guest-impl/README.md`](guest-impl/README.md) classifies

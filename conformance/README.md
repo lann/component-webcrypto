@@ -23,8 +23,9 @@ adapters/
   composed-driver/   # CLI driver for the composed in-guest target (guest +
                    #   in-guest provider via `wac plug`); prints results JSON
   jco/             # Node + headless-Chromium adapters over jco-impl's
-                   #   webcrypto.js (jco-node gates; the browser target
-                   #   needs a Chromium install and is run manually)
+                   #   webcrypto.js (jco-node gates everywhere; jco-browser
+                   #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
+                   #   with Chrome/Chromium 137+ installed)
 runner/            # classification + matrix.md rendering
 ```
 

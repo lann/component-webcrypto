@@ -121,14 +121,28 @@ conformance-timeout := "600"
 # unexpected-pass.
 #
 # Enabled targets: wasmtime, composed, and jco-node (Node 24+ with npm
-# required). jco-browser is not gating — it needs a Chromium install; run it
-# manually with `just conformance-jco-browser` (the runner warns on targets
-# without results rather than failing).
-conformance: conformance-wasmtime conformance-composed conformance-jco-node
+# required) — plus jco-browser under GitHub Actions (the runner image ships
+# Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
+# Chrome/Chromium 137+; the runner warns on targets without results rather
+# than failing).
+conformance: conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
     cargo run --release -p conformance-runner -- \
         --manifests conformance/manifests.toml \
         --results conformance/results \
         --matrix-out conformance/matrix.md
+
+# Run the jco-browser conformance target when gating applies: always under
+# GitHub Actions, locally only with CONFORMANCE_BROWSER=1 (skips with a
+# notice otherwise). The `conformance` recipe's runner pass classifies the
+# results.
+_conformance-jco-browser-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CONFORMANCE_BROWSER:-}" != "1" ]; then
+        echo "skipping the jco-browser conformance target (opt in with CONFORMANCE_BROWSER=1; needs Chrome/Chromium 137+)"
+        exit 0
+    fi
+    just conformance-jco-browser
 
 # Build the shared conformance guest component into conformance/guest/build/.
 build-conformance-guest:
@@ -189,7 +203,7 @@ conformance-jco-node: build-conformance-guest build-signing-guest
 
 # Run the conformance corpus under the jco host in headless Chromium (137+;
 # auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json.
-# Not gating — needs a Chromium install; run it manually.
+# Gates in CI; local `just conformance` runs it only with CONFORMANCE_BROWSER=1.
 conformance-jco-browser: build-conformance-guest
     cd conformance/adapters/jco && npm run transpile && \
         timeout {{conformance-timeout}} npm run run:browser

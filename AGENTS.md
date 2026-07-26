@@ -57,8 +57,9 @@ conformance/            # cross-implementation conformance suite — see
   signing-guest/        #   host-only guest for surfaces the in-guest
                         #     provider does not export (ecdsa-sign)
   adapters/             #   per-target drivers: wasmtime, composed-driver (for
-                        #     the composed target), jco (Node gates; the
-                        #     browser target needs Chromium and runs manually)
+                        #     the composed target), jco (Node gates everywhere;
+                        #     the browser target gates in CI, locally opt-in
+                        #     via CONFORMANCE_BROWSER=1 with Chrome installed)
   runner/               #   classifies results against manifests.toml and
                         #     renders conformance/matrix.md
   manifests.toml        #   per-target expectations (policy-driven)
@@ -138,7 +139,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime, composed, and jco-node targets (Node 24+; jco-browser needs a Chromium install and is run manually). |
+| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
