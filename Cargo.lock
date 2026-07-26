@@ -1354,6 +1354,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "timing-lab"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "subtle",
+ "wasip3",
+ "wit-bindgen 0.57.1",
+]
+
+[[package]]
 name = "tokio"
 version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

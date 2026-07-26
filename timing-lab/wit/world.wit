@@ -1,0 +1,19 @@
+// The timing-lab world. The lab is a driver-style component (like the
+// conformance wasip3-driver): it imports the `lann:webcrypto` surfaces under
+// measurement — satisfied by composing the wasip3 provider in with
+// `wac plug` — and exports an async `wasi:cli/run` (via the `wasip3` crate),
+// so the composed lab runs under a plain `wasmtime run`.
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/lann-webcrypto` symlink.
+package lann:timing-lab;
+
+/// The measurement harness: imports the surfaces under test.
+world lab {
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/bytes@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/chacha20-poly1305@0.1.0;
+}

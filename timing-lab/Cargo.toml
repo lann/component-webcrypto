@@ -1,0 +1,19 @@
+[package]
+name = "timing-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "dudect-style timing lab: statistical leakage tests of the composed wasip3 provider's surfaces, run entirely in-guest under wasmtime."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:cli/run` export.
+wasip3 = { version = "0.7", features = ["async-spawn"] }
+# Pinned to the wit-bindgen version the `wasip3` crate uses (see
+# examples/demo-driver).
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+# The in-guest constant-time control surface.
+subtle = "2"

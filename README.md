@@ -78,6 +78,9 @@ conformance/            # cross-implementation conformance suite: vendored
                         #   conformance guest (vectors under chunking
                         #   schedules, plus API-contract probes), per-target
                         #   adapters, and a runner rendering matrix.md
+timing-lab/             # dudect-style statistical timing tests of the
+                        #   composed wasip3 provider (non-gating; see its
+                        #   README for methodology and detection limits)
 ```
 
 Demo components pull the shared package in through `wit/deps/lann-webcrypto`
@@ -97,6 +100,8 @@ just test-webcrypto-composed # compose guest + in-guest provider + driver (wac p
                              #   and run the whole thing under `wasmtime run`
 just conformance             # the Wycheproof-derived conformance corpus over the
                              #   enabled targets; renders conformance/matrix.md
+just timing-lab              # dudect-style timing tests of the composed wasip3
+                             #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs
 ```
 

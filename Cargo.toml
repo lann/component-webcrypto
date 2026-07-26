@@ -9,5 +9,6 @@ members = [
     "conformance/adapters/wasmtime",
     "conformance/adapters/wasip3-driver",
     "conformance/runner",
+    "timing-lab",
 ]
 resolver = "2"
