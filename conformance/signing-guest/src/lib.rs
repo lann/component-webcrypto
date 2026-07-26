@@ -188,7 +188,7 @@ async fn p256_sign_roundtrip() -> Result<(), String> {
     }
 
     let derived = key.verifying_key();
-    let exported = derived.export().await;
+    let exported = derived.export_key().await;
     if exported != p256_public_point() {
         return Err("derived public key does not match the RFC 6979 point".into());
     }
@@ -261,7 +261,7 @@ async fn sign_key_export() -> Result<(), String> {
     if !key.extractable() {
         return Err("extractable key reports non-extractable".into());
     }
-    let exported = key.export().await.map_err(|e| describe("export", &e))?;
+    let exported = key.export_key().await.map_err(|e| describe("export", &e))?;
     if exported != unhex(P256_PRIVATE) {
         return Err("exported scalar does not round-trip".into());
     }
@@ -269,7 +269,7 @@ async fn sign_key_export() -> Result<(), String> {
     let key = import_signing_key(EcdsaVariant::P256Sha256, unhex(P256_PRIVATE), false)
         .await
         .map_err(|e| describe("import-signing-key", &e))?;
-    match key.export().await {
+    match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
         Ok(_) => Err("non-extractable key exported".into()),

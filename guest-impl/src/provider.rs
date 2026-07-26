@@ -214,7 +214,7 @@ impl GuestMacKey for MacKey {
         self.raw.len() as u32 * 8
     }
 
-    async fn export(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
             Ok(self.raw.clone())
         } else {
@@ -375,7 +375,7 @@ impl GuestAeadKey for AeadKey {
         self.cipher.length_bits()
     }
 
-    async fn export(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
             Ok(self.raw.clone())
         } else {
@@ -677,7 +677,7 @@ impl GuestVerifyingKey for VerifyingKey {
         self.public.hash().map(str::to_string)
     }
 
-    async fn export(&self) -> Vec<u8> {
+    async fn export_key(&self) -> Vec<u8> {
         match &self.public {
             SigPublic::Ed25519(key) => key.to_bytes().to_vec(),
             SigPublic::EcdsaP256(key) => key.to_encoded_point(false).as_bytes().to_vec(),
@@ -725,7 +725,7 @@ impl GuestSigningKey for SigningKey {
         self.extractable
     }
 
-    async fn export(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
             Ok(self.private.to_bytes().to_vec())
         } else {

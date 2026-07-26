@@ -277,7 +277,7 @@ async fn key_export_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("import-key", &e))?;
     let exported = key
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("hmac export", &e))?;
     expect_bytes(&exported, &hmac_raw, "exported HMAC key material")?;
@@ -286,7 +286,10 @@ async fn key_export_roundtrip() -> Result<(), String> {
     let key = import_key(AesVariant::Aes256, aes_raw.clone(), true)
         .await
         .map_err(|e| describe("import-key", &e))?;
-    let exported = key.export().await.map_err(|e| describe("aes export", &e))?;
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("aes export", &e))?;
     expect_bytes(&exported, &aes_raw, "exported AES key material")
 }
 
@@ -296,7 +299,7 @@ async fn not_extractable() -> Result<(), String> {
     let key = import_hmac_key(Sha2Variant::Sha256, b"not-extractable".to_vec(), false)
         .await
         .map_err(|e| describe("import-key", &e))?;
-    match key.export().await {
+    match key.export_key().await {
         Err(Error::NotExtractable) => {}
         Err(other) => return Err(describe("hmac: expected not-extractable, got", &other)),
         Ok(_) => return Err("non-extractable HMAC key exported".into()),
@@ -305,7 +308,7 @@ async fn not_extractable() -> Result<(), String> {
     let key = import_key(AesVariant::Aes256, vec![0x42u8; 32], false)
         .await
         .map_err(|e| describe("import-key", &e))?;
-    match key.export().await {
+    match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("aes: expected not-extractable, got", &other)),
         Ok(_) => Err("non-extractable AES key exported".into()),
@@ -321,7 +324,7 @@ async fn generated_key_shape() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let exported = hmac_key
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("generated hmac export", &e))?;
     if exported.len() != 64 {
@@ -340,7 +343,7 @@ async fn generated_key_shape() -> Result<(), String> {
 
     let aes_key = generate_key_256(true).await?;
     let exported = aes_key
-        .export()
+        .export_key()
         .await
         .map_err(|e| describe("generated aes export", &e))?;
     if exported.len() != 32 {
@@ -592,7 +595,7 @@ async fn chacha_key_metadata() -> Result<(), String> {
             .await
             .map_err(|e| describe("generate-key", &e))?;
         let raw = generated
-            .export()
+            .export_key()
             .await
             .map_err(|e| describe("export", &e))?;
         if raw.len() != 32 {
@@ -792,7 +795,7 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     fed?;
     let sig = sig.map_err(|e| describe("sign", &e))?;
 
-    let exported = signing.verifying_key().export().await;
+    let exported = signing.verifying_key().export_key().await;
     if exported.len() != 32 {
         return Err(format!(
             "Ed25519 public keys export as 32 bytes, got {}",
