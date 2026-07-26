@@ -23,8 +23,9 @@ rather than relying on a cached summary.
 ```
 wit/                    # lann:webcrypto package: types (structural),
                         #   mac/aead/digest (generic primitive resources),
-                        #   hmac-sha2/aes-gcm/sha2 (minting algorithm interfaces),
-                        #   bytes (constant-time comparison utility)
+                        #   hmac-sha2/aes-gcm/chacha20-poly1305/sha2 (minting
+                        #   algorithm interfaces), bytes (constant-time
+                        #   comparison utility)
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
@@ -73,7 +74,7 @@ The layering is a design invariant, not a convention:
 
 - **Generic primitive-kind interfaces** (`mac`, `aead`) own the
   algorithm-agnostic resources. Adding an algorithm must not change them.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `sha2`) contain only minting;
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, `sha2`) contain only minting;
   operations hang off the key resources, which are capabilities (see the WIT
   doc comments for the exact contracts, including extractability and the
   "input streams are fully drained even on error" rule for `seal`/`open`).
@@ -163,8 +164,7 @@ artifacts like `conformance/matrix.md`.
 ## Direction (designed, not yet built)
 
 - More algorithms per kind — each is a new minting interface plus
-  constructors, never a generic change. ChaCha20-Poly1305 is the planned next
-  AEAD and the recommended one for the in-guest provider (class A + B).
+  constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium
   `secretstream`-style) for unbounded content with O(segment) memory;
   single-message `aead.open` deliberately buffers-and-verifies and must not be

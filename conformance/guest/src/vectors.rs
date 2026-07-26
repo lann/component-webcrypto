@@ -1,12 +1,16 @@
 //! Execution of the normalized vector cases against the imported
 //! `lann:webcrypto` interfaces.
 
+use crate::lann::webcrypto::aead::AeadKey;
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
 use crate::lann::webcrypto::bytes::constant_time_equal;
+use crate::lann::webcrypto::chacha20_poly1305::{import_key as import_chacha_key, ChachaVariant};
 use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
-use crate::translate::{GcmCase, GcmExpectation, HmacCase, Sha2Alg, Sha2Case};
+use crate::translate::{
+    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, Schedule, Sha2Alg, Sha2Case,
+};
 use crate::util::{compute, describe, expect_bytes, open, seal, sign, verify};
 
 /// Run one SHA-2 digest vector under its schedule.
@@ -63,38 +67,82 @@ pub async fn run_gcm_case(case: &GcmCase) -> Result<(), String> {
     let key = import_key(AesVariant::Aes256, case.key.clone(), false)
         .await
         .map_err(|e| describe("import-key", &e))?;
-    match case.expectation {
-        GcmExpectation::InvalidNonce => {
-            let (sealed, fed) = seal(&key, &case.iv, &case.aad, &case.msg, case.schedule).await;
+    run_aead_expectation(
+        &key,
+        case.expectation,
+        &case.iv,
+        &case.aad,
+        &case.msg,
+        &case.ct_tag,
+        case.schedule,
+    )
+    .await
+}
+
+/// Run one ChaCha20-Poly1305 vector (either variant) under its schedule.
+pub async fn run_chacha_case(case: &ChaChaCase) -> Result<(), String> {
+    let variant = match case.alg {
+        ChaChaAlg::ChaCha20Poly1305 => ChachaVariant::Chacha20Poly1305,
+        ChaChaAlg::XChaCha20Poly1305 => ChachaVariant::Xchacha20Poly1305,
+    };
+    let key = import_chacha_key(variant, case.key.clone(), false)
+        .await
+        .map_err(|e| describe("import-key", &e))?;
+    run_aead_expectation(
+        &key,
+        case.expectation,
+        &case.iv,
+        &case.aad,
+        &case.msg,
+        &case.ct_tag,
+        case.schedule,
+    )
+    .await
+}
+
+/// Drive one imported AEAD key through a vector's expectation; shared by
+/// every AEAD algorithm's vector suite.
+async fn run_aead_expectation(
+    key: &AeadKey,
+    expectation: AeadExpectation,
+    iv: &[u8],
+    aad: &[u8],
+    msg: &[u8],
+    ct_tag: &[u8],
+    schedule: Schedule,
+) -> Result<(), String> {
+    match expectation {
+        AeadExpectation::InvalidNonce => {
+            let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
             fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
             match sealed {
                 Err(Error::InvalidNonce(_)) => {}
                 Err(other) => return Err(describe("seal: expected invalid-nonce, got", &other)),
                 Ok(_) => {
-                    return Err(format!("seal accepted a {}-byte nonce", case.iv.len()));
+                    return Err(format!("seal accepted a {}-byte nonce", iv.len()));
                 }
             }
-            let (opened, fed) = open(&key, &case.iv, &case.aad, &case.ct_tag, case.schedule).await;
+            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             match opened {
                 Err(Error::InvalidNonce(_)) => Ok(()),
                 Err(other) => Err(describe("open: expected invalid-nonce, got", &other)),
-                Ok(_) => Err(format!("open accepted a {}-byte nonce", case.iv.len())),
+                Ok(_) => Err(format!("open accepted a {}-byte nonce", iv.len())),
             }
         }
-        GcmExpectation::Valid => {
-            let (sealed, fed) = seal(&key, &case.iv, &case.aad, &case.msg, case.schedule).await;
+        AeadExpectation::Valid => {
+            let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
             fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
             let sealed = sealed.map_err(|e| describe("seal", &e))?;
-            expect_bytes(&sealed, &case.ct_tag, "sealed bytes")?;
+            expect_bytes(&sealed, ct_tag, "sealed bytes")?;
 
-            let (opened, fed) = open(&key, &case.iv, &case.aad, &case.ct_tag, case.schedule).await;
+            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             let opened = opened.map_err(|e| describe("open", &e))?;
-            expect_bytes(&opened, &case.msg, "opened bytes")
+            expect_bytes(&opened, msg, "opened bytes")
         }
-        GcmExpectation::AuthenticationFailed => {
-            let (opened, fed) = open(&key, &case.iv, &case.aad, &case.ct_tag, case.schedule).await;
+        AeadExpectation::AuthenticationFailed => {
+            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             match opened {
                 Err(Error::AuthenticationFailed) => Ok(()),

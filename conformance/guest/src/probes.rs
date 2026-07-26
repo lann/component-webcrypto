@@ -5,6 +5,9 @@
 
 use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
 use crate::lann::webcrypto::bytes::constant_time_equal;
+use crate::lann::webcrypto::chacha20_poly1305::{
+    generate_key as generate_chacha_key, import_key as import_chacha_key, ChachaVariant,
+};
 use crate::lann::webcrypto::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
@@ -30,6 +33,8 @@ pub const NAMES: &[&str] = &[
     "mac-verify-rejects-truncated",
     "digest-reuse",
     "constant-time-equal",
+    "chacha-key-metadata",
+    "chacha-nonce-lengths",
 ];
 
 /// Run the probe at `index` (into [`NAMES`]).
@@ -50,6 +55,8 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         12 => mac_verify_rejects_truncated().await,
         13 => digest_reuse().await,
         14 => constant_time_equal_probe().await,
+        15 => chacha_key_metadata().await,
+        16 => chacha_nonce_lengths().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -475,6 +482,89 @@ async fn constant_time_equal_probe() -> Result<(), String> {
         if constant_time_equal(x, y) != want {
             return Err(format!("{what}: got {}, want {want}", !want));
         }
+    }
+    Ok(())
+}
+
+/// Both `chacha-variant`s mint 256-bit keys reporting their own algorithm
+/// names, decline non-32-byte material as `invalid-key`, and generate
+/// 32 bytes of key material.
+async fn chacha_key_metadata() -> Result<(), String> {
+    for (variant, name) in [
+        (ChachaVariant::Chacha20Poly1305, "ChaCha20-Poly1305"),
+        (ChachaVariant::Xchacha20Poly1305, "XChaCha20-Poly1305"),
+    ] {
+        let key = import_chacha_key(variant, vec![0x42u8; 32], false)
+            .await
+            .map_err(|e| describe("import-key", &e))?;
+        if key.algorithm_name() != name {
+            return Err(format!(
+                "{variant:?} key name: got {:?}, want {name:?}",
+                key.algorithm_name()
+            ));
+        }
+        if key.algorithm_length() != 256 {
+            return Err(format!(
+                "{variant:?} key length: got {}, want 256",
+                key.algorithm_length()
+            ));
+        }
+        match import_chacha_key(variant, vec![0x42u8; 16], false).await {
+            Err(Error::InvalidKey(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    "import-key(16 bytes): expected invalid-key, got",
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{variant:?} imported 16 bytes of key material")),
+        }
+        let generated = generate_chacha_key(variant, true)
+            .await
+            .map_err(|e| describe("generate-key", &e))?;
+        let raw = generated
+            .export()
+            .await
+            .map_err(|e| describe("export", &e))?;
+        if raw.len() != 32 {
+            return Err(format!(
+                "{variant:?} generated {} bytes of key material, want 32",
+                raw.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Each `chacha-variant`'s key accepts exactly its own nonce length: the
+/// other variant's length is `invalid-nonce` (nonce-length confusion between
+/// the constructions cannot pass silently), and the correct length
+/// round-trips.
+async fn chacha_nonce_lengths() -> Result<(), String> {
+    let msg = b"chacha-nonce-lengths";
+    for (variant, good_len, bad_len) in [
+        (ChachaVariant::Chacha20Poly1305, 12usize, 24usize),
+        (ChachaVariant::Xchacha20Poly1305, 24, 12),
+    ] {
+        let key = import_chacha_key(variant, vec![0x42u8; 32], false)
+            .await
+            .map_err(|e| describe("import-key", &e))?;
+        let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", msg, Schedule::Whole).await;
+        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        match sealed {
+            Err(Error::InvalidNonce(_)) => {}
+            Err(other) => return Err(describe("seal: expected invalid-nonce, got", &other)),
+            Ok(_) => {
+                return Err(format!("{variant:?} sealed under a {bad_len}-byte nonce"));
+            }
+        }
+        let (sealed, fed) = seal(&key, &vec![0u8; good_len], b"", msg, Schedule::Whole).await;
+        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        let sealed = sealed.map_err(|e| describe("seal", &e))?;
+        let (opened, fed) = open(&key, &vec![0u8; good_len], b"", &sealed, Schedule::Whole).await;
+        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe("open", &e))?;
+        expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
 }

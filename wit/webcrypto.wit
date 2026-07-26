@@ -328,3 +328,40 @@ interface aes-gcm {
     /// variant.
     generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
 }
+
+/// ChaCha20-Poly1305 key minting (RFC 8439, and the XChaCha20-Poly1305
+/// extension of draft-irtf-cfrg-xchacha).
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags,
+/// the `ciphertext ‖ tag` wire format, and the variant's nonce length.
+interface chacha20-poly1305 {
+    use types.{error};
+    use aead.{aead-key};
+
+    /// The ChaCha20-Poly1305 constructions. Both use 256-bit keys and differ
+    /// only in nonce construction, so unlike `aes-variant` the declared
+    /// variant selects the accepted nonce length, not the key length.
+    enum chacha-variant {
+        /// The IETF construction (RFC 8439): 12-byte nonces. The nonce space
+        /// is too small to draw nonces at random; callers need a
+        /// deterministic uniqueness scheme (such as a counter).
+        chacha20-poly1305,
+        /// The extended-nonce construction (draft-irtf-cfrg-xchacha, as
+        /// deployed ubiquitously by libsodium): 24-byte nonces, large enough
+        /// to be chosen at random. Not IETF-standardized.
+        xchacha20-poly1305,
+    }
+
+    /// Import raw key material as the declared variant.
+    ///
+    /// Both variants take exactly 32 bytes of key material; anything else
+    /// fails with `error.invalid-key`. An implementation not serving the
+    /// variant (for example, browser WebCrypto implements no
+    /// ChaCha20-Poly1305) fails with `error.unsupported`.
+    import-key: async func(%variant: chacha-variant, raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+
+    /// Generate a fresh random 256-bit key of the declared variant. Fails
+    /// with `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<aead-key, error>;
+}

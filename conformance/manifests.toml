@@ -16,10 +16,23 @@ expected-fail = []
 # The jco targets are enumerated but TEMPORARILY produce no results (the
 # runner warns rather than fails): jco's component-model-async runtime
 # corrupts the guest heap under this corpus. See the `conformance` recipe in
-# the justfile. Their empty expectations below are the post-fix state.
+# the justfile. The expectations below are the post-fix state.
 
+# Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
+# unimplemented), so the jco host declines both `chacha-variant`s as
+# `unsupported`: every ChaCha20-Poly1305 vector case and probe fails at key
+# minting. This is policy, not a bug — a composition needing ChaCha on this
+# target must supply another provider.
 [targets.jco-node]
-expected-fail = []
+expected-fail = [
+    "chacha20-poly1305/*",
+    "xchacha20-poly1305/*",
+    "probe/chacha-*",
+]
 
 [targets.jco-browser]
-expected-fail = []
+expected-fail = [
+    "chacha20-poly1305/*",
+    "xchacha20-poly1305/*",
+    "probe/chacha-*",
+]

@@ -5,6 +5,8 @@ Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 
 - `hmac_sha256_test.json` — HMAC-SHA-256 MAC vectors.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
+- `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
+  ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.
 
 Vendored from the [NIST CAVP Secure Hashing byte-oriented test
 vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing)
@@ -29,6 +31,9 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` fail `invalid-nonce` regardless of the vector's own result (the WIT mandates 12-byte nonces; Wycheproof merely *discourages* other sizes). |
 | GCM, keySize 256, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
+| ChaCha20-Poly1305 (either variant), ivSize ≠ the variant's (96, or 192 for XChaCha) | `seal`/`open` fail `invalid-nonce` — the declared `chacha-variant` selects the accepted nonce length. Nothing is skipped: both files are all-keySize-256. |
+| ChaCha20-Poly1305, variant ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
+| ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed` (open direction only). |
 | HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
 | HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
 | HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |

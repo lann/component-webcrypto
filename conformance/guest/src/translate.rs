@@ -1,7 +1,7 @@
-//! Translation of the vendored test vectors (Wycheproof JSON for HMAC and
-//! GCM, NIST CAVP `.rsp` for SHA-2) into the `lann:webcrypto` contract — the
-//! authoritative encoding of the policy documented in
-//! `conformance/vectors/README.md`:
+//! Translation of the vendored test vectors (Wycheproof JSON for HMAC, GCM,
+//! and ChaCha20-Poly1305, NIST CAVP `.rsp` for SHA-2) into the
+//! `lann:webcrypto` contract — the authoritative encoding of the policy
+//! documented in `conformance/vectors/README.md`:
 //!
 //! | Vector property | Our expectation |
 //! | --- | --- |
@@ -9,6 +9,9 @@
 //! | GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` both fail `invalid-nonce`. |
 //! | GCM, keySize 256, ivSize 96, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
 //! | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed`. |
+//! | ChaCha20-Poly1305, ivSize ≠ the variant's (96 / 192 for X) | `seal`/`open` both fail `invalid-nonce`. |
+//! | ChaCha20-Poly1305, variant ivSize, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
+//! | ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed`. |
 //! | HMAC, tagSize ≠ 256 | Skipped (truncated tags are an application concern). |
 //! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
 //! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
@@ -91,9 +94,9 @@ pub struct HmacCase {
     pub valid: bool,
 }
 
-/// What the `lann:webcrypto` contract requires of a GCM vector.
+/// What the `lann:webcrypto` contract requires of an AEAD vector.
 #[derive(Clone, Copy)]
-pub enum GcmExpectation {
+pub enum AeadExpectation {
     /// Both `seal` and `open` must fail `invalid-nonce`.
     InvalidNonce,
     /// `seal` must produce exactly `ct ‖ tag`; `open` must recover `msg`.
@@ -112,11 +115,60 @@ pub struct GcmCase {
     pub msg: Vec<u8>,
     /// The vector's ciphertext followed by its tag (the seal wire format).
     pub ct_tag: Vec<u8>,
-    pub expectation: GcmExpectation,
+    pub expectation: AeadExpectation,
+}
+
+/// A `chacha-variant`, as named in ChaCha20-Poly1305 vector ids.
+#[derive(Clone, Copy)]
+pub enum ChaChaAlg {
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
+}
+
+impl ChaChaAlg {
+    /// The variant's name as used in test ids (its WIT enum-case name).
+    pub fn name(self) -> &'static str {
+        match self {
+            ChaChaAlg::ChaCha20Poly1305 => "chacha20-poly1305",
+            ChaChaAlg::XChaCha20Poly1305 => "xchacha20-poly1305",
+        }
+    }
+
+    /// The variant's nonce length in bits (the vector files' `ivSize`).
+    fn iv_bits(self) -> u32 {
+        match self {
+            ChaChaAlg::ChaCha20Poly1305 => 96,
+            ChaChaAlg::XChaCha20Poly1305 => 192,
+        }
+    }
+}
+
+/// One executed ChaCha20-Poly1305 vector under one schedule.
+pub struct ChaChaCase {
+    pub alg: ChaChaAlg,
+    pub tc_id: u64,
+    pub schedule: Schedule,
+    pub key: Vec<u8>,
+    pub iv: Vec<u8>,
+    pub aad: Vec<u8>,
+    pub msg: Vec<u8>,
+    /// The vector's ciphertext followed by its tag (the seal wire format).
+    pub ct_tag: Vec<u8>,
+    pub expectation: AeadExpectation,
 }
 
 const HMAC_VECTORS: &str = include_str!("../../vectors/hmac_sha256_test.json");
 const GCM_VECTORS: &str = include_str!("../../vectors/aes_gcm_test.json");
+const CHACHA_VECTORS: [(ChaChaAlg, &str); 2] = [
+    (
+        ChaChaAlg::ChaCha20Poly1305,
+        include_str!("../../vectors/chacha20_poly1305_test.json"),
+    ),
+    (
+        ChaChaAlg::XChaCha20Poly1305,
+        include_str!("../../vectors/xchacha20_poly1305_test.json"),
+    ),
+];
 const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
     (
         Sha2Alg::Sha256,
@@ -187,16 +239,16 @@ struct HmacTest {
 }
 
 #[derive(Deserialize)]
-struct GcmGroup {
+struct AeadGroup {
     #[serde(rename = "keySize")]
     key_size: u32,
     #[serde(rename = "ivSize")]
     iv_size: u32,
-    tests: Vec<GcmTest>,
+    tests: Vec<AeadTest>,
 }
 
 #[derive(Deserialize)]
-struct GcmTest {
+struct AeadTest {
     #[serde(rename = "tcId")]
     tc_id: u64,
     key: String,
@@ -254,7 +306,7 @@ pub fn hmac_cases() -> Vec<HmacCase> {
 /// The normalized AES-256-GCM corpus: every keySize-256 vector, expanded
 /// over its schedule set.
 pub fn gcm_cases() -> Vec<GcmCase> {
-    let file: VectorFile<GcmGroup> =
+    let file: VectorFile<AeadGroup> =
         serde_json::from_str(GCM_VECTORS).expect("parsing aes_gcm_test.json");
     let mut cases = Vec::new();
     for group in &file.test_groups {
@@ -263,35 +315,93 @@ pub fn gcm_cases() -> Vec<GcmCase> {
         }
         for test in &group.tests {
             let field = format!("gcm tc{}", test.tc_id);
-            let key = unhex(&field, &test.key);
-            let iv = unhex(&field, &test.iv);
-            let aad = unhex(&field, &test.aad);
-            let msg = unhex(&field, &test.msg);
-            let mut ct_tag = unhex(&field, &test.ct);
-            ct_tag.extend(unhex(&field, &test.tag));
-            let valid = is_valid(&field, &test.result);
-            let (expectation, max_input_len) = if group.iv_size != 96 {
-                (GcmExpectation::InvalidNonce, msg.len().max(ct_tag.len()))
-            } else if valid {
-                (GcmExpectation::Valid, msg.len().max(ct_tag.len()))
-            } else {
-                (GcmExpectation::AuthenticationFailed, ct_tag.len())
-            };
+            let (fields, expectation, max_input_len) = translate_aead(&field, group, test, 96);
             for schedule in schedules(max_input_len) {
+                let (key, iv, aad, msg, ct_tag) = fields.clone();
                 cases.push(GcmCase {
                     tc_id: test.tc_id,
                     schedule,
-                    key: key.clone(),
-                    iv: iv.clone(),
-                    aad: aad.clone(),
-                    msg: msg.clone(),
-                    ct_tag: ct_tag.clone(),
+                    key,
+                    iv,
+                    aad,
+                    msg,
+                    ct_tag,
                     expectation,
                 });
             }
         }
     }
     cases
+}
+
+/// The normalized ChaCha20-Poly1305 corpus (both variants): every vector,
+/// expanded over its schedule set. Both files are all-keySize-256, so unlike
+/// GCM nothing is skipped.
+pub fn chacha_cases() -> Vec<ChaChaCase> {
+    let mut cases = Vec::new();
+    for (alg, text) in CHACHA_VECTORS {
+        let file: VectorFile<AeadGroup> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        for group in &file.test_groups {
+            assert_eq!(
+                group.key_size,
+                256,
+                "{} vectors are all 256-bit",
+                alg.name()
+            );
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                let (fields, expectation, max_input_len) =
+                    translate_aead(&field, group, test, alg.iv_bits());
+                for schedule in schedules(max_input_len) {
+                    let (key, iv, aad, msg, ct_tag) = fields.clone();
+                    cases.push(ChaChaCase {
+                        alg,
+                        tc_id: test.tc_id,
+                        schedule,
+                        key,
+                        iv,
+                        aad,
+                        msg,
+                        ct_tag,
+                        expectation,
+                    });
+                }
+            }
+        }
+    }
+    cases
+}
+
+/// Decode one Wycheproof AEAD test and derive its expectation: a group whose
+/// `ivSize` is not the algorithm's nonce length must fail `invalid-nonce`;
+/// otherwise the vector's own verdict applies.
+#[allow(clippy::type_complexity)]
+fn translate_aead(
+    field: &str,
+    group: &AeadGroup,
+    test: &AeadTest,
+    valid_iv_bits: u32,
+) -> (
+    (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>),
+    AeadExpectation,
+    usize,
+) {
+    let key = unhex(field, &test.key);
+    let iv = unhex(field, &test.iv);
+    let aad = unhex(field, &test.aad);
+    let msg = unhex(field, &test.msg);
+    let mut ct_tag = unhex(field, &test.ct);
+    ct_tag.extend(unhex(field, &test.tag));
+    let valid = is_valid(field, &test.result);
+    let (expectation, max_input_len) = if group.iv_size != valid_iv_bits {
+        (AeadExpectation::InvalidNonce, msg.len().max(ct_tag.len()))
+    } else if valid {
+        (AeadExpectation::Valid, msg.len().max(ct_tag.len()))
+    } else {
+        (AeadExpectation::AuthenticationFailed, ct_tag.len())
+    };
+    ((key, iv, aad, msg, ct_tag), expectation, max_input_len)
 }
 
 /// The normalized SHA-2 digest corpus: every NIST CAVP ShortMsg vector,

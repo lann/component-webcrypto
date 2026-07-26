@@ -10,7 +10,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
-use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
+use aes_gcm::{Aes128Gcm, Aes256Gcm};
+use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use futures::channel::oneshot;
 use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamReader, StreamResult};
 use wasmtime::{Result, StoreContextMut};
@@ -20,16 +21,13 @@ use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
-    aes_gcm as aes_gcm_iface, bytes as bytes_iface, digest as digest_iface,
-    hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
+    aes_gcm as aes_gcm_iface, bytes as bytes_iface, chacha20_poly1305 as chacha_iface,
+    digest as digest_iface, hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
 };
 use crate::{
-    AeadKey, Digest, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME,
+    AeadKey, Digest, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME,
+    CHACHA20_POLY1305_NAME, HMAC_NAME, XCHACHA20_POLY1305_NAME,
 };
-
-/// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
-/// WIT contract (12-byte nonces, 16-byte tags).
-const GCM_NONCE_LEN: usize = 12;
 
 // --- types -------------------------------------------------------------------
 
@@ -281,61 +279,91 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
 
 impl aead::Host for WasiWebcryptoCtxView<'_> {}
 
-/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. Only
-/// the WIT `aes-variant` cases this implementation serves appear here:
+/// The cipher backing an [`AeadKey`], bound to its algorithm at minting.
+/// Only the WIT variant cases this implementation serves appear here:
 /// AES-192 is declined at minting (see the WIT `aes-variant` doc).
 #[derive(Clone)]
-// Each variant is an expanded key schedule; the size skew between AES-128
-// and AES-256 schedules is inherent and both live briefly per call.
+// Each AES variant is an expanded key schedule; the size skew between the
+// AES-128 and AES-256 schedules is inherent and both live briefly per call.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum AesGcmCipher {
-    Aes128(Aes128Gcm),
-    Aes256(Aes256Gcm),
+pub(crate) enum AeadCipher {
+    Aes128Gcm(Aes128Gcm),
+    Aes256Gcm(Aes256Gcm),
+    ChaCha20Poly1305(ChaCha20Poly1305),
+    XChaCha20Poly1305(XChaCha20Poly1305),
 }
 
-/// Validate an AES-GCM nonce length, rendering the WIT `invalid-nonce` error
-/// for anything but 12 bytes.
-fn check_gcm_nonce(nonce: &[u8]) -> std::result::Result<(), Error> {
-    if nonce.len() == GCM_NONCE_LEN {
-        Ok(())
-    } else {
-        Err(Error::InvalidNonce(format!(
-            "AES-GCM requires a {GCM_NONCE_LEN}-byte nonce, got {} bytes",
-            nonce.len()
-        )))
+impl AeadCipher {
+    /// The algorithm name reported by `aead-key.algorithm-name`.
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Aes128Gcm(_) | Self::Aes256Gcm(_) => AES_GCM_NAME,
+            Self::ChaCha20Poly1305(_) => CHACHA20_POLY1305_NAME,
+            Self::XChaCha20Poly1305(_) => XCHACHA20_POLY1305_NAME,
+        }
     }
-}
 
-impl AesGcmCipher {
     /// The key length in bits (WebCrypto's `AesKeyAlgorithm.length`).
     fn length_bits(&self) -> u32 {
         match self {
-            Self::Aes128(_) => 128,
-            Self::Aes256(_) => 256,
+            Self::Aes128Gcm(_) => 128,
+            Self::Aes256Gcm(_) | Self::ChaCha20Poly1305(_) | Self::XChaCha20Poly1305(_) => 256,
+        }
+    }
+
+    /// The nonce length this cipher's algorithm specifies.
+    fn nonce_len(&self) -> usize {
+        match self {
+            Self::XChaCha20Poly1305(_) => 24,
+            _ => 12,
+        }
+    }
+
+    /// Validate a nonce's length, rendering the WIT `invalid-nonce` error
+    /// for anything but the algorithm's nonce length.
+    fn check_nonce(&self, nonce: &[u8]) -> std::result::Result<(), Error> {
+        if nonce.len() == self.nonce_len() {
+            Ok(())
+        } else {
+            Err(Error::InvalidNonce(format!(
+                "{} requires a {}-byte nonce, got {} bytes",
+                self.name(),
+                self.nonce_len(),
+                nonce.len()
+            )))
         }
     }
 
     fn encrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> aes_gcm::aead::Result<Vec<u8>> {
-        let nonce = Nonce::from_slice(nonce);
         match self {
-            Self::Aes128(c) => c.encrypt(nonce, payload),
-            Self::Aes256(c) => c.encrypt(nonce, payload),
+            Self::Aes128Gcm(c) => c.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::Aes256Gcm(c) => c.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::ChaCha20Poly1305(c) => {
+                c.encrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
+            }
+            Self::XChaCha20Poly1305(c) => {
+                c.encrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
+            }
         }
     }
 
     fn decrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> aes_gcm::aead::Result<Vec<u8>> {
-        let nonce = Nonce::from_slice(nonce);
         match self {
-            Self::Aes128(c) => c.decrypt(nonce, payload),
-            Self::Aes256(c) => c.decrypt(nonce, payload),
+            Self::Aes128Gcm(c) => c.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::Aes256Gcm(c) => c.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
+            Self::ChaCha20Poly1305(c) => {
+                c.decrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
+            }
+            Self::XChaCha20Poly1305(c) => {
+                c.decrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
+            }
         }
     }
 }
 
 impl HostAeadKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_name(&mut self, self_: Resource<AeadKey>) -> Result<String> {
-        self.table.get(&self_)?;
-        Ok(AES_GCM_NAME.to_string())
+        Ok(self.table.get(&self_)?.cipher.name().to_string())
     }
 
     fn algorithm_length(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
@@ -358,7 +386,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         // the call resolves with an error, so the caller's writer always
         // completes.
         let msg = drain_stream(accessor, plaintext).await?;
-        if let Err(err) = check_gcm_nonce(&nonce) {
+        if let Err(err) = cipher.check_nonce(&nonce) {
             return Ok(Err(err));
         }
         let sealed = match cipher.encrypt(
@@ -369,7 +397,12 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
             },
         ) {
             Ok(sealed) => sealed,
-            Err(_) => return Ok(Err(Error::Other("AES-GCM encryption failed".into()))),
+            Err(_) => {
+                return Ok(Err(Error::Other(format!(
+                    "{} encryption failed",
+                    cipher.name()
+                ))))
+            }
         };
         let reader = accessor.with(|access| StreamReader::new(access, sealed))?;
         Ok(Ok(reader))
@@ -390,7 +423,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         // completes. Buffering the whole message is inherent to `open`: no
         // unverified plaintext may be observable.
         let msg = drain_stream(accessor, ciphertext).await?;
-        if let Err(err) = check_gcm_nonce(&nonce) {
+        if let Err(err) = cipher.check_nonce(&nonce) {
             return Ok(Err(err));
         }
         // Any decryption failure — truncated input, bad tag, wrong key,
@@ -577,11 +610,11 @@ fn new_aes_gcm_key(
     }
     let cipher = match variant {
         AesVariant::Aes128 => {
-            AesGcmCipher::Aes128(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
+            AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
         }
         AesVariant::Aes192 => unreachable!("rejected above"),
         AesVariant::Aes256 => {
-            AesGcmCipher::Aes256(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
+            AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
         }
     };
     Ok(AeadKey {
@@ -624,6 +657,71 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
         let key = new_aes_gcm_key(variant, raw, extractable)
+            .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+// --- chacha20-poly1305 (key minting) -----------------------------------------
+
+impl chacha_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// The length in bytes of a ChaCha20-Poly1305 key (either variant).
+const CHACHA_KEY_LEN: usize = 32;
+
+/// Build an [`AeadKey`] from raw material declared as `variant`, rendering
+/// the WIT `invalid-key` error when the material is not the 32 bytes both
+/// variants require.
+fn new_chacha_key(
+    variant: chacha_iface::ChachaVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> std::result::Result<AeadKey, Error> {
+    use chacha_iface::ChachaVariant;
+    if raw.len() != CHACHA_KEY_LEN {
+        return Err(Error::InvalidKey(format!(
+            "{variant:?} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
+            raw.len()
+        )));
+    }
+    let cipher = match variant {
+        ChachaVariant::Chacha20Poly1305 => AeadCipher::ChaCha20Poly1305(
+            ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+        ),
+        ChachaVariant::Xchacha20Poly1305 => AeadCipher::XChaCha20Poly1305(
+            XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+        ),
+    };
+    Ok(AeadKey {
+        cipher,
+        raw,
+        extractable,
+    })
+}
+
+impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key(
+        accessor: &Accessor<T, Self>,
+        variant: chacha_iface::ChachaVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let key = match new_chacha_key(variant, raw, extractable) {
+            Ok(key) => key,
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: chacha_iface::ChachaVariant,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw)
+            .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
+        let key = new_chacha_key(variant, raw, extractable)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
