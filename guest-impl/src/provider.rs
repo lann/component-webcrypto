@@ -17,11 +17,16 @@ use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
+use crate::exports::lann::webcrypto::aead_internal_nonce::{
+    Guest as AeadInternalNonceGuest, GuestInternalNonceKey,
+};
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
+use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
 use crate::exports::lann::webcrypto::chacha20_poly1305::{
     ChachaVariant, Guest as ChaChaPoly1305Guest,
 };
+use crate::exports::lann::webcrypto::chacha20_poly1305_internal_nonce::Guest as ChachaInternalNonceGuest;
 use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
 use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
@@ -270,6 +275,18 @@ impl AeadCipher {
         match self {
             Self::XChaCha20Poly1305(_) => 24,
             _ => 12,
+        }
+    }
+
+    /// The internal-nonce seal budget for this cipher's algorithm: the WIT
+    /// contract's 2^32-invocation bound for 12-byte-nonce algorithms (SP
+    /// 800-38D SS8.2.2's repeat-probability bound); `none` for 24-byte
+    /// nonces, whose repeat probability is negligible at any realistic
+    /// count.
+    fn nonce_budget(&self) -> Option<u64> {
+        match self.nonce_len() {
+            12 => Some(1 << 32),
+            _ => None,
         }
     }
 
@@ -593,6 +610,172 @@ impl ChaChaPoly1305Guest for Component {
         let key = new_chacha_key(variant, raw, extractable)
             .expect("generated key material always matches the variant");
         Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+}
+
+// --- aead-internal-nonce -------------------------------------------------------
+
+impl AeadInternalNonceGuest for Component {
+    type InternalNonceKey = InternalNonceKey;
+}
+
+/// An exported `internal-nonce-key`: like [`AeadKey`], but the nonce is
+/// generated here per `seal` (the SP 800-38D SS8.2.2 RBG-based construction)
+/// and carried as the sealed message's prefix. The key tracks its seal
+/// count to enforce the WIT nonce budget (`error.key-exhausted`) for
+/// 12-byte-nonce algorithms.
+pub struct InternalNonceKey {
+    raw: Vec<u8>,
+    extractable: bool,
+    cipher: AeadCipher,
+    /// `seal` invocations so far, counted against the nonce budget.
+    /// A `Cell` because exports take `&self` (wasm is single-threaded).
+    sealed: std::cell::Cell<u64>,
+}
+
+/// Wrap a caller-nonce [`AeadKey`] build as an [`InternalNonceKey`] (the
+/// cipher and validation are identical; only the nonce discipline differs).
+fn into_internal_nonce_key(key: AeadKey) -> InternalNonceKey {
+    InternalNonceKey {
+        raw: key.raw,
+        extractable: key.extractable,
+        cipher: key.cipher,
+        sealed: std::cell::Cell::new(0),
+    }
+}
+
+impl GuestInternalNonceKey for InternalNonceKey {
+    async fn seal(
+        &self,
+        aad: Vec<u8>,
+        plaintext: wit_bindgen::StreamReader<u8>,
+    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
+        // Per the WIT contract, the input stream is fully drained even when
+        // the call resolves with an error, so the caller's writer always
+        // completes.
+        let msg = drain_stream(plaintext).await;
+        // Count this invocation against the algorithm's nonce budget, per
+        // the minting interfaces' SHOULD-enforce contract.
+        if let Some(budget) = self.cipher.nonce_budget() {
+            if self.sealed.get() >= budget {
+                return Err(Error::KeyExhausted);
+            }
+        }
+        self.sealed.set(self.sealed.get() + 1);
+        // The SP 800-38D SS8.2.2 RBG-based construction: a fresh random
+        // nonce per seal, carried as the sealed message's prefix
+        // (`nonce || ciphertext || tag`, per the minting interface docs).
+        let mut sealed = vec![0u8; self.cipher.nonce_len()];
+        getrandom::fill(&mut sealed).expect("WASI random source is always available");
+        let body = self
+            .cipher
+            .encrypt(
+                &sealed,
+                Payload {
+                    msg: &msg,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| Error::Other(format!("{} encryption failed", self.cipher.name())))?;
+        sealed.extend(body);
+        Ok(stream_of(sealed))
+    }
+
+    async fn open(
+        &self,
+        aad: Vec<u8>,
+        sealed: wit_bindgen::StreamReader<u8>,
+    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
+        // Like `seal`: fully drain the input first; buffering the whole
+        // message is inherent to `open` (no unverified plaintext may be
+        // observable).
+        let msg = drain_stream(sealed).await;
+        // Any failure -- input too short to carry the wire format, a bad
+        // tag, wrong key, wrong associated data -- reports
+        // `authentication-failed` with no detail, per the WIT contract.
+        if msg.len() < self.cipher.nonce_len() {
+            return Err(Error::AuthenticationFailed);
+        }
+        let (nonce, body) = msg.split_at(self.cipher.nonce_len());
+        let opened = self
+            .cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: body,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| Error::AuthenticationFailed)?;
+        Ok(stream_of(opened))
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.cipher.name().to_string()
+    }
+
+    fn algorithm_length(&self) -> u32 {
+        self.cipher.length_bits()
+    }
+
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+        if self.extractable {
+            Ok(self.raw.clone())
+        } else {
+            Err(Error::NotExtractable)
+        }
+    }
+}
+
+// --- aes-gcm-internal-nonce (key minting) ----------------------------------------
+
+impl AesGcmInternalNonceGuest for Component {
+    async fn import_key(
+        variant: AesVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+        let key = into_internal_nonce_key(new_aes_gcm_key(variant, raw, extractable)?);
+        Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
+    }
+
+    async fn generate_key(
+        variant: AesVariant,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+        let mut raw = vec![0u8; variant_len(variant)?];
+        getrandom::fill(&mut raw).expect("WASI random source is always available");
+        let key = into_internal_nonce_key(
+            new_aes_gcm_key(variant, raw, extractable)
+                .expect("generated key material always matches the variant"),
+        );
+        Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
+    }
+}
+
+// --- chacha20-poly1305-internal-nonce (key minting) -------------------------------
+
+impl ChachaInternalNonceGuest for Component {
+    async fn import_key(
+        variant: ChachaVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+        let key = into_internal_nonce_key(new_chacha_key(variant, raw, extractable)?);
+        Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
+    }
+
+    async fn generate_key(
+        variant: ChachaVariant,
+        extractable: bool,
+    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw).expect("WASI random source is always available");
+        let key = into_internal_nonce_key(
+            new_chacha_key(variant, raw, extractable)
+                .expect("generated key material always matches the variant"),
+        );
+        Ok(crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(key))
     }
 }
 

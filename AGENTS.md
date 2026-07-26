@@ -22,11 +22,12 @@ rather than relying on a cached summary.
 
 ```
 wit/                    # lann:webcrypto package: types (structural),
-                        #   mac/aead/digest/signature (generic primitive
-                        #   resources), hmac-sha2/aes-gcm/chacha20-poly1305/
-                        #   sha2/ed25519-*/ecdsa-* (minting algorithm
-                        #   interfaces), bytes (constant-time comparison
-                        #   utility)
+                        #   mac/aead/aead-internal-nonce/digest/signature
+                        #   (generic primitive resources), hmac-sha2/aes-gcm/
+                        #   chacha20-poly1305/*-internal-nonce/sha2/
+                        #   ed25519-*/ecdsa-* (minting algorithm interfaces),
+                        #   aes/chacha (shared variant enums), bytes
+                        #   (constant-time comparison utility)
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
@@ -195,13 +196,16 @@ the change should resolve, not work around.
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'
   fine-grained leaks (its README documents the current detection limits).
 - A FIPS 140-3 profile, kept *possible* (not implemented): everything needed
-  is additive — an internal-nonce seal (`seal-internal-nonce`, since SP
-  800-38D forbids externally supplied GCM encryption IVs in approved mode; a
-  FIPS provider offers caller-nonce `seal` only as a non-approved service), a
-  `module` interface for ISO 19790's mandatory services (show version, show
-  status, self-test, zeroization) plus approved-service indication, and
-  wrapped key export. Do not reintroduce WIT contracts that *mandate*
-  non-approved behavior (the HMAC import doc deliberately permits
-  policy-based rejection of short keys for this reason); a FIPS profile is
-  then just a provider exporting only approved algorithm interfaces —
-  enforced at `wac plug` time like the timing-channel class D policy.
+  is additive — the `aead-internal-nonce` primitive kind carries the
+  approved-mode seal (SP 800-38D forbids externally supplied GCM encryption
+  IVs in approved mode, so a FIPS provider exports `aes-gcm-internal-nonce`
+  but not `aes-gcm`, and offers caller-nonce sealing only as a non-approved
+  service), a `module` interface for ISO 19790's mandatory services (show
+  version, show status, self-test, zeroization) plus approved-service
+  indication, and wrapped key export. Do not reintroduce WIT contracts that
+  *mandate* non-approved behavior (the HMAC import doc deliberately permits
+  policy-based rejection of short keys, and the internal-nonce import docs
+  permit policy-based rejection of imported material, for this reason); a
+  FIPS profile is then just a provider exporting only approved algorithm
+  interfaces — enforced at `wac plug` time like the timing-channel class D
+  policy.

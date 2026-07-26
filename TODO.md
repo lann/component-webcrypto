@@ -7,12 +7,18 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## WIT (pre-freeze: cheap now, breaking later)
 
-- **Nonce-misuse resistance: internal-nonce seal.** Caller-supplied nonces are
-  the top real-world AEAD footgun and the API's only defense is a doc comment.
-  Add a `seal-internal-nonce` (nonce chosen by the implementation, returned or
-  prefixed) as the recommended path, keeping caller-nonce `seal` for interop.
-  Also required eventually by the FIPS direction (SP 800-38D forbids
-  caller-supplied GCM encryption IVs in approved mode).
+- **Consider dropping `chacha-variant` in favor of separate interfaces.**
+  The two ChaCha20-Poly1305 constructions differ in nonce contract, not key
+  shape; per-construction minting interfaces (like the `-verify`/`-sign`
+  split) may carve better than a variant enum. Decide before the surface
+  freezes.
+- **Does `aead` need a nonce-length getter?** A component holding only an
+  `aead-key` (capability-style) cannot learn the nonce length its algorithm
+  requires; `algorithm-name` forces string matching. An
+  `algorithm-nonce-length` getter would be additive-before-freeze.
+- **Split `wit/webcrypto.wit` into multiple files.** The package is one long
+  file; WIT packages can span files in a directory. Organize by layer
+  (types/kinds/minting) before it grows further.
 
 ## Implementation hardening
 

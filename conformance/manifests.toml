@@ -27,6 +27,8 @@ expected-fail = []
 expected-fail = [
     "chacha20-poly1305/*",
     "xchacha20-poly1305/*",
+    "chacha20-poly1305-internal-nonce/*",
+    "xchacha20-poly1305-internal-nonce/*",
     "probe/chacha-*",
     # WebCrypto signs ECDSA with a randomized k (RFC 6979's deterministic k
     # is unobservable there), so the deterministic known-answer probe from
@@ -39,6 +41,8 @@ expected-fail = [
 expected-fail = [
     "chacha20-poly1305/*",
     "xchacha20-poly1305/*",
+    "chacha20-poly1305-internal-nonce/*",
+    "xchacha20-poly1305-internal-nonce/*",
     "probe/chacha-*",
     "probe/ecdsa-sign-deterministic-rfc6979",
 ]

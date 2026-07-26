@@ -74,9 +74,14 @@ crypto conformance tests *functions against mathematics*.
 ## Deliberately deferred
 
 - **Golden-artifact hand-off** (one target seals to a checked-in file,
-  others open it): redundant while every operation is deterministic and
-  vector-covered; becomes valuable the moment something genuinely randomized
-  exists (e.g. a FIPS-profile internal-nonce seal). Revisit then.
+  others open it): still deferred even now that a randomized seal exists
+  (`aead-internal-nonce`), because its cross-target claims are already
+  covered deterministically — every target must `open` the same
+  vector-derived `iv ‖ ct ‖ tag` sealed messages, which pins the wire
+  format, and each target's own `seal` is verified by reopening. A checked-in
+  artifact would add only "target A's randomness works on target B", which
+  the format pin already implies. Revisit if a wire format ever gains
+  target-varying degrees of freedom.
 - **The timing lab** (dudect-style statistical tests of the composed in-guest
   provider, targeting the class B/C surfaces in
   `guest-impl/README.md`): when built, it reports (a matrix column and

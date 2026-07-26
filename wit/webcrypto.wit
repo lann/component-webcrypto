@@ -37,6 +37,13 @@ interface types {
         /// size the platform's crypto API declines). The string is
         /// human-readable.
         unsupported(string),
+        /// The key's nonce budget is exhausted: the implementation can no
+        /// longer guarantee nonce uniqueness for this key (for example, an
+        /// AES-GCM internal-nonce key reaching SP 800-38D's
+        /// 2^32-invocation bound for the RBG-based IV construction). The
+        /// key remains valid for `open`; mint a fresh key to continue
+        /// sealing.
+        key-exhausted,
         /// An implementation-specific operational failure — for example, an
         /// implementation backed by an external keystore (an HSM, a platform
         /// key service) that cannot complete the operation right now. The
@@ -204,6 +211,73 @@ interface aead {
     }
 }
 
+/// The `aead-internal-nonce` primitive kind: single-message authenticated
+/// encryption with the nonce generated within the implementation (SP
+/// 800-38D §8's "IV generated within the cryptographic module").
+///
+/// This is the misuse-resistant counterpart of `aead`: the nonce never
+/// appears in the API, so nonce reuse — the most common catastrophic AEAD
+/// failure — is unrepresentable rather than merely discouraged. Each `seal`
+/// draws a fresh nonce via a construction that guarantees per-key
+/// uniqueness and carries it in the sealed output, making every sealed
+/// message self-contained.
+///
+/// Keys are a distinct resource from `aead.aead-key`, minted by separate
+/// per-algorithm interfaces: the nonce discipline is part of the key
+/// capability, so one key can never mix implementation-chosen and
+/// caller-chosen nonces. Prefer this kind unless interop requires an
+/// externally specified nonce layout; among its algorithms, prefer
+/// XChaCha20-Poly1305 for high-volume keys (see the minting interfaces'
+/// nonce-budget notes).
+///
+/// Like `aead`, this is a single-message primitive: `open` buffers and
+/// verifies before releasing any plaintext, and both operations fully drain
+/// their input streams even when the result is an error. See `mac-key` for
+/// the capability, extractability, and truncating-producer notes, which
+/// apply identically here.
+interface aead-internal-nonce {
+    use types.{error};
+
+    /// An internal-nonce AEAD key: an unforgeable capability, bound to one
+    /// algorithm at creation.
+    resource internal-nonce-key {
+        /// Encrypt and authenticate `plaintext` under a fresh
+        /// implementation-generated nonce with the associated data `aad`.
+        ///
+        /// The returned stream is a self-contained sealed message:
+        /// everything `open` needs besides the key and `aad` is carried
+        /// in-band. The wire format is documented by the key's minting
+        /// interface.
+        ///
+        /// Fails with `error.key-exhausted` once the implementation can no
+        /// longer guarantee nonce uniqueness for this key.
+        seal: async func(aad: list<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
+
+        /// Decrypt and verify a sealed message, as produced by `seal` under
+        /// the same algorithm, with the associated data `aad`.
+        ///
+        /// Resolves only after the stream is fully drained and the tag
+        /// verified: `ok(stream)` *is* the authentication statement, and
+        /// unverified plaintext is never observable. Any failure — a bad
+        /// tag, wrong associated data, or input too short to carry the wire
+        /// format — reports `error.authentication-failed` with no detail.
+        open: async func(aad: list<u8>, sealed: stream<u8>) -> result<stream<u8>, error>;
+
+        /// The registry name of the algorithm family this key is bound to,
+        /// e.g. `"AES-GCM"` (spelled as for `aead-key.algorithm-name`).
+        algorithm-name: func() -> string;
+
+        /// The key length in bits, e.g. `256`.
+        algorithm-length: func() -> u32;
+
+        /// The raw key material. Fails with `error.not-extractable` unless
+        /// the key was created with `extractable` true. The nonce budget
+        /// does not travel with the material — see the minting interfaces'
+        /// import docs.
+        export-key: async func() -> result<list<u8>, error>;
+    }
+}
+
 /// The `digest` primitive kind: cryptographic hash functions.
 ///
 /// `mac` minus keys: there is no key material, so no extractability and no
@@ -312,14 +386,10 @@ interface hmac-sha2 {
     generate-key: async func(%variant: sha2-variant, extractable: bool) -> result<mac-key, error>;
 }
 
-/// AES-GCM key minting (NIST SP 800-38D).
-///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
-/// and 16-byte tags.
-interface aes-gcm {
-    use types.{error};
-    use aead.{aead-key};
-
+/// The AES family's shared parameterization. Interfaces minting AES-based
+/// keys (`aes-gcm`, `aes-gcm-internal-nonce`, …) declare their variant from
+/// this one closed set (the `sha2` pattern: one definition per family).
+interface aes {
     /// The AES variants, distinguished by key size: AES closes this set, so
     /// it is an enum, not a number. (Each algorithm interface names its
     /// closed set of parameterizations `<algorithm>-variant`.)
@@ -332,6 +402,16 @@ interface aes-gcm {
         aes192,
         aes256,
     }
+}
+
+/// AES-GCM key minting (NIST SP 800-38D).
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
+/// and 16-byte tags.
+interface aes-gcm {
+    use types.{error};
+    use aead.{aead-key};
+    use aes.{aes-variant};
 
     /// Import raw key material as the declared AES variant.
     ///
@@ -349,15 +429,11 @@ interface aes-gcm {
     generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
 }
 
-/// ChaCha20-Poly1305 key minting (RFC 8439, and the XChaCha20-Poly1305
-/// extension of draft-irtf-cfrg-xchacha).
-///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags,
-/// the `ciphertext ‖ tag` wire format, and the variant's nonce length.
-interface chacha20-poly1305 {
-    use types.{error};
-    use aead.{aead-key};
-
+/// The ChaCha20-Poly1305 family's shared parameterization. Interfaces
+/// minting ChaCha-based keys (`chacha20-poly1305`,
+/// `chacha20-poly1305-internal-nonce`, …) declare their construction from
+/// this one closed set (the `sha2` pattern: one definition per family).
+interface chacha {
     /// The ChaCha20-Poly1305 constructions. Both use 256-bit keys and differ
     /// only in nonce construction, so unlike `aes-variant` the declared
     /// variant selects the accepted nonce length, not the key length.
@@ -371,6 +447,17 @@ interface chacha20-poly1305 {
         /// to be chosen at random. Not IETF-standardized.
         xchacha20-poly1305,
     }
+}
+
+/// ChaCha20-Poly1305 key minting (RFC 8439, and the XChaCha20-Poly1305
+/// extension of draft-irtf-cfrg-xchacha).
+///
+/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags,
+/// the `ciphertext ‖ tag` wire format, and the variant's nonce length.
+interface chacha20-poly1305 {
+    use types.{error};
+    use aead.{aead-key};
+    use chacha.{chacha-variant};
 
     /// Import raw key material as the declared variant.
     ///
@@ -384,6 +471,77 @@ interface chacha20-poly1305 {
     /// with `error.unsupported` if this implementation does not serve the
     /// variant.
     generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<aead-key, error>;
+}
+
+/// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
+/// SP 800-38D §8.2.2 RBG-based IV construction (96 random bits per seal).
+///
+/// Sealed messages are `iv ‖ ciphertext ‖ tag` (12-byte IV, 16-byte tag).
+///
+/// A key's nonce budget is 2^32 `seal` invocations (§8.2.2's
+/// repeat-probability bound). Implementations SHOULD enforce it with
+/// `error.key-exhausted`; a FIPS 140-3 profile MUST. For workloads that
+/// could approach the bound, prefer `chacha20-poly1305-internal-nonce` with
+/// `xchacha20-poly1305`.
+///
+/// This interface is deliberately separate from `aes-gcm` (caller-nonce
+/// minting) so a security profile can serve one nonce discipline without
+/// the other at `wac plug` time — e.g. a FIPS 140-3 approved-mode provider
+/// exports this interface but not `aes-gcm`, whose caller-supplied
+/// encryption IVs SP 800-38D §8 forbids in approved mode.
+interface aes-gcm-internal-nonce {
+    use types.{error};
+    use aead-internal-nonce.{internal-nonce-key};
+    use aes.{aes-variant};
+
+    /// Import raw key material as an internal-nonce AES-GCM key of the
+    /// declared variant (see `aes-gcm.import-key` for the
+    /// variant/`raw`-length contract, which applies identically here).
+    ///
+    /// The nonce-uniqueness guarantee is per key *as managed by this
+    /// implementation*: importing the same material into multiple
+    /// implementations divides the nonce budget among them blindly. An
+    /// implementation MAY reject imported material per its security policy
+    /// (for example, a profile that cannot establish uniqueness for
+    /// externally sourced material) with `error.invalid-key` or
+    /// `error.unsupported`; prefer `generate-key` where interop does not
+    /// require import.
+    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+
+    /// Generate a fresh random internal-nonce AES-GCM key of the declared
+    /// variant. Fails with `error.unsupported` if this implementation does
+    /// not serve the variant.
+    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<internal-nonce-key, error>;
+}
+
+/// ChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce` keys
+/// drawing each nonce from the implementation's random source.
+///
+/// Sealed messages are `nonce ‖ ciphertext ‖ tag` (16-byte tag; 12- or
+/// 24-byte nonce per the declared variant).
+///
+/// The `xchacha20-poly1305` variant is the recommended internal-nonce
+/// algorithm: with 24-byte random nonces the repeat probability is
+/// negligible for any realistic invocation count, so there is no practical
+/// nonce budget. The 12-byte `chacha20-poly1305` variant carries the same
+/// 2^32-invocation budget as `aes-gcm-internal-nonce`, and the same
+/// SHOULD-enforce expectation.
+interface chacha20-poly1305-internal-nonce {
+    use types.{error};
+    use aead-internal-nonce.{internal-nonce-key};
+    use chacha.{chacha-variant};
+
+    /// Import raw key material as an internal-nonce key of the declared
+    /// variant (both take exactly 32 bytes; anything else fails with
+    /// `error.invalid-key`). See `aes-gcm-internal-nonce.import-key` for
+    /// the shared-material caveat and policy-rejection allowance, which
+    /// apply identically here.
+    import-key: async func(%variant: chacha-variant, raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+
+    /// Generate a fresh random internal-nonce key of the declared variant.
+    /// Fails with `error.unsupported` if this implementation does not serve
+    /// the variant.
+    generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<internal-nonce-key, error>;
 }
 
 /// The `signature` primitive kind: asymmetric signing and verification.

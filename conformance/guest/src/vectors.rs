@@ -3,8 +3,10 @@
 
 use crate::lann::webcrypto::aead::AeadKey;
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
+use crate::lann::webcrypto::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
 use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::chacha20_poly1305::{import_key as import_chacha_key, ChachaVariant};
+use crate::lann::webcrypto::chacha20_poly1305_internal_nonce::import_key as import_chacha_internal_key;
 use crate::lann::webcrypto::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
@@ -13,10 +15,12 @@ use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::{
-    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, Schedule, Sha2Alg, Sha2Case, SigAlg,
-    SigCase,
+    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, InternalNonceAlg, InternalNonceCase,
+    Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase,
 };
-use crate::util::{compute, describe, expect_bytes, open, seal, sig_verify, sign, verify};
+use crate::util::{
+    compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
+};
 
 /// Run one SHA-2 digest vector under its schedule.
 pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
@@ -157,6 +161,60 @@ async fn run_aead_expectation(
                 )),
                 Ok(_) => Err("open accepted an invalid vector".into()),
             }
+        }
+    }
+}
+
+/// Run one internal-nonce AEAD vector under its schedule: `open` the
+/// vector's `iv || ct || tag` (the deterministic direction), and, for valid
+/// vectors, additionally round-trip a fresh `seal` (randomized, so only
+/// self-consistency is checkable).
+pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), String> {
+    let key = match case.alg {
+        InternalNonceAlg::AesGcm => {
+            import_gcm_internal_key(AesVariant::Aes256, case.key.clone(), false)
+                .await
+                .map_err(|e| describe("import-key", &e))?
+        }
+        InternalNonceAlg::ChaCha20Poly1305 => {
+            import_chacha_internal_key(ChachaVariant::Chacha20Poly1305, case.key.clone(), false)
+                .await
+                .map_err(|e| describe("import-key", &e))?
+        }
+        InternalNonceAlg::XChaCha20Poly1305 => {
+            import_chacha_internal_key(ChachaVariant::Xchacha20Poly1305, case.key.clone(), false)
+                .await
+                .map_err(|e| describe("import-key", &e))?
+        }
+    };
+    let (opened, fed) = in_open(&key, &case.aad, &case.sealed, case.schedule).await;
+    fed.map_err(|e| format!("open sealed feeder: {e}"))?;
+    if case.valid {
+        let opened = opened.map_err(|e| describe("open", &e))?;
+        expect_bytes(&opened, &case.msg, "opened bytes")?;
+
+        let (resealed, fed) = in_seal(&key, &case.aad, &case.msg, case.schedule).await;
+        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        let resealed = resealed.map_err(|e| describe("seal", &e))?;
+        if resealed.len() != case.sealed.len() {
+            return Err(format!(
+                "resealed length: got {}, want {}",
+                resealed.len(),
+                case.sealed.len()
+            ));
+        }
+        let (reopened, fed) = in_open(&key, &case.aad, &resealed, Schedule::Whole).await;
+        fed.map_err(|e| format!("re-open sealed feeder: {e}"))?;
+        let reopened = reopened.map_err(|e| describe("open of fresh seal", &e))?;
+        expect_bytes(&reopened, &case.msg, "round-tripped bytes")
+    } else {
+        match opened {
+            Err(Error::AuthenticationFailed) => Ok(()),
+            Err(other) => Err(describe(
+                "open: expected authentication-failed, got",
+                &other,
+            )),
+            Ok(_) => Err("open accepted an invalid sealed message".into()),
         }
     }
 }
