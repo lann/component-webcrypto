@@ -3,7 +3,7 @@
 //!
 //! This crate factors the host-agnostic part of the Wasmtime WebCrypto host
 //! out of the demo binaries so any host can satisfy the `lann:webcrypto`
-//! imports with one call to [`add_to_linker`]. It is a wasip3 (component-model
+//! imports with one call to [`add_to_linker`]. It is an async (component-model
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],

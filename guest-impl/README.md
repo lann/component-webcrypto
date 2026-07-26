@@ -1,4 +1,4 @@
-# `wasip3-webcrypto`
+# `guest-webcrypto`
 
 The in-guest implementation of `lann:webcrypto`: a wasm component (built for
 `wasm32-wasip2`) that runs RustCrypto entirely inside the guest and **exports**

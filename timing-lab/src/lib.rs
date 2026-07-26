@@ -1,5 +1,5 @@
 //! The timing lab: dudect-style statistical timing tests of the composed
-//! `lann:webcrypto` wasip3 provider, run entirely in-guest.
+//! `lann:webcrypto` in-guest provider, run entirely in-guest.
 //!
 //! Methodology ("dude, is my code constant time?" — Reparaz, Balasch,
 //! Verbauwhede, DATE 2017): for each surface, interleave measurements of two

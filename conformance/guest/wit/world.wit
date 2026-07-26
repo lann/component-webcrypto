@@ -1,7 +1,7 @@
 // The shared conformance guest world. One guest binary runs the whole corpus
 // against whichever `lann:webcrypto` implementation the target under test
 // provides: the Wasmtime host, the jco host (Node and browser), or the
-// composed wasip3 provider.
+// composed in-guest provider.
 //
 // The `lann:webcrypto` package lives once at the repository root `wit/` and
 // is pulled in through the `deps/lann-webcrypto` symlink.

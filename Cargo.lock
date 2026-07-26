@@ -180,6 +180,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "conformance-composed-driver"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wasip3",
+ "wit-bindgen 0.57.1",
+]
+
+[[package]]
 name = "conformance-guest"
 version = "0.1.0"
 dependencies = [
@@ -198,16 +208,6 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "conformance-wasip3-driver"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "wasip3",
- "wit-bindgen 0.57.1",
 ]
 
 [[package]]
@@ -724,6 +724,19 @@ dependencies = [
  "hashbrown 0.16.1",
  "indexmap",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "guest-webcrypto"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "chacha20poly1305",
+ "getrandom 0.3.4",
+ "hmac",
+ "sha2",
+ "subtle",
+ "wit-bindgen 0.59.0",
 ]
 
 [[package]]
@@ -1536,19 +1549,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07aa681120704bf09828d1f7cf7e763666c1dc6a36e5096efd0ad9aadfb302d3"
 dependencies = [
  "wit-bindgen 0.57.1",
-]
-
-[[package]]
-name = "wasip3-webcrypto"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "chacha20poly1305",
- "getrandom 0.3.4",
- "hmac",
- "sha2",
- "subtle",
- "wit-bindgen 0.59.0",
 ]
 
 [[package]]

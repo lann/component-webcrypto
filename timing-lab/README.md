@@ -1,7 +1,7 @@
 # timing-lab
 
 A dudect-style statistical timing lab for the composed `lann:webcrypto`
-wasip3 provider: the same component the demos and conformance suite exercise,
+in-guest provider: the same component the demos and conformance suite exercise,
 measured entirely in-guest under `wasmtime`.
 
 ```
@@ -57,7 +57,7 @@ Two in-guest controls bracket every run:
 
 ## Relation to the timing-channel classes
 
-`wasip3-impl/README.md` classifies each algorithm's timing behavior (classes
+`guest-impl/README.md` classifies each algorithm's timing behavior (classes
 A–D) by *construction* — argument from the code's shape. The lab is the
 *empirical* companion: it can confirm the positive claims are not obviously
 wrong (ChaCha20-Poly1305's class A + B should be the boring, quiet row) and

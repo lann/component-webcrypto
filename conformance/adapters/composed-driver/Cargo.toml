@@ -1,9 +1,9 @@
 [package]
-name = "conformance-wasip3-driver"
+name = "conformance-composed-driver"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "CLI driver component for the wasip3-guest conformance target: imports conformance:webcrypto/tests, exports an async wasi:cli/run, and prints the results JSON on stdout."
+description = "CLI driver component for the composed conformance target: imports conformance:webcrypto/tests, exports an async wasi:cli/run, and prints the results JSON on stdout."
 
 [lib]
 crate-type = ["cdylib"]

@@ -61,7 +61,7 @@ wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
 jco-impl/               # jco host library: webcrypto.js, browser-compatible
                         #   Web Crypto API only (crypto.subtle /
                         #   getRandomValues); no dependencies
-wasip3-impl/            # in-guest wasm component: RustCrypto in wasm,
+guest-impl/            # in-guest wasm component: RustCrypto in wasm,
                         #   EXPORTS the package surface, composable via
                         #   `wac plug` — see its README for the wasm
                         #   timing-channel classification & export policy
@@ -79,7 +79,7 @@ conformance/            # cross-implementation conformance suite: vendored
                         #   schedules, plus API-contract probes), per-target
                         #   adapters, and a runner rendering matrix.md
 timing-lab/             # dudect-style statistical timing tests of the
-                        #   composed wasip3 provider (non-gating; see its
+                        #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
 ```
 
@@ -100,7 +100,7 @@ just test-webcrypto-composed # compose guest + in-guest provider + driver (wac p
                              #   and run the whole thing under `wasmtime run`
 just conformance             # the Wycheproof-derived conformance corpus over the
                              #   enabled targets; renders conformance/matrix.md
-just timing-lab              # dudect-style timing tests of the composed wasip3
+just timing-lab              # dudect-style timing tests of the composed in-guest
                              #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs
 ```
@@ -109,11 +109,11 @@ All three implementations run identical guest components. The conformance
 suite (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
 NIST CAVP SHA-2 vectors under multiple stream-chunking schedules, plus
 API-contract probes) gates the wasmtime and
-wasip3-guest targets; the `crypto-demo` guest additionally covers the jco
+composed targets; the `crypto-demo` guest additionally covers the jco
 host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time
-guarantees, so [`wasip3-impl/README.md`](wasip3-impl/README.md) classifies
+guarantees, so [`guest-impl/README.md`](guest-impl/README.md) classifies
 algorithms by how exploitable their timing channels are in wasm (classes A–D)
 and enforces the policy structurally — class D algorithms (e.g. RSA
 private-key ops) are simply never exported by it, so compositions that need
