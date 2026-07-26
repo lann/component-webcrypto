@@ -165,6 +165,15 @@ matters, a gate asserts it (e.g. the demo harness's expected-summary check);
 if it doesn't, omit it. Machine-derived counts belong only in generated
 artifacts like `conformance/matrix.md`.
 
+## Maintaining TODO.md
+
+[`TODO.md`](TODO.md) tracks open review findings. When a change fixes,
+obsoletes, or invalidates an item, amend TODO.md in the same change: delete
+the item entirely (no "done" markers) and prune any section left empty.
+Before starting work that touches an area TODO.md covers, read the relevant
+items — some encode contract decisions (e.g. stream-failure semantics) that
+the change should resolve, not work around.
+
 ## Direction (designed, not yet built)
 
 - More algorithms per kind — each is a new minting interface plus
