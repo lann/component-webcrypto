@@ -1,6 +1,5 @@
 //! The exported `lann:webcrypto` resources and key-minting functions, backed
-//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-256, `aes`/`aes-gcm` for
-//! AES-GCM).
+//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-256, `aes-gcm` for AES-GCM).
 //!
 //! - [`MacKey`] holds raw HMAC key material; `sign` and `verify` are
 //!   one-shot HMAC-SHA-256 computations, stateless per call.
@@ -12,9 +11,8 @@
 //! contract for `seal`/`open`), and outgoing streams are fed from a detached
 //! task (`wit_bindgen::spawn`) after the export returns.
 
-use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
-use aes_gcm::{Aes128Gcm, Aes256Gcm, AesGcm, Nonce};
+use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
 use hmac::Mac as _;
 
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
@@ -22,10 +20,6 @@ use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest}
 use crate::exports::lann::webcrypto::hmac::Guest as HmacGuest;
 use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
 use crate::lann::webcrypto::types::Error;
-
-/// AES-192-GCM with the standard 12-byte nonce (the `aes-gcm` crate provides
-/// no alias for the 192-bit key size).
-type Aes192Gcm = AesGcm<aes::Aes192, U12>;
 
 /// The HMAC-SHA-256 state backing one `sign`/`verify` call.
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
@@ -151,11 +145,11 @@ pub struct AeadKey {
     cipher: AesGcmCipher,
 }
 
-/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. The
-/// WIT `aes-variant` enum closes the size set, so this enum is total.
+/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. Only
+/// the WIT `aes-variant` cases this implementation serves appear here:
+/// AES-192 is declined at minting (see the WIT `aes-variant` doc).
 enum AesGcmCipher {
     Aes128(Aes128Gcm),
-    Aes192(Aes192Gcm),
     Aes256(Aes256Gcm),
 }
 
@@ -164,7 +158,6 @@ impl AesGcmCipher {
     fn length_bits(&self) -> u32 {
         match self {
             Self::Aes128(_) => 128,
-            Self::Aes192(_) => 192,
             Self::Aes256(_) => 256,
         }
     }
@@ -173,7 +166,6 @@ impl AesGcmCipher {
         let nonce = Nonce::from_slice(nonce);
         match self {
             Self::Aes128(cipher) => cipher.encrypt(nonce, payload),
-            Self::Aes192(cipher) => cipher.encrypt(nonce, payload),
             Self::Aes256(cipher) => cipher.encrypt(nonce, payload),
         }
     }
@@ -182,7 +174,6 @@ impl AesGcmCipher {
         let nonce = Nonce::from_slice(nonce);
         match self {
             Self::Aes128(cipher) => cipher.decrypt(nonce, payload),
-            Self::Aes192(cipher) => cipher.decrypt(nonce, payload),
             Self::Aes256(cipher) => cipher.decrypt(nonce, payload),
         }
     }
@@ -293,20 +284,24 @@ impl HmacGuest for Component {
 
 // --- aes-gcm (key minting) -------------------------------------------------------
 
-/// The raw key length in bytes for an AES variant.
-fn variant_len(variant: AesVariant) -> usize {
+/// The raw key length in bytes for a served AES variant, or `unsupported`
+/// for one this implementation declines (AES-192; see the WIT `aes-variant`
+/// doc).
+fn variant_len(variant: AesVariant) -> Result<usize, Error> {
     match variant {
-        AesVariant::Aes128 => 16,
-        AesVariant::Aes192 => 24,
-        AesVariant::Aes256 => 32,
+        AesVariant::Aes128 => Ok(16),
+        AesVariant::Aes192 => Err(Error::Unsupported(
+            "AES-192 is not served by this implementation".into(),
+        )),
+        AesVariant::Aes256 => Ok(32),
     }
 }
 
 /// Build an [`AeadKey`] from raw material declared as `variant`, rendering
 /// the WIT `invalid-key` error when the material's length disagrees with
-/// the declared variant.
+/// the declared variant, or `unsupported` for a declined variant.
 fn new_aes_gcm_key(variant: AesVariant, raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
-    let expected = variant_len(variant);
+    let expected = variant_len(variant)?;
     if raw.len() != expected {
         return Err(Error::InvalidKey(format!(
             "{variant:?} requires {expected} bytes of key material, got {} bytes",
@@ -317,9 +312,7 @@ fn new_aes_gcm_key(variant: AesVariant, raw: Vec<u8>, extractable: bool) -> Resu
         AesVariant::Aes128 => {
             AesGcmCipher::Aes128(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
         }
-        AesVariant::Aes192 => {
-            AesGcmCipher::Aes192(Aes192Gcm::new_from_slice(&raw).expect("length checked"))
-        }
+        AesVariant::Aes192 => unreachable!("rejected above"),
         AesVariant::Aes256 => {
             AesGcmCipher::Aes256(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
         }
@@ -345,7 +338,7 @@ impl AesGcmGuest for Component {
         variant: AesVariant,
         extractable: bool,
     ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
-        let mut raw = vec![0u8; variant_len(variant)];
+        let mut raw = vec![0u8; variant_len(variant)?];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
         let key = new_aes_gcm_key(variant, raw, extractable)
             .expect("generated key material always matches the variant");

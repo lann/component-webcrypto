@@ -219,6 +219,10 @@ interface aes-gcm {
     /// closed set of parameterizations `<algorithm>-variant`.)
     enum aes-variant {
         aes128,
+        /// Not widely supported: browsers decline AES-192, and no current
+        /// implementation of this package serves it — expect
+        /// `error.unsupported` unless composed with a provider that
+        /// specifically offers it.
         aes192,
         aes256,
     }

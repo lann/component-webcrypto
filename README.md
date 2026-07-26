@@ -40,9 +40,12 @@ kind*, not by algorithm:
   `error` variant carries no misuse cases — incrementality comes from the
   streams, not from resource state.
 
-Current algorithms: **HMAC-SHA-256** and **AES-GCM** (128/192/256-bit keys,
+Current algorithms: **HMAC-SHA-256** and **AES-GCM** (128/256-bit keys,
 12-byte nonces, 16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire
-format, which RustCrypto's `aes-gcm` produces identically).
+format, which RustCrypto's `aes-gcm` produces identically). The `aes-variant`
+enum also declares `aes192` — AES's spec closes the set — but no
+implementation here serves it (browsers decline AES-192); it fails
+`unsupported`, and a composition needing it must supply its own provider.
 
 ## Layout
 

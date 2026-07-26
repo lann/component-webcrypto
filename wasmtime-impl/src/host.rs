@@ -9,9 +9,8 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
-use aes_gcm::{Aes128Gcm, Aes256Gcm, AesGcm, Nonce};
+use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
 use futures::channel::oneshot;
 use hmac::Mac as _;
 use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamReader, StreamResult};
@@ -25,9 +24,6 @@ use crate::{
     AeadKey, HmacSha256, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME,
     HMAC_SHA256_HASH,
 };
-
-/// AES-192-GCM, which the `aes-gcm` crate does not alias.
-type Aes192Gcm = AesGcm<aes::Aes192, U12>;
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
 /// WIT contract (12-byte nonces, 16-byte tags).
@@ -196,12 +192,15 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
 
 impl aead::Host for WasiWebcryptoCtxView<'_> {}
 
-/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. The
-/// WIT `aes-variant` enum closes the size set, so this enum is total.
+/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. Only
+/// the WIT `aes-variant` cases this implementation serves appear here:
+/// AES-192 is declined at minting (see the WIT `aes-variant` doc).
 #[derive(Clone)]
+// Each variant is an expanded key schedule; the size skew between AES-128
+// and AES-256 schedules is inherent and both live briefly per call.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum AesGcmCipher {
     Aes128(Aes128Gcm),
-    Aes192(Aes192Gcm),
     Aes256(Aes256Gcm),
 }
 
@@ -223,7 +222,6 @@ impl AesGcmCipher {
     fn length_bits(&self) -> u32 {
         match self {
             Self::Aes128(_) => 128,
-            Self::Aes192(_) => 192,
             Self::Aes256(_) => 256,
         }
     }
@@ -232,7 +230,6 @@ impl AesGcmCipher {
         let nonce = Nonce::from_slice(nonce);
         match self {
             Self::Aes128(c) => c.encrypt(nonce, payload),
-            Self::Aes192(c) => c.encrypt(nonce, payload),
             Self::Aes256(c) => c.encrypt(nonce, payload),
         }
     }
@@ -241,7 +238,6 @@ impl AesGcmCipher {
         let nonce = Nonce::from_slice(nonce);
         match self {
             Self::Aes128(c) => c.decrypt(nonce, payload),
-            Self::Aes192(c) => c.decrypt(nonce, payload),
             Self::Aes256(c) => c.decrypt(nonce, payload),
         }
     }
@@ -387,7 +383,8 @@ impl aes_gcm_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 /// Build an [`AeadKey`] from raw material declared as `variant`, rendering
 /// the WIT `invalid-key` error when the material's length disagrees with
-/// the declared variant.
+/// the declared variant, or `unsupported` for a variant this implementation
+/// does not serve (AES-192; see the WIT `aes-variant` doc).
 fn new_aes_gcm_key(
     variant: aes_gcm_iface::AesVariant,
     raw: Vec<u8>,
@@ -396,7 +393,11 @@ fn new_aes_gcm_key(
     use aes_gcm_iface::AesVariant;
     let expected = match variant {
         AesVariant::Aes128 => 16,
-        AesVariant::Aes192 => 24,
+        AesVariant::Aes192 => {
+            return Err(Error::Unsupported(
+                "AES-192 is not served by this implementation".into(),
+            ))
+        }
         AesVariant::Aes256 => 32,
     };
     if raw.len() != expected {
@@ -409,9 +410,7 @@ fn new_aes_gcm_key(
         AesVariant::Aes128 => {
             AesGcmCipher::Aes128(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
         }
-        AesVariant::Aes192 => {
-            AesGcmCipher::Aes192(Aes192Gcm::new_from_slice(&raw).expect("length checked"))
-        }
+        AesVariant::Aes192 => unreachable!("rejected above"),
         AesVariant::Aes256 => {
             AesGcmCipher::Aes256(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
         }
@@ -445,7 +444,11 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         use aes_gcm_iface::AesVariant;
         let len = match variant {
             AesVariant::Aes128 => 16,
-            AesVariant::Aes192 => 24,
+            AesVariant::Aes192 => {
+                return Ok(Err(Error::Unsupported(
+                    "AES-192 is not served by this implementation".into(),
+                )))
+            }
             AesVariant::Aes256 => 32,
         };
         let mut raw = vec![0u8; len];

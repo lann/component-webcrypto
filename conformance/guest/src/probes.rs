@@ -13,6 +13,7 @@ use crate::util::{describe, expect_bytes, open, seal, sign, verify};
 pub const NAMES: &[&str] = &[
     "hmac-import-empty-key",
     "aes-import-wrong-length",
+    "aes192-unsupported",
     "seal-drains-on-invalid-nonce",
     "open-drains-on-invalid-nonce",
     "sealed-length",
@@ -28,14 +29,15 @@ pub async fn run_one(index: usize) -> Result<(), String> {
     match index {
         0 => hmac_import_empty_key().await,
         1 => aes_import_wrong_length().await,
-        2 => seal_drains_on_invalid_nonce().await,
-        3 => open_drains_on_invalid_nonce().await,
-        4 => sealed_length().await,
-        5 => key_export_roundtrip().await,
-        6 => not_extractable().await,
-        7 => generated_key_shape().await,
-        8 => algorithm_names().await,
-        9 => mac_verify_rejects_truncated().await,
+        2 => aes192_unsupported().await,
+        3 => seal_drains_on_invalid_nonce().await,
+        4 => open_drains_on_invalid_nonce().await,
+        5 => sealed_length().await,
+        6 => key_export_roundtrip().await,
+        7 => not_extractable().await,
+        8 => generated_key_shape().await,
+        9 => algorithm_names().await,
+        10 => mac_verify_rejects_truncated().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -73,6 +75,21 @@ async fn aes_import_wrong_length() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// No implementation of this package serves AES-192 (see the WIT
+/// `aes-variant` doc): both minting paths fail `unsupported`.
+async fn aes192_unsupported() -> Result<(), String> {
+    match import_key(AesVariant::Aes192, vec![0u8; 24], false).await {
+        Err(Error::Unsupported(_)) => {}
+        Err(other) => return Err(describe("import-key: expected unsupported, got", &other)),
+        Ok(_) => return Err("AES-192 key imported".into()),
+    }
+    match generate_key(AesVariant::Aes192, false).await {
+        Err(Error::Unsupported(_)) => Ok(()),
+        Err(other) => Err(describe("generate-key: expected unsupported, got", &other)),
+        Ok(_) => Err("AES-192 key generated".into()),
+    }
 }
 
 /// `seal` with a bad nonce still drains the plaintext stream: the concurrent

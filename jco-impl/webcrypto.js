@@ -207,27 +207,35 @@ export async function generateHmacSha256Key(extractable) {
 }
 
 /**
- * The raw key length in bytes for each `aes-variant` enum case (jco lowers
- * WIT enums as their kebab-case names).
+ * The raw key length in bytes for each served `aes-variant` enum case (jco
+ * lowers WIT enums as their kebab-case names). AES-192 is absent: this
+ * implementation declines it (browsers do not reliably serve it — Chromium
+ * implements no AES-192; see the WIT `aes-variant` doc).
  */
-const AES_VARIANT_BYTES = { aes128: 16, aes192: 24, aes256: 32 };
+const AES_VARIANT_BYTES = { aes128: 16, aes256: 32 };
 
-/** The key length in bits declared by an `aes-variant` case. */
-function aesVariantBits(variant) {
-  return AES_VARIANT_BYTES[variant] * 8;
+/**
+ * The raw key length in bytes declared by `variant`, throwing
+ * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ */
+function aesVariantByteLength(variant) {
+  const expected = AES_VARIANT_BYTES[variant];
+  if (expected === undefined) {
+    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+  }
+  return expected;
 }
 
 /**
- * Import raw key material as the declared AES variant. Material whose length
- * disagrees with `variant` throws `{ tag: 'invalid-key', val }`; a variant
- * the platform declines (Chromium implements no AES-192) throws
- * `{ tag: 'unsupported', val }`.
+ * Import raw key material as the declared AES variant. A variant this
+ * implementation declines throws `{ tag: 'unsupported', val }`; material
+ * whose length disagrees with `variant` throws `{ tag: 'invalid-key', val }`.
  * @param {string} variant
  * @param {Uint8Array} raw
  * @param {boolean} extractable
  */
 export async function importKey(variant, raw, extractable) {
-  const expected = AES_VARIANT_BYTES[variant];
+  const expected = aesVariantByteLength(variant);
   if (raw.length !== expected) {
     throw {
       tag: "invalid-key",
@@ -241,30 +249,23 @@ export async function importKey(variant, raw, extractable) {
       "decrypt",
     ]);
   } catch (err) {
-    // The material's length already matches the variant, so a platform
-    // rejection means the variant itself is not served.
-    throw { tag: "unsupported", val: `${variant}: ${String(err)}` };
+    throw { tag: "invalid-key", val: String(err) };
   }
   return new AeadKey(key);
 }
 
 /**
- * Generate a fresh random AES key of the declared variant. A variant the
- * platform declines throws `{ tag: 'unsupported', val }`.
+ * Generate a fresh random AES key of the declared variant. A variant this
+ * implementation declines throws `{ tag: 'unsupported', val }`.
  * @param {string} variant
  * @param {boolean} extractable
  */
 export async function generateKey(variant, extractable) {
-  let key;
-  try {
-    key = await subtle.generateKey(
-      { name: "AES-GCM", length: aesVariantBits(variant) },
-      extractable,
-      ["encrypt", "decrypt"],
-    );
-  } catch (err) {
-    throw { tag: "unsupported", val: `${variant}: ${String(err)}` };
-  }
+  const key = await subtle.generateKey(
+    { name: "AES-GCM", length: aesVariantByteLength(variant) * 8 },
+    extractable,
+    ["encrypt", "decrypt"],
+  );
   return new AeadKey(key);
 }
 
