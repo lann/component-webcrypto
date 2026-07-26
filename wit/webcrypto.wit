@@ -382,6 +382,11 @@ interface signature {
         /// verification fails — and fails closed with
         /// `error.authentication-failed` (deliberately not a `bool`: an
         /// ignored boolean fails open, a dropped `result` does not).
+        ///
+        /// Signature verification is a *policy*, not a bit-exact predicate:
+        /// the precise criterion — which degenerate keys and signatures
+        /// must be rejected — is defined by the key's minting interface,
+        /// exactly like the wire format.
         verify: async func(data: stream<u8>, sig: list<u8>) -> result<_, error>;
 
         /// The registry name of the algorithm family this key is bound to,

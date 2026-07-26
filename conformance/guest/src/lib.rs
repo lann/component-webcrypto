@@ -24,7 +24,9 @@ mod util;
 mod vectors;
 
 use exports::conformance::webcrypto::tests::{Guest, TestResult};
-use translate::{ChaChaCase, GcmCase, HmacCase, InternalNonceCase, Sha2Case, SigCase};
+use translate::{
+    ChaChaCase, GcmCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase,
+};
 
 struct Component;
 
@@ -36,6 +38,7 @@ struct Corpus {
     internal_nonce: Vec<InternalNonceCase>,
     sha2: Vec<Sha2Case>,
     sig: Vec<SigCase>,
+    speccheck: Vec<SpeccheckCase>,
 }
 
 /// One corpus entry: a vector case or a probe index.
@@ -46,6 +49,7 @@ enum Test<'a> {
     InternalNonce(&'a InternalNonceCase),
     Sha2(&'a Sha2Case),
     Sig(&'a SigCase),
+    Speccheck(&'a SpeccheckCase),
     Probe(usize),
 }
 
@@ -58,6 +62,7 @@ impl Corpus {
             internal_nonce: translate::internal_nonce_cases(),
             sha2: translate::sha2_cases(),
             sig: translate::sig_cases(),
+            speccheck: translate::speccheck_cases(),
         }
     }
 
@@ -68,6 +73,7 @@ impl Corpus {
             + self.internal_nonce.len()
             + self.sha2.len()
             + self.sig.len()
+            + self.speccheck.len()
             + probes::NAMES.len()
     }
 
@@ -98,6 +104,10 @@ impl Corpus {
             return Some(Test::Sig(&self.sig[index]));
         }
         index -= self.sig.len();
+        if index < self.speccheck.len() {
+            return Some(Test::Speccheck(&self.speccheck[index]));
+        }
+        index -= self.speccheck.len();
         (index < probes::NAMES.len()).then_some(Test::Probe(index))
     }
 }
@@ -139,6 +149,11 @@ impl Test<'_> {
                 case.tc_id,
                 case.schedule.name()
             ),
+            Test::Speccheck(case) => format!(
+                "ed25519/speccheck/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            ),
             Test::Probe(index) => format!("probe/{}", probes::NAMES[*index]),
         }
     }
@@ -151,6 +166,7 @@ impl Test<'_> {
             Test::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
             Test::Sha2(case) => vectors::run_sha2_case(case).await,
             Test::Sig(case) => vectors::run_sig_case(case).await,
+            Test::Speccheck(case) => vectors::run_speccheck_case(case).await,
             Test::Probe(index) => probes::run_one(*index).await,
         };
         to_result(self.id(), outcome)

@@ -591,6 +591,60 @@ pub struct SigCase {
     pub valid: bool,
 }
 
+/// One executed ed25519-speccheck adversarial vector under one schedule:
+/// degenerate keys and signatures (small-order and non-canonical `A`/`R`,
+/// out-of-range `S`, mixed-order torsion components) that pin the
+/// `ed25519-verify` verification criterion cross-target.
+pub struct SpeccheckCase {
+    /// The vector's index in the published set.
+    pub tc_id: u64,
+    pub schedule: Schedule,
+    pub public: Vec<u8>,
+    pub msg: Vec<u8>,
+    pub sig: Vec<u8>,
+    /// `true`: import and verification must both succeed (the one
+    /// mixed-order case the cofactorless equation accepts). `false`: the
+    /// input must be rejected — at import (`invalid-key`) or at
+    /// verification (`authentication-failed`), per the WIT criterion.
+    pub valid: bool,
+}
+
+#[derive(Deserialize)]
+struct SpeccheckVector {
+    message: String,
+    pub_key: String,
+    signature: String,
+}
+
+const SPECCHECK_VECTORS: &str = include_str!("../../vectors/ed25519_speccheck.json");
+
+/// The index of the only speccheck vector the pinned criterion accepts:
+/// case 3 (mixed-order `A` and `R` under a passing cofactorless equation) —
+/// `verify_strict`'s published result set.
+const SPECCHECK_VALID_CASE: u64 = 3;
+
+/// The normalized speccheck corpus, expanded over its schedule set.
+pub fn speccheck_cases() -> Vec<SpeccheckCase> {
+    let vectors: Vec<SpeccheckVector> =
+        serde_json::from_str(SPECCHECK_VECTORS).expect("parsing ed25519_speccheck.json");
+    let mut cases = Vec::new();
+    for (index, vector) in vectors.iter().enumerate() {
+        let field = format!("speccheck tc{index}");
+        let msg = unhex(&field, &vector.message);
+        for schedule in schedules(msg.len()) {
+            cases.push(SpeccheckCase {
+                tc_id: index as u64,
+                schedule,
+                public: unhex(&field, &vector.pub_key),
+                msg: msg.clone(),
+                sig: unhex(&field, &vector.signature),
+                valid: index as u64 == SPECCHECK_VALID_CASE,
+            });
+        }
+    }
+    cases
+}
+
 #[derive(Deserialize)]
 struct EddsaGroup {
     #[serde(rename = "publicKey")]

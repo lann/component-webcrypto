@@ -14,6 +14,17 @@ Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
   format (the ASN.1-DER variants of these files are deliberately not
   vendored: DER signatures are unrepresentable in the WIT contract).
 
+Vendored from
+[novifinancial/ed25519-speccheck](https://github.com/novifinancial/ed25519-speccheck)
+(Apache-2.0), the test set from "Taming the many EdDSAs" (Chalkias,
+Garillot, Nikolaenko):
+
+- `ed25519_speccheck.json` — 12 adversarial Ed25519 vectors (small-order
+  and non-canonical `A`/`R`, out-of-range `S`, mixed-order torsion
+  components) that discriminate between the EdDSA verification policies
+  real implementations ship. They pin the `ed25519-verify` WIT criterion
+  (`verify_strict` semantics, cofactorless) across targets.
+
 Vendored from the [NIST CAVP Secure Hashing byte-oriented test
 vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing)
 (`shabytetestvectors.zip`; NIST publications are US-government works, not
@@ -47,6 +58,8 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 | SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
 | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
+| ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |
+| ed25519-speccheck, every other case | rejected at import (`invalid-key`) or verification (`authentication-failed`), per the `ed25519-verify` criterion; where the rejection lands is implementation-defined. |
 | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
