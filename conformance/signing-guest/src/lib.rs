@@ -130,6 +130,7 @@ fn describe(context: &str, error: &Error) -> String {
         Error::AuthenticationFailed => "authentication-failed".to_string(),
         Error::NotExtractable => "not-extractable".to_string(),
         Error::Unsupported(detail) => format!("unsupported: {detail}"),
+        Error::KeyExhausted => "key-exhausted".to_string(),
         Error::Other(detail) => format!("other: {detail}"),
     };
     format!("{context}: {rendered}")
