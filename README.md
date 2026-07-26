@@ -40,9 +40,9 @@ kind*, not by algorithm:
   `error` variant carries no misuse cases — incrementality comes from the
   streams, not from resource state.
 
-Current algorithms: **HMAC-SHA-256** and **AES-256-GCM** (12-byte nonces,
-16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire format, which
-RustCrypto's `aes-gcm` produces identically).
+Current algorithms: **HMAC-SHA-256** and **AES-GCM** (128/192/256-bit keys,
+12-byte nonces, 16-byte tags, `ciphertext ‖ tag` — the `crypto.subtle` wire
+format, which RustCrypto's `aes-gcm` produces identically).
 
 ## Layout
 

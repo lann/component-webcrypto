@@ -3,7 +3,7 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
-use crate::lann::webcrypto::aes_gcm::{generate_aes256_gcm_key, import_aes256_gcm_key};
+use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
 use crate::lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
@@ -40,6 +40,15 @@ pub async fn run_one(index: usize) -> Result<(), String> {
     }
 }
 
+/// Generate an AES-256 key, rendering a WIT error as a probe failure.
+async fn generate_key_256(
+    extractable: bool,
+) -> Result<crate::lann::webcrypto::aead::AeadKey, String> {
+    generate_key(AesVariant::Aes256, extractable)
+        .await
+        .map_err(|e| describe("generate-key", &e))
+}
+
 /// Importing an empty HMAC key fails `invalid-key`.
 async fn hmac_import_empty_key() -> Result<(), String> {
     match import_hmac_sha256_key(Vec::new(), false).await {
@@ -52,7 +61,7 @@ async fn hmac_import_empty_key() -> Result<(), String> {
 /// Importing 16- or 24-byte material as an AES-256 key fails `invalid-key`.
 async fn aes_import_wrong_length() -> Result<(), String> {
     for len in [16usize, 24] {
-        match import_aes256_gcm_key(vec![0u8; len], false).await {
+        match import_key(AesVariant::Aes256, vec![0u8; len], false).await {
             Err(Error::InvalidKey(_)) => {}
             Err(other) => {
                 return Err(describe(
@@ -69,7 +78,7 @@ async fn aes_import_wrong_length() -> Result<(), String> {
 /// `seal` with a bad nonce still drains the plaintext stream: the concurrent
 /// feeder must complete, and the error must be `invalid-nonce`.
 async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key_256(false).await?;
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (sealed, fed) = seal(
         &key,
@@ -90,7 +99,7 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
 /// `open` with a bad nonce still drains the ciphertext stream: the concurrent
 /// feeder must complete, and the error must be `invalid-nonce`.
 async fn open_drains_on_invalid_nonce() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key_256(false).await?;
     let ciphertext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (opened, fed) = open(
         &key,
@@ -110,7 +119,7 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
 
 /// Sealed output is exactly plaintext length + the 16-byte tag.
 async fn sealed_length() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key_256(false).await?;
     for len in [0usize, 1, 15, 16, 17, 1024] {
         let plaintext = vec![0xa5u8; len];
         let (sealed, fed) = seal(&key, &[1u8; 12], b"", &plaintext, Schedule::Whole).await;
@@ -141,9 +150,9 @@ async fn key_export_roundtrip() -> Result<(), String> {
     expect_bytes(&exported, &hmac_raw, "exported HMAC key material")?;
 
     let aes_raw: Vec<u8> = (0..32u8).collect();
-    let key = import_aes256_gcm_key(aes_raw.clone(), true)
+    let key = import_key(AesVariant::Aes256, aes_raw.clone(), true)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     let exported = key.export().await.map_err(|e| describe("aes export", &e))?;
     expect_bytes(&exported, &aes_raw, "exported AES key material")
 }
@@ -160,9 +169,9 @@ async fn not_extractable() -> Result<(), String> {
         Ok(_) => return Err("non-extractable HMAC key exported".into()),
     }
 
-    let key = import_aes256_gcm_key(vec![0x42u8; 32], false)
+    let key = import_key(AesVariant::Aes256, vec![0x42u8; 32], false)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     match key.export().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("aes: expected not-extractable, got", &other)),
@@ -193,7 +202,7 @@ async fn generated_key_shape() -> Result<(), String> {
     fed.map_err(|e| format!("verify data feeder: {e}"))?;
     verified.map_err(|e| describe("generated HMAC key's tag did not verify", &e))?;
 
-    let aes_key = generate_aes256_gcm_key(true).await;
+    let aes_key = generate_key_256(true).await?;
     let exported = aes_key
         .export()
         .await
@@ -263,16 +272,16 @@ async fn algorithm_names() -> Result<(), String> {
         "generated mac-key length",
     )?;
 
-    let imported = import_aes256_gcm_key(vec![0x24u8; 32], false)
+    let imported = import_key(AesVariant::Aes256, vec![0x24u8; 32], false)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     expect(
         imported.algorithm_name(),
         "AES-GCM".to_string(),
         "imported aead-key name",
     )?;
     expect(imported.algorithm_length(), 256, "imported aead-key length")?;
-    let generated = generate_aes256_gcm_key(false).await;
+    let generated = generate_key_256(false).await?;
     expect(
         generated.algorithm_name(),
         "AES-GCM".to_string(),

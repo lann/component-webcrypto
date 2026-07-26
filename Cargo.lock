@@ -1496,6 +1496,7 @@ dependencies = [
 name = "wasip3-webcrypto"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "aes-gcm",
  "getrandom 0.3.4",
  "hmac",
@@ -1932,6 +1933,7 @@ dependencies = [
 name = "wasmtime-webcrypto"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "aes-gcm",
  "anyhow",
  "futures",

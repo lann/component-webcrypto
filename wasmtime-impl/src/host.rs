@@ -9,8 +9,9 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
-use aes_gcm::{Aes256Gcm, Nonce};
+use aes_gcm::{Aes128Gcm, Aes256Gcm, AesGcm, Nonce};
 use futures::channel::oneshot;
 use hmac::Mac as _;
 use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamReader, StreamResult};
@@ -21,9 +22,12 @@ use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{aes_gcm as aes_gcm_iface, hmac as hmac_iface};
 use crate::{
-    AeadKey, HmacSha256, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_256_LENGTH, AES_GCM_NAME,
-    HMAC_NAME, HMAC_SHA256_HASH,
+    AeadKey, HmacSha256, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME, HMAC_NAME,
+    HMAC_SHA256_HASH,
 };
+
+/// AES-192-GCM, which the `aes-gcm` crate does not alias.
+type Aes192Gcm = AesGcm<aes::Aes192, U12>;
 
 /// The AES-GCM nonce length this implementation accepts, per the `aes-gcm`
 /// WIT contract (12-byte nonces, 16-byte tags).
@@ -192,6 +196,15 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
 
 impl aead::Host for WasiWebcryptoCtxView<'_> {}
 
+/// The AES-GCM cipher backing an [`AeadKey`], dispatching on key size. The
+/// WIT `aes-variant` enum closes the size set, so this enum is total.
+#[derive(Clone)]
+pub(crate) enum AesGcmCipher {
+    Aes128(Aes128Gcm),
+    Aes192(Aes192Gcm),
+    Aes256(Aes256Gcm),
+}
+
 /// Validate an AES-GCM nonce length, rendering the WIT `invalid-nonce` error
 /// for anything but 12 bytes.
 fn check_gcm_nonce(nonce: &[u8]) -> std::result::Result<(), Error> {
@@ -199,9 +212,38 @@ fn check_gcm_nonce(nonce: &[u8]) -> std::result::Result<(), Error> {
         Ok(())
     } else {
         Err(Error::InvalidNonce(format!(
-            "AES-256-GCM requires a {GCM_NONCE_LEN}-byte nonce, got {} bytes",
+            "AES-GCM requires a {GCM_NONCE_LEN}-byte nonce, got {} bytes",
             nonce.len()
         )))
+    }
+}
+
+impl AesGcmCipher {
+    /// The key length in bits (WebCrypto's `AesKeyAlgorithm.length`).
+    fn length_bits(&self) -> u32 {
+        match self {
+            Self::Aes128(_) => 128,
+            Self::Aes192(_) => 192,
+            Self::Aes256(_) => 256,
+        }
+    }
+
+    fn encrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> aes_gcm::aead::Result<Vec<u8>> {
+        let nonce = Nonce::from_slice(nonce);
+        match self {
+            Self::Aes128(c) => c.encrypt(nonce, payload),
+            Self::Aes192(c) => c.encrypt(nonce, payload),
+            Self::Aes256(c) => c.encrypt(nonce, payload),
+        }
+    }
+
+    fn decrypt(&self, nonce: &[u8], payload: Payload<'_, '_>) -> aes_gcm::aead::Result<Vec<u8>> {
+        let nonce = Nonce::from_slice(nonce);
+        match self {
+            Self::Aes128(c) => c.decrypt(nonce, payload),
+            Self::Aes192(c) => c.decrypt(nonce, payload),
+            Self::Aes256(c) => c.decrypt(nonce, payload),
+        }
     }
 }
 
@@ -212,8 +254,7 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
     }
 
     fn algorithm_length(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
-        self.table.get(&self_)?;
-        Ok(AES_256_LENGTH)
+        Ok(self.table.get(&self_)?.cipher.length_bits())
     }
 }
 
@@ -236,14 +277,14 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
             return Ok(Err(err));
         }
         let sealed = match cipher.encrypt(
-            Nonce::from_slice(&nonce),
+            &nonce,
             Payload {
                 msg: &msg,
                 aad: &aad,
             },
         ) {
             Ok(sealed) => sealed,
-            Err(_) => return Ok(Err(Error::Other("AES-256-GCM encryption failed".into()))),
+            Err(_) => return Ok(Err(Error::Other("AES-GCM encryption failed".into()))),
         };
         let reader = accessor.with(|access| StreamReader::new(access, sealed))?;
         Ok(Ok(reader))
@@ -271,7 +312,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         // wrong associated data — reports `authentication-failed` with no
         // detail, per the WIT contract.
         let opened = match cipher.decrypt(
-            Nonce::from_slice(&nonce),
+            &nonce,
             Payload {
                 msg: &msg,
                 aad: &aad,
@@ -344,15 +385,37 @@ impl<T: Send> hmac_iface::HostWithStore<T> for WasiWebcrypto {
 
 impl aes_gcm_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-/// Build an [`AeadKey`] from 32 bytes of raw material, rendering the WIT
-/// `invalid-key` error for any other length.
-fn new_aes256_gcm_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<AeadKey, Error> {
-    let cipher = Aes256Gcm::new_from_slice(&raw).map_err(|_| {
-        Error::InvalidKey(format!(
-            "AES-256-GCM requires 32 bytes of key material, got {} bytes",
+/// Build an [`AeadKey`] from raw material declared as `variant`, rendering
+/// the WIT `invalid-key` error when the material's length disagrees with
+/// the declared variant.
+fn new_aes_gcm_key(
+    variant: aes_gcm_iface::AesVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> std::result::Result<AeadKey, Error> {
+    use aes_gcm_iface::AesVariant;
+    let expected = match variant {
+        AesVariant::Aes128 => 16,
+        AesVariant::Aes192 => 24,
+        AesVariant::Aes256 => 32,
+    };
+    if raw.len() != expected {
+        return Err(Error::InvalidKey(format!(
+            "{variant:?} requires {expected} bytes of key material, got {} bytes",
             raw.len()
-        ))
-    })?;
+        )));
+    }
+    let cipher = match variant {
+        AesVariant::Aes128 => {
+            AesGcmCipher::Aes128(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
+        }
+        AesVariant::Aes192 => {
+            AesGcmCipher::Aes192(Aes192Gcm::new_from_slice(&raw).expect("length checked"))
+        }
+        AesVariant::Aes256 => {
+            AesGcmCipher::Aes256(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
+        }
+    };
     Ok(AeadKey {
         cipher,
         raw,
@@ -361,27 +424,35 @@ fn new_aes256_gcm_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<Ae
 }
 
 impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_aes256_gcm_key(
+    async fn import_key(
         accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let key = match new_aes256_gcm_key(raw, extractable) {
+        let key = match new_aes_gcm_key(variant, raw, extractable) {
             Ok(key) => key,
             Err(err) => return Ok(Err(err)),
         };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 
-    async fn generate_aes256_gcm_key(
+    async fn generate_key(
         accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
         extractable: bool,
-    ) -> Result<Resource<AeadKey>> {
-        let mut raw = vec![0u8; 32];
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        use aes_gcm_iface::AesVariant;
+        let len = match variant {
+            AesVariant::Aes128 => 16,
+            AesVariant::Aes192 => 24,
+            AesVariant::Aes256 => 32,
+        };
+        let mut raw = vec![0u8; len];
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
-        let key = new_aes256_gcm_key(raw, extractable)
+        let key = new_aes_gcm_key(variant, raw, extractable)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
-        accessor.with(|mut access| Ok(access.get().table.push(key)?))
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 }

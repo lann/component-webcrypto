@@ -25,7 +25,7 @@ wit_bindgen::generate!({
 
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann::webcrypto::aead::AeadKey;
-use lann::webcrypto::aes_gcm::{generate_aes256_gcm_key, import_aes256_gcm_key};
+use lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
 use lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
 use lann::webcrypto::mac::MacKey;
 use lann::webcrypto::types::Error;
@@ -172,9 +172,9 @@ async fn hmac_key_export() -> Result<(), String> {
 
 /// Seal the NIST vector's plaintext and compare against its ciphertext‖tag.
 async fn gcm_known_answer_seal() -> Result<(), String> {
-    let key = import_aes256_gcm_key(unhex(GCM_KEY), false)
+    let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     expect_eq(
         key.algorithm_name(),
         "AES-GCM".to_string(),
@@ -199,9 +199,9 @@ async fn gcm_known_answer_seal() -> Result<(), String> {
 /// Open the NIST vector's ciphertext‖tag (fed one byte at a time) and compare
 /// against its plaintext.
 async fn gcm_known_answer_open() -> Result<(), String> {
-    let key = import_aes256_gcm_key(unhex(GCM_KEY), false)
+    let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
 
     let mut ciphertext = unhex(GCM_CIPHERTEXT);
     ciphertext.extend(unhex(GCM_TAG));
@@ -213,7 +213,9 @@ async fn gcm_known_answer_open() -> Result<(), String> {
 
 /// Seal then open under a generated key round-trips the plaintext.
 async fn gcm_round_trip() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     let nonce = [7u8; 12];
     let aad = b"round-trip aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(3 * 1024 + 17).collect();
@@ -231,7 +233,9 @@ async fn gcm_round_trip() -> Result<(), String> {
 
 /// A flipped ciphertext bit fails with `authentication-failed`.
 async fn gcm_tampered() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     let nonce = [9u8; 12];
     let mut sealed = seal_chunked(&key, &nonce, b"", b"attack at dawn", usize::MAX)
         .await
@@ -246,7 +250,9 @@ async fn gcm_tampered() -> Result<(), String> {
 
 /// The wrong associated data fails with `authentication-failed`.
 async fn gcm_wrong_aad() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     let nonce = [11u8; 12];
     let sealed = seal_chunked(&key, &nonce, b"right aad", b"payload", usize::MAX)
         .await
@@ -260,7 +266,7 @@ async fn gcm_wrong_aad() -> Result<(), String> {
 
 /// Importing wrong-length key material fails with `invalid-key`.
 async fn gcm_invalid_key() -> Result<(), String> {
-    match import_aes256_gcm_key(vec![0u8; 16], false).await {
+    match import_key(AesVariant::Aes256, vec![0u8; 16], false).await {
         Err(Error::InvalidKey(_)) => Ok(()),
         Err(other) => Err(describe("expected invalid-key, got", &other)),
         Ok(_) => Err("16-byte key imported as AES-256".into()),
@@ -269,7 +275,9 @@ async fn gcm_invalid_key() -> Result<(), String> {
 
 /// Sealing with a wrong-length nonce fails with `invalid-nonce`.
 async fn gcm_invalid_nonce() -> Result<(), String> {
-    let key = generate_aes256_gcm_key(false).await;
+    let key = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     match seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await {
         Err(Error::InvalidNonce(_)) => Ok(()),
         Err(other) => Err(describe("expected invalid-nonce, got", &other)),
@@ -280,16 +288,18 @@ async fn gcm_invalid_nonce() -> Result<(), String> {
 /// Extractability behaves for AEAD keys exactly as for MAC keys.
 async fn gcm_key_export() -> Result<(), String> {
     let raw = unhex(GCM_KEY);
-    let key = import_aes256_gcm_key(raw.clone(), true)
+    let key = import_key(AesVariant::Aes256, raw.clone(), true)
         .await
-        .map_err(|e| describe("import-aes256-gcm-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     let exported = key
         .export()
         .await
         .map_err(|e| describe("export of extractable key", &e))?;
     expect_eq(exported, raw, "exported key material")?;
 
-    let sealed_key = generate_aes256_gcm_key(false).await;
+    let sealed_key = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     match sealed_key.export().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
@@ -399,6 +409,7 @@ fn describe(context: &str, error: &Error) -> String {
         Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
         Error::AuthenticationFailed => "authentication-failed".to_string(),
         Error::NotExtractable => "not-extractable".to_string(),
+        Error::Unsupported(detail) => format!("unsupported: {detail}"),
         Error::Other(detail) => format!("other: {detail}"),
     };
     format!("{context}: {rendered}")
