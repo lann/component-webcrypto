@@ -8,13 +8,20 @@ use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::chacha20_poly1305::{
     generate_key as generate_chacha_key, import_key as import_chacha_key, ChachaVariant,
 };
+use crate::lann::webcrypto::ecdsa_verify::{
+    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+};
+use crate::lann::webcrypto::ed25519_sign::{
+    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
+};
+use crate::lann::webcrypto::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use crate::lann::webcrypto::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
-use crate::util::{compute, describe, expect_bytes, open, seal, sign, verify};
+use crate::util::{compute, describe, expect_bytes, open, seal, sig_verify, sign, verify};
 
 /// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
 pub const NAMES: &[&str] = &[
@@ -35,6 +42,10 @@ pub const NAMES: &[&str] = &[
     "constant-time-equal",
     "chacha-key-metadata",
     "chacha-nonce-lengths",
+    "ed25519-sign-roundtrip",
+    "sig-key-metadata",
+    "sig-import-invalid",
+    "verifying-key-export-roundtrip",
 ];
 
 /// Run the probe at `index` (into [`NAMES`]).
@@ -57,6 +68,10 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         14 => constant_time_equal_probe().await,
         15 => chacha_key_metadata().await,
         16 => chacha_nonce_lengths().await,
+        17 => ed25519_sign_roundtrip().await,
+        18 => sig_key_metadata().await,
+        19 => sig_import_invalid().await,
+        20 => verifying_key_export_roundtrip().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -567,4 +582,173 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
+}
+
+/// A generated Ed25519 key signs, its derived public key verifies, a
+/// corrupted signature fails `authentication-failed`, and a *different*
+/// key's public half rejects the signature (keys are not interchangeable).
+async fn ed25519_sign_roundtrip() -> Result<(), String> {
+    let key = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let payload = b"conformance signature payload";
+    let (tx, rx) = crate::wit_stream::new();
+    let (sig, fed) = futures::join!(key.sign(rx), crate::util::feed_whole(tx, payload));
+    fed?;
+    let sig = sig.map_err(|e| describe("sign", &e))?;
+    if sig.len() != 64 {
+        return Err(format!(
+            "Ed25519 signatures are 64 bytes, got {}",
+            sig.len()
+        ));
+    }
+
+    let public = key.verifying_key();
+    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("round-trip signature did not verify", &e))?;
+
+    let mut corrupted = sig.clone();
+    corrupted[0] ^= 0x01;
+    let (verified, fed) = sig_verify(&public, payload, &corrupted, Schedule::Whole).await;
+    fed?;
+    match verified {
+        Err(Error::AuthenticationFailed) => {}
+        Err(other) => return Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => return Err("corrupted signature verified".into()),
+    }
+
+    let other = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let (verified, fed) = sig_verify(&other.verifying_key(), payload, &sig, Schedule::Whole).await;
+    fed?;
+    match verified {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => Err("signature verified under a different key".into()),
+    }
+}
+
+/// The signature getters report the mint binding: Ed25519 keys have no
+/// curve/hash parameters; ECDSA keys report their variant's curve and hash.
+async fn sig_key_metadata() -> Result<(), String> {
+    let signing = generate_ed25519_key(true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    if signing.algorithm_name() != "Ed25519" {
+        return Err(format!(
+            "Ed25519 signing-key.algorithm-name: {}",
+            signing.algorithm_name()
+        ));
+    }
+    if signing.algorithm_curve().is_some() || signing.algorithm_hash().is_some() {
+        return Err("Ed25519 keys report no curve/hash parameters".into());
+    }
+    if !signing.extractable() {
+        return Err("extractable generated key reports non-extractable".into());
+    }
+    let public = signing.verifying_key();
+    if public.algorithm_name() != "Ed25519"
+        || public.algorithm_curve().is_some()
+        || public.algorithm_hash().is_some()
+    {
+        return Err("derived Ed25519 verifying-key metadata mismatch".into());
+    }
+
+    // An ECDSA public key (any valid point works; this is the RFC 6979
+    // A.2.5 public key).
+    let mut point = vec![0x04];
+    point.extend(crate::util::unhex(
+        "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+    ));
+    point.extend(crate::util::unhex(
+        "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+    ));
+    let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
+        .await
+        .map_err(|e| describe("import-verifying-key", &e))?;
+    if key.algorithm_name() != "ECDSA"
+        || key.algorithm_curve().as_deref() != Some("P-256")
+        || key.algorithm_hash().as_deref() != Some("SHA-256")
+    {
+        return Err(format!(
+            "ECDSA verifying-key metadata: name={} curve={:?} hash={:?}",
+            key.algorithm_name(),
+            key.algorithm_curve(),
+            key.algorithm_hash()
+        ));
+    }
+    Ok(())
+}
+
+/// Malformed key material fails `invalid-key` on every signature import
+/// path: wrong lengths, and a *compressed* SEC1 point (the WIT requires
+/// uncompressed).
+async fn sig_import_invalid() -> Result<(), String> {
+    fn expect_invalid(what: &str, result: Result<(), Error>) -> Result<(), String> {
+        match result {
+            Err(Error::InvalidKey(_)) => Ok(()),
+            Err(other) => Err(format!(
+                "{what}: expected invalid-key, got {}",
+                describe("", &other)
+            )),
+            Ok(()) => Err(format!("{what}: malformed material was accepted")),
+        }
+    }
+
+    expect_invalid(
+        "ed25519 short public",
+        import_ed25519_verifying_key(vec![0u8; 31]).await.map(drop),
+    )?;
+    expect_invalid(
+        "ed25519 short seed",
+        import_ed25519_signing_key(vec![0u8; 16], false)
+            .await
+            .map(drop),
+    )?;
+    expect_invalid(
+        "ecdsa wrong-length point",
+        import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, vec![0x04; 64])
+            .await
+            .map(drop),
+    )?;
+    // A compressed encoding of the RFC 6979 A.2.5 public key (y is odd).
+    let mut compressed = vec![0x03];
+    compressed.extend(crate::util::unhex(
+        "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+    ));
+    expect_invalid(
+        "ecdsa compressed point",
+        import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, compressed)
+            .await
+            .map(drop),
+    )
+}
+
+/// Public-key export is an identity round trip (no extractability gate),
+/// and re-importing the export yields a key that still verifies.
+async fn verifying_key_export_roundtrip() -> Result<(), String> {
+    let signing = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let payload = b"export roundtrip payload";
+    let (tx, rx) = crate::wit_stream::new();
+    let (sig, fed) = futures::join!(signing.sign(rx), crate::util::feed_whole(tx, payload));
+    fed?;
+    let sig = sig.map_err(|e| describe("sign", &e))?;
+
+    let exported = signing.verifying_key().export().await;
+    if exported.len() != 32 {
+        return Err(format!(
+            "Ed25519 public keys export as 32 bytes, got {}",
+            exported.len()
+        ));
+    }
+    let reimported = import_ed25519_verifying_key(exported)
+        .await
+        .map_err(|e| describe("re-import of exported public key", &e))?;
+    let (verified, fed) = sig_verify(&reimported, payload, &sig, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("re-imported key did not verify", &e))
 }

@@ -84,7 +84,14 @@ pub async fn read_all(mut rx: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
 /// distinguishable from the call's own result.
 pub async fn sign(key: &MacKey, data: &[u8], schedule: Schedule) -> (Vec<u8>, Result<(), String>) {
     let (tx, rx) = crate::wit_stream::new();
-    futures::join!(key.sign(rx), feed(tx, schedule.chunks(data)))
+    let (tag, fed) = futures::join!(key.sign(rx), feed(tx, schedule.chunks(data)));
+    match tag {
+        Ok(tag) => (tag, fed),
+        Err(err) => {
+            let failed: Result<(), String> = Err(format!("mac-key.sign failed: {err:?}"));
+            (Vec::new(), failed.and(fed))
+        }
+    }
 }
 
 /// `verify`, feeding `data` per `schedule` concurrently with the call; same
@@ -155,4 +162,29 @@ pub async fn open(
         Err(err) => Err(err),
     };
     (opened, fed)
+}
+
+/// `verifying-key.verify`, feeding `data` per `schedule` concurrently with
+/// the call; same outcome split as [`verify`].
+pub async fn sig_verify(
+    key: &crate::lann::webcrypto::signature::VerifyingKey,
+    data: &[u8],
+    sig: &[u8],
+    schedule: Schedule,
+) -> (Result<(), Error>, Result<(), String>) {
+    let (tx, rx) = crate::wit_stream::new();
+    futures::join!(
+        key.verify(rx, sig.to_vec()),
+        feed(tx, schedule.chunks(data))
+    )
+}
+
+/// [`feed`] with the whole payload as one chunk.
+pub async fn feed_whole(tx: wit_bindgen::StreamWriter<u8>, data: &[u8]) -> Result<(), String> {
+    feed(tx, vec![data.to_vec()]).await
+}
+
+/// Decode a hex constant (probe-internal known-answer material).
+pub fn unhex(hex: &str) -> Vec<u8> {
+    hex::decode(hex).expect("probe hex constants are valid")
 }

@@ -22,11 +22,14 @@ use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
     aes_gcm as aes_gcm_iface, bytes as bytes_iface, chacha20_poly1305 as chacha_iface,
-    digest as digest_iface, hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
+    digest as digest_iface, ecdsa_sign as ecdsa_sign_iface, ecdsa_verify as ecdsa_verify_iface,
+    ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
+    hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface, signature as signature_iface,
 };
 use crate::{
-    AeadKey, Digest, MacKey, WasiWebcrypto, WasiWebcryptoCtxView, AES_GCM_NAME,
-    CHACHA20_POLY1305_NAME, HMAC_NAME, XCHACHA20_POLY1305_NAME,
+    AeadKey, Digest, MacKey, SigningKey, VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
+    AES_GCM_NAME, CHACHA20_POLY1305_NAME, ECDSA_NAME, ED25519_NAME, HMAC_NAME,
+    XCHACHA20_POLY1305_NAME,
 };
 
 // --- types -------------------------------------------------------------------
@@ -227,15 +230,18 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         self_: Resource<MacKey>,
         data: StreamReader<u8>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
         let (variant, raw) = accessor.with(|mut access| {
             let key = access.get().table.get(&self_)?;
             Ok::<_, wasmtime::Error>((key.variant, key.raw.clone()))
         })?;
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
+        //
+        // The WIT `err` case exists for operational keystore failures; this
+        // implementation holds the material in-process, so it never errs.
         let bytes = drain_stream(accessor, data).await?;
-        variant.sign(&raw, &bytes)
+        Ok(Ok(variant.sign(&raw, &bytes)?))
     }
 
     async fn verify(
@@ -723,6 +729,425 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
         let key = new_chacha_key(variant, raw, extractable)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+// --- signature -----------------------------------------------------------------
+
+impl signature_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// The public key backing a [`VerifyingKey`], bound to its algorithm (and,
+/// for ECDSA, its curve/digest variant) at minting.
+pub(crate) enum SigPublic {
+    Ed25519(ed25519_dalek::VerifyingKey),
+    EcdsaP256(p256::ecdsa::VerifyingKey),
+    EcdsaP384(p384::ecdsa::VerifyingKey),
+}
+
+impl SigPublic {
+    /// The registry algorithm name (`verifying-key.algorithm-name`).
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Ed25519(_) => ED25519_NAME,
+            Self::EcdsaP256(_) | Self::EcdsaP384(_) => ECDSA_NAME,
+        }
+    }
+
+    /// The registry curve name (`verifying-key.algorithm-curve`).
+    fn curve(&self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519(_) => None,
+            Self::EcdsaP256(_) => Some("P-256"),
+            Self::EcdsaP384(_) => Some("P-384"),
+        }
+    }
+
+    /// The mint-bound digest name (`verifying-key.algorithm-hash`).
+    fn hash(&self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519(_) => None,
+            Self::EcdsaP256(_) => Some("SHA-256"),
+            Self::EcdsaP384(_) => Some("SHA-384"),
+        }
+    }
+
+    /// The public key material in the minting interface's documented form:
+    /// raw 32 bytes for Ed25519, an uncompressed SEC1 point for ECDSA.
+    fn export(&self) -> Vec<u8> {
+        match self {
+            Self::Ed25519(key) => key.to_bytes().to_vec(),
+            Self::EcdsaP256(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+            Self::EcdsaP384(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+        }
+    }
+
+    /// One-shot verification of `sig` over `data`; the ECDSA signature
+    /// format is fixed-width `r ‖ s` (IEEE P1363).
+    fn verify(&self, data: &[u8], sig: &[u8]) -> std::result::Result<(), Error> {
+        use p256::ecdsa::signature::Verifier as _;
+        let ok = match self {
+            Self::Ed25519(key) => ed25519_dalek::Signature::from_slice(sig)
+                .and_then(|sig| key.verify_strict(data, &sig))
+                .is_ok(),
+            Self::EcdsaP256(key) => p256::ecdsa::Signature::from_slice(sig)
+                .and_then(|sig| key.verify(data, &sig))
+                .is_ok(),
+            Self::EcdsaP384(key) => p384::ecdsa::Signature::from_slice(sig)
+                .and_then(|sig| key.verify(data, &sig))
+                .is_ok(),
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(Error::AuthenticationFailed)
+        }
+    }
+}
+
+/// The private key backing a [`SigningKey`], bound to its algorithm (and,
+/// for ECDSA, its curve/digest variant) at minting.
+pub(crate) enum SigPrivate {
+    Ed25519(ed25519_dalek::SigningKey),
+    EcdsaP256(p256::ecdsa::SigningKey),
+    EcdsaP384(p384::ecdsa::SigningKey),
+}
+
+impl SigPrivate {
+    /// The corresponding [`SigPublic`].
+    fn public(&self) -> SigPublic {
+        match self {
+            Self::Ed25519(key) => SigPublic::Ed25519(key.verifying_key()),
+            Self::EcdsaP256(key) => SigPublic::EcdsaP256(*key.verifying_key()),
+            Self::EcdsaP384(key) => SigPublic::EcdsaP384(*key.verifying_key()),
+        }
+    }
+
+    /// One-shot signature over `data`: 64 bytes for Ed25519 (RFC 8032),
+    /// fixed-width `r ‖ s` (IEEE P1363, RFC 6979 deterministic) for ECDSA.
+    fn sign(&self, data: &[u8]) -> Vec<u8> {
+        use p256::ecdsa::signature::Signer as _;
+        match self {
+            Self::Ed25519(key) => {
+                use ed25519_dalek::Signer as _;
+                key.sign(data).to_bytes().to_vec()
+            }
+            Self::EcdsaP256(key) => {
+                let sig: p256::ecdsa::Signature = key.sign(data);
+                sig.to_bytes().to_vec()
+            }
+            Self::EcdsaP384(key) => {
+                let sig: p384::ecdsa::Signature = key.sign(data);
+                sig.to_bytes().to_vec()
+            }
+        }
+    }
+
+    /// The private key material in the minting interface's documented form:
+    /// the 32-byte RFC 8032 seed for Ed25519, the raw big-endian scalar for
+    /// ECDSA.
+    fn export(&self) -> Vec<u8> {
+        match self {
+            Self::Ed25519(key) => key.to_bytes().to_vec(),
+            Self::EcdsaP256(key) => key.to_bytes().to_vec(),
+            Self::EcdsaP384(key) => key.to_bytes().to_vec(),
+        }
+    }
+}
+
+impl signature_iface::HostVerifyingKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<VerifyingKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.public.name().to_string())
+    }
+
+    fn algorithm_curve(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<String>> {
+        Ok(self.table.get(&self_)?.public.curve().map(str::to_string))
+    }
+
+    fn algorithm_hash(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<String>> {
+        Ok(self.table.get(&self_)?.public.hash().map(str::to_string))
+    }
+}
+
+impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
+    async fn verify(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<VerifyingKey>,
+        data: StreamReader<u8>,
+        sig: Vec<u8>,
+    ) -> Result<std::result::Result<(), Error>> {
+        let bytes = drain_stream(accessor, data).await?;
+        accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok(key.public.verify(&bytes, &sig))
+        })
+    }
+
+    async fn export(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<VerifyingKey>,
+    ) -> Result<Vec<u8>> {
+        accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok(key.public.export())
+        })
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<VerifyingKey>) -> Result<()> {
+        accessor.with(|mut access| {
+            access.get().table.delete(rep)?;
+            Ok(())
+        })
+    }
+}
+
+impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
+    fn verifying_key(&mut self, self_: Resource<SigningKey>) -> Result<Resource<VerifyingKey>> {
+        let public = self.table.get(&self_)?.private.public();
+        Ok(self.table.push(VerifyingKey { public })?)
+    }
+
+    fn algorithm_name(&mut self, self_: Resource<SigningKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.private.public().name().to_string())
+    }
+
+    fn algorithm_curve(&mut self, self_: Resource<SigningKey>) -> Result<Option<String>> {
+        Ok(self
+            .table
+            .get(&self_)?
+            .private
+            .public()
+            .curve()
+            .map(str::to_string))
+    }
+
+    fn algorithm_hash(&mut self, self_: Resource<SigningKey>) -> Result<Option<String>> {
+        Ok(self
+            .table
+            .get(&self_)?
+            .private
+            .public()
+            .hash()
+            .map(str::to_string))
+    }
+
+    fn extractable(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.extractable)
+    }
+}
+
+impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
+    async fn sign(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<SigningKey>,
+        data: StreamReader<u8>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        let bytes = drain_stream(accessor, data).await?;
+        // The WIT `err` case exists for operational keystore failures; this
+        // implementation holds the material in-process, so it never errs.
+        accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok(Ok(key.private.sign(&bytes)))
+        })
+    }
+
+    async fn export(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<SigningKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        accessor.with(|mut access| {
+            let key = access.get().table.get(&self_)?;
+            Ok(if key.extractable {
+                Ok(key.private.export())
+            } else {
+                Err(Error::NotExtractable)
+            })
+        })
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<SigningKey>) -> Result<()> {
+        accessor.with(|mut access| {
+            access.get().table.delete(rep)?;
+            Ok(())
+        })
+    }
+}
+
+// --- ed25519 (key minting) -----------------------------------------------------
+
+impl ed25519_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl ed25519_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// Parse a 32-byte RFC 8032 public key, rendering `invalid-key` for wrong
+/// lengths and non-canonical point encodings.
+fn parse_ed25519_public(raw: &[u8]) -> std::result::Result<SigPublic, Error> {
+    let bytes: &[u8; 32] = raw.try_into().map_err(|_| {
+        Error::InvalidKey(format!(
+            "Ed25519 public keys are 32 bytes, got {}",
+            raw.len()
+        ))
+    })?;
+    let key = ed25519_dalek::VerifyingKey::from_bytes(bytes)
+        .map_err(|err| Error::InvalidKey(format!("invalid Ed25519 public key: {err}")))?;
+    Ok(SigPublic::Ed25519(key))
+}
+
+impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = match parse_ed25519_public(&raw) {
+            Ok(public) => public,
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(VerifyingKey { public })?)))
+    }
+}
+
+impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_signing_key(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let seed: &[u8; 32] = match raw.as_slice().try_into() {
+            Ok(seed) => seed,
+            Err(_) => {
+                return Ok(Err(Error::InvalidKey(format!(
+                    "Ed25519 private keys are 32-byte seeds, got {} bytes",
+                    raw.len()
+                ))))
+            }
+        };
+        let key = SigningKey {
+            private: SigPrivate::Ed25519(ed25519_dalek::SigningKey::from_bytes(seed)),
+            extractable,
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed)
+            .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
+        let key = SigningKey {
+            private: SigPrivate::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)),
+            extractable,
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+// --- ecdsa (key minting) ---------------------------------------------------------
+
+impl ecdsa_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl ecdsa_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// Parse an uncompressed SEC1 point for the declared variant, rendering
+/// `invalid-key` for anything else (including compressed encodings, per the
+/// WIT contract).
+fn parse_ecdsa_public(
+    variant: ecdsa_verify_iface::EcdsaVariant,
+    raw: &[u8],
+) -> std::result::Result<SigPublic, Error> {
+    use ecdsa_verify_iface::EcdsaVariant;
+    let expected = match variant {
+        EcdsaVariant::P256Sha256 => 65,
+        EcdsaVariant::P384Sha384 => 97,
+    };
+    if raw.len() != expected || raw[0] != 0x04 {
+        return Err(Error::InvalidKey(format!(
+            "{variant:?} public keys are uncompressed SEC1 points ({expected} bytes, leading 0x04)"
+        )));
+    }
+    match variant {
+        EcdsaVariant::P256Sha256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(raw)
+            .map(SigPublic::EcdsaP256)
+            .map_err(|err| Error::InvalidKey(format!("invalid P-256 public key: {err}"))),
+        EcdsaVariant::P384Sha384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(raw)
+            .map(SigPublic::EcdsaP384)
+            .map_err(|err| Error::InvalidKey(format!("invalid P-384 public key: {err}"))),
+    }
+}
+
+/// Parse a raw big-endian scalar for the declared variant, rendering
+/// `invalid-key` for wrong lengths and out-of-range scalars.
+fn parse_ecdsa_private(
+    variant: ecdsa_verify_iface::EcdsaVariant,
+    raw: &[u8],
+) -> std::result::Result<SigPrivate, Error> {
+    use ecdsa_verify_iface::EcdsaVariant;
+    match variant {
+        EcdsaVariant::P256Sha256 => p256::ecdsa::SigningKey::from_slice(raw)
+            .map(SigPrivate::EcdsaP256)
+            .map_err(|err| Error::InvalidKey(format!("invalid P-256 private key: {err}"))),
+        EcdsaVariant::P384Sha384 => p384::ecdsa::SigningKey::from_slice(raw)
+            .map(SigPrivate::EcdsaP384)
+            .map_err(|err| Error::InvalidKey(format!("invalid P-384 private key: {err}"))),
+    }
+}
+
+impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        raw: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = match parse_ecdsa_public(variant, &raw) {
+            Ok(public) => public,
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(VerifyingKey { public })?)))
+    }
+}
+
+impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_signing_key(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let private = match parse_ecdsa_private(variant, &raw) {
+            Ok(private) => private,
+            Err(err) => return Ok(Err(err)),
+        };
+        let key = SigningKey {
+            private,
+            extractable,
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        use ecdsa_verify_iface::EcdsaVariant;
+        // Rejection-sample the scalar range with fresh randomness (the
+        // probability of a retry is negligible for these curves).
+        let scalar_len = match variant {
+            EcdsaVariant::P256Sha256 => 32,
+            EcdsaVariant::P384Sha384 => 48,
+        };
+        let private = loop {
+            let mut raw = vec![0u8; scalar_len];
+            getrandom::fill(&mut raw).map_err(|err| {
+                wasmtime::Error::msg(format!("random key generation failed: {err}"))
+            })?;
+            if let Ok(private) = parse_ecdsa_private(variant, &raw) {
+                break private;
+            }
+        };
+        let key = SigningKey {
+            private,
+            extractable,
+        };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
 }

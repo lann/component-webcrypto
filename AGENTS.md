@@ -22,10 +22,11 @@ rather than relying on a cached summary.
 
 ```
 wit/                    # lann:webcrypto package: types (structural),
-                        #   mac/aead/digest (generic primitive resources),
-                        #   hmac-sha2/aes-gcm/chacha20-poly1305/sha2 (minting
-                        #   algorithm interfaces), bytes (constant-time
-                        #   comparison utility)
+                        #   mac/aead/digest/signature (generic primitive
+                        #   resources), hmac-sha2/aes-gcm/chacha20-poly1305/
+                        #   sha2/ed25519-*/ecdsa-* (minting algorithm
+                        #   interfaces), bytes (constant-time comparison
+                        #   utility)
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
@@ -77,7 +78,8 @@ The layering is a design invariant, not a convention:
 
 - **Generic primitive-kind interfaces** (`mac`, `aead`) own the
   algorithm-agnostic resources. Adding an algorithm must not change them.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, `sha2`) contain only minting;
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
+  `sha2`, `ed25519-verify`/`-sign`, `ecdsa-verify`/`-sign`) contain only minting;
   operations hang off the key resources, which are capabilities (see the WIT
   doc comments for the exact contracts, including extractability and the
   "input streams are fully drained even on error" rule for `seal`/`open`).
@@ -178,9 +180,10 @@ artifacts like `conformance/matrix.md`.
   is a constructor parameter with a sane default (it is on-the-wire — both
   peers must agree); `open` releases each segment only after its tag
   verifies, and truncation/tampering ends the stream with an error.
-- A `signature` primitive kind whose `verify` (secret-free — e.g. JWT
-  validation) is exportable by the in-guest provider even for algorithms whose
-  `sign` is class D.
+- More `signature` algorithms (RSA-PSS/RSASSA-PKCS1-v1_5 need an
+  `algorithm-length` getter — additive — and SPKI/PKCS#8 formats); the
+  per-algorithm `-verify`/`-sign` minting split already carries the class-D
+  policy (the in-guest provider exports `ecdsa-verify` but not `ecdsa-sign`).
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'
   fine-grained leaks (its README documents the current detection limits).
 - A FIPS 140-3 profile, kept *possible* (not implemented): everything needed

@@ -7,6 +7,12 @@ Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
 - `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
   ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.
+- `ed25519_test.json` — Ed25519 signature-verification vectors.
+- `ecdsa_secp256r1_sha256_p1363_test.json`,
+  `ecdsa_secp384r1_sha384_p1363_test.json` — ECDSA verification vectors
+  with fixed-width `r ‖ s` (IEEE P1363) signatures, this package's wire
+  format (the ASN.1-DER variants of these files are deliberately not
+  vendored: DER signatures are unrepresentable in the WIT contract).
 
 Vendored from the [NIST CAVP Secure Hashing byte-oriented test
 vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing)
@@ -38,6 +44,8 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
 | HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 | SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
+| Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
+| Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes (Ed25519 round trips; ECDSA signing is not importable by this guest — the in-guest provider does not export `ecdsa-sign`, so a guest importing it could not compose). |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT

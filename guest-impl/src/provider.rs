@@ -23,9 +23,15 @@ use crate::exports::lann::webcrypto::chacha20_poly1305::{
     ChachaVariant, Guest as ChaChaPoly1305Guest,
 };
 use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
+use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
+use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
+use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
+use crate::exports::lann::webcrypto::signature::{
+    self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestVerifyingKey,
+};
 use crate::lann::webcrypto::types::Error;
 
 /// The `algorithm-name` reported by HMAC keys and computations
@@ -42,6 +48,14 @@ const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
 
 /// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
 const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
+
+/// The `algorithm-name` reported by Ed25519 keys (WebCrypto's
+/// `KeyAlgorithm.name`, per the Secure Curves registry entry).
+const ED25519_NAME: &str = "Ed25519";
+
+/// The `algorithm-name` reported by ECDSA keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+const ECDSA_NAME: &str = "ECDSA";
 
 /// The length in bytes of a ChaCha20-Poly1305 key (either variant).
 const CHACHA_KEY_LEN: usize = 32;
@@ -173,11 +187,14 @@ impl Sha2 {
 }
 
 impl GuestMacKey for MacKey {
-    async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
+    async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
+        //
+        // The WIT `err` case exists for operational keystore failures; this
+        // implementation holds the material in-process, so it never errs.
         let bytes = drain_stream(data).await;
-        self.variant.sign(&self.raw, &bytes)
+        Ok(self.variant.sign(&self.raw, &bytes))
     }
 
     async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
@@ -576,5 +593,216 @@ impl ChaChaPoly1305Guest for Component {
         let key = new_chacha_key(variant, raw, extractable)
             .expect("generated key material always matches the variant");
         Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(key))
+    }
+}
+
+// --- signature -----------------------------------------------------------------
+
+impl SignatureGuest for Component {
+    type VerifyingKey = VerifyingKey;
+    type SigningKey = SigningKey;
+}
+
+/// An exported `verifying-key`: public material bound to its algorithm
+/// (and, for ECDSA, its curve/digest variant) at minting.
+pub struct VerifyingKey {
+    public: SigPublic,
+}
+
+/// The public key backing a [`VerifyingKey`]. ECDSA arms exist for
+/// *verification only* — secret-free, so exempt from the timing-channel
+/// classes; ECDSA signing is class D and this provider never mints it.
+enum SigPublic {
+    Ed25519(ed25519_dalek::VerifyingKey),
+    EcdsaP256(p256::ecdsa::VerifyingKey),
+    EcdsaP384(p384::ecdsa::VerifyingKey),
+}
+
+impl SigPublic {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Ed25519(_) => ED25519_NAME,
+            Self::EcdsaP256(_) | Self::EcdsaP384(_) => ECDSA_NAME,
+        }
+    }
+
+    fn curve(&self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519(_) => None,
+            Self::EcdsaP256(_) => Some("P-256"),
+            Self::EcdsaP384(_) => Some("P-384"),
+        }
+    }
+
+    fn hash(&self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519(_) => None,
+            Self::EcdsaP256(_) => Some("SHA-256"),
+            Self::EcdsaP384(_) => Some("SHA-384"),
+        }
+    }
+}
+
+impl GuestVerifyingKey for VerifyingKey {
+    async fn verify(&self, data: wit_bindgen::StreamReader<u8>, sig: Vec<u8>) -> Result<(), Error> {
+        use p256::ecdsa::signature::Verifier as _;
+        let bytes = drain_stream(data).await;
+        let ok = match &self.public {
+            SigPublic::Ed25519(key) => ed25519_dalek::Signature::from_slice(&sig)
+                .and_then(|sig| key.verify_strict(&bytes, &sig))
+                .is_ok(),
+            SigPublic::EcdsaP256(key) => p256::ecdsa::Signature::from_slice(&sig)
+                .and_then(|sig| key.verify(&bytes, &sig))
+                .is_ok(),
+            SigPublic::EcdsaP384(key) => p384::ecdsa::Signature::from_slice(&sig)
+                .and_then(|sig| key.verify(&bytes, &sig))
+                .is_ok(),
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(Error::AuthenticationFailed)
+        }
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.public.name().to_string()
+    }
+
+    fn algorithm_curve(&self) -> Option<String> {
+        self.public.curve().map(str::to_string)
+    }
+
+    fn algorithm_hash(&self) -> Option<String> {
+        self.public.hash().map(str::to_string)
+    }
+
+    async fn export(&self) -> Vec<u8> {
+        match &self.public {
+            SigPublic::Ed25519(key) => key.to_bytes().to_vec(),
+            SigPublic::EcdsaP256(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+            SigPublic::EcdsaP384(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+        }
+    }
+}
+
+/// An exported `signing-key`. This provider mints only Ed25519 signing keys
+/// (constant-time by construction); ECDSA signing is class D and its
+/// interface is not exported, so no ECDSA arm exists here.
+pub struct SigningKey {
+    private: ed25519_dalek::SigningKey,
+    extractable: bool,
+}
+
+impl GuestSigningKey for SigningKey {
+    async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
+        use ed25519_dalek::Signer as _;
+        // The WIT `err` case exists for operational keystore failures; this
+        // implementation holds the material in-process, so it never errs.
+        let bytes = drain_stream(data).await;
+        Ok(self.private.sign(&bytes).to_bytes().to_vec())
+    }
+
+    fn verifying_key(&self) -> signature_iface::VerifyingKey {
+        signature_iface::VerifyingKey::new(VerifyingKey {
+            public: SigPublic::Ed25519(self.private.verifying_key()),
+        })
+    }
+
+    fn algorithm_name(&self) -> String {
+        ED25519_NAME.to_string()
+    }
+
+    fn algorithm_curve(&self) -> Option<String> {
+        None
+    }
+
+    fn algorithm_hash(&self) -> Option<String> {
+        None
+    }
+
+    fn extractable(&self) -> bool {
+        self.extractable
+    }
+
+    async fn export(&self) -> Result<Vec<u8>, Error> {
+        if self.extractable {
+            Ok(self.private.to_bytes().to_vec())
+        } else {
+            Err(Error::NotExtractable)
+        }
+    }
+}
+
+// --- ed25519 (key minting) -----------------------------------------------------
+
+impl Ed25519VerifyGuest for Component {
+    async fn import_verifying_key(raw: Vec<u8>) -> Result<signature_iface::VerifyingKey, Error> {
+        let bytes: &[u8; 32] = raw.as_slice().try_into().map_err(|_| {
+            Error::InvalidKey(format!(
+                "Ed25519 public keys are 32 bytes, got {} bytes",
+                raw.len()
+            ))
+        })?;
+        let key = ed25519_dalek::VerifyingKey::from_bytes(bytes)
+            .map_err(|err| Error::InvalidKey(format!("invalid Ed25519 public key: {err}")))?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey {
+            public: SigPublic::Ed25519(key),
+        }))
+    }
+}
+
+impl Ed25519SignGuest for Component {
+    async fn import_signing_key(
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<signature_iface::SigningKey, Error> {
+        let seed: &[u8; 32] = raw.as_slice().try_into().map_err(|_| {
+            Error::InvalidKey(format!(
+                "Ed25519 private keys are 32-byte seeds, got {} bytes",
+                raw.len()
+            ))
+        })?;
+        Ok(signature_iface::SigningKey::new(SigningKey {
+            private: ed25519_dalek::SigningKey::from_bytes(seed),
+            extractable,
+        }))
+    }
+
+    async fn generate_key(extractable: bool) -> Result<signature_iface::SigningKey, Error> {
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).expect("WASI random source is always available");
+        Ok(signature_iface::SigningKey::new(SigningKey {
+            private: ed25519_dalek::SigningKey::from_bytes(&seed),
+            extractable,
+        }))
+    }
+}
+
+// --- ecdsa (verification-key minting only; signing is class D) ------------------
+
+impl EcdsaVerifyGuest for Component {
+    async fn import_verifying_key(
+        variant: EcdsaVariant,
+        raw: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let expected = match variant {
+            EcdsaVariant::P256Sha256 => 65,
+            EcdsaVariant::P384Sha384 => 97,
+        };
+        if raw.len() != expected || raw[0] != 0x04 {
+            return Err(Error::InvalidKey(format!(
+                "{variant:?} public keys are uncompressed SEC1 points ({expected} bytes, leading 0x04)"
+            )));
+        }
+        let public = match variant {
+            EcdsaVariant::P256Sha256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(&raw)
+                .map(SigPublic::EcdsaP256)
+                .map_err(|err| Error::InvalidKey(format!("invalid P-256 public key: {err}")))?,
+            EcdsaVariant::P384Sha384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(&raw)
+                .map(SigPublic::EcdsaP384)
+                .map_err(|err| Error::InvalidKey(format!("invalid P-384 public key: {err}")))?,
+        };
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
 }

@@ -12,13 +12,16 @@ following the same architecture.
 The package ([`wit/webcrypto.wit`](wit/webcrypto.wit)) is layered by *primitive
 kind*, not by algorithm:
 
-- **Generic primitive interfaces** (`mac`, `aead`, `digest`; later
-  `stream-aead`, …) each own the algorithm-agnostic resources. Adding an
-  algorithm never touches them.
+- **Generic primitive interfaces** (`mac`, `aead`, `digest`, `signature`;
+  later `stream-aead`, …) each own the algorithm-agnostic resources. Adding
+  an algorithm never touches them.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
-  `sha2`) contain only *key minting*
-  (`import-*`/`generate-*`). Everything else hangs off the key resource, so a
-  key can never be used with the wrong algorithm.
+  `sha2`, `ed25519-verify`/`-sign`, `ecdsa-verify`/`-sign`) contain only
+  *key minting* (`import-*`/`generate-*`). Everything else hangs off the key
+  resource, so a key can never be used with the wrong algorithm. Signature
+  minting splits the public and private halves into separate interfaces, so
+  a provider can serve verification for an algorithm whose signing it
+  declines to host.
 - **Keys are resources — capabilities.** A world importing only `mac` can use
   key handles it is granted but cannot mint keys; only a world importing
   `hmac` can. `extractable: false` keys refuse `export` (on the jco host the
@@ -46,7 +49,10 @@ Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
 **ChaCha20-Poly1305** (both the RFC 8439 construction and XChaCha20-Poly1305
 with 24-byte nonces; browsers implement neither, so the jco host declines
 them) — the AEADs share 16-byte tags and the `ciphertext ‖ tag` wire format
-(`crypto.subtle`'s, which RustCrypto produces identically) — plus the
+(`crypto.subtle`'s, which RustCrypto produces identically) — plus
+**Ed25519** and **ECDSA** (P-256/SHA-256, P-384/SHA-384; fixed-width
+`r ‖ s` signatures, WebCrypto's format; the in-guest provider serves ECDSA
+*verification only* — signing is class D) and the
 `bytes.constant-time-equal` utility. The variant enums also declare cases no
 implementation here serves (`aes192`, the truncated SHA-2 variants) — each
 algorithm's spec closes its set — which fail `unsupported`; a composition

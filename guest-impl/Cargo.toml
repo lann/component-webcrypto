@@ -23,3 +23,10 @@ aes-gcm = "0.10"
 chacha20poly1305 = "0.10"
 # Key generation, via the target's WASI random backend.
 getrandom = "0.3"
+# Signature algorithms. Ed25519 signing is constant-time by construction
+# (class A/B — see the README's classification), so both halves are
+# exported; the ECDSA crates back *verification only* (signing is class D
+# and its interface is never exported by this provider).
+ed25519-dalek = "2"
+p256 = { version = "0.13", features = ["ecdsa"] }
+p384 = { version = "0.13", features = ["ecdsa"] }

@@ -5,13 +5,18 @@ use crate::lann::webcrypto::aead::AeadKey;
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
 use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::chacha20_poly1305::{import_key as import_chacha_key, ChachaVariant};
+use crate::lann::webcrypto::ecdsa_verify::{
+    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+};
+use crate::lann::webcrypto::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::{
-    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, Schedule, Sha2Alg, Sha2Case,
+    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, Schedule, Sha2Alg, Sha2Case, SigAlg,
+    SigCase,
 };
-use crate::util::{compute, describe, expect_bytes, open, seal, sign, verify};
+use crate::util::{compute, describe, expect_bytes, open, seal, sig_verify, sign, verify};
 
 /// Run one SHA-2 digest vector under its schedule.
 pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
@@ -152,6 +157,39 @@ async fn run_aead_expectation(
                 )),
                 Ok(_) => Err("open accepted an invalid vector".into()),
             }
+        }
+    }
+}
+
+/// Run one signature-verification vector under its schedule.
+pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
+    let key = match case.alg {
+        SigAlg::Ed25519 => import_ed25519_verifying_key(case.public.clone())
+            .await
+            .map_err(|e| describe("import-verifying-key", &e))?,
+        SigAlg::EcdsaP256Sha256 => {
+            import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, case.public.clone())
+                .await
+                .map_err(|e| describe("import-verifying-key", &e))?
+        }
+        SigAlg::EcdsaP384Sha384 => {
+            import_ecdsa_verifying_key(EcdsaVariant::P384Sha384, case.public.clone())
+                .await
+                .map_err(|e| describe("import-verifying-key", &e))?
+        }
+    };
+    let (verified, fed) = sig_verify(&key, &case.msg, &case.sig, case.schedule).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    if case.valid {
+        verified.map_err(|e| describe("verify(sig) failed for a valid vector", &e))
+    } else {
+        match verified {
+            Err(Error::AuthenticationFailed) => Ok(()),
+            Err(other) => Err(describe(
+                "verify of an invalid vector: expected authentication-failed, got",
+                &other,
+            )),
+            Ok(()) => Err("verify(sig) succeeded for an invalid vector".into()),
         }
     }
 }
