@@ -17,7 +17,7 @@ use crate::lann::webcrypto::xchacha20_poly1305::import_key as import_xchacha_key
 use crate::lann::webcrypto::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
 use crate::translate::{
     AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, InternalNonceAlg, InternalNonceCase,
-    Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase,
+    Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
 };
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
@@ -210,6 +210,32 @@ pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), Str
                 &other,
             )),
             Ok(_) => Err("open accepted an invalid sealed message".into()),
+        }
+    }
+}
+
+/// Run one ed25519-speccheck adversarial vector under its schedule. The
+/// WIT criterion permits rejecting a degenerate public key at import or at
+/// verification, so both count as rejection; anything else — acceptance,
+/// or a different error — fails the case.
+pub async fn run_speccheck_case(case: &SpeccheckCase) -> Result<(), String> {
+    let key = match import_ed25519_verifying_key(case.public.clone()).await {
+        Ok(key) => key,
+        Err(Error::InvalidKey(_)) if !case.valid => return Ok(()),
+        Err(err) => return Err(describe("import-verifying-key", &err)),
+    };
+    let (verified, fed) = sig_verify(&key, &case.msg, &case.sig, case.schedule).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    if case.valid {
+        verified.map_err(|e| describe("verify failed for the valid case", &e))
+    } else {
+        match verified {
+            Err(Error::AuthenticationFailed) => Ok(()),
+            Err(other) => Err(describe(
+                "verify: expected authentication-failed, got",
+                &other,
+            )),
+            Ok(()) => Err("a degenerate signature verified".into()),
         }
     }
 }

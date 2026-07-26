@@ -9,7 +9,11 @@ package lann:webcrypto@0.1.0;
 ///
 /// Signatures are fixed-width `r ‖ s` (IEEE P1363, WebCrypto's format):
 /// 64 bytes for P-256, 96 bytes for P-384. ASN.1 DER signatures are not
-/// accepted.
+/// accepted. Verification requires `r` and `s` in `[1, n-1]`; the
+/// fixed-width format leaves no further encoding freedom. Note that ECDSA
+/// is inherently malleable — `(r, s)` and `(r, n-s)` both verify — and
+/// this interface deliberately imposes no low-`s` normalization: do not
+/// build systems that assume signature uniqueness.
 interface ecdsa-verify {
     use types.{error};
     use signature.{verifying-key};

@@ -4,13 +4,30 @@ package lann:webcrypto@0.1.0;
 ///
 /// Ed25519 has no parameters: 32-byte public keys, 64-byte signatures.
 /// Keys report `algorithm-name` `"Ed25519"` and `none` for curve and hash.
+///
+/// Verification criterion (RFC 8032 leaves edge cases open and real
+/// implementations disagree on them, so this interface pins one policy —
+/// divergent verify results across providers is a vulnerability class):
+/// keys minted here verify with the *cofactorless* equation
+/// (`[S]B = R + [k]A`) and MUST reject signatures with a non-canonical
+/// scalar (`S ≥ L`), a non-canonically-encoded or small-order `R`, and
+/// keys with a non-canonically-encoded or small-order `A` — the strict
+/// semantics of ed25519-dalek's `verify_strict`. Whether a degenerate `A`
+/// is rejected at import (`error.invalid-key`) or at verification
+/// (`error.authentication-failed`) is implementation-defined; the
+/// guarantee is that no signature ever verifies under one. Inputs with
+/// *mixed-order* (torsion-component, not small-order) `A` or `R` are the
+/// remaining freedom: they verify iff the cofactorless equation holds.
+/// None of the rejected inputs can be produced by an honest RFC 8032
+/// signer, so this strictness costs no interoperability.
 interface ed25519-verify {
     use types.{error};
     use signature.{verifying-key};
 
-    /// Import a 32-byte raw public key (RFC 8032 encoding). Anything else
-    /// fails with `error.invalid-key`, including encodings the algorithm
-    /// rejects (non-canonical points).
+    /// Import a 32-byte raw public key (RFC 8032 encoding). Material of
+    /// any other length fails with `error.invalid-key`; a non-canonical or
+    /// small-order encoding is rejected here or at verification, per the
+    /// interface's verification criterion.
     import-verifying-key: async func(raw: list<u8>) -> result<verifying-key, error>;
 }
 

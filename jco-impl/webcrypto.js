@@ -704,6 +704,18 @@ export class VerifyingKey {
    */
   async verify(data, sig) {
     const message = await collectByteStream(data);
+    // The `ed25519-verify` WIT criterion (verify_strict semantics): the
+    // engine implements plain RFC 8032, so reject non-canonical `S`,
+    // and non-canonical or small-order `R`, before delegating. The
+    // message stream is drained first, per the WIT drain rule.
+    if (this.#key.algorithm.name === "Ed25519" && sig.length === 64) {
+      if (!ltLittleEndian(sig.subarray(32), ED25519_L)) {
+        throw { tag: "authentication-failed" };
+      }
+      if (!ed25519PointStrict(sig.subarray(0, 32))) {
+        throw { tag: "authentication-failed" };
+      }
+    }
     const params = signParams(this.#key.algorithm.name, this.#hash);
     if (!(await subtle.verify(params, this.#key, sig, message))) {
       throw { tag: "authentication-failed" };
@@ -825,15 +837,92 @@ async function derivePublicKey(privateKey, importParams) {
   return subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
 }
 
+/**
+ * Ed25519 strict-validation predicates (the `ed25519-verify` WIT criterion:
+ * `verify_strict` semantics). WebCrypto engines implement plain RFC 8032,
+ * which leaves acceptance of non-canonical and small-order inputs open, so
+ * this host enforces the pinned rejections itself before delegating —
+ * pure byte compares on public data (no constant-time requirement), and
+ * strictly monotone: they only add rejections in front of the engine.
+ * None of the rejected encodings can be produced by an honest signer.
+ */
+
+/** The field prime p = 2^255 - 19, little-endian. */
+// prettier-ignore
+const ED25519_P = Uint8Array.from([
+  0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
+]);
+
+/** The group order L = 2^252 + 27742317777372353535851937790883648493, little-endian. */
+// prettier-ignore
+const ED25519_L = Uint8Array.from([
+  0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+]);
+
+/**
+ * The y-coordinates of edwards25519's 8-torsion subgroup, little-endian:
+ * every small-order point has one of these five y values (y = 0, 1, p-1,
+ * and the two order-8 y values). Derived from the curve equation
+ * (d·y⁴ + 2y² − 1 = 0 for the order-8 points) and cross-checked against
+ * the ed25519-speccheck vectors and ed25519-dalek's torsion table.
+ */
+// prettier-ignore
+const ED25519_SMALL_ORDER_Y = [
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+].map((hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16)));
+
+/** Whether little-endian `a` < `b` (equal-length). */
+function ltLittleEndian(a, b) {
+  for (let i = a.length - 1; i >= 0; i--) {
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
+  return false;
+}
+
+/** Whether `a` and `b` are byte-equal (public data; early exit is fine). */
+function bytesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a 32-byte Ed25519 point encoding is canonical (y < p) and not a
+ * small-order point — the strict-validation predicate for both `A` (at
+ * import) and `R` (at verify).
+ * @param {Uint8Array} encoded
+ */
+function ed25519PointStrict(encoded) {
+  const y = encoded.slice();
+  y[31] &= 0x7f; // mask the x sign bit
+  if (!ltLittleEndian(y, ED25519_P)) return false; // non-canonical
+  return !ED25519_SMALL_ORDER_Y.some((torsion) => bytesEqual(y, torsion));
+}
+
 /** Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`. */
 function invalidKey(err, what) {
   throw { tag: "invalid-key", val: `invalid ${what}: ${err.message ?? err}` };
 }
 
-/** Import a 32-byte raw Ed25519 public key. */
+/**
+ * Import a 32-byte raw Ed25519 public key. Non-canonical and small-order
+ * encodings are rejected here (the WIT strict criterion; the platform's
+ * import performs little validation of its own).
+ */
 async function importEd25519VerifyingKey(raw) {
   if (raw.length !== 32) {
     throw { tag: "invalid-key", val: `Ed25519 public keys are 32 bytes, got ${raw.length}` };
+  }
+  if (!ed25519PointStrict(raw)) {
+    throw { tag: "invalid-key", val: "non-canonical or small-order Ed25519 public key" };
   }
   let key;
   try {
