@@ -1,8 +1,8 @@
 //! The exported `lann:webcrypto` resources and key-minting functions, backed
-//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-256, `aes-gcm` for AES-GCM).
+//! by RustCrypto (`hmac`/`sha2` for HMAC-SHA-2, `aes-gcm` for AES-GCM).
 //!
 //! - [`MacKey`] holds raw HMAC key material; `sign` and `verify` are
-//!   one-shot HMAC-SHA-256 computations, stateless per call.
+//!   one-shot HMAC computations over the key's SHA-2 variant, stateless per call.
 //! - [`AeadKey`] holds raw AES key material plus its schedule; `seal` and
 //!   `open` are stateless per call.
 //!
@@ -13,24 +13,16 @@
 
 use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
-use hmac::Mac as _;
 
 use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
-use crate::exports::lann::webcrypto::hmac::Guest as HmacGuest;
+use crate::exports::lann::webcrypto::hmac_sha2::{Guest as HmacSha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
 use crate::lann::webcrypto::types::Error;
 
-/// The HMAC-SHA-256 state backing one `sign`/`verify` call.
-type HmacSha256 = hmac::Hmac<sha2::Sha256>;
-
-/// The `algorithm-name` reported by HMAC-SHA-256 keys and computations
+/// The `algorithm-name` reported by HMAC keys and computations
 /// (WebCrypto's `KeyAlgorithm.name`).
 const HMAC_NAME: &str = "HMAC";
-
-/// The `algorithm-hash` reported by HMAC-SHA-256 keys and computations
-/// (WebCrypto's `HmacKeyAlgorithm.hash`).
-const HMAC_SHA256_HASH: &str = "SHA-256";
 
 /// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
 /// `KeyAlgorithm.name`).
@@ -78,36 +70,93 @@ impl MacGuest for Component {
     type MacKey = MacKey;
 }
 
-/// An exported `mac-key`: raw HMAC key material bound to HMAC-SHA-256.
+/// An exported `mac-key`: raw HMAC key material bound to a SHA-2 variant.
 pub struct MacKey {
     raw: Vec<u8>,
+    variant: HmacVariant,
     extractable: bool,
 }
 
-impl MacKey {
-    /// Build the HMAC state for this key's material, folding in one entire
-    /// drained stream.
-    async fn hmac_over(&self, data: wit_bindgen::StreamReader<u8>) -> HmacSha256 {
-        // HMAC accepts key material of any length, so this cannot fail for a
-        // key that was accepted at import/generation time.
-        let mut hmac = <HmacSha256 as hmac::Mac>::new_from_slice(&self.raw)
-            .expect("HMAC accepts any key length");
-        hmac.update(&drain_stream(data).await);
-        hmac
+/// The served SHA-2 variants a [`MacKey`] can be bound to. Only the WIT
+/// `sha2-variant` cases this implementation serves appear here: the
+/// truncated variants are declined at minting (see the WIT `sha2-variant`
+/// doc).
+#[derive(Clone, Copy)]
+enum HmacVariant {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl HmacVariant {
+    /// The hash name (WebCrypto's `HmacKeyAlgorithm.hash`).
+    fn hash_name(self) -> &'static str {
+        match self {
+            Self::Sha256 => "SHA-256",
+            Self::Sha384 => "SHA-384",
+            Self::Sha512 => "SHA-512",
+        }
+    }
+
+    /// The underlying hash's block length in bytes (the length of a
+    /// generated key, per WebCrypto's `generateKey` default).
+    fn block_len(self) -> usize {
+        match self {
+            Self::Sha256 => 64,
+            Self::Sha384 | Self::Sha512 => 128,
+        }
+    }
+
+    /// One-shot HMAC over `data` with `key` material.
+    fn sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
+        fn tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Vec<u8> {
+            // HMAC accepts key material of any length, so this cannot fail
+            // for a key that was accepted at import/generation time.
+            let mut hmac =
+                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+            hmac.update(data);
+            hmac.finalize().into_bytes().to_vec()
+        }
+        match self {
+            Self::Sha256 => tag::<hmac::Hmac<sha2::Sha256>>(key, data),
+            Self::Sha384 => tag::<hmac::Hmac<sha2::Sha384>>(key, data),
+            Self::Sha512 => tag::<hmac::Hmac<sha2::Sha512>>(key, data),
+        }
+    }
+
+    /// One-shot constant-time HMAC verification of `tag` over `data`.
+    fn verify(self, key: &[u8], data: &[u8], tag: &[u8]) -> Result<(), Error> {
+        fn check<M: hmac::Mac + hmac::digest::KeyInit>(
+            key: &[u8],
+            data: &[u8],
+            tag: &[u8],
+        ) -> Result<(), Error> {
+            let mut hmac =
+                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+            hmac.update(data);
+            // `verify_slice` compares in constant time, per the WIT contract.
+            hmac.verify_slice(tag)
+                .map_err(|_| Error::AuthenticationFailed)
+        }
+        match self {
+            Self::Sha256 => check::<hmac::Hmac<sha2::Sha256>>(key, data, tag),
+            Self::Sha384 => check::<hmac::Hmac<sha2::Sha384>>(key, data, tag),
+            Self::Sha512 => check::<hmac::Hmac<sha2::Sha512>>(key, data, tag),
+        }
     }
 }
 
 impl GuestMacKey for MacKey {
     async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
-        self.hmac_over(data).await.finalize().into_bytes().to_vec()
+        // Buffer the whole stream, then fold it into the HMAC state; the
+        // result is chunking-invariant either way.
+        let bytes = drain_stream(data).await;
+        self.variant.sign(&self.raw, &bytes)
     }
 
     async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
-        // `verify_slice` compares in constant time, per the WIT contract.
-        self.hmac_over(data)
-            .await
-            .verify_slice(&tag)
-            .map_err(|_| Error::AuthenticationFailed)
+        let bytes = drain_stream(data).await;
+        self.variant.verify(&self.raw, &bytes, &tag)
     }
 
     fn algorithm_name(&self) -> String {
@@ -115,7 +164,7 @@ impl GuestMacKey for MacKey {
     }
 
     fn algorithm_hash(&self) -> Option<String> {
-        Some(HMAC_SHA256_HASH.to_string())
+        Some(self.variant.hash_name().to_string())
     }
 
     fn algorithm_length(&self) -> u32 {
@@ -261,10 +310,29 @@ impl GuestAeadKey for AeadKey {
     }
 }
 
-// --- hmac (key minting) --------------------------------------------------------
+// --- hmac-sha2 (key minting) -----------------------------------------------------
 
-impl HmacGuest for Component {
-    async fn import_hmac_sha256_key(raw: Vec<u8>, extractable: bool) -> Result<mac::MacKey, Error> {
+/// The served [`HmacVariant`] for a WIT `sha2-variant`, or `unsupported` for
+/// one this implementation declines (the truncated variants; see the WIT
+/// `sha2-variant` doc).
+fn hmac_variant(variant: Sha2Variant) -> Result<HmacVariant, Error> {
+    match variant {
+        Sha2Variant::Sha256 => Ok(HmacVariant::Sha256),
+        Sha2Variant::Sha384 => Ok(HmacVariant::Sha384),
+        Sha2Variant::Sha512 => Ok(HmacVariant::Sha512),
+        Sha2Variant::Sha224 | Sha2Variant::Sha512224 | Sha2Variant::Sha512256 => Err(
+            Error::Unsupported(format!("{variant:?} is not served by this implementation")),
+        ),
+    }
+}
+
+impl HmacSha2Guest for Component {
+    async fn import_key(
+        variant: Sha2Variant,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<mac::MacKey, Error> {
+        let variant = hmac_variant(variant)?;
         // RFC 2104 accepts any non-empty key length (longer-than-block keys
         // are hashed first); an empty key is rejected as `invalid-key`.
         if raw.is_empty() {
@@ -272,13 +340,22 @@ impl HmacGuest for Component {
                 "HMAC key material must be non-empty".into(),
             ));
         }
-        Ok(mac::MacKey::new(MacKey { raw, extractable }))
+        Ok(mac::MacKey::new(MacKey {
+            raw,
+            variant,
+            extractable,
+        }))
     }
 
-    async fn generate_hmac_sha256_key(extractable: bool) -> mac::MacKey {
-        let mut raw = vec![0u8; 32];
+    async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<mac::MacKey, Error> {
+        let variant = hmac_variant(variant)?;
+        let mut raw = vec![0u8; variant.block_len()];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
-        mac::MacKey::new(MacKey { raw, extractable })
+        Ok(mac::MacKey::new(MacKey {
+            raw,
+            variant,
+            extractable,
+        }))
     }
 }
 

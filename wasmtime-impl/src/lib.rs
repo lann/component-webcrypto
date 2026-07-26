@@ -7,28 +7,19 @@
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
-//! and calls [`add_to_linker`] to satisfy the `types`, `mac`, `aead`, `hmac`,
-//! and `aes-gcm` imports with HMAC-SHA-256 and AES-GCM implementations.
+//! and calls [`add_to_linker`] to satisfy the `types`, `mac`, `aead`, `hmac-sha2`,
+//! and `aes-gcm` imports with HMAC-SHA-2 and AES-GCM implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
 pub mod bindings;
 mod host;
 
-use hmac::Hmac;
-use sha2::Sha256;
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
-/// The HMAC-SHA-256 state backing one `sign`/`verify` call.
-pub(crate) type HmacSha256 = Hmac<Sha256>;
-
-/// The `algorithm-name` reported by HMAC-SHA-256 keys and computations
+/// The `algorithm-name` reported by HMAC keys and computations
 /// (WebCrypto's `KeyAlgorithm.name`).
 pub(crate) const HMAC_NAME: &str = "HMAC";
-
-/// The `algorithm-hash` reported by HMAC-SHA-256 keys and computations
-/// (WebCrypto's `HmacKeyAlgorithm.hash`).
-pub(crate) const HMAC_SHA256_HASH: &str = "SHA-256";
 
 /// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
 /// `KeyAlgorithm.name`).
@@ -82,15 +73,16 @@ impl HasData for WasiWebcrypto {
 
 /// Backing type for the `mac.mac-key` resource.
 ///
-/// Holds the raw key material and the key's extractability. The algorithm is
-/// fixed at creation (currently always HMAC-SHA-256) and derived from the
-/// material on demand; `sign`/`verify` are one-shot and stateless per call,
-/// so the key carries no per-operation state. `extractable` gates `%export`
-/// only — the material necessarily lives host-side either way.
+/// Holds the raw key material, the SHA-2 variant the key is bound to, and
+/// the key's extractability; `sign`/`verify` are one-shot and stateless per
+/// call, so the key carries no per-operation state. `extractable` gates
+/// `%export` only — the material necessarily lives host-side either way.
 pub struct MacKey {
     /// The raw key material, retained for `sign`/`verify` and (when
     /// extractable) `%export`.
     pub(crate) raw: Vec<u8>,
+    /// The SHA-2 variant this key is bound to.
+    pub(crate) variant: crate::host::HmacVariant,
     /// Whether `%export` may return the raw material.
     pub(crate) extractable: bool,
 }
@@ -110,7 +102,7 @@ pub struct AeadKey {
 }
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate (`types`,
-/// `mac`, `aead`, `hmac`, and `aes-gcm`) to the provided [`Linker`].
+/// `mac`, `aead`, `hmac-sha2`, and `aes-gcm`) to the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebcryptoView`]. The
 /// engine's [`Config`](wasmtime::Config) must have
@@ -151,7 +143,7 @@ where
     bindings::webcrypto::types::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::mac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
-    bindings::webcrypto::hmac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }

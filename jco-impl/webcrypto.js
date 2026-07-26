@@ -1,5 +1,5 @@
-// Host implementation of the `lann:webcrypto` imports (`mac`, `aead`, `hmac`,
-// `aes-gcm`) for jco-transpiled components.
+// Host implementation of the `lann:webcrypto` imports (`mac`, `aead`,
+// `hmac-sha2`, `aes-gcm`) for jco-transpiled components.
 //
 // This is the "browser-first" host: it is written against the standard Web
 // Crypto API only — `globalThis.crypto.subtle` and
@@ -7,10 +7,13 @@
 // browser. No `node:crypto` imports and no Node-only APIs are used; Node
 // provides the same globals natively.
 //
-// `jco --map` wires this module in as the component's `mac`/`aead`/`hmac`/
-// `aes-gcm` imports (one module for all four, since their export names do not
-// collide). Errors are surfaced to the guest by throwing the WIT `error`
-// variant value (for example `{ tag: 'invalid-key', val }` or
+// `jco --map` wires this module in as the component's imports: the `mac` and
+// `aead` resource interfaces map to the module itself (the `MacKey` and
+// `AeadKey` class exports), while the key-minting interfaces map to the
+// `hmacSha2` and `aesGcm` named exports (`--map '…=./webcrypto.js#hmacSha2'`)
+// since both mint via `import-key`/`generate-key` and the names would
+// otherwise collide. Errors are surfaced to the guest by throwing the WIT
+// `error` variant value (for example `{ tag: 'invalid-key', val }` or
 // `{ tag: 'authentication-failed' }`), which jco lifts into the
 // `result<_, error>` the WIT declares.
 //
@@ -21,13 +24,36 @@
 
 const subtle = globalThis.crypto.subtle;
 
-/** HMAC-SHA-256 `importKey` parameters. */
-const HMAC_ALGORITHM = { name: "HMAC", hash: "SHA-256" };
+/**
+ * The hash name and block length for each served `sha2-variant` enum case
+ * (jco lowers WIT enums as their kebab-case names). The truncated variants
+ * (sha224, sha512-224, sha512-256) are absent: WebCrypto does not serve
+ * them, so this implementation declines them (see the WIT `sha2-variant`
+ * doc).
+ */
+const SHA2_VARIANTS = {
+  sha256: { hash: "SHA-256", blockBytes: 64 },
+  sha384: { hash: "SHA-384", blockBytes: 128 },
+  sha512: { hash: "SHA-512", blockBytes: 128 },
+};
 
 /**
- * The `mac-key` resource: an HMAC-SHA-256 key. Holds a `CryptoKey` imported
- * with usages `["sign", "verify"]` and the caller's `extractable` flag;
- * instances are minted only by the `hmac` interface functions below.
+ * The served `sha2-variant` entry for `variant`, throwing
+ * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ */
+function sha2Variant(variant) {
+  const entry = SHA2_VARIANTS[variant];
+  if (entry === undefined) {
+    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+  }
+  return entry;
+}
+
+/**
+ * The `mac-key` resource: an HMAC key bound to a SHA-2 variant. Holds a
+ * `CryptoKey` imported with usages `["sign", "verify"]` and the caller's
+ * `extractable` flag; instances are minted only by the `hmac-sha2`
+ * interface functions below.
  * `sign`/`verify` are one-shot and stateless per call, matching
  * `subtle.sign`/`verify` exactly (WebCrypto has no incremental HMAC): each
  * call collects its entire input stream, then signs or verifies it whole.
@@ -180,16 +206,23 @@ export class AeadKey {
 }
 
 /**
- * Import raw key material as an HMAC-SHA-256 key. Any non-empty length is
- * accepted (RFC 2104); empty material throws `{ tag: 'invalid-key', val }`.
+ * Import raw key material as an HMAC key over the declared SHA-2 variant. A
+ * variant this implementation declines throws `{ tag: 'unsupported', val }`.
+ * Any non-empty length is accepted (RFC 2104); empty material throws
+ * `{ tag: 'invalid-key', val }`.
+ * @param {string} variant
  * @param {Uint8Array} raw
  * @param {boolean} extractable
  */
-export async function importHmacSha256Key(raw, extractable) {
+async function importHmacKey(variant, raw, extractable) {
+  const { hash } = sha2Variant(variant);
   if (raw.length === 0) throw { tag: "invalid-key", val: "empty key" };
   let key;
   try {
-    key = await subtle.importKey("raw", raw, HMAC_ALGORITHM, extractable, ["sign", "verify"]);
+    key = await subtle.importKey("raw", raw, { name: "HMAC", hash }, extractable, [
+      "sign",
+      "verify",
+    ]);
   } catch (err) {
     throw { tag: "invalid-key", val: String(err) };
   }
@@ -197,14 +230,21 @@ export async function importHmacSha256Key(raw, extractable) {
 }
 
 /**
- * Generate a fresh random HMAC-SHA-256 key (32 bytes of key material).
+ * Generate a fresh random HMAC key over the declared SHA-2 variant, with
+ * the underlying hash's block size of key material (WebCrypto's
+ * `generateKey` default). A variant this implementation declines throws
+ * `{ tag: 'unsupported', val }`.
+ * @param {string} variant
  * @param {boolean} extractable
  */
-export async function generateHmacSha256Key(extractable) {
-  const raw = globalThis.crypto.getRandomValues(new Uint8Array(32));
-  const key = await subtle.importKey("raw", raw, HMAC_ALGORITHM, extractable, ["sign", "verify"]);
+async function generateHmacKey(variant, extractable) {
+  const { hash } = sha2Variant(variant);
+  const key = await subtle.generateKey({ name: "HMAC", hash }, extractable, ["sign", "verify"]);
   return new MacKey(key);
 }
+
+/** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
+export const hmacSha2 = { importKey: importHmacKey, generateKey: generateHmacKey };
 
 /**
  * The raw key length in bytes for each served `aes-variant` enum case (jco
@@ -234,7 +274,7 @@ function aesVariantByteLength(variant) {
  * @param {Uint8Array} raw
  * @param {boolean} extractable
  */
-export async function importKey(variant, raw, extractable) {
+async function importAesKey(variant, raw, extractable) {
   const expected = aesVariantByteLength(variant);
   if (raw.length !== expected) {
     throw {
@@ -260,7 +300,7 @@ export async function importKey(variant, raw, extractable) {
  * @param {string} variant
  * @param {boolean} extractable
  */
-export async function generateKey(variant, extractable) {
+async function generateAesKey(variant, extractable) {
   const key = await subtle.generateKey(
     { name: "AES-GCM", length: aesVariantByteLength(variant) * 8 },
     extractable,
@@ -268,6 +308,9 @@ export async function generateKey(variant, extractable) {
   );
   return new AeadKey(key);
 }
+
+/** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
+export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
 
 /**
  * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes

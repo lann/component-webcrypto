@@ -45,13 +45,13 @@ interface types {
 /// The `mac` primitive kind: message-authentication codes.
 ///
 /// This interface is algorithm-agnostic. Keys are minted by per-algorithm
-/// interfaces (such as `hmac`) and returned as `mac-key` resources bound to
+/// interfaces (such as `hmac-sha2`) and returned as `mac-key` resources bound to
 /// their algorithm at creation; every operation then hangs off the key, so a
 /// key can never be used with the wrong algorithm.
 ///
 /// A component whose world imports only this interface can *use* any
 /// `mac-key` handle it is granted but cannot mint or import keys; only a
-/// world importing a key-minting interface (such as `hmac`) can create them.
+/// world importing a key-minting interface (such as `hmac-sha2`) can create them.
 /// Key handles are therefore capabilities.
 interface mac {
     use types.{error};
@@ -185,25 +185,49 @@ interface aead {
     }
 }
 
-/// HMAC key minting (RFC 2104), one function pair per underlying hash.
+/// HMAC key minting (RFC 2104) over the SHA-2 hash family (FIPS 180-4).
 ///
 /// Adding an algorithm touches only an interface like this one: the generic
 /// `mac` surface is closed. Keys returned here drive `mac.mac-key.sign` and
 /// `verify`.
-interface hmac {
+interface hmac-sha2 {
     use types.{error};
     use mac.{mac-key};
 
-    /// Import raw key material as an HMAC-SHA-256 key. Empty keys are
-    /// rejected with `error.invalid-key`. Implementations generally accept
-    /// any non-empty length (per RFC 2104; keys longer than the block size
-    /// are hashed first), but an implementation enforcing a security policy
-    /// (for example FIPS 140-3 approved mode, which requires keys of at
-    /// least 112 bits) MAY reject shorter keys with `error.invalid-key`.
-    import-hmac-sha256-key: async func(raw: list<u8>, extractable: bool) -> result<mac-key, error>;
+    /// The SHA-2 variants: FIPS 180-4 closes this set, so it is an enum.
+    /// (Each algorithm interface names its closed set of parameterizations
+    /// `<algorithm>-variant`.)
+    enum sha2-variant {
+        /// Not widely supported: WebCrypto serves only SHA-256/384/512, and
+        /// no current implementation of this package serves the truncated
+        /// variants — expect `error.unsupported` unless composed with a
+        /// provider that specifically offers them.
+        sha224,
+        sha256,
+        sha384,
+        sha512,
+        /// Not widely supported (see `sha224`).
+        sha512-224,
+        /// Not widely supported (see `sha224`).
+        sha512-256,
+    }
 
-    /// Generate a fresh random HMAC-SHA-256 key (32 bytes of key material).
-    generate-hmac-sha256-key: async func(extractable: bool) -> mac-key;
+    /// Import raw key material as an HMAC key over the declared SHA-2
+    /// variant. Empty keys are rejected with `error.invalid-key`.
+    /// Implementations generally accept any non-empty length (per RFC 2104;
+    /// keys longer than the block size are hashed first), but an
+    /// implementation enforcing a security policy (for example FIPS 140-3
+    /// approved mode, which requires keys of at least 112 bits) MAY reject
+    /// shorter keys with `error.invalid-key`. An implementation not serving
+    /// the variant fails with `error.unsupported`.
+    import-key: async func(%variant: sha2-variant, raw: list<u8>, extractable: bool) -> result<mac-key, error>;
+
+    /// Generate a fresh random HMAC key over the declared SHA-2 variant,
+    /// with the underlying hash's block size of key material (WebCrypto's
+    /// `generateKey` default: 64 bytes for SHA-256, 128 for SHA-384/512).
+    /// Fails with `error.unsupported` if this implementation does not serve
+    /// the variant.
+    generate-key: async func(%variant: sha2-variant, extractable: bool) -> result<mac-key, error>;
 }
 
 /// AES-GCM key minting (NIST SP 800-38D).

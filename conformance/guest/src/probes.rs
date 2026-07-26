@@ -4,7 +4,9 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
-use crate::lann::webcrypto::hmac::{generate_hmac_sha256_key, import_hmac_sha256_key};
+use crate::lann::webcrypto::hmac_sha2::{
+    generate_key as generate_hmac_key, import_key as import_hmac_key, Sha2Variant,
+};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
 use crate::util::{describe, expect_bytes, open, seal, sign, verify};
@@ -12,6 +14,8 @@ use crate::util::{describe, expect_bytes, open, seal, sign, verify};
 /// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
 pub const NAMES: &[&str] = &[
     "hmac-import-empty-key",
+    "hmac-sha384-sha512",
+    "sha2-truncated-unsupported",
     "aes-import-wrong-length",
     "aes192-unsupported",
     "seal-drains-on-invalid-nonce",
@@ -28,16 +32,18 @@ pub const NAMES: &[&str] = &[
 pub async fn run_one(index: usize) -> Result<(), String> {
     match index {
         0 => hmac_import_empty_key().await,
-        1 => aes_import_wrong_length().await,
-        2 => aes192_unsupported().await,
-        3 => seal_drains_on_invalid_nonce().await,
-        4 => open_drains_on_invalid_nonce().await,
-        5 => sealed_length().await,
-        6 => key_export_roundtrip().await,
-        7 => not_extractable().await,
-        8 => generated_key_shape().await,
-        9 => algorithm_names().await,
-        10 => mac_verify_rejects_truncated().await,
+        1 => hmac_sha384_sha512().await,
+        2 => sha2_truncated_unsupported().await,
+        3 => aes_import_wrong_length().await,
+        4 => aes192_unsupported().await,
+        5 => seal_drains_on_invalid_nonce().await,
+        6 => open_drains_on_invalid_nonce().await,
+        7 => sealed_length().await,
+        8 => key_export_roundtrip().await,
+        9 => not_extractable().await,
+        10 => generated_key_shape().await,
+        11 => algorithm_names().await,
+        12 => mac_verify_rejects_truncated().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -53,11 +59,81 @@ async fn generate_key_256(
 
 /// Importing an empty HMAC key fails `invalid-key`.
 async fn hmac_import_empty_key() -> Result<(), String> {
-    match import_hmac_sha256_key(Vec::new(), false).await {
+    match import_hmac_key(Sha2Variant::Sha256, Vec::new(), false).await {
         Err(Error::InvalidKey(_)) => Ok(()),
         Err(other) => Err(describe("expected invalid-key, got", &other)),
         Ok(_) => Err("empty HMAC key imported".into()),
     }
+}
+
+/// The non-SHA-256 served variants compute correct tags (RFC 4231 test
+/// case 2 known answers) and report their hash names.
+async fn hmac_sha384_sha512() -> Result<(), String> {
+    const KEY: &[u8] = b"Jefe";
+    const DATA: &[u8] = b"what do ya want for nothing?";
+    const TAG_SHA384: &str = "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e\
+                              8e2240ca5e69e2c78b3239ecfab21649";
+    const TAG_SHA512: &str = "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea250554\
+                              9758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737";
+    for (variant, hash, want_hex) in [
+        (Sha2Variant::Sha384, "SHA-384", TAG_SHA384),
+        (Sha2Variant::Sha512, "SHA-512", TAG_SHA512),
+    ] {
+        let key = import_hmac_key(variant, KEY.to_vec(), false)
+            .await
+            .map_err(|e| describe("import-key", &e))?;
+        if key.algorithm_hash().as_deref() != Some(hash) {
+            return Err(format!(
+                "{hash} key reports algorithm-hash {:?}",
+                key.algorithm_hash()
+            ));
+        }
+        let want: Vec<u8> = want_hex
+            .replace(' ', "")
+            .as_bytes()
+            .chunks(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+        let (tag, fed) = sign(&key, DATA, Schedule::Whole).await;
+        fed.map_err(|e| format!("sign data feeder: {e}"))?;
+        expect_bytes(&tag, &want, &format!("HMAC-{hash} known-answer tag"))?;
+        let (verified, fed) = verify(&key, DATA, &tag, Schedule::Whole).await;
+        fed.map_err(|e| format!("verify data feeder: {e}"))?;
+        verified.map_err(|e| describe("known-answer tag did not verify", &e))?;
+    }
+    Ok(())
+}
+
+/// No implementation of this package serves the truncated SHA-2 variants
+/// (see the WIT `sha2-variant` doc): both minting paths fail `unsupported`.
+async fn sha2_truncated_unsupported() -> Result<(), String> {
+    for variant in [
+        Sha2Variant::Sha224,
+        Sha2Variant::Sha512224,
+        Sha2Variant::Sha512256,
+    ] {
+        match import_hmac_key(variant, b"truncated".to_vec(), false).await {
+            Err(Error::Unsupported(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("import-key {variant:?}: expected unsupported, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{variant:?} key imported")),
+        }
+        match generate_hmac_key(variant, false).await {
+            Err(Error::Unsupported(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("generate-key {variant:?}: expected unsupported, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{variant:?} key generated")),
+        }
+    }
+    Ok(())
 }
 
 /// Importing 16- or 24-byte material as an AES-256 key fails `invalid-key`.
@@ -157,9 +233,9 @@ async fn sealed_length() -> Result<(), String> {
 /// and AES keys.
 async fn key_export_roundtrip() -> Result<(), String> {
     let hmac_raw = b"key-export-roundtrip".to_vec();
-    let key = import_hmac_sha256_key(hmac_raw.clone(), true)
+    let key = import_hmac_key(Sha2Variant::Sha256, hmac_raw.clone(), true)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     let exported = key
         .export()
         .await
@@ -177,9 +253,9 @@ async fn key_export_roundtrip() -> Result<(), String> {
 /// Export of a non-extractable key fails `not-extractable`, for both HMAC
 /// and AES keys.
 async fn not_extractable() -> Result<(), String> {
-    let key = import_hmac_sha256_key(b"not-extractable".to_vec(), false)
+    let key = import_hmac_key(Sha2Variant::Sha256, b"not-extractable".to_vec(), false)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     match key.export().await {
         Err(Error::NotExtractable) => {}
         Err(other) => return Err(describe("hmac: expected not-extractable, got", &other)),
@@ -196,18 +272,21 @@ async fn not_extractable() -> Result<(), String> {
     }
 }
 
-/// Generated keys have the right shape: extractable generated keys export 32
-/// bytes, a generated HMAC key signs and verifies, and a generated AES key
-/// round-trips seal/open.
+/// Generated keys have the right shape: extractable generated HMAC keys
+/// export the hash's block size (WebCrypto's `generateKey` default), AES-256
+/// keys export 32 bytes, a generated HMAC key signs and verifies, and a
+/// generated AES key round-trips seal/open.
 async fn generated_key_shape() -> Result<(), String> {
-    let hmac_key = generate_hmac_sha256_key(true).await;
+    let hmac_key = generate_hmac_key(Sha2Variant::Sha256, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     let exported = hmac_key
         .export()
         .await
         .map_err(|e| describe("generated hmac export", &e))?;
-    if exported.len() != 32 {
+    if exported.len() != 64 {
         return Err(format!(
-            "generated HMAC key exports {} bytes, want 32",
+            "generated HMAC key exports {} bytes, want 64 (SHA-256 block size)",
             exported.len()
         ));
     }
@@ -254,9 +333,9 @@ async fn algorithm_names() -> Result<(), String> {
 
     let raw = b"algorithm-names".to_vec();
     let key_bits = raw.len() as u32 * 8;
-    let imported = import_hmac_sha256_key(raw, false)
+    let imported = import_hmac_key(Sha2Variant::Sha256, raw, false)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     expect(
         imported.algorithm_name(),
         "HMAC".to_string(),
@@ -272,7 +351,9 @@ async fn algorithm_names() -> Result<(), String> {
         key_bits,
         "imported mac-key length",
     )?;
-    let generated = generate_hmac_sha256_key(false).await;
+    let generated = generate_hmac_key(Sha2Variant::Sha256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
     expect(
         generated.algorithm_name(),
         "HMAC".to_string(),
@@ -285,7 +366,7 @@ async fn algorithm_names() -> Result<(), String> {
     )?;
     expect(
         generated.algorithm_length(),
-        256,
+        512,
         "generated mac-key length",
     )?;
 
@@ -313,9 +394,13 @@ async fn algorithm_names() -> Result<(), String> {
 
 /// `verify` rejects a 31-byte prefix of the correct tag.
 async fn mac_verify_rejects_truncated() -> Result<(), String> {
-    let key = import_hmac_sha256_key(b"truncated-tag probe key".to_vec(), false)
-        .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+    let key = import_hmac_key(
+        Sha2Variant::Sha256,
+        b"truncated-tag probe key".to_vec(),
+        false,
+    )
+    .await
+    .map_err(|e| describe("import-key", &e))?;
     let payload = b"truncated-tag payload";
 
     let (tag, fed) = sign(&key, payload, Schedule::Whole).await;

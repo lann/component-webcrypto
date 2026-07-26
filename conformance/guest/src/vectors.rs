@@ -2,16 +2,16 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
-use crate::lann::webcrypto::hmac::import_hmac_sha256_key;
+use crate::lann::webcrypto::hmac_sha2::{import_key as import_hmac_key, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::{GcmCase, GcmExpectation, HmacCase};
 use crate::util::{describe, expect_bytes, open, seal, sign, verify};
 
 /// Run one HMAC-SHA-256 vector under its schedule.
 pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
-    let key = import_hmac_sha256_key(case.key.clone(), false)
+    let key = import_hmac_key(Sha2Variant::Sha256, case.key.clone(), false)
         .await
-        .map_err(|e| describe("import-hmac-sha256-key", &e))?;
+        .map_err(|e| describe("import-key", &e))?;
     if case.valid {
         let (tag, fed) = sign(&key, &case.msg, case.schedule).await;
         fed.map_err(|e| format!("sign data feeder: {e}"))?;
