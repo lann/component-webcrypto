@@ -165,14 +165,16 @@ matters, a gate asserts it (e.g. the demo harness's expected-summary check);
 if it doesn't, omit it. Machine-derived counts belong only in generated
 artifacts like `conformance/matrix.md`.
 
-## Maintaining TODO.md
+## Tracking open findings in GitHub issues
 
-[`TODO.md`](TODO.md) tracks open review findings. When a change fixes,
-obsoletes, or invalidates an item, amend TODO.md in the same change: delete
-the item entirely (no "done" markers) and prune any section left empty.
-Before starting work that touches an area TODO.md covers, read the relevant
-items — some encode contract decisions (e.g. stream-failure semantics) that
-the change should resolve, not work around.
+Open review findings and design decisions live in this repository's GitHub
+issue tracker (`gh issue list`), not in a TODO file. Before starting work
+that touches an area, search the open issues — some encode contract
+decisions (e.g. stream-failure semantics) that the change should resolve,
+not work around. When a change fixes, obsoletes, or invalidates an issue,
+close it as part of landing the change (e.g. `Fixes #N` in the PR); file new
+issues for new findings rather than adding TODO comments or files. Issue
+numbers are never reused, so closed numbers remain stable references.
 
 ## Direction (designed, not yet built)
 
