@@ -7,16 +7,30 @@ sections. See AGENTS.md ("Maintaining TODO.md").
 
 ## Correctness
 
-- **Wasmtime host: stream errors become truncated inputs.**
-  `ByteCollector::drop` hands back whatever partial buffer it holds, and
-  `drain_stream` maps a dropped channel to an empty buffer
-  (`done_rx.await.unwrap_or_default()`, wasmtime-impl/src/host.rs). If the
-  pipe fails mid-stream, the operation runs over the truncated (or empty)
-  input as if it were complete: `sign` returns a valid tag over a truncated
-  message; `seal` encrypts truncated plaintext. (`open`/`verify` fail closed,
-  which masks the bug.) Stream failure must surface as an error, never as a
-  shorter input. Add a conformance probe whose stream writer dies mid-stream —
-  no existing test covers that path, which is why this survived the suite.
+- **Wasmtime host: host-side pipe errors become short inputs.** Writer drop
+  is the ABI's sole end-of-stream signal, so an early drop legitimately ends
+  the message — that part is contract, not bug. The bug is narrower: in
+  `ByteCollector` (wasmtime-impl/src/host.rs), a Rust-level pipe error (e.g.
+  `source.read` failing) still delivers the partial buffer via `Drop`, and
+  `drain_stream` maps a dead channel to an empty buffer
+  (`done_rx.await.unwrap_or_default()`). Host-internal errors must surface as
+  errors, never as `Ok(shorter input)`. Not guest-triggerable through the
+  ABI, so cover it with a wasmtime-impl unit test, and add a conformance
+  probe pinning the contract side: `sign` over a stream whose writer drops
+  after N bytes equals `sign` over the N-byte message, on every target.
+
+## Documentation
+
+- **Warn about truncating remote producers.** A caller that forwards a
+  writable stream end to another component cannot detect that producer
+  failing midway: the callee correctly operates on the delivered prefix and
+  the ABI carries no verdict at end-of-stream (a bare `stream` is never
+  sufficient for fallible production). Add a WIT doc warning on the
+  stream-taking operations: writer drop is the authoritative end of message;
+  convey completeness in-band when the write path can fail independently of
+  the caller. Revisit if the component model gains the
+  under-discussion optional stream sentinel value (which would typically
+  carry a final `result`).
 
 ## WIT (pre-freeze: cheap now, breaking later)
 
