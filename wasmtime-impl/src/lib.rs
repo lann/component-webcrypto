@@ -7,8 +7,9 @@
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
-//! and calls [`add_to_linker`] to satisfy the `types`, `mac`, `aead`, `hmac-sha2`,
-//! and `aes-gcm` imports with HMAC-SHA-2 and AES-GCM implementations.
+//! and calls [`add_to_linker`] to satisfy the `types`, `bytes`, `mac`,
+//! `aead`, `digest`, `hmac-sha2`, `aes-gcm`, and `sha2` imports with
+//! HMAC-SHA-2, AES-GCM, and SHA-2 implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
@@ -82,7 +83,7 @@ pub struct MacKey {
     /// extractable) `%export`.
     pub(crate) raw: Vec<u8>,
     /// The SHA-2 variant this key is bound to.
-    pub(crate) variant: crate::host::HmacVariant,
+    pub(crate) variant: crate::host::Sha2,
     /// Whether `%export` may return the raw material.
     pub(crate) extractable: bool,
 }
@@ -101,8 +102,19 @@ pub struct AeadKey {
     pub(crate) extractable: bool,
 }
 
+/// Backing type for the `digest.digest` resource.
+///
+/// A digest holds no key material — just the SHA-2 variant it is bound to;
+/// `compute` is one-shot and stateless per call, so the resource is
+/// reusable and carries no per-operation state.
+pub struct Digest {
+    /// The SHA-2 variant this digest is bound to.
+    pub(crate) variant: crate::host::Sha2,
+}
+
 /// Add the `lann:webcrypto` interfaces implemented by this crate (`types`,
-/// `mac`, `aead`, `hmac-sha2`, and `aes-gcm`) to the provided [`Linker`].
+/// `bytes`, `mac`, `aead`, `digest`, `hmac-sha2`, `aes-gcm`, and `sha2`) to
+/// the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebcryptoView`]. The
 /// engine's [`Config`](wasmtime::Config) must have
@@ -141,9 +153,12 @@ where
     T: WasiWebcryptoView + 'static,
 {
     bindings::webcrypto::types::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::bytes::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::mac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }

@@ -1,11 +1,32 @@
-//! Execution of the normalized Wycheproof cases against the imported
+//! Execution of the normalized vector cases against the imported
 //! `lann:webcrypto` interfaces.
 
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
-use crate::lann::webcrypto::hmac_sha2::{import_key as import_hmac_key, Sha2Variant};
+use crate::lann::webcrypto::bytes::constant_time_equal;
+use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
+use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
-use crate::translate::{GcmCase, GcmExpectation, HmacCase};
-use crate::util::{describe, expect_bytes, open, seal, sign, verify};
+use crate::translate::{GcmCase, GcmExpectation, HmacCase, Sha2Alg, Sha2Case};
+use crate::util::{compute, describe, expect_bytes, open, seal, sign, verify};
+
+/// Run one SHA-2 digest vector under its schedule.
+pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
+    let variant = match case.alg {
+        Sha2Alg::Sha256 => Sha2Variant::Sha256,
+        Sha2Alg::Sha384 => Sha2Variant::Sha384,
+        Sha2Alg::Sha512 => Sha2Variant::Sha512,
+    };
+    let digest = make_digest(variant).map_err(|e| describe("make-digest", &e))?;
+    let (got, fed) = compute(&digest, &case.msg, case.schedule).await;
+    fed.map_err(|e| format!("compute data feeder: {e}"))?;
+    expect_bytes(&got, &case.md, "computed digest")?;
+    // The comparison every caller of a digest vector makes; pins
+    // `constant-time-equal`'s agreement with plain equality on real data.
+    if !constant_time_equal(&got, &case.md) {
+        return Err("constant-time-equal disagreed with byte equality".into());
+    }
+    Ok(())
+}
 
 /// Run one HMAC-SHA-256 vector under its schedule.
 pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {

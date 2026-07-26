@@ -4,12 +4,14 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
+use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::hmac_sha2::{
-    generate_key as generate_hmac_key, import_key as import_hmac_key, Sha2Variant,
+    generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
+use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
-use crate::util::{describe, expect_bytes, open, seal, sign, verify};
+use crate::util::{compute, describe, expect_bytes, open, seal, sign, verify};
 
 /// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
 pub const NAMES: &[&str] = &[
@@ -26,6 +28,8 @@ pub const NAMES: &[&str] = &[
     "generated-key-shape",
     "algorithm-names",
     "mac-verify-rejects-truncated",
+    "digest-reuse",
+    "constant-time-equal",
 ];
 
 /// Run the probe at `index` (into [`NAMES`]).
@@ -44,6 +48,8 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         10 => generated_key_shape().await,
         11 => algorithm_names().await,
         12 => mac_verify_rejects_truncated().await,
+        13 => digest_reuse().await,
+        14 => constant_time_equal_probe().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -131,6 +137,16 @@ async fn sha2_truncated_unsupported() -> Result<(), String> {
                 ))
             }
             Ok(_) => return Err(format!("{variant:?} key generated")),
+        }
+        match make_digest(variant) {
+            Err(Error::Unsupported(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("make-digest {variant:?}: expected unsupported, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{variant:?} digest minted")),
         }
     }
     Ok(())
@@ -416,4 +432,49 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
         Err(other) => Err(describe("expected authentication-failed, got", &other)),
         Ok(()) => Err("31-byte prefix of the correct tag verified".into()),
     }
+}
+
+/// A `digest` resource is reusable and algorithm-bound: repeated `compute`
+/// calls agree, and each served variant reports its registry name.
+async fn digest_reuse() -> Result<(), String> {
+    for (variant, name) in [
+        (Sha2Variant::Sha256, "SHA-256"),
+        (Sha2Variant::Sha384, "SHA-384"),
+        (Sha2Variant::Sha512, "SHA-512"),
+    ] {
+        let digest = make_digest(variant).map_err(|e| describe("make-digest", &e))?;
+        if digest.algorithm_name() != name {
+            return Err(format!(
+                "{name} digest reports algorithm-name {:?}",
+                digest.algorithm_name()
+            ));
+        }
+        let (first, fed) = compute(&digest, b"reusable", Schedule::Whole).await;
+        fed.map_err(|e| format!("first compute feeder: {e}"))?;
+        let (second, fed) = compute(&digest, b"reusable", Schedule::Bytes).await;
+        fed.map_err(|e| format!("second compute feeder: {e}"))?;
+        expect_bytes(&second, &first, &format!("{name} recomputed digest"))?;
+    }
+    Ok(())
+}
+
+/// `constant-time-equal` agrees with plain equality across equal, differing,
+/// different-length, and empty inputs.
+async fn constant_time_equal_probe() -> Result<(), String> {
+    let a = [0xa5u8; 32];
+    let mut b = a;
+    b[31] ^= 0x01;
+    let checks: [(&[u8], &[u8], bool, &str); 5] = [
+        (&a, &a, true, "equal inputs"),
+        (&a, &b, false, "last-byte difference"),
+        (&a, &a[..31], false, "prefix of itself"),
+        (&[], &[], true, "empty inputs"),
+        (&[], &a, false, "empty versus non-empty"),
+    ];
+    for (x, y, want, what) in checks {
+        if constant_time_equal(x, y) != want {
+            return Err(format!("{what}: got {}, want {want}", !want));
+        }
+    }
+    Ok(())
 }

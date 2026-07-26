@@ -1,9 +1,10 @@
 //! Raw `bindgen!` output for the `lann:webcrypto` package.
 //!
-//! The crate implements the `types` interface, the `mac` interface (the
-//! `mac-key` resource), the `aead` interface (the `aead-key` resource), and
-//! the `hmac-sha2` / `aes-gcm` key-minting interfaces. See [`crate`] for the
-//! public API built on top of these bindings.
+//! The crate implements the `types` and `bytes` interfaces, the `mac`,
+//! `aead`, and `digest` primitive-kind interfaces (the `mac-key`,
+//! `aead-key`, and `digest` resources), and the `hmac-sha2` / `aes-gcm` /
+//! `sha2` minting interfaces. See [`crate`] for the public API built on top
+//! of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]
 mod generated {
@@ -28,10 +29,14 @@ mod generated {
             "lann:webcrypto/mac@0.1.0.[method]mac-key.algorithm-length": trappable,
             "lann:webcrypto/aead@0.1.0.[method]aead-key.algorithm-name": trappable,
             "lann:webcrypto/aead@0.1.0.[method]aead-key.algorithm-length": trappable,
+            "lann:webcrypto/digest@0.1.0.[method]digest.algorithm-name": trappable,
+            "lann:webcrypto/sha2@0.1.0.make-digest": trappable,
+            "lann:webcrypto/bytes@0.1.0.constant-time-equal": trappable,
         },
         with: {
             "lann:webcrypto/mac.mac-key": crate::MacKey,
             "lann:webcrypto/aead.aead-key": crate::AeadKey,
+            "lann:webcrypto/digest.digest": crate::Digest,
         },
     });
 }

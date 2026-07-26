@@ -2,6 +2,7 @@
 //! corpus and the API-contract probes.
 
 use crate::lann::webcrypto::aead::AeadKey;
+use crate::lann::webcrypto::digest::Digest;
 use crate::lann::webcrypto::mac::MacKey;
 use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
@@ -99,6 +100,17 @@ pub async fn verify(
         key.verify(rx, tag.to_vec()),
         feed(tx, schedule.chunks(data))
     )
+}
+
+/// `compute`, feeding `data` per `schedule` concurrently with the call; same
+/// outcome split as [`sign`].
+pub async fn compute(
+    digest: &Digest,
+    data: &[u8],
+    schedule: Schedule,
+) -> (Vec<u8>, Result<(), String>) {
+    let (tx, rx) = crate::wit_stream::new();
+    futures::join!(digest.compute(rx), feed(tx, schedule.chunks(data)))
 }
 
 /// `seal`, feeding the plaintext per `schedule` concurrently with the call.
