@@ -341,6 +341,12 @@ impl AeadCipher {
         }
     }
 
+    /// The tag length every algorithm this implementation serves trails
+    /// its ciphertext with.
+    fn tag_len(&self) -> usize {
+        16
+    }
+
     /// The internal-nonce seal budget for this cipher's algorithm: the WIT
     /// contract's 2^32-invocation bound for 12-byte-nonce algorithms (SP
     /// 800-38D SS8.2.2's repeat-probability bound); `none` for 24-byte
@@ -402,6 +408,14 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_length(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
         Ok(self.table.get(&self_)?.cipher.length_bits())
+    }
+
+    fn nonce_size(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
+        Ok(self.table.get(&self_)?.cipher.nonce_len() as u32)
+    }
+
+    fn tag_size(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
+        Ok(self.table.get(&self_)?.cipher.tag_len() as u32)
     }
 }
 
@@ -806,6 +820,14 @@ impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_length(&mut self, self_: Resource<InternalNonceKey>) -> Result<u32> {
         Ok(self.table.get(&self_)?.cipher.length_bits())
+    }
+
+    fn seals_remaining(&mut self, self_: Resource<InternalNonceKey>) -> Result<Option<u64>> {
+        let key = self.table.get(&self_)?;
+        Ok(key
+            .cipher
+            .nonce_budget()
+            .map(|budget| budget.saturating_sub(key.sealed)))
     }
 }
 

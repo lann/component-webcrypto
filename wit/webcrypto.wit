@@ -94,6 +94,11 @@ interface mac {
     /// physical one — the *implementation* of this interface necessarily
     /// holds the key material. The guarantee is that components holding only
     /// the handle cannot obtain the material through this API.
+    ///
+    /// Getter conventions (package-wide): `algorithm-*` getters project the
+    /// W3C Web Cryptography API registry's algorithm properties, spelled
+    /// and denominated (bits) as the registry defines them; `*-size`
+    /// getters report operation-contract quantities in bytes.
     resource mac-key {
         /// Compute the authentication tag over an entire byte stream keyed
         /// by this key. Resolves once the stream is fully drained (its
@@ -205,6 +210,17 @@ interface aead {
         /// `AesKeyAlgorithm.length`).
         algorithm-length: func() -> u32;
 
+        /// The size in bytes of the nonce this key's `seal`/`open` require,
+        /// e.g. `12` for AES-GCM — so a component granted only the key
+        /// handle can construct nonces without matching on
+        /// `algorithm-name`.
+        nonce-size: func() -> u32;
+
+        /// The size in bytes of the authentication tag trailing the
+        /// ciphertext in `seal`'s output, e.g. `16` — for framing
+        /// arithmetic (sealed length = plaintext length + `tag-size`).
+        tag-size: func() -> u32;
+
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
@@ -269,6 +285,20 @@ interface aead-internal-nonce {
 
         /// The key length in bits, e.g. `256`.
         algorithm-length: func() -> u32;
+
+        /// The number of further `seal` invocations this key's nonce budget
+        /// permits, or `none` when the implementation enforces no budget.
+        /// A hint for key-rotation scheduling: monotonically non-increasing,
+        /// and `some(0)` means the next `seal` fails `error.key-exhausted` —
+        /// but implementations MAY decrement faster than one per seal (a
+        /// policy or accounting choice), so it is not an exact invocation
+        /// count.
+        ///
+        /// There are deliberately no wire-layout getters here (nonce or tag
+        /// size): the sealed message's layout is the minting interface's
+        /// contract, and a consumer parsing it already knows that
+        /// interface's documented constants.
+        seals-remaining: func() -> option<u64>;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true. The nonce budget

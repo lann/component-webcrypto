@@ -185,7 +185,9 @@ export class AeadKey {
 
   /**
    * The algorithm getters: direct projections of the `CryptoKey`'s
-   * `AesKeyAlgorithm` (`name` and `length`).
+   * `AesKeyAlgorithm` (`name` and `length`), plus the operation-contract
+   * sizes (every AEAD this host serves is AES-GCM: 12-byte nonces, 16-byte
+   * tags).
    */
   algorithmName() {
     return this.#key.algorithm.name;
@@ -193,6 +195,14 @@ export class AeadKey {
 
   algorithmLength() {
     return this.#key.algorithm.length;
+  }
+
+  nonceSize() {
+    return 12;
+  }
+
+  tagSize() {
+    return 16;
   }
 
   /**
@@ -490,6 +500,15 @@ export class InternalNonceKey {
 
   algorithmLength() {
     return this.#key.algorithm.length;
+  }
+
+  /**
+   * The remaining seal budget (the WIT 2^32 bound for 12-byte nonces minus
+   * seals so far), as a rotation-scheduling hint.
+   */
+  sealsRemaining() {
+    const remaining = InternalNonceKey.#NONCE_BUDGET - this.#sealed;
+    return remaining > 0n ? remaining : 0n;
   }
 
   /**
