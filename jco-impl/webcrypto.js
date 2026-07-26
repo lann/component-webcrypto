@@ -473,3 +473,347 @@ function concatChunks(chunks, total) {
   }
   return out;
 }
+
+/**
+ * The per-variant ECDSA parameters: WebCrypto's `namedCurve`, the
+ * mint-bound hash, and the uncompressed-SEC1 public key length.
+ */
+const ECDSA_VARIANTS = {
+  "p256-sha256": { namedCurve: "P-256", hash: "SHA-256", publicLength: 65 },
+  "p384-sha384": { namedCurve: "P-384", hash: "SHA-384", publicLength: 97 },
+};
+
+/**
+ * The served `ecdsa-variant` entry for `variant`, throwing
+ * `{ tag: 'unsupported', val }` for anything unknown.
+ */
+function ecdsaVariant(variant) {
+  const entry = ECDSA_VARIANTS[variant];
+  if (entry === undefined) {
+    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+  }
+  return entry;
+}
+
+/** The WebCrypto sign/verify algorithm parameter for a key's mint binding. */
+function signParams(algorithmName, hash) {
+  return algorithmName === "ECDSA" ? { name: "ECDSA", hash } : algorithmName;
+}
+
+/**
+ * The `verifying-key` resource: a public `CryptoKey` plus its mint-bound
+ * hash (WebCrypto passes ECDSA's hash per-operation; this package binds it
+ * at mint). Instances are minted by the `ed25519-verify` / `ecdsa-verify`
+ * interface functions below, or derived from a `SigningKey`.
+ */
+export class VerifyingKey {
+  #key;
+  #hash;
+
+  /**
+   * @param {CryptoKey} key
+   * @param {string | undefined} hash
+   */
+  constructor(key, hash) {
+    this.#key = key;
+    this.#hash = hash;
+  }
+
+  /**
+   * Verify `sig` over an entire byte stream; resolves only after the stream
+   * is fully drained. Throws `{ tag: 'authentication-failed' }` on failure
+   * (including malformed signatures — WebCrypto reports both as `false`).
+   * @param {AsyncIterable<unknown> | ReadableStream} data
+   * @param {Uint8Array} sig
+   */
+  async verify(data, sig) {
+    const message = await collectByteStream(data);
+    const params = signParams(this.#key.algorithm.name, this.#hash);
+    if (!(await subtle.verify(params, this.#key, sig, message))) {
+      throw { tag: "authentication-failed" };
+    }
+  }
+
+  /** Direct projections of the `CryptoKey`'s algorithm + the mint binding. */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmCurve() {
+    return this.#key.algorithm.namedCurve;
+  }
+
+  algorithmHash() {
+    return this.#hash;
+  }
+
+  /**
+   * The public key material (`raw`: 32 bytes for Ed25519, an uncompressed
+   * SEC1 point for ECDSA). Public material is always exportable.
+   */
+  async export() {
+    return new Uint8Array(await subtle.exportKey("raw", this.#key));
+  }
+}
+
+/**
+ * The `signing-key` resource: a private `CryptoKey` (imported
+ * platform-extractable so the public half can be derived; the WIT
+ * `extractable` gate is enforced by this class — extractability is an API
+ * property, per the WIT), its derived public half, the mint-bound hash, and
+ * the caller's `extractable` flag.
+ */
+export class SigningKey {
+  #privateKey;
+  #publicKey;
+  #hash;
+  #extractable;
+
+  /**
+   * @param {CryptoKey} privateKey
+   * @param {CryptoKey} publicKey
+   * @param {string | undefined} hash
+   * @param {boolean} extractable
+   */
+  constructor(privateKey, publicKey, hash, extractable) {
+    this.#privateKey = privateKey;
+    this.#publicKey = publicKey;
+    this.#hash = hash;
+    this.#extractable = extractable;
+  }
+
+  /**
+   * Sign an entire byte stream; resolves once the stream is fully drained.
+   * @param {AsyncIterable<unknown> | ReadableStream} data
+   */
+  async sign(data) {
+    const message = await collectByteStream(data);
+    const params = signParams(this.#privateKey.algorithm.name, this.#hash);
+    return new Uint8Array(await subtle.sign(params, this.#privateKey, message));
+  }
+
+  /** The corresponding public key. */
+  verifyingKey() {
+    return new VerifyingKey(this.#publicKey, this.#hash);
+  }
+
+  algorithmName() {
+    return this.#privateKey.algorithm.name;
+  }
+
+  algorithmCurve() {
+    return this.#privateKey.algorithm.namedCurve;
+  }
+
+  algorithmHash() {
+    return this.#hash;
+  }
+
+  extractable() {
+    return this.#extractable;
+  }
+
+  /**
+   * The private key material (the 32-byte RFC 8032 seed for Ed25519, the
+   * raw big-endian scalar for ECDSA), recovered from the JWK `d` field.
+   * Throws `{ tag: 'not-extractable' }` unless minted with `extractable`
+   * true.
+   */
+  async export() {
+    if (!this.#extractable) throw { tag: "not-extractable" };
+    const jwk = await subtle.exportKey("jwk", this.#privateKey);
+    return base64UrlDecode(jwk.d);
+  }
+}
+
+/** Decode a base64url string (JWK field encoding) to bytes. */
+function base64UrlDecode(text) {
+  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Derive the public `CryptoKey` for `privateKey` by round-tripping its JWK
+ * without the private field.
+ * @param {CryptoKey} privateKey
+ * @param {object} importParams
+ */
+async function derivePublicKey(privateKey, importParams) {
+  const jwk = await subtle.exportKey("jwk", privateKey);
+  delete jwk.d;
+  jwk.key_ops = ["verify"];
+  return subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
+}
+
+/** Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`. */
+function invalidKey(err, what) {
+  throw { tag: "invalid-key", val: `invalid ${what}: ${err.message ?? err}` };
+}
+
+/** Import a 32-byte raw Ed25519 public key. */
+async function importEd25519VerifyingKey(raw) {
+  if (raw.length !== 32) {
+    throw { tag: "invalid-key", val: `Ed25519 public keys are 32 bytes, got ${raw.length}` };
+  }
+  let key;
+  try {
+    key = await subtle.importKey("raw", raw, "Ed25519", true, ["verify"]);
+  } catch (err) {
+    invalidKey(err, "Ed25519 public key");
+  }
+  return new VerifyingKey(key, undefined);
+}
+
+/** The `lann:webcrypto/ed25519-verify` interface (`--map '…#ed25519Verify'`). */
+export const ed25519Verify = { importVerifyingKey: importEd25519VerifyingKey };
+
+/**
+ * The fixed PKCS#8 prefix wrapping a 32-byte Ed25519 seed (RFC 5958 +
+ * RFC 8410): WebCrypto imports private keys as `pkcs8`, not `raw`.
+ */
+const ED25519_PKCS8_PREFIX = new Uint8Array([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
+/** Import a 32-byte raw Ed25519 private seed. */
+async function importEd25519SigningKey(raw, extractable) {
+  if (raw.length !== 32) {
+    throw { tag: "invalid-key", val: `Ed25519 private keys are 32-byte seeds, got ${raw.length}` };
+  }
+  const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + raw.length);
+  pkcs8.set(ED25519_PKCS8_PREFIX);
+  pkcs8.set(raw, ED25519_PKCS8_PREFIX.length);
+  let privateKey;
+  try {
+    // Imported platform-extractable so the public half and the WIT-gated
+    // `export` can be derived; the WIT gate is `extractable` below.
+    privateKey = await subtle.importKey("pkcs8", pkcs8, "Ed25519", true, ["sign"]);
+  } catch (err) {
+    invalidKey(err, "Ed25519 private key");
+  }
+  const publicKey = await derivePublicKey(privateKey, "Ed25519");
+  return new SigningKey(privateKey, publicKey, undefined, extractable);
+}
+
+/** Generate a fresh Ed25519 signing key. */
+async function generateEd25519Key(extractable) {
+  const pair = await subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  return new SigningKey(pair.privateKey, pair.publicKey, undefined, extractable);
+}
+
+/** The `lann:webcrypto/ed25519-sign` interface (`--map '…#ed25519Sign'`). */
+export const ed25519Sign = {
+  importSigningKey: importEd25519SigningKey,
+  generateKey: generateEd25519Key,
+};
+
+/** Import an uncompressed-SEC1 ECDSA public key of the declared variant. */
+async function importEcdsaVerifyingKey(variant, raw) {
+  const entry = ecdsaVariant(variant);
+  if (raw.length !== entry.publicLength || raw[0] !== 0x04) {
+    throw {
+      tag: "invalid-key",
+      val: `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
+    };
+  }
+  let key;
+  try {
+    key = await subtle.importKey(
+      "raw",
+      raw,
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      true,
+      ["verify"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} public key`);
+  }
+  return new VerifyingKey(key, entry.hash);
+}
+
+/** The `lann:webcrypto/ecdsa-verify` interface (`--map '…#ecdsaVerify'`). */
+export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
+
+/** Import a raw big-endian ECDSA scalar of the declared variant, via JWK. */
+async function importEcdsaSigningKey(variant, raw, extractable) {
+  const entry = ecdsaVariant(variant);
+  const scalarLength = entry.namedCurve === "P-256" ? 32 : 48;
+  if (raw.length !== scalarLength) {
+    throw {
+      tag: "invalid-key",
+      val: `${variant} private keys are raw ${scalarLength}-byte scalars, got ${raw.length}`,
+    };
+  }
+  // WebCrypto imports EC private keys as pkcs8 or jwk only, and a JWK
+  // private key requires the public coordinates — which plain JS cannot
+  // compute. Import via a minimal PKCS#8/RFC 5915 wrapping instead (the
+  // platform derives the public point).
+  const pkcs8 = ecdsaScalarToPkcs8(entry.namedCurve, raw);
+  let privateKey;
+  try {
+    privateKey = await subtle.importKey(
+      "pkcs8",
+      pkcs8,
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      true,
+      ["sign"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} private key`);
+  }
+  const publicKey = await derivePublicKey(privateKey, {
+    name: "ECDSA",
+    namedCurve: entry.namedCurve,
+  });
+  return new SigningKey(privateKey, publicKey, entry.hash, extractable);
+}
+
+/**
+ * Wrap a raw EC scalar in a minimal PKCS#8 `PrivateKeyInfo` (RFC 5208)
+ * containing an RFC 5915 `ECPrivateKey` without the optional public key.
+ * @param {string} namedCurve
+ * @param {Uint8Array} scalar
+ */
+function ecdsaScalarToPkcs8(namedCurve, scalar) {
+  const curveOid =
+    namedCurve === "P-256"
+      ? [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]
+      : [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22];
+  const ecPrivateKey = [
+    0x30, 3 + 2 + scalar.length, // SEQUENCE { INTEGER 1, OCTET STRING d }
+    0x02, 0x01, 0x01,
+    0x04, scalar.length, ...scalar,
+  ];
+  const algorithm = [
+    0x30, 9 + curveOid.length, // SEQUENCE { OID ecPublicKey, OID curve }
+    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+    ...curveOid,
+  ];
+  const body = [
+    0x02, 0x01, 0x00, // INTEGER 0 (version)
+    ...algorithm,
+    0x04, ecPrivateKey.length, ...ecPrivateKey, // OCTET STRING { ECPrivateKey }
+  ];
+  return new Uint8Array([0x30, body.length, ...body]);
+}
+
+/** Generate a fresh ECDSA signing key of the declared variant. */
+async function generateEcdsaKey(variant, extractable) {
+  const entry = ecdsaVariant(variant);
+  const pair = await subtle.generateKey(
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["sign", "verify"],
+  );
+  return new SigningKey(pair.privateKey, pair.publicKey, entry.hash, extractable);
+}
+
+/** The `lann:webcrypto/ecdsa-sign` interface (`--map '…#ecdsaSign'`). */
+export const ecdsaSign = {
+  importSigningKey: importEcdsaSigningKey,
+  generateKey: generateEcdsaKey,
+};

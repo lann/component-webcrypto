@@ -1,10 +1,12 @@
 //! Raw `bindgen!` output for the `lann:webcrypto` package.
 //!
 //! The crate implements the `types` and `bytes` interfaces, the `mac`,
-//! `aead`, and `digest` primitive-kind interfaces (the `mac-key`,
-//! `aead-key`, and `digest` resources), and the `hmac-sha2` / `aes-gcm` /
-//! `chacha20-poly1305` / `sha2` minting interfaces. See [`crate`] for the
-//! public API built on top of these bindings.
+//! `aead`, `digest`, and `signature` primitive-kind interfaces (the
+//! `mac-key`, `aead-key`, `digest`, `verifying-key`, and `signing-key`
+//! resources), and the `hmac-sha2` / `aes-gcm` / `chacha20-poly1305` /
+//! `sha2` / `ed25519-verify` / `ed25519-sign` / `ecdsa-verify` /
+//! `ecdsa-sign` minting interfaces. See [`crate`] for the public API built
+//! on top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]
 mod generated {
@@ -32,11 +34,21 @@ mod generated {
             "lann:webcrypto/digest@0.1.0.[method]digest.algorithm-name": trappable,
             "lann:webcrypto/sha2@0.1.0.make-digest": trappable,
             "lann:webcrypto/bytes@0.1.0.constant-time-equal": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]verifying-key.algorithm-name": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]verifying-key.algorithm-curve": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]verifying-key.algorithm-hash": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]signing-key.algorithm-name": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]signing-key.algorithm-curve": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]signing-key.algorithm-hash": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]signing-key.extractable": trappable,
+            "lann:webcrypto/signature@0.1.0.[method]signing-key.verifying-key": trappable,
         },
         with: {
             "lann:webcrypto/mac.mac-key": crate::MacKey,
             "lann:webcrypto/aead.aead-key": crate::AeadKey,
             "lann:webcrypto/digest.digest": crate::Digest,
+            "lann:webcrypto/signature.verifying-key": crate::VerifyingKey,
+            "lann:webcrypto/signature.signing-key": crate::SigningKey,
         },
     });
 }

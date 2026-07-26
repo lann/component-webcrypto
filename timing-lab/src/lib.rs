@@ -261,13 +261,13 @@ async fn read_all(mut rx: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
 
 /// `mac-key.sign` over one chunk (untimed; produces the valid tag the
 /// corrupted classes are derived from).
-async fn sign(key: &MacKey, message: &[u8]) -> Vec<u8> {
+async fn sign(key: &MacKey, message: &[u8]) -> Result<Vec<u8>, String> {
     let (mut tx, rx) = wit_stream::new();
     let (tag, _) = futures::join!(key.sign(rx), async move {
         let _ = tx.write_all(message.to_vec()).await;
         drop(tx);
     });
-    tag
+    tag.map_err(|e| format!("mac-key.sign failed: {e:?}"))
 }
 
 /// `aead-key.seal` to a collected byte vector (untimed; produces the valid
@@ -433,7 +433,7 @@ async fn run_lab() -> Result<(), String> {
             .map_err(|e| format!("hmac generate-key: {e:?}"))?;
         let mut message = vec![0u8; SEAL_LEN];
         rng.fill(&mut message);
-        let tag = sign(&key, &message).await;
+        let tag = sign(&key, &message).await?;
         reports.push(
             measure(
                 "hmac-sha256/verify tag compare",

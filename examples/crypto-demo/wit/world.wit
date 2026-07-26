@@ -11,7 +11,8 @@ interface demo {
     run: async func() -> result<string, string>;
 }
 
-/// A guest that exercises the `mac`, `aead`, and `digest` primitive kinds
+/// A guest that exercises the `mac`, `aead`, `digest`, and `signature`
+/// primitive kinds
 /// end to end: HMAC-SHA-256 known-answer vectors, SHA-256 digests plus
 /// `bytes.constant-time-equal`, and AES-256-GCM seal/open round trips,
 /// including the key-capability surface (import/generate/export and
@@ -24,6 +25,10 @@ world crypto-demo {
     import lann:webcrypto/sha2@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/signature@0.1.0;
+    import lann:webcrypto/ed25519-verify@0.1.0;
+    import lann:webcrypto/ed25519-sign@0.1.0;
+    import lann:webcrypto/ecdsa-verify@0.1.0;
 
     export demo;
 }

@@ -16,6 +16,8 @@
 //! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
 //! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
 //! | SHA-2 ShortMsg case | `compute` = `MD` (every case; there are no invalid digest vectors). |
+//! | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
+//! | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` is `authentication-failed` (malformed signatures included — rejection carries no detail). |
 //!
 //! Every executed vector is emitted once per chunking schedule; a vector whose
 //! stream inputs are all empty runs only `whole` (the other schedules are
@@ -181,6 +183,21 @@ const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
     (
         Sha2Alg::Sha512,
         include_str!("../../vectors/SHA512ShortMsg.rsp"),
+    ),
+];
+
+const SIG_VECTORS: [(SigAlg, &str); 3] = [
+    (
+        SigAlg::Ed25519,
+        include_str!("../../vectors/ed25519_test.json"),
+    ),
+    (
+        SigAlg::EcdsaP256Sha256,
+        include_str!("../../vectors/ecdsa_secp256r1_sha256_p1363_test.json"),
+    ),
+    (
+        SigAlg::EcdsaP384Sha384,
+        include_str!("../../vectors/ecdsa_secp384r1_sha384_p1363_test.json"),
     ),
 ];
 
@@ -441,6 +458,121 @@ pub fn sha2_cases() -> Vec<Sha2Case> {
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+    cases
+}
+
+/// A served signature algorithm, as named in vector ids.
+#[derive(Clone, Copy)]
+pub enum SigAlg {
+    Ed25519,
+    EcdsaP256Sha256,
+    EcdsaP384Sha384,
+}
+
+impl SigAlg {
+    /// The algorithm's name as used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            SigAlg::Ed25519 => "ed25519",
+            SigAlg::EcdsaP256Sha256 => "ecdsa-p256-sha256",
+            SigAlg::EcdsaP384Sha384 => "ecdsa-p384-sha384",
+        }
+    }
+}
+
+/// One executed signature-verification vector under one schedule: importing
+/// the group's public key and verifying `sig` over `msg` must succeed
+/// (`valid`) or fail `authentication-failed` (`invalid`).
+pub struct SigCase {
+    pub alg: SigAlg,
+    pub tc_id: u64,
+    pub schedule: Schedule,
+    /// The public key in the minting interface's import format (raw 32
+    /// bytes for Ed25519, an uncompressed SEC1 point for ECDSA).
+    pub public: Vec<u8>,
+    pub msg: Vec<u8>,
+    pub sig: Vec<u8>,
+    pub valid: bool,
+}
+
+#[derive(Deserialize)]
+struct EddsaGroup {
+    #[serde(rename = "publicKey")]
+    public_key: EddsaPublicKey,
+    tests: Vec<SigTest>,
+}
+
+#[derive(Deserialize)]
+struct EddsaPublicKey {
+    pk: String,
+}
+
+#[derive(Deserialize)]
+struct EcdsaGroup {
+    #[serde(rename = "publicKey")]
+    public_key: EcdsaPublicKey,
+    tests: Vec<SigTest>,
+}
+
+#[derive(Deserialize)]
+struct EcdsaPublicKey {
+    uncompressed: String,
+}
+
+#[derive(Deserialize)]
+struct SigTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    msg: String,
+    sig: String,
+    result: String,
+}
+
+/// The normalized signature-verification corpus (Wycheproof Ed25519 plus
+/// the ECDSA P1363-signature files, whose fixed-width `r ‖ s` encoding is
+/// exactly this package's wire format), expanded over its schedule set.
+pub fn sig_cases() -> Vec<SigCase> {
+    fn push_group(cases: &mut Vec<SigCase>, alg: SigAlg, public: &[u8], tests: &[SigTest]) {
+        for test in tests {
+            let field = format!("{} tc{}", alg.name(), test.tc_id);
+            let msg = unhex(&field, &test.msg);
+            let sig = unhex(&field, &test.sig);
+            let valid = is_valid(&field, &test.result);
+            for schedule in schedules(msg.len()) {
+                cases.push(SigCase {
+                    alg,
+                    tc_id: test.tc_id,
+                    schedule,
+                    public: public.to_vec(),
+                    msg: msg.clone(),
+                    sig: sig.clone(),
+                    valid,
+                });
+            }
+        }
+    }
+
+    let mut cases = Vec::new();
+    for (alg, text) in SIG_VECTORS {
+        match alg {
+            SigAlg::Ed25519 => {
+                let file: VectorFile<EddsaGroup> = serde_json::from_str(text)
+                    .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+                for group in &file.test_groups {
+                    let public = unhex("ed25519 pk", &group.public_key.pk);
+                    push_group(&mut cases, alg, &public, &group.tests);
+                }
+            }
+            SigAlg::EcdsaP256Sha256 | SigAlg::EcdsaP384Sha384 => {
+                let file: VectorFile<EcdsaGroup> = serde_json::from_str(text)
+                    .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+                for group in &file.test_groups {
+                    let public = unhex("ecdsa uncompressed", &group.public_key.uncompressed);
+                    push_group(&mut cases, alg, &public, &group.tests);
+                }
             }
         }
     }

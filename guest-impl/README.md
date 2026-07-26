@@ -63,10 +63,11 @@ host-side provider for them.
 
 The classes describe **keyed operations**. Operations without secrets —
 hashing public data, and notably **signature verification** (e.g. validating
-JWTs) — are exempt regardless of the signing algorithm's class: a future
+JWTs) — are exempt regardless of the signing algorithm's class: the
 `signature` primitive kind's `verify` over public keys is fine in-guest even
-where the corresponding `sign` is class D. The key-resource layering is what
-marks where secrets flow.
+where the corresponding `sign` is class D — which is why this provider
+exports `ecdsa-verify` but not `ecdsa-sign`. The key-resource layering is
+what marks where secrets flow.
 
 ### What this provider exports today
 
@@ -76,6 +77,8 @@ marks where secrets flow.
 | AES-GCM (128/256) | C + B | `aes-gcm` with the soft **fixsliced** AES backend (bitsliced, table-free) + masked-multiply GHASH | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | ChaCha20-Poly1305 / XChaCha20-Poly1305 | A + B | `chacha20poly1305` (portable software backend: ChaCha20 is pure ARX by construction; Poly1305 is limb-based multiply-accumulate) | Constant-latency integer multiply (Poly1305 only). |
 | SHA-2 digests (256/384/512) | exempt (secret-free) | `sha2` | The `digest` primitive is unkeyed — hashing public data carries no secret to leak. `bytes.constant-time-equal` (via `subtle`) is exported for callers comparing digests against untrusted values. |
+| Ed25519 (sign + verify) | B | `ed25519-dalek` (complete addition laws, no per-signature secret nonce, constant-time scalar arithmetic) | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
+| ECDSA P-256/P-384 (**verify only**) | exempt (secret-free) | `p256`/`p384` verification — public keys and public signatures | Signing is class D (per-signature secret nonce; small leaks are key-recovering) and its interface (`ecdsa-sign`) is **not exported**; compositions requiring it fail at `wac plug` time. |
 
 ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
 constant time by construction rather than by countermeasure, it is the

@@ -61,8 +61,17 @@ async fn crypto_demo_all_checks_pass() {
     let summary = wasmtime_webcrypto_demo::run_demo(&component)
         .await
         .expect("run_demo failed");
+    // The summary's declared count must agree with the checks it lists —
+    // derived, not maintained (the guest is the single source of truth).
+    let (count, names) = summary
+        .split_once(" checks passed: ")
+        .unwrap_or_else(|| panic!("unexpected summary shape: {summary}"));
+    let declared: usize = count
+        .parse()
+        .unwrap_or_else(|_| panic!("unexpected summary shape: {summary}"));
+    let listed = names.split(", ").count();
     assert!(
-        summary.contains("16 checks passed"),
-        "unexpected summary: {summary}"
+        declared > 0 && declared == listed,
+        "summary declares {declared} checks but lists {listed}: {summary}"
     );
 }

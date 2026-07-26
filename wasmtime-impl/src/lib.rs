@@ -8,7 +8,7 @@
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
 //! and calls [`add_to_linker`] to satisfy the `types`, `bytes`, `mac`,
-//! `aead`, `digest`, `hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, and `sha2`
+//! `aead`, `digest`, `signature`, and the minting interfaces
 //! imports with HMAC-SHA-2, AES-GCM, ChaCha20-Poly1305, and SHA-2
 //! implementations.
 //!
@@ -33,6 +33,14 @@ pub(crate) const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
 
 /// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
 pub(crate) const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
+
+/// The `algorithm-name` reported by Ed25519 keys (WebCrypto's
+/// `KeyAlgorithm.name`, per the Secure Curves registry entry).
+pub(crate) const ED25519_NAME: &str = "Ed25519";
+
+/// The `algorithm-name` reported by ECDSA keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub(crate) const ECDSA_NAME: &str = "ECDSA";
 
 /// Configuration and per-store state for the WebCrypto host.
 ///
@@ -120,9 +128,31 @@ pub struct Digest {
     pub(crate) variant: crate::host::Sha2,
 }
 
-/// Add the `lann:webcrypto` interfaces implemented by this crate (`types`,
-/// `bytes`, `mac`, `aead`, `digest`, `hmac-sha2`, `aes-gcm`,
-/// `chacha20-poly1305`, and `sha2`) to the provided [`Linker`].
+/// Backing type for the `signature.verifying-key` resource.
+///
+/// Public material only — verification is secret-free, and there is no
+/// extractability gate (`%export` always succeeds).
+pub struct VerifyingKey {
+    /// The public key, bound to its algorithm (and, for ECDSA, its
+    /// curve/digest variant) at minting.
+    pub(crate) public: crate::host::SigPublic,
+}
+
+/// Backing type for the `signature.signing-key` resource.
+///
+/// `sign` is one-shot and stateless per call, so the key carries no
+/// per-operation state. `extractable` gates `%export` only.
+pub struct SigningKey {
+    /// The private key, bound to its algorithm (and, for ECDSA, its
+    /// curve/digest variant) at minting.
+    pub(crate) private: crate::host::SigPrivate,
+    /// Whether `%export` may return the private material.
+    pub(crate) extractable: bool,
+}
+
+/// Add the `lann:webcrypto` interfaces implemented by this crate — `types`,
+/// `bytes`, the primitive kinds (`mac`, `aead`, `digest`, `signature`), and
+/// the algorithm minting interfaces — to the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebcryptoView`]. The
 /// engine's [`Config`](wasmtime::Config) must have
@@ -172,5 +202,10 @@ where
         T::webcrypto,
     )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::signature::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::ed25519_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::ed25519_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::ecdsa_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::ecdsa_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }

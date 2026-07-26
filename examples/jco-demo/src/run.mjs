@@ -4,7 +4,6 @@
 // Run with:  npm run build:component && npm run transpile && npm test
 import { demo } from "../generated/crypto-demo.js";
 
-const EXPECTED = "16 checks passed";
 
 async function main() {
   // jco represents `result<string, string>` by returning the ok value and
@@ -24,8 +23,16 @@ async function main() {
 
   console.log("crypto-demo (Node / Web Crypto host) result:");
   console.log(`  ${summary}`);
-  if (!summary.includes(EXPECTED)) {
-    throw new Error(`expected summary to contain "${EXPECTED}", got: ${summary}`);
+  // The summary's declared count must agree with the checks it lists —
+  // derived, not maintained (the guest is the single source of truth).
+  const match = /^(\d+) checks passed: (.+)$/.exec(summary);
+  if (!match) {
+    throw new Error(`unexpected summary shape: ${summary}`);
+  }
+  const declared = Number(match[1]);
+  const listed = match[2].split(", ").length;
+  if (declared === 0 || declared !== listed) {
+    throw new Error(`summary declares ${declared} checks but lists ${listed}: ${summary}`);
   }
   console.log("\nOK: every check passed against the Web Crypto host.");
 }

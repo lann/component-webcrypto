@@ -37,7 +37,11 @@ interface types {
         /// size the platform's crypto API declines). The string is
         /// human-readable.
         unsupported(string),
-        /// An implementation-specific failure. The string is human-readable.
+        /// An implementation-specific operational failure — for example, an
+        /// implementation backed by an external keystore (an HSM, a platform
+        /// key service) that cannot complete the operation right now. The
+        /// string is human-readable. API misuse remains unrepresentable by
+        /// construction and never appears here.
         other(string),
     }
 }
@@ -76,7 +80,11 @@ interface mac {
         /// Compute the authentication tag over an entire byte stream keyed
         /// by this key. Resolves once the stream is fully drained (its
         /// writer dropped).
-        sign: async func(data: stream<u8>) -> list<u8>;
+        ///
+        /// Fails only for operational reasons (`error.other`, e.g. an
+        /// external keystore backing this key that cannot complete the
+        /// operation) — never for misuse, which is unrepresentable.
+        sign: async func(data: stream<u8>) -> result<list<u8>, error>;
 
         /// Verify `tag` against the tag computed over an entire byte stream
         /// keyed by this key, in constant time. Like `sign`, resolves only
@@ -364,4 +372,175 @@ interface chacha20-poly1305 {
     /// with `error.unsupported` if this implementation does not serve the
     /// variant.
     generate-key: async func(%variant: chacha-variant, extractable: bool) -> result<aead-key, error>;
+}
+
+/// The `signature` primitive kind: asymmetric signing and verification.
+///
+/// This interface is algorithm-agnostic. Keys are minted by per-algorithm
+/// interfaces and returned bound to their algorithm at creation; every
+/// operation hangs off a key resource, so a key can never be used with the
+/// wrong algorithm.
+///
+/// The public and private halves are distinct resource types, split by
+/// secrecy: a component holding only a `verifying-key` provably cannot
+/// sign. Minting is likewise split into per-algorithm `-verify` and `-sign`
+/// interfaces, so a provider can serve verification for an algorithm whose
+/// signing it declines to host — verification is secret-free, while signing
+/// may be excluded by the in-guest provider's timing-channel policy (see
+/// guest-impl/README.md, class D) at `wac plug` time.
+interface signature {
+    use types.{error};
+
+    /// A public key: verification only, secret-free.
+    resource verifying-key {
+        /// Verify `sig` over an entire byte stream. Like `mac-key.verify`,
+        /// resolves only after the stream is fully drained — even when
+        /// verification fails — and fails closed with
+        /// `error.authentication-failed` (deliberately not a `bool`: an
+        /// ignored boolean fails open, a dropped `result` does not).
+        verify: async func(data: stream<u8>, sig: list<u8>) -> result<_, error>;
+
+        /// The registry name of the algorithm family this key is bound to,
+        /// e.g. `"Ed25519"` or `"ECDSA"` (WebCrypto's `KeyAlgorithm.name`).
+        algorithm-name: func() -> string;
+
+        /// The registry name of the curve for algorithms parameterized by
+        /// one, e.g. `"P-256"` (WebCrypto's `EcKeyAlgorithm.namedCurve`).
+        /// `none` for Ed25519, whose curve is implied by the name.
+        algorithm-curve: func() -> option<string>;
+
+        /// The digest bound at mint, e.g. `"SHA-256"`. `none` for Ed25519:
+        /// RFC 8032 fixes SHA-512 internally, so it is not a parameter.
+        algorithm-hash: func() -> option<string>;
+
+        /// The public key material, in the minting interface's documented
+        /// public format. Public material is always exportable — there is
+        /// no extractability gate on this resource.
+        %export: async func() -> list<u8>;
+    }
+
+    /// A private key. `sign` is one-shot on the immutable key, mirroring
+    /// `mac-key.sign`; there is no incremental computation resource.
+    ///
+    /// Note on extractability: `extractable` is an API property, not a
+    /// physical one — see `mac-key`.
+    resource signing-key {
+        /// Sign an entire byte stream. Resolves once the stream is fully
+        /// drained (its writer dropped). The signature's wire format is
+        /// documented by the minting interface.
+        ///
+        /// Fails only for operational reasons (`error.other`, e.g. an
+        /// external keystore backing this key that cannot complete the
+        /// operation) — never for misuse, which is unrepresentable.
+        sign: async func(data: stream<u8>) -> result<list<u8>, error>;
+
+        /// Derive the corresponding public key.
+        verifying-key: func() -> verifying-key;
+
+        /// See `verifying-key.algorithm-name`.
+        algorithm-name: func() -> string;
+
+        /// See `verifying-key.algorithm-curve`.
+        algorithm-curve: func() -> option<string>;
+
+        /// See `verifying-key.algorithm-hash`.
+        algorithm-hash: func() -> option<string>;
+
+        /// Whether the private key material may be exported.
+        extractable: func() -> bool;
+
+        /// The private key material, in the minting interface's documented
+        /// private format. Fails with `error.not-extractable` unless the
+        /// key was created with `extractable` true.
+        %export: async func() -> result<list<u8>, error>;
+    }
+}
+
+/// Ed25519 verification-key minting (RFC 8032).
+///
+/// Ed25519 has no parameters: 32-byte public keys, 64-byte signatures.
+/// Keys report `algorithm-name` `"Ed25519"` and `none` for curve and hash.
+interface ed25519-verify {
+    use types.{error};
+    use signature.{verifying-key};
+
+    /// Import a 32-byte raw public key (RFC 8032 encoding). Anything else
+    /// fails with `error.invalid-key`, including encodings the algorithm
+    /// rejects (non-canonical points).
+    import-verifying-key: async func(raw: list<u8>) -> result<verifying-key, error>;
+}
+
+/// Ed25519 signing-key minting (RFC 8032).
+///
+/// Split from `ed25519-verify` so a provider can serve verification alone;
+/// the in-guest provider exports both — Ed25519 signing is constant-time by
+/// construction (no per-signature secret nonce, complete addition laws).
+interface ed25519-sign {
+    use types.{error};
+    use signature.{signing-key};
+
+    /// Import a 32-byte raw private key (the RFC 8032 seed). Anything else
+    /// fails with `error.invalid-key`. `signing-key.export` returns this
+    /// same 32-byte seed form.
+    import-signing-key: async func(raw: list<u8>, extractable: bool) -> result<signing-key, error>;
+
+    /// Generate a fresh random signing key.
+    generate-key: async func(extractable: bool) -> result<signing-key, error>;
+}
+
+/// ECDSA verification-key minting (FIPS 186-5).
+///
+/// The variant binds curve and digest together at mint — unlike WebCrypto,
+/// where the hash is a per-operation parameter — so a granted key cannot be
+/// used with a weaker digest than its minter chose. Keys report
+/// `algorithm-name` `"ECDSA"` plus the variant's curve and hash.
+///
+/// Signatures are fixed-width `r ‖ s` (IEEE P1363, WebCrypto's format):
+/// 64 bytes for P-256, 96 bytes for P-384. ASN.1 DER signatures are not
+/// accepted.
+interface ecdsa-verify {
+    use types.{error};
+    use signature.{verifying-key};
+
+    /// The served curve/digest pairings — the matched pairs of FIPS 186-5
+    /// deployment practice. Mixed pairings (e.g. P-256 with SHA-384) are
+    /// deliberately unrepresentable.
+    enum ecdsa-variant {
+        /// NIST P-256 (secp256r1) with SHA-256.
+        p256-sha256,
+        /// NIST P-384 (secp384r1) with SHA-384.
+        p384-sha384,
+    }
+
+    /// Import a public key as an uncompressed SEC1 point (`04 ‖ x ‖ y`;
+    /// 65 bytes for P-256, 97 bytes for P-384 — WebCrypto's `raw` format).
+    /// Anything else — including compressed points and points not on the
+    /// curve — fails with `error.invalid-key`. `verifying-key.export`
+    /// returns this same form.
+    import-verifying-key: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
+}
+
+/// ECDSA signing-key minting (FIPS 186-5).
+///
+/// Split from `ecdsa-verify` because ECDSA signing handles a per-signature
+/// secret nonce whose timing leakage is key-recovering — class D in the
+/// in-guest provider's classification, so that provider never exports this
+/// interface and compositions requiring it fail at `wac plug` time.
+/// Host-backed providers (Wasmtime, browser WebCrypto) serve it.
+///
+/// Note the signature is not deterministic across implementations: RFC 6979
+/// (deterministic) and randomized-k implementations both verify, but
+/// produce different bytes for the same input.
+interface ecdsa-sign {
+    use types.{error};
+    use signature.{signing-key};
+    use ecdsa-verify.{ecdsa-variant};
+
+    /// Import a private key as the raw big-endian scalar (32 bytes for
+    /// P-256, 48 for P-384). Out-of-range or wrong-length scalars fail with
+    /// `error.invalid-key`. `signing-key.export` returns this same form.
+    import-signing-key: async func(%variant: ecdsa-variant, raw: list<u8>, extractable: bool) -> result<signing-key, error>;
+
+    /// Generate a fresh random signing key of the declared variant.
+    generate-key: async func(%variant: ecdsa-variant, extractable: bool) -> result<signing-key, error>;
 }

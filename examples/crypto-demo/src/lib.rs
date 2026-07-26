@@ -1,5 +1,6 @@
 //! `crypto-demo`: an example WebAssembly component that exercises the
-//! `lann:webcrypto` `mac`, `aead`, and `digest` primitive kinds end to end.
+//! `lann:webcrypto` `mac`, `aead`, `digest`, and `signature` primitive kinds
+//! end to end.
 //!
 //! The component is host-agnostic: the same binary runs unchanged under the
 //! Wasmtime (RustCrypto) host and the jco (browser WebCrypto) host, which is
@@ -15,6 +16,9 @@
 //!   - seal/open round trips with a generated key, including tampered
 //!     ciphertext and wrong associated data failing with
 //!     `authentication-failed`,
+//!   - Ed25519 against an RFC 8032 known-answer vector (deterministic
+//!     signing, public-key derivation, verification) and ECDSA P-256
+//!     verification against an RFC 6979 known-answer vector,
 //!   - the key-capability surface: import/generate, `export` on extractable
 //!     keys (an import→export identity round trip), `not-extractable`
 //!     failures, and `invalid-key`/`invalid-nonce` rejections.
@@ -30,11 +34,19 @@ use lann::webcrypto::aead::AeadKey;
 use lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
 use lann::webcrypto::bytes::constant_time_equal;
 use lann::webcrypto::digest::Digest;
+use lann::webcrypto::ecdsa_verify::{
+    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+};
+use lann::webcrypto::ed25519_sign::{
+    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
+};
+use lann::webcrypto::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use lann::webcrypto::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
 use lann::webcrypto::mac::MacKey;
 use lann::webcrypto::sha2::{make_digest, Sha2Variant};
+use lann::webcrypto::signature::{SigningKey, VerifyingKey};
 use lann::webcrypto::types::Error;
 
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
@@ -53,6 +65,22 @@ const GCM_AAD: &str = "feedfacedeadbeeffeedfacedeadbeefabaddad2";
 const GCM_CIPHERTEXT: &str = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa\
                               8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
 const GCM_TAG: &str = "76fc6ece0f4e1768cddf8853bb2d551b";
+
+// --- RFC 8032 §7.1 test 2 (Ed25519) ------------------------------------------
+
+const ED25519_SEED: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
+const ED25519_PUBLIC: &str = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+const ED25519_MESSAGE: &[u8] = &[0x72];
+const ED25519_SIG: &str = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
+                           085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+
+// --- RFC 6979 A.2.5 (ECDSA P-256 + SHA-256, message "sample") ----------------
+
+const ECDSA_PUBLIC_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
+const ECDSA_PUBLIC_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+const ECDSA_MESSAGE: &[u8] = b"sample";
+const ECDSA_SIG_R: &str = "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716";
+const ECDSA_SIG_S: &str = "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8";
 
 struct Component;
 
@@ -83,6 +111,15 @@ impl Guest for Component {
         check("gcm-invalid-key", gcm_invalid_key().await).await?;
         check("gcm-invalid-nonce", gcm_invalid_nonce().await).await?;
         check("gcm-key-export", gcm_key_export().await).await?;
+        check("ed25519-known-answer", ed25519_known_answer().await).await?;
+        check("ed25519-verify", ed25519_verify_check().await).await?;
+        check("ed25519-generated-key", ed25519_generated_key().await).await?;
+        check("ed25519-key-export", ed25519_key_export().await).await?;
+        check(
+            "ecdsa-verify-known-answer",
+            ecdsa_verify_known_answer().await,
+        )
+        .await?;
 
         Ok(format!(
             "{} checks passed: {}",
@@ -370,7 +407,7 @@ async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>
     let (tx, rx) = wit_stream::new();
     let (tag, fed) = futures::join!(key.sign(rx), feed(tx, data, chunk));
     fed?;
-    Ok(tag)
+    tag.map_err(|e| describe("mac-key.sign", &e))
 }
 
 /// `compute`, feeding `data` in `chunk`-byte pieces (one stream;
@@ -500,3 +537,155 @@ fn unhex(hex: &str) -> Vec<u8> {
 }
 
 export!(Component);
+
+// --- signature checks ----------------------------------------------------------
+
+/// Sign an entire byte stream (whole-write) with a `signing-key`.
+async fn sig_sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
+    let (tx, rx) = wit_stream::new();
+    let (sig, fed) = futures::join!(key.sign(rx), feed(tx, data, usize::MAX));
+    fed?;
+    sig.map_err(|e| describe("signing-key.sign", &e))
+}
+
+/// Verify `sig` over an entire byte stream (whole-write) with a
+/// `verifying-key`.
+async fn sig_verify(
+    key: &VerifyingKey,
+    data: &[u8],
+    sig: Vec<u8>,
+) -> Result<Result<(), Error>, String> {
+    let (tx, rx) = wit_stream::new();
+    let (verified, fed) = futures::join!(key.verify(rx, sig), feed(tx, data, usize::MAX));
+    fed?;
+    Ok(verified)
+}
+
+/// The RFC 8032 known answer: importing the seed reproduces the vector's
+/// signature (Ed25519 is deterministic), the getters report the algorithm,
+/// and the derived public key matches the vector and verifies.
+async fn ed25519_known_answer() -> Result<(), String> {
+    let key = import_ed25519_signing_key(unhex(ED25519_SEED), false)
+        .await
+        .map_err(|e| describe("import-signing-key", &e))?;
+    expect_eq(
+        key.algorithm_name(),
+        "Ed25519".to_string(),
+        "signing-key.algorithm-name",
+    )?;
+    expect_eq(key.algorithm_curve(), None, "signing-key.algorithm-curve")?;
+    expect_eq(key.algorithm_hash(), None, "signing-key.algorithm-hash")?;
+
+    let sig = sig_sign(&key, ED25519_MESSAGE).await?;
+    expect_eq(
+        hex(&sig),
+        ED25519_SIG.replace(char::is_whitespace, ""),
+        "signature",
+    )?;
+
+    let public = key.verifying_key();
+    expect_eq(
+        hex(&public.export().await),
+        ED25519_PUBLIC.to_string(),
+        "derived public key",
+    )?;
+    sig_verify(&public, ED25519_MESSAGE, sig)
+        .await?
+        .map_err(|e| describe("known-answer signature did not verify", &e))
+}
+
+/// An imported public key verifies the vector's signature and rejects a
+/// corrupted one with `authentication-failed`.
+async fn ed25519_verify_check() -> Result<(), String> {
+    let key = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
+        .await
+        .map_err(|e| describe("import-verifying-key", &e))?;
+    expect_eq(
+        key.algorithm_name(),
+        "Ed25519".to_string(),
+        "verifying-key.algorithm-name",
+    )?;
+
+    let mut sig = unhex(&ED25519_SIG.replace(char::is_whitespace, ""));
+    sig_verify(&key, ED25519_MESSAGE, sig.clone())
+        .await?
+        .map_err(|e| describe("correct signature did not verify", &e))?;
+
+    sig[0] ^= 0x01;
+    match sig_verify(&key, ED25519_MESSAGE, sig).await? {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => Err("corrupted signature verified".into()),
+    }
+}
+
+/// A generated key round-trips sign→verify, and its non-extractable
+/// material stays that way.
+async fn ed25519_generated_key() -> Result<(), String> {
+    let key = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect_eq(key.extractable(), false, "signing-key.extractable")?;
+
+    let sig = sig_sign(&key, b"payload").await?;
+    expect_eq(sig.len(), 64, "signature length")?;
+    sig_verify(&key.verifying_key(), b"payload", sig)
+        .await?
+        .map_err(|e| describe("round-trip signature did not verify", &e))?;
+
+    match key.export().await {
+        Err(Error::NotExtractable) => Ok(()),
+        Err(other) => Err(describe("expected not-extractable, got", &other)),
+        Ok(_) => Err("non-extractable key exported".into()),
+    }
+}
+
+/// An extractable imported key exports the seed it was imported from.
+async fn ed25519_key_export() -> Result<(), String> {
+    let key = import_ed25519_signing_key(unhex(ED25519_SEED), true)
+        .await
+        .map_err(|e| describe("import-signing-key", &e))?;
+    expect_eq(key.extractable(), true, "signing-key.extractable")?;
+    let exported = key.export().await.map_err(|e| describe("export", &e))?;
+    expect_eq(hex(&exported), ED25519_SEED.to_string(), "exported seed")
+}
+
+/// The RFC 6979 known answer: an imported P-256 public key reports its
+/// variant through the getters, verifies the deterministic signature over
+/// "sample", and rejects a corrupted one.
+async fn ecdsa_verify_known_answer() -> Result<(), String> {
+    let mut point = vec![0x04];
+    point.extend(unhex(ECDSA_PUBLIC_X));
+    point.extend(unhex(ECDSA_PUBLIC_Y));
+    let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
+        .await
+        .map_err(|e| describe("import-verifying-key", &e))?;
+    expect_eq(
+        key.algorithm_name(),
+        "ECDSA".to_string(),
+        "verifying-key.algorithm-name",
+    )?;
+    expect_eq(
+        key.algorithm_curve(),
+        Some("P-256".to_string()),
+        "verifying-key.algorithm-curve",
+    )?;
+    expect_eq(
+        key.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "verifying-key.algorithm-hash",
+    )?;
+
+    let mut sig = unhex(ECDSA_SIG_R);
+    sig.extend(unhex(ECDSA_SIG_S));
+    sig_verify(&key, ECDSA_MESSAGE, sig.clone())
+        .await?
+        .map_err(|e| describe("known-answer signature did not verify", &e))?;
+
+    sig[0] ^= 0x01;
+    match sig_verify(&key, ECDSA_MESSAGE, sig).await? {
+        Err(Error::AuthenticationFailed) => Ok(()),
+        Err(other) => Err(describe("expected authentication-failed, got", &other)),
+        Ok(()) => Err("corrupted signature verified".into()),
+    }
+}
