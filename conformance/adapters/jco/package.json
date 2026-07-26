@@ -10,10 +10,7 @@
     "run:browser": "node src/run-browser.mjs"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "^1.19.0",
+    "@bytecodealliance/jco": "^1.26.0",
     "playwright-core": "^1.61.1"
-  },
-  "overrides": {
-    "@bytecodealliance/jco-transpile": "0.5.0"
   }
 }

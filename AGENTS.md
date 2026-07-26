@@ -137,20 +137,18 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime and composed targets; the jco targets are temporarily non-gating (upstream jco runtime bug — run `just conformance-jco-node` to check a fix). |
+| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime, composed, and jco-node targets (Node 24+; jco-browser needs a Chromium install and is run manually). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
 Behavioral changes must keep all three implementations in sync: the
-conformance suite (`just conformance`) is the gate for the wasmtime and
-composed targets, and the same guest component must report every check
+conformance suite (`just conformance`) gates the wasmtime, composed, and
+jco-node targets, and the same guest component must report every check
 passing under `just test` (Wasmtime), `just test-node` (jco), and
-`just test-webcrypto-composed` (in-guest). The jco conformance targets
-rejoin the gate when the upstream jco runtime fix lands (see the
-`conformance` recipe); until then `just test-node` is the jco behavioral
-gate. When adding behavior, extend the conformance corpus (vectors or
+`just test-webcrypto-composed` (in-guest). When adding behavior, extend the
+conformance corpus (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
 its vector suite exists (see conformance/README.md, "Growing the corpus").
 

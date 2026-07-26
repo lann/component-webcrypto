@@ -21,7 +21,8 @@
 # Environment overrides:
 #   WASM_TOOLS_VERSION   version of wasm-tools to install (default below)
 #   JUST_VERSION         version of just to install (default below)
-#   SKIP_NODE=1          skip installing the jco demo driver's npm dependencies
+#   SKIP_NODE=1          skip installing the npm dependencies (jco demo
+#                        driver and conformance jco adapter)
 
 set -euo pipefail
 
@@ -71,6 +72,8 @@ fi
 if [ "${SKIP_NODE:-}" != "1" ]; then
     log "Installing the jco demo driver's npm dependencies (examples/jco-demo)"
     (cd "$REPO_ROOT/examples/jco-demo" && npm install)
+    log "Installing the conformance jco adapter's npm dependencies (conformance/adapters/jco)"
+    (cd "$REPO_ROOT/conformance/adapters/jco" && npm install)
 fi
 
 log "Done."

@@ -90,14 +90,11 @@ conformance-timeout := "600"
 # render conformance/matrix.md, exiting nonzero on any fail or
 # unexpected-pass.
 #
-# Enabled targets: wasmtime and composed. The jco targets (jco-node,
-# jco-browser) are TEMPORARILY not gating: jco's component-model-async runtime
-# corrupts the guest heap under this corpus (the identical binary runs clean
-# under Wasmtime); the runner reports them as "targets without results". Run
-# them manually with `just conformance-jco-node` / `conformance-jco-browser`
-# to check an upstream fix, and add them back here when it lands (diagnosis:
-# GUEST-HEAP-CORRUPTION-DEBUG.md in the jco checkout).
-conformance: conformance-wasmtime conformance-composed
+# Enabled targets: wasmtime, composed, and jco-node (Node 24+ with npm
+# required). jco-browser is not gating — it needs a Chromium install; run it
+# manually with `just conformance-jco-browser` (the runner warns on targets
+# without results rather than failing).
+conformance: conformance-wasmtime conformance-composed conformance-jco-node
     cargo run --release -p conformance-runner -- \
         --manifests conformance/manifests.toml \
         --results conformance/results \
