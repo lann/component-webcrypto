@@ -119,7 +119,14 @@ pub async fn compute(
     schedule: Schedule,
 ) -> (Vec<u8>, Result<(), String>) {
     let (tx, rx) = crate::wit_stream::new();
-    futures::join!(digest.compute(rx), feed(tx, schedule.chunks(data)))
+    let (got, fed) = futures::join!(digest.compute(rx), feed(tx, schedule.chunks(data)));
+    match got {
+        Ok(got) => (got, fed),
+        Err(err) => {
+            let failed: Result<(), String> = Err(format!("digest.compute failed: {err:?}"));
+            (Vec::new(), failed.and(fed))
+        }
+    }
 }
 
 /// `internal-nonce-key.seal`, feeding the plaintext per `schedule`

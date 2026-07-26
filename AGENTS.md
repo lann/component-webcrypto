@@ -89,6 +89,17 @@ The layering is a design invariant, not a convention:
   unrepresentable and the `error` variant carries no misuse cases. Keep it
   that way.
 
+Two evolution rules govern the package surface. Adding a **resource method**
+is a semver-minor package bump: new methods are subtyping-compatible for
+existing compositions, but providers must update to serve them. Adding a
+**`types.error` case** is always semver-major: the variant sits in return
+position, so a new case flows toward consumers whose bindings cannot
+represent it — there is no compatible path for variant growth. Before
+proposing an error case, check whether the fail-closed design maps the
+condition onto an existing one (it usually does); `other(string)` carries
+operational conditions indefinitely, never semantic conditions callers must
+branch on.
+
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`wasmtime-impl/src/bindings.rs`,
@@ -191,9 +202,8 @@ numbers are never reused, so closed numbers remain stable references.
   peers must agree); `open` releases each segment only after its tag
   verifies, and truncation/tampering ends the stream with an error.
 - More `signature` algorithms (RSA-PSS/RSASSA-PKCS1-v1_5 need an
-  `algorithm-length` getter — a semver-minor package bump: new resource
-  methods are subtyping-compatible for existing compositions, but providers
-  must update to serve them — and SPKI/PKCS#8 formats); the
+  `algorithm-length` getter — semver-minor; see the evolution rules in the
+  WIT section — and SPKI/PKCS#8 formats); the
   per-algorithm `-verify`/`-sign` minting split already carries the class-D
   policy (the in-guest provider exports `ecdsa-verify` but not `ecdsa-sign`).
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'

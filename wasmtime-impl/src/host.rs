@@ -529,13 +529,17 @@ impl<T: Send> HostDigestWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         self_: Resource<Digest>,
         data: StreamReader<u8>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
         let variant = accessor
             .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.variant))?;
         // Buffer the whole stream, then hash it; the result is
         // chunking-invariant either way.
+        //
+        // The WIT `err` case exists for operational failures (e.g. an
+        // external digest engine); this implementation computes in-process,
+        // so it never errs.
         let bytes = drain_stream(accessor, data).await?;
-        Ok(variant.digest(&bytes))
+        Ok(Ok(variant.digest(&bytes)))
     }
 
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<Digest>) -> Result<()> {
