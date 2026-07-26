@@ -72,6 +72,17 @@ interface mac {
     /// arrives or buffer the stream whole; the result is chunking-invariant
     /// either way.
     ///
+    /// Warning on truncating producers (applies to every stream-taking
+    /// operation in this package): dropping the writer is the stream's only
+    /// end-of-input signal and carries no verdict, so a producer that fails
+    /// midway is indistinguishable from one that finished — the operation
+    /// correctly computes over the delivered prefix. A bare `stream` is
+    /// never sufficient input for a fallible producer: when the write path
+    /// can fail independently of the party consuming the result (for
+    /// example, a writable end forwarded to another component), convey
+    /// completeness in-band (e.g. length framing) or discard the result on
+    /// producer failure.
+    ///
     /// Note on extractability: `extractable` is an API property, not a
     /// physical one — the *implementation* of this interface necessarily
     /// holds the key material. The guarantee is that components holding only
@@ -142,8 +153,8 @@ interface aead {
     use types.{error};
 
     /// An AEAD key: an unforgeable capability, bound to one algorithm at
-    /// creation. See `mac-key` for the capability and extractability notes,
-    /// which apply identically here.
+    /// creation. See `mac-key` for the capability, extractability, and
+    /// truncating-producer notes, which apply identically here.
     resource aead-key {
         /// Encrypt and authenticate `plaintext` under `nonce` with the
         /// associated data `aad`.
@@ -207,7 +218,8 @@ interface digest {
     /// reusable), mirroring `crypto.subtle.digest`: there is deliberately no
     /// incremental computation resource, so misuse of in-progress state is
     /// unrepresentable. The byte `stream` is the only ingestion path and
-    /// also the incremental one; the result is chunking-invariant.
+    /// also the incremental one; the result is chunking-invariant. See
+    /// `mac-key` for the truncating-producer note, which applies here too.
     ///
     /// A digest authenticates nothing by itself. There is deliberately no
     /// `verify` here: checking untrusted data against a known digest is an
@@ -388,6 +400,9 @@ interface chacha20-poly1305 {
 /// signing it declines to host — verification is secret-free, while signing
 /// may be excluded by the in-guest provider's timing-channel policy (see
 /// guest-impl/README.md, class D) at `wac plug` time.
+///
+/// See `mac-key` for the truncating-producer note, which applies to `sign`
+/// and `verify` here too.
 interface signature {
     use types.{error};
 

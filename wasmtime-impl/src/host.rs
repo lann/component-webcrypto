@@ -52,17 +52,16 @@ impl bytes_iface::Host for WasiWebcryptoCtxView<'_> {
 /// A [`StreamConsumer`] that drains every byte of a `stream<u8>` into a
 /// buffer, handing the completed buffer back through `done_tx` when the
 /// stream ends.
+///
+/// Dropping the consumer is how Wasmtime signals end-of-stream (the writer
+/// dropped its end), so `Drop` is the sole completion point. If a host-side
+/// pipe error occurs, the buffer is never delivered — the channel closes
+/// unsent and [`drain_stream`] surfaces an error — so a partial buffer can
+/// never be mistaken for the complete input.
 struct ByteCollector {
     buf: Vec<u8>,
+    failed: bool,
     done_tx: Option<oneshot::Sender<Vec<u8>>>,
-}
-
-impl ByteCollector {
-    fn finish(&mut self) {
-        if let Some(tx) = self.done_tx.take() {
-            let _ = tx.send(std::mem::take(&mut self.buf));
-        }
-    }
 }
 
 impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
@@ -80,16 +79,20 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
         let available = source.remaining(&mut store);
         if available > 0 {
             let mut chunk = Vec::with_capacity(available);
-            source.read(&mut store, &mut chunk)?;
+            if let Err(err) = source.read(&mut store, &mut chunk) {
+                // Never let `Drop` deliver a partial buffer as if it were
+                // the complete input.
+                this.failed = true;
+                return Poll::Ready(Err(err));
+            }
             this.buf.extend_from_slice(&chunk);
             return Poll::Ready(Ok(StreamResult::Completed));
         }
 
-        // No bytes available. When `finish` is set the stream is ending, so
-        // hand the collected buffer back; `Drop` covers a normal
-        // end-of-stream.
+        // No bytes available. When `finish` is set the writer cancelled its
+        // pending write; the stream itself remains open, so keep the buffer
+        // and keep collecting — `Drop` is the completion point.
         if finish {
-            this.finish();
             Poll::Ready(Ok(StreamResult::Cancelled))
         } else {
             Poll::Pending
@@ -99,12 +102,17 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
 
 impl Drop for ByteCollector {
     fn drop(&mut self) {
-        self.finish();
+        if !self.failed {
+            if let Some(tx) = self.done_tx.take() {
+                let _ = tx.send(std::mem::take(&mut self.buf));
+            }
+        }
     }
 }
 
 /// Drain an entire `stream<u8>` into a buffer, resolving once the stream ends
-/// (its writer dropped).
+/// (its writer dropped). Fails if the consumer was torn down without
+/// delivering the complete input (a host-side pipe error).
 async fn drain_stream<T: Send>(
     accessor: &Accessor<T, WasiWebcrypto>,
     data: StreamReader<u8>,
@@ -115,11 +123,14 @@ async fn drain_stream<T: Send>(
             access,
             ByteCollector {
                 buf: Vec::new(),
+                failed: false,
                 done_tx: Some(done_tx),
             },
         )
     })?;
-    Ok(done_rx.await.unwrap_or_default())
+    done_rx
+        .await
+        .map_err(|_| wasmtime::Error::msg("input stream ended without completing"))
 }
 
 // --- mac ---------------------------------------------------------------------
@@ -1149,5 +1160,38 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
             extractable,
         };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ByteCollector;
+    use futures::channel::oneshot;
+
+    /// Dropping the collector (Wasmtime's end-of-stream notification)
+    /// delivers the collected buffer.
+    #[test]
+    fn byte_collector_drop_delivers_buffer() {
+        let (done_tx, mut done_rx) = oneshot::channel();
+        drop(ByteCollector {
+            buf: b"collected".to_vec(),
+            failed: false,
+            done_tx: Some(done_tx),
+        });
+        assert_eq!(done_rx.try_recv(), Ok(Some(b"collected".to_vec())));
+    }
+
+    /// After a pipe error, dropping the collector must NOT deliver the
+    /// partial buffer as if it were the complete input: the channel closes
+    /// unsent, which `drain_stream` maps to an error.
+    #[test]
+    fn byte_collector_drop_after_failure_delivers_nothing() {
+        let (done_tx, mut done_rx) = oneshot::channel::<Vec<u8>>();
+        drop(ByteCollector {
+            buf: b"partial".to_vec(),
+            failed: true,
+            done_tx: Some(done_tx),
+        });
+        assert!(done_rx.try_recv().is_err());
     }
 }

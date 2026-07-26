@@ -38,6 +38,7 @@ pub const NAMES: &[&str] = &[
     "generated-key-shape",
     "algorithm-names",
     "mac-verify-rejects-truncated",
+    "sign-prefix-drop",
     "digest-reuse",
     "constant-time-equal",
     "chacha-key-metadata",
@@ -64,14 +65,15 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         10 => generated_key_shape().await,
         11 => algorithm_names().await,
         12 => mac_verify_rejects_truncated().await,
-        13 => digest_reuse().await,
-        14 => constant_time_equal_probe().await,
-        15 => chacha_key_metadata().await,
-        16 => chacha_nonce_lengths().await,
-        17 => ed25519_sign_roundtrip().await,
-        18 => sig_key_metadata().await,
-        19 => sig_import_invalid().await,
-        20 => verifying_key_export_roundtrip().await,
+        13 => sign_prefix_drop().await,
+        14 => digest_reuse().await,
+        15 => constant_time_equal_probe().await,
+        16 => chacha_key_metadata().await,
+        17 => chacha_nonce_lengths().await,
+        18 => ed25519_sign_roundtrip().await,
+        19 => sig_key_metadata().await,
+        20 => sig_import_invalid().await,
+        21 => verifying_key_export_roundtrip().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -454,6 +456,58 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
         Err(other) => Err(describe("expected authentication-failed, got", &other)),
         Ok(()) => Err("31-byte prefix of the correct tag verified".into()),
     }
+}
+
+/// Dropping the writer mid-message is the authoritative end of input, per
+/// the WIT truncating-producer contract: `sign` over a stream whose writer
+/// stops after delivering a prefix of a larger message equals `sign` over
+/// that prefix delivered whole. There is no "abrupt drop" an implementation
+/// may treat differently.
+async fn sign_prefix_drop() -> Result<(), String> {
+    let key = import_hmac_key(
+        Sha2Variant::Sha256,
+        b"prefix-drop probe key".to_vec(),
+        false,
+    )
+    .await
+    .map_err(|e| describe("import-key", &e))?;
+
+    let message: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
+    let prefix_len = 700;
+
+    // Feed only a prefix of the message's chunk schedule, then drop the
+    // writer as if the producer failed midway.
+    let (tx, rx) = crate::wit_stream::new();
+    let feed_prefix = async {
+        let mut tx = tx;
+        let mut sent = 0usize;
+        for chunk in Schedule::Straddle.chunks(&message) {
+            if sent >= prefix_len {
+                break;
+            }
+            let take = chunk.len().min(prefix_len - sent);
+            sent += take;
+            let leftover = tx.write_all(chunk[..take].to_vec()).await;
+            if !leftover.is_empty() {
+                return Err(format!(
+                    "stream writer closed early with {} bytes unwritten",
+                    leftover.len()
+                ));
+            }
+        }
+        Ok(())
+    };
+    let (tag, fed) = futures::join!(key.sign(rx), feed_prefix);
+    fed.map_err(|e| format!("prefix feeder: {e}"))?;
+    let tag = tag.map_err(|e| describe("sign over dropped-early stream", &e))?;
+
+    let (whole_tag, fed) = sign(&key, &message[..prefix_len], Schedule::Whole).await;
+    fed.map_err(|e| format!("whole-prefix feeder: {e}"))?;
+    expect_bytes(
+        &tag,
+        &whole_tag,
+        "tag over dropped-early stream vs. its prefix delivered whole",
+    )
 }
 
 /// A `digest` resource is reusable and algorithm-bound: repeated `compute`
