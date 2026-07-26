@@ -5,8 +5,7 @@ use crate::lann::webcrypto::aead::AeadKey;
 use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
 use crate::lann::webcrypto::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
 use crate::lann::webcrypto::bytes::constant_time_equal;
-use crate::lann::webcrypto::chacha20_poly1305::{import_key as import_chacha_key, ChachaVariant};
-use crate::lann::webcrypto::chacha20_poly1305_internal_nonce::import_key as import_chacha_internal_key;
+use crate::lann::webcrypto::chacha20_poly1305::import_key as import_chacha_key;
 use crate::lann::webcrypto::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
@@ -14,6 +13,8 @@ use crate::lann::webcrypto::ed25519_verify::import_verifying_key as import_ed255
 use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
+use crate::lann::webcrypto::xchacha20_poly1305::import_key as import_xchacha_key;
+use crate::lann::webcrypto::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
 use crate::translate::{
     AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, InternalNonceAlg, InternalNonceCase,
     Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase,
@@ -90,13 +91,14 @@ pub async fn run_gcm_case(case: &GcmCase) -> Result<(), String> {
 
 /// Run one ChaCha20-Poly1305 vector (either variant) under its schedule.
 pub async fn run_chacha_case(case: &ChaChaCase) -> Result<(), String> {
-    let variant = match case.alg {
-        ChaChaAlg::ChaCha20Poly1305 => ChachaVariant::Chacha20Poly1305,
-        ChaChaAlg::XChaCha20Poly1305 => ChachaVariant::Xchacha20Poly1305,
+    let key = match case.alg {
+        ChaChaAlg::ChaCha20Poly1305 => import_chacha_key(case.key.clone(), false)
+            .await
+            .map_err(|e| describe("import-key", &e))?,
+        ChaChaAlg::XChaCha20Poly1305 => import_xchacha_key(case.key.clone(), false)
+            .await
+            .map_err(|e| describe("import-key", &e))?,
     };
-    let key = import_chacha_key(variant, case.key.clone(), false)
-        .await
-        .map_err(|e| describe("import-key", &e))?;
     run_aead_expectation(
         &key,
         case.expectation,
@@ -176,16 +178,9 @@ pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), Str
                 .await
                 .map_err(|e| describe("import-key", &e))?
         }
-        InternalNonceAlg::ChaCha20Poly1305 => {
-            import_chacha_internal_key(ChachaVariant::Chacha20Poly1305, case.key.clone(), false)
-                .await
-                .map_err(|e| describe("import-key", &e))?
-        }
-        InternalNonceAlg::XChaCha20Poly1305 => {
-            import_chacha_internal_key(ChachaVariant::Xchacha20Poly1305, case.key.clone(), false)
-                .await
-                .map_err(|e| describe("import-key", &e))?
-        }
+        InternalNonceAlg::XChaCha20Poly1305 => import_xchacha_internal_key(case.key.clone(), false)
+            .await
+            .map_err(|e| describe("import-key", &e))?,
     };
     let (opened, fed) = in_open(&key, &case.aad, &case.sealed, case.schedule).await;
     fed.map_err(|e| format!("open sealed feeder: {e}"))?;

@@ -25,10 +25,11 @@ use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
     aes_gcm as aes_gcm_iface, aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
-    chacha20_poly1305 as chacha_iface, chacha20_poly1305_internal_nonce as chacha_in_iface,
-    digest as digest_iface, ecdsa_sign as ecdsa_sign_iface, ecdsa_verify as ecdsa_verify_iface,
-    ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
-    hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface, signature as signature_iface,
+    chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
+    ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
+    ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
+    signature as signature_iface, xchacha20_poly1305 as xchacha_iface,
+    xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::{
     AeadKey, Digest, InternalNonceKey, MacKey, SigningKey, VerifyingKey, WasiWebcrypto,
@@ -695,36 +696,46 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     }
 }
 
-// --- chacha20-poly1305 (key minting) -----------------------------------------
+// --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 
 impl chacha_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl xchacha_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-/// The length in bytes of a ChaCha20-Poly1305 key (either variant).
+/// The length in bytes of a ChaCha20-Poly1305 key (either construction).
 const CHACHA_KEY_LEN: usize = 32;
 
-/// Build an [`AeadKey`] from raw material declared as `variant`, rendering
-/// the WIT `invalid-key` error when the material is not the 32 bytes both
-/// variants require.
-fn new_chacha_key(
-    variant: chacha_iface::ChachaVariant,
-    raw: Vec<u8>,
-    extractable: bool,
-) -> std::result::Result<AeadKey, Error> {
-    use chacha_iface::ChachaVariant;
-    if raw.len() != CHACHA_KEY_LEN {
-        return Err(Error::InvalidKey(format!(
-            "{variant:?} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
+/// Validate ChaCha key material (32 bytes for either construction),
+/// rendering the WIT `invalid-key` error otherwise.
+fn check_chacha_key(name: &str, raw: &[u8]) -> std::result::Result<(), Error> {
+    if raw.len() == CHACHA_KEY_LEN {
+        Ok(())
+    } else {
+        Err(Error::InvalidKey(format!(
+            "{name} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
             raw.len()
-        )));
+        )))
     }
-    let cipher = match variant {
-        ChachaVariant::Chacha20Poly1305 => AeadCipher::ChaCha20Poly1305(
-            ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        ),
-        ChachaVariant::Xchacha20Poly1305 => AeadCipher::XChaCha20Poly1305(
-            XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        ),
-    };
+}
+
+/// Build an IETF ChaCha20-Poly1305 [`AeadKey`] from raw material.
+fn new_chacha_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<AeadKey, Error> {
+    check_chacha_key(CHACHA20_POLY1305_NAME, &raw)?;
+    let cipher = AeadCipher::ChaCha20Poly1305(
+        ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+    );
+    Ok(AeadKey {
+        cipher,
+        raw,
+        extractable,
+    })
+}
+
+/// Build an XChaCha20-Poly1305 [`AeadKey`] from raw material.
+fn new_xchacha_key(raw: Vec<u8>, extractable: bool) -> std::result::Result<AeadKey, Error> {
+    check_chacha_key(XCHACHA20_POLY1305_NAME, &raw)?;
+    let cipher = AeadCipher::XChaCha20Poly1305(
+        XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
+    );
     Ok(AeadKey {
         cipher,
         raw,
@@ -735,11 +746,10 @@ fn new_chacha_key(
 impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
     async fn import_key(
         accessor: &Accessor<T, Self>,
-        variant: chacha_iface::ChachaVariant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let key = match new_chacha_key(variant, raw, extractable) {
+        let key = match new_chacha_key(raw, extractable) {
             Ok(key) => key,
             Err(err) => return Ok(Err(err)),
         };
@@ -748,13 +758,38 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        variant: chacha_iface::ChachaVariant,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let mut raw = vec![0u8; CHACHA_KEY_LEN];
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
-        let key = new_chacha_key(variant, raw, extractable)
+        let key = new_chacha_key(raw, extractable)
+            .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+}
+
+impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let key = match new_xchacha_key(raw, extractable) {
+            Ok(key) => key,
+            Err(err) => return Ok(Err(err)),
+        };
+        accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let mut raw = vec![0u8; CHACHA_KEY_LEN];
+        getrandom::fill(&mut raw)
+            .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
+        let key = new_xchacha_key(raw, extractable)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))
     }
@@ -941,18 +976,17 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
     }
 }
 
-// --- chacha20-poly1305-internal-nonce (key minting) -------------------------------
+// --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
 
-impl chacha_in_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl xchacha_in_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-impl<T: Send> chacha_in_iface::HostWithStore<T> for WasiWebcrypto {
+impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
     async fn import_key(
         accessor: &Accessor<T, Self>,
-        variant: chacha_iface::ChachaVariant,
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let key = match new_chacha_key(variant, raw, extractable) {
+        let key = match new_xchacha_key(raw, extractable) {
             Ok(key) => into_internal_nonce_key(key),
             Err(err) => return Ok(Err(err)),
         };
@@ -961,13 +995,12 @@ impl<T: Send> chacha_in_iface::HostWithStore<T> for WasiWebcrypto {
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        variant: chacha_iface::ChachaVariant,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
         let mut raw = vec![0u8; CHACHA_KEY_LEN];
         getrandom::fill(&mut raw)
             .map_err(|err| wasmtime::Error::msg(format!("random key generation failed: {err}")))?;
-        let key = new_chacha_key(variant, raw, extractable)
+        let key = new_xchacha_key(raw, extractable)
             .map(into_internal_nonce_key)
             .map_err(|_| wasmtime::Error::msg("generated key material was rejected"))?;
         accessor.with(|mut access| Ok(Ok(access.get().table.push(key)?)))

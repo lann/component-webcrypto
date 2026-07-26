@@ -3,15 +3,15 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
+use crate::lann::webcrypto::aead::AeadKey;
 use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
 use crate::lann::webcrypto::aes_gcm_internal_nonce::{
     generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
 };
 use crate::lann::webcrypto::bytes::constant_time_equal;
 use crate::lann::webcrypto::chacha20_poly1305::{
-    generate_key as generate_chacha_key, import_key as import_chacha_key, ChachaVariant,
+    generate_key as generate_chacha_key, import_key as import_chacha_key,
 };
-use crate::lann::webcrypto::chacha20_poly1305_internal_nonce::generate_key as generate_chacha_internal_nonce_key;
 use crate::lann::webcrypto::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
@@ -24,6 +24,10 @@ use crate::lann::webcrypto::hmac_sha2::{
 };
 use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
 use crate::lann::webcrypto::types::Error;
+use crate::lann::webcrypto::xchacha20_poly1305::{
+    generate_key as generate_xchacha_key, import_key as import_xchacha_key,
+};
+use crate::lann::webcrypto::xchacha20_poly1305_internal_nonce::generate_key as generate_xchacha_internal_nonce_key;
 use crate::translate::Schedule;
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
@@ -572,26 +576,23 @@ async fn constant_time_equal_probe() -> Result<(), String> {
 /// names, decline non-32-byte material as `invalid-key`, and generate
 /// 32 bytes of key material.
 async fn chacha_key_metadata() -> Result<(), String> {
-    for (variant, name) in [
-        (ChachaVariant::Chacha20Poly1305, "ChaCha20-Poly1305"),
-        (ChachaVariant::Xchacha20Poly1305, "XChaCha20-Poly1305"),
-    ] {
-        let key = import_chacha_key(variant, vec![0x42u8; 32], false)
+    for (name, import, generate) in CHACHA_MINTERS {
+        let key = import(vec![0x42u8; 32], false)
             .await
             .map_err(|e| describe("import-key", &e))?;
         if key.algorithm_name() != name {
             return Err(format!(
-                "{variant:?} key name: got {:?}, want {name:?}",
+                "{name} key name: got {:?}, want {name:?}",
                 key.algorithm_name()
             ));
         }
         if key.algorithm_length() != 256 {
             return Err(format!(
-                "{variant:?} key length: got {}, want 256",
+                "{name} key length: got {}, want 256",
                 key.algorithm_length()
             ));
         }
-        match import_chacha_key(variant, vec![0x42u8; 16], false).await {
+        match import(vec![0x42u8; 16], false).await {
             Err(Error::InvalidKey(_)) => {}
             Err(other) => {
                 return Err(describe(
@@ -599,9 +600,9 @@ async fn chacha_key_metadata() -> Result<(), String> {
                     &other,
                 ))
             }
-            Ok(_) => return Err(format!("{variant:?} imported 16 bytes of key material")),
+            Ok(_) => return Err(format!("{name} imported 16 bytes of key material")),
         }
-        let generated = generate_chacha_key(variant, true)
+        let generated = generate(true)
             .await
             .map_err(|e| describe("generate-key", &e))?;
         let raw = generated
@@ -610,7 +611,7 @@ async fn chacha_key_metadata() -> Result<(), String> {
             .map_err(|e| describe("export", &e))?;
         if raw.len() != 32 {
             return Err(format!(
-                "{variant:?} generated {} bytes of key material, want 32",
+                "{name} generated {} bytes of key material, want 32",
                 raw.len()
             ));
         }
@@ -618,17 +619,40 @@ async fn chacha_key_metadata() -> Result<(), String> {
     Ok(())
 }
 
-/// Each `chacha-variant`'s key accepts exactly its own nonce length: the
-/// other variant's length is `invalid-nonce` (nonce-length confusion between
+/// The two ChaCha constructions' minting interfaces, name-tagged for probe
+/// messages. Boxed futures because the interfaces are distinct functions
+/// with identical shapes.
+type MintFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, Error>>>>;
+/// One construction's minting entry: (name, import-key, generate-key).
+type ChachaMinter = (
+    &'static str,
+    fn(Vec<u8>, bool) -> MintFuture<AeadKey>,
+    fn(bool) -> MintFuture<AeadKey>,
+);
+const CHACHA_MINTERS: [ChachaMinter; 2] = [
+    (
+        "ChaCha20-Poly1305",
+        |raw, extractable| Box::pin(import_chacha_key(raw, extractable)),
+        |extractable| Box::pin(generate_chacha_key(extractable)),
+    ),
+    (
+        "XChaCha20-Poly1305",
+        |raw, extractable| Box::pin(import_xchacha_key(raw, extractable)),
+        |extractable| Box::pin(generate_xchacha_key(extractable)),
+    ),
+];
+
+/// Each construction's key accepts exactly its own nonce length: the other
+/// construction's length is `invalid-nonce` (nonce-length confusion between
 /// the constructions cannot pass silently), and the correct length
 /// round-trips.
 async fn chacha_nonce_lengths() -> Result<(), String> {
     let msg = b"chacha-nonce-lengths";
-    for (variant, good_len, bad_len) in [
-        (ChachaVariant::Chacha20Poly1305, 12usize, 24usize),
-        (ChachaVariant::Xchacha20Poly1305, 24, 12),
+    for ((name, import, _), good_len, bad_len) in [
+        (CHACHA_MINTERS[0], 12usize, 24usize),
+        (CHACHA_MINTERS[1], 24, 12),
     ] {
-        let key = import_chacha_key(variant, vec![0x42u8; 32], false)
+        let key = import(vec![0x42u8; 32], false)
             .await
             .map_err(|e| describe("import-key", &e))?;
         let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", msg, Schedule::Whole).await;
@@ -637,7 +661,7 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
             Err(Error::InvalidNonce(_)) => {}
             Err(other) => return Err(describe("seal: expected invalid-nonce, got", &other)),
             Ok(_) => {
-                return Err(format!("{variant:?} sealed under a {bad_len}-byte nonce"));
+                return Err(format!("{name} sealed under a {bad_len}-byte nonce"));
             }
         }
         let (sealed, fed) = seal(&key, &vec![0u8; good_len], b"", msg, Schedule::Whole).await;
@@ -925,28 +949,23 @@ async fn internal_nonce_shape() -> Result<(), String> {
 /// nonce length prefixed (12 bytes for the IETF construction, 24 for
 /// XChaCha).
 async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
-    for (variant, nonce_len) in [
-        (ChachaVariant::Chacha20Poly1305, 12usize),
-        (ChachaVariant::Xchacha20Poly1305, 24),
-    ] {
-        let key = generate_chacha_internal_nonce_key(variant, false)
-            .await
-            .map_err(|e| describe(&format!("{variant:?} generate-key"), &e))?;
-        let plaintext = b"chacha internal-nonce payload".to_vec();
-        let (sealed, fed) = in_seal(&key, b"aad", &plaintext, Schedule::Whole).await;
-        fed.map_err(|e| format!("{variant:?} seal feeder: {e}"))?;
-        let sealed = sealed.map_err(|e| describe(&format!("{variant:?} seal"), &e))?;
-        if sealed.len() != plaintext.len() + nonce_len + 16 {
-            return Err(format!(
-                "{variant:?} sealed length: got {}, want {}",
-                sealed.len(),
-                plaintext.len() + nonce_len + 16
-            ));
-        }
-        let (opened, fed) = in_open(&key, b"aad", &sealed, Schedule::Whole).await;
-        fed.map_err(|e| format!("{variant:?} open feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe(&format!("{variant:?} open"), &e))?;
-        expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
+    let key = generate_xchacha_internal_nonce_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let plaintext = b"chacha internal-nonce payload".to_vec();
+    let (sealed, fed) = in_seal(&key, b"aad", &plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    // 24-byte nonce prefix + ciphertext + 16-byte tag.
+    if sealed.len() != plaintext.len() + 24 + 16 {
+        return Err(format!(
+            "sealed length: got {}, want {}",
+            sealed.len(),
+            plaintext.len() + 24 + 16
+        ));
     }
-    Ok(())
+    let (opened, fed) = in_open(&key, b"aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open", &e))?;
+    expect_bytes(&opened, &plaintext, "round-tripped plaintext")
 }

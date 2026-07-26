@@ -26,7 +26,7 @@ wit/                    # lann:webcrypto package: types (structural),
                         #   (generic primitive resources), hmac-sha2/aes-gcm/
                         #   chacha20-poly1305/*-internal-nonce/sha2/
                         #   ed25519-*/ecdsa-* (minting algorithm interfaces),
-                        #   aes/chacha (shared variant enums), bytes
+                        #   aes (shared variant enum), bytes
                         #   (constant-time comparison utility)
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +

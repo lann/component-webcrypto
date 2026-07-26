@@ -455,7 +455,7 @@ async fn run_lab() -> Result<(), String> {
     let gcm_key = aes_gcm::generate_key(aes_gcm::AesVariant::Aes256, false)
         .await
         .map_err(|e| format!("aes-gcm generate-key: {e:?}"))?;
-    let chacha_key = chacha::generate_key(chacha::ChachaVariant::Chacha20Poly1305, false)
+    let chacha_key = chacha::generate_key(false)
         .await
         .map_err(|e| format!("chacha generate-key: {e:?}"))?;
     let gcm_nonce = [0x24u8; 12];

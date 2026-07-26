@@ -376,21 +376,33 @@ async function generateAesKey(variant, extractable) {
 export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
 
 /**
- * Throw `{ tag: 'unsupported', val }` for either `chacha-variant`: browser
+ * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
  * WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
- * unimplemented), so this host declines the whole interface and a
- * composition needing it must supply another provider (the in-guest
- * provider serves both variants).
- * @param {string} variant
+ * unimplemented), so this host declines these interfaces whole and a
+ * composition needing them must supply another provider (the in-guest
+ * provider serves both constructions).
+ * @param {string} name
  */
-function unsupportedChacha(variant) {
-  throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+function unsupportedChacha(name) {
+  throw { tag: "unsupported", val: `${name} is not served by this implementation` };
 }
 
 /** The `lann:webcrypto/chacha20-poly1305` interface (`--map '…#chacha20Poly1305'`). */
 export const chacha20Poly1305 = {
-  importKey: async (variant) => unsupportedChacha(variant),
-  generateKey: async (variant) => unsupportedChacha(variant),
+  importKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
+  generateKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
+};
+
+/** The `lann:webcrypto/xchacha20-poly1305` interface (`--map '…#xchacha20Poly1305'`). */
+export const xchacha20Poly1305 = {
+  importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+};
+
+/** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface (`--map '…#xchachaInternalNonce'`). */
+export const xchachaInternalNonce = {
+  importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
 
 /**
@@ -536,12 +548,6 @@ async function generateAesInternalNonceKey(variant, extractable) {
 export const aesGcmInternalNonce = {
   importKey: importAesInternalNonceKey,
   generateKey: generateAesInternalNonceKey,
-};
-
-/** The `lann:webcrypto/chacha20-poly1305-internal-nonce` interface (`--map '…#chachaInternalNonce'`): declined like `chacha20Poly1305`. */
-export const chachaInternalNonce = {
-  importKey: async (variant) => unsupportedChacha(variant),
-  generateKey: async (variant) => unsupportedChacha(variant),
 };
 
 /**
