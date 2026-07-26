@@ -5,33 +5,6 @@ later. Amend this file as part of any change that fixes, obsoletes, or
 invalidates an item: delete the item (don't mark it done) and prune empty
 sections. See AGENTS.md ("Maintaining TODO.md").
 
-## Correctness
-
-- **Wasmtime host: host-side pipe errors become short inputs.** Writer drop
-  is the ABI's sole end-of-stream signal, so an early drop legitimately ends
-  the message — that part is contract, not bug. The bug is narrower: in
-  `ByteCollector` (wasmtime-impl/src/host.rs), a Rust-level pipe error (e.g.
-  `source.read` failing) still delivers the partial buffer via `Drop`, and
-  `drain_stream` maps a dead channel to an empty buffer
-  (`done_rx.await.unwrap_or_default()`). Host-internal errors must surface as
-  errors, never as `Ok(shorter input)`. Not guest-triggerable through the
-  ABI, so cover it with a wasmtime-impl unit test, and add a conformance
-  probe pinning the contract side: `sign` over a stream whose writer drops
-  after N bytes equals `sign` over the N-byte message, on every target.
-
-## Documentation
-
-- **Warn about truncating remote producers.** A caller that forwards a
-  writable stream end to another component cannot detect that producer
-  failing midway: the callee correctly operates on the delivered prefix and
-  the ABI carries no verdict at end-of-stream (a bare `stream` is never
-  sufficient for fallible production). Add a WIT doc warning on the
-  stream-taking operations: writer drop is the authoritative end of message;
-  convey completeness in-band when the write path can fail independently of
-  the caller. Revisit if the component model gains the
-  under-discussion optional stream sentinel value (which would typically
-  carry a final `result`).
-
 ## WIT (pre-freeze: cheap now, breaking later)
 
 - **Rename `%export`.** It collides with a WIT keyword, so it needs `%`
