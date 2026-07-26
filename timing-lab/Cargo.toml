@@ -3,7 +3,7 @@ name = "timing-lab"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "dudect-style timing lab: statistical leakage tests of the composed wasip3 provider's surfaces, run entirely in-guest under wasmtime."
+description = "dudect-style timing lab: statistical leakage tests of the composed in-guest provider's surfaces, run entirely in-guest under wasmtime."
 
 [lib]
 crate-type = ["cdylib"]

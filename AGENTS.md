@@ -32,9 +32,9 @@ wasmtime-impl/          # Wasmtime host crate, modeled after
 jco-impl/               # jco host LIBRARY: webcrypto.js implements the
                         #   imports over the browser-compatible Web Crypto
                         #   API ONLY; no dependencies, no demo code
-wasip3-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
+guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
-                        #   crate: wasip3-webcrypto — see its README for the
+                        #   crate: guest-webcrypto — see its README for the
                         #   timing-channel classification and export policy
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
@@ -53,7 +53,7 @@ conformance/            # cross-implementation conformance suite — see
                         #   from the WebRTC sibling's suite
   vectors/              #   vendored Wycheproof JSON + the translation policy
   guest/                #   the shared conformance guest (vectors compiled in)
-  adapters/             #   per-target drivers: wasmtime, wasip3-driver (for
+  adapters/             #   per-target drivers: wasmtime, composed-driver (for
                         #     the composed target), jco (Node + browser;
                         #     currently blocked on an upstream jco bug — see
                         #     the `conformance` justfile recipe)
@@ -61,7 +61,7 @@ conformance/            # cross-implementation conformance suite — see
                         #     renders conformance/matrix.md
   manifests.toml        #   per-target expectations (policy-driven)
 timing-lab/             # dudect-style statistical timing tests of the
-                        #   composed wasip3 provider (non-gating; see its
+                        #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
 scripts/setup.sh        # one-shot dependency setup (idempotent; used by CI)
 ```
@@ -89,14 +89,14 @@ The layering is a design invariant, not a convention:
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`wasmtime-impl/src/bindings.rs`,
-`examples/wasmtime-demo/src/lib.rs`), the wasip3 provider world and bindings
-(`wasip3-impl/`), the driver's inline world
+`examples/wasmtime-demo/src/lib.rs`), the in-guest provider world and bindings
+(`guest-impl/`), the driver's inline world
 (`examples/demo-driver/src/lib.rs`), and the `jco transpile`
 `--async-exports`/`--async-imports`/`--map` flags in `examples/jco-demo/package.json`.
 
-### The wasip3 provider's timing-channel policy
+### The in-guest provider's timing-channel policy
 
-`wasip3-impl/README.md` carries the timing-channel classification (classes
+`guest-impl/README.md` carries the timing-channel classification (classes
 A–D) and this provider's policy: only class A–C algorithms are exported,
 always via constant-time-variant implementations; class D algorithm
 interfaces (RSA private-key ops, ECDSA signing, …) are **never** exported by
@@ -134,8 +134,8 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just validate-wit` | any `.wit` file. |
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
-| `just test-webcrypto-composed` | the `wasip3-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime and wasip3-guest targets; the jco targets are temporarily non-gating (upstream jco runtime bug — run `just conformance-jco-node` to check a fix). |
+| `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime and composed targets; the jco targets are temporarily non-gating (upstream jco runtime bug — run `just conformance-jco-node` to check a fix). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
@@ -143,7 +143,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 
 Behavioral changes must keep all three implementations in sync: the
 conformance suite (`just conformance`) is the gate for the wasmtime and
-wasip3-guest targets, and the same guest component must report every check
+composed targets, and the same guest component must report every check
 passing under `just test` (Wasmtime), `just test-node` (jco), and
 `just test-webcrypto-composed` (in-guest). The jco conformance targets
 rejoin the gate when the upstream jco runtime fix lands (see the

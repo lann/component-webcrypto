@@ -1,4 +1,4 @@
-//! `wasip3-webcrypto`: a wasm **component** that runs RustCrypto *in-guest*
+//! `guest-webcrypto`: a wasm **component** that runs RustCrypto *in-guest*
 //! and exports the `lann:webcrypto` package surface.
 //!
 //! This is the third implementation alongside the `wasmtime-impl` (RustCrypto,

@@ -1,4 +1,4 @@
-// The `wasip3-webcrypto` component world.
+// The `guest-webcrypto` component world.
 //
 // This is the third implementation of `lann:webcrypto`, alongside the
 // `wasmtime-impl` (RustCrypto, native) and `jco-impl` (browser Web Crypto)
@@ -19,7 +19,7 @@
 // The `lann:webcrypto` package lives once at the repository root `wit/` and
 // is pulled in through the `deps/lann-webcrypto` symlink, exactly like the
 // demo components do.
-package wasip3:webcrypto;
+package guest:webcrypto;
 
 /// The composable in-guest WebCrypto provider.
 world provider {

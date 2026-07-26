@@ -10,7 +10,7 @@
 [targets.wasmtime]
 expected-fail = []
 
-[targets.wasip3-guest]
+[targets.composed]
 expected-fail = []
 
 # The jco targets are enumerated but TEMPORARILY produce no results (the

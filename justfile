@@ -14,26 +14,26 @@ fmt-check:
 
 # Run clippy across all crates (the wasm crates on their wasm targets).
 clippy:
-    cargo clippy --workspace --exclude crypto-demo --exclude wasip3-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-wasip3-driver --exclude timing-lab -- -D warnings
+    cargo clippy --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
     cargo clippy -p crypto-demo --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p conformance-guest --target wasm32-unknown-unknown -- -D warnings
-    cargo clippy -p wasip3-webcrypto --target wasm32-wasip2 -- -D warnings
+    cargo clippy -p guest-webcrypto --target wasm32-wasip2 -- -D warnings
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
-    cargo clippy -p conformance-wasip3-driver --target wasm32-wasip2 -- -D warnings
+    cargo clippy -p conformance-composed-driver --target wasm32-wasip2 -- -D warnings
 
 # Validate WIT packages.
 validate-wit:
     wasm-tools component wit wit
     wasm-tools component wit wasmtime-impl/wit
-    wasm-tools component wit wasip3-impl/wit
+    wasm-tools component wit guest-impl/wit
     wasm-tools component wit examples/crypto-demo/wit
     wasm-tools component wit conformance/guest/wit
 
 # Run the Rust tests, including the wasmtime-demo integration test (which
 # builds and runs the crypto-demo guest under the Wasmtime host).
 test:
-    cargo test --workspace --exclude crypto-demo --exclude wasip3-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-wasip3-driver --exclude timing-lab
+    cargo test --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-composed-driver --exclude timing-lab
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 build-component:
@@ -53,20 +53,20 @@ demo-wasmtime: build-component
     cargo run --release --bin wasmtime-webcrypto-host -- \
         examples/crypto-demo/build/crypto-demo.component.wasm
 
-# Build the wasip3 provider component (RustCrypto entirely in-guest; it
+# Build the in-guest provider component (RustCrypto entirely in-guest; it
 # exports the lann:webcrypto surface) into
-# target/wasm32-wasip2/release/wasip3_webcrypto.wasm.
-build-wasip3-provider:
-    cargo build --release -p wasip3-webcrypto --target wasm32-wasip2
+# target/wasm32-wasip2/release/guest_webcrypto.wasm.
+build-guest-provider:
+    cargo build --release -p guest-webcrypto --target wasm32-wasip2
 
 # Compose the fully in-guest demo: the crypto-demo guest's lann:webcrypto
-# imports are satisfied by the wasip3 provider's exports (`wac plug`), then
+# imports are satisfied by the in-guest provider's exports (`wac plug`), then
 # the CLI driver (async wasi:cli/run) is plugged on top, yielding one
 # self-contained component in target/crypto-demo-composed.wasm.
-compose-demo: build-component build-wasip3-provider
+compose-demo: build-component build-guest-provider
     cargo build --release -p crypto-demo-driver --target wasm32-wasip2
     wac plug examples/crypto-demo/build/crypto-demo.component.wasm \
-        --plug target/wasm32-wasip2/release/wasip3_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
         -o target/crypto-demo-with-crypto.wasm
     wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
         --plug target/crypto-demo-with-crypto.wasm \
@@ -90,14 +90,14 @@ conformance-timeout := "600"
 # render conformance/matrix.md, exiting nonzero on any fail or
 # unexpected-pass.
 #
-# Enabled targets: wasmtime and wasip3-guest. The jco targets (jco-node,
+# Enabled targets: wasmtime and composed. The jco targets (jco-node,
 # jco-browser) are TEMPORARILY not gating: jco's component-model-async runtime
 # corrupts the guest heap under this corpus (the identical binary runs clean
 # under Wasmtime); the runner reports them as "targets without results". Run
 # them manually with `just conformance-jco-node` / `conformance-jco-browser`
 # to check an upstream fix, and add them back here when it lands (diagnosis:
 # GUEST-HEAP-CORRUPTION-DEBUG.md in the jco checkout).
-conformance: conformance-wasmtime conformance-wasip3
+conformance: conformance-wasmtime conformance-composed
     cargo run --release -p conformance-runner -- \
         --manifests conformance/manifests.toml \
         --results conformance/results \
@@ -119,25 +119,25 @@ conformance-wasmtime: build-conformance-guest
         --guest conformance/guest/build/conformance-guest.component.wasm \
         --out conformance/results/wasmtime.json
 
-# Build the composed wasip3-guest conformance component: the conformance guest
-# plugged with the wasip3 provider, under the CLI driver that prints the
+# Build the composed conformance component: the conformance guest
+# plugged with the in-guest provider, under the CLI driver that prints the
 # results JSON on stdout.
-build-conformance-wasip3: build-conformance-guest build-wasip3-provider
-    cargo build --release -p conformance-wasip3-driver --target wasm32-wasip2
+build-conformance-composed: build-conformance-guest build-guest-provider
+    cargo build --release -p conformance-composed-driver --target wasm32-wasip2
     wac plug conformance/guest/build/conformance-guest.component.wasm \
-        --plug target/wasm32-wasip2/release/wasip3_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
         -o target/conformance-with-crypto.wasm
-    wac plug target/wasm32-wasip2/release/conformance_wasip3_driver.wasm \
+    wac plug target/wasm32-wasip2/release/conformance_composed_driver.wasm \
         --plug target/conformance-with-crypto.wasm \
-        -o target/conformance-wasip3-composed.wasm
+        -o target/conformance-composed.wasm
 
 # Run the conformance corpus fully in-guest (RustCrypto in wasm). Writes
-# conformance/results/wasip3-guest.json.
-conformance-wasip3: build-conformance-wasip3
+# conformance/results/composed.json.
+conformance-composed: build-conformance-composed
     mkdir -p conformance/results
     timeout {{conformance-timeout}} wasmtime run -W component-model-async=y -S cli \
-        target/conformance-wasip3-composed.wasm \
-        > conformance/results/wasip3-guest.json
+        target/conformance-composed.wasm \
+        > conformance/results/composed.json
 
 # Run the conformance corpus under the jco host on Node (24+; JSPI). Writes
 # conformance/results/jco-node.json. NOT yet part of `just conformance` — see
@@ -155,16 +155,16 @@ conformance-jco-browser: build-conformance-guest
 
 # --- timing lab ---------------------------------------------------------------
 
-# Compose the timing lab with the wasip3 provider: the lab's lann:webcrypto
+# Compose the timing lab with the in-guest provider: the lab's lann:webcrypto
 # imports are satisfied by the provider under measurement, yielding one
 # self-contained component in target/timing-lab-composed.wasm.
-compose-timing-lab: build-wasip3-provider
+compose-timing-lab: build-guest-provider
     cargo build --release -p timing-lab --target wasm32-wasip2
     wac plug target/wasm32-wasip2/release/timing_lab.wasm \
-        --plug target/wasm32-wasip2/release/wasip3_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
         -o target/timing-lab-composed.wasm
 
-# Run the dudect-style timing lab against the composed wasip3 provider.
+# Run the dudect-style timing lab against the composed in-guest provider.
 # Statistical and environment-sensitive by nature, so deliberately NOT part
 # of `just ci` — run it on a quiet machine. Set TIMING_LAB_SAMPLES to trade
 # runtime for sensitivity.

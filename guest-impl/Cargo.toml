@@ -1,5 +1,5 @@
 [package]
-name = "wasip3-webcrypto"
+name = "guest-webcrypto"
 version = "0.1.0"
 edition = "2021"
 publish = false

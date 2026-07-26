@@ -2,7 +2,7 @@
 //!
 //! It imports the `crypto-demo` guest's exported `demo:webcrypto-demo/demo`
 //! interface and exports an async `wasi:cli/run` (via the `wasip3` crate), so
-//! the fully composed component — crypto-demo guest + `wasip3-webcrypto`
+//! the fully composed component — crypto-demo guest + `guest-webcrypto`
 //! provider + this driver — runs under a plain `wasmtime run -S cli`.
 //!
 //! It drives the demo's checks to completion and prints the summary (or the

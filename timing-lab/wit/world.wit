@@ -1,6 +1,6 @@
 // The timing-lab world. The lab is a driver-style component (like the
-// conformance wasip3-driver): it imports the `lann:webcrypto` surfaces under
-// measurement — satisfied by composing the wasip3 provider in with
+// conformance composed-driver): it imports the `lann:webcrypto` surfaces under
+// measurement — satisfied by composing the in-guest provider in with
 // `wac plug` — and exports an async `wasi:cli/run` (via the `wasip3` crate),
 // so the composed lab runs under a plain `wasmtime run`.
 //

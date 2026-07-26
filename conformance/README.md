@@ -12,12 +12,12 @@ vectors/           # vendored Wycheproof JSON + the translation policy
                    #   (vectors/README.md) mapping vector expectations into
                    #   this package's stricter contract
 guest/             # the conformance guest: vectors compiled in (no I/O
-                   #   imports, so the composed wasip3 target runs under a
+                   #   imports, so the composed target runs under a
                    #   plain `wasmtime run`); exports count/run-all/run-slice
 adapters/
   wasmtime/        # native adapter over wasmtime-webcrypto's add_to_linker
-  wasip3-driver/   # CLI driver for the composed in-guest target (guest +
-                   #   wasip3 provider via `wac plug`); prints results JSON
+  composed-driver/   # CLI driver for the composed in-guest target (guest +
+                   #   in-guest provider via `wac plug`); prints results JSON
   jco/             # Node + headless-Chromium adapters over jco-impl's
                    #   webcrypto.js (currently non-gating; see the
                    #   `conformance` justfile recipe)
@@ -75,7 +75,7 @@ crypto conformance tests *functions against mathematics*.
   exists (e.g. a FIPS-profile internal-nonce seal). Revisit then.
 - **The timing lab** (dudect-style statistical tests of the composed in-guest
   provider, targeting the class B/C surfaces in
-  `wasip3-impl/README.md`): when built, it reports (a matrix column and
+  `guest-impl/README.md`): when built, it reports (a matrix column and
   artifacts) but does **not** gate — statistical p-values flapping in CI
   train people to ignore red.
 
@@ -85,5 +85,5 @@ Adding an algorithm interface to the package is not done until its vector
 suite is here: vendor the vectors, extend the translation policy in
 `vectors/README.md` + `guest/src/translate.rs` (they must agree), and update
 the per-target manifests/profiles if the algorithm's policy differs by
-implementation (e.g. an algorithm the wasip3 provider deliberately does not
-export appears in no wasip3-guest results — that is absence, not failure).
+implementation (e.g. an algorithm the in-guest provider deliberately does not
+export appears in no composed results — that is absence, not failure).

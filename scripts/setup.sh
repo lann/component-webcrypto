@@ -9,7 +9,7 @@
 #   - wasm-tools, used to wrap guest modules into components and validate WIT
 #   - just, the command runner used for development and CI recipes
 #   - wac, the component linker used to compose the crypto-demo guest with the
-#     wasip3 provider (`just compose-demo`)
+#     in-guest provider (`just compose-demo`)
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
 #     integration test (`just test-webcrypto-composed`)
 #   - the jco demo driver's npm dependencies (jco)

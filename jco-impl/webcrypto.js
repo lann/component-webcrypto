@@ -379,7 +379,7 @@ export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
  * Throw `{ tag: 'unsupported', val }` for either `chacha-variant`: browser
  * WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
  * unimplemented), so this host declines the whole interface and a
- * composition needing it must supply another provider (the wasip3 in-guest
+ * composition needing it must supply another provider (the in-guest
  * provider serves both variants).
  * @param {string} variant
  */
