@@ -21,13 +21,12 @@ rather than relying on a cached summary.
 ## Repository layout
 
 ```
-wit/                    # lann:webcrypto package: types (structural),
-                        #   mac/aead/aead-internal-nonce/digest/signature
-                        #   (generic primitive resources), hmac-sha2/aes-gcm/
-                        #   chacha20-poly1305/*-internal-nonce/sha2/
-                        #   ed25519-*/ecdsa-* (minting algorithm interfaces),
-                        #   aes (shared variant enum), bytes
-                        #   (constant-time comparison utility)
+wit/                    # the lann:webcrypto package, one file per layer:
+                        #   webcrypto.wit holds the stable layer (structural
+                        #   types, the generic primitive kinds, bytes);
+                        #   family files (aes/chacha/sha2/hmac/ed25519/
+                        #   ecdsa.wit) hold the minting interfaces and grow
+                        #   as algorithms are added
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto

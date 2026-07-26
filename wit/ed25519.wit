@@ -1,0 +1,33 @@
+package lann:webcrypto@0.1.0;
+
+/// Ed25519 verification-key minting (RFC 8032).
+///
+/// Ed25519 has no parameters: 32-byte public keys, 64-byte signatures.
+/// Keys report `algorithm-name` `"Ed25519"` and `none` for curve and hash.
+interface ed25519-verify {
+    use types.{error};
+    use signature.{verifying-key};
+
+    /// Import a 32-byte raw public key (RFC 8032 encoding). Anything else
+    /// fails with `error.invalid-key`, including encodings the algorithm
+    /// rejects (non-canonical points).
+    import-verifying-key: async func(raw: list<u8>) -> result<verifying-key, error>;
+}
+
+/// Ed25519 signing-key minting (RFC 8032).
+///
+/// Split from `ed25519-verify` so a provider can serve verification alone;
+/// the in-guest provider exports both — Ed25519 signing is constant-time by
+/// construction (no per-signature secret nonce, complete addition laws).
+interface ed25519-sign {
+    use types.{error};
+    use signature.{signing-key};
+
+    /// Import a 32-byte raw private key (the RFC 8032 seed). Anything else
+    /// fails with `error.invalid-key`. `signing-key.export-key` returns this
+    /// same 32-byte seed form.
+    import-signing-key: async func(raw: list<u8>, extractable: bool) -> result<signing-key, error>;
+
+    /// Generate a fresh random signing key.
+    generate-key: async func(extractable: bool) -> result<signing-key, error>;
+}

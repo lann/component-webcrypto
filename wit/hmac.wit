@@ -1,0 +1,29 @@
+package lann:webcrypto@0.1.0;
+
+/// HMAC key minting (RFC 2104) over the SHA-2 hash family (FIPS 180-4).
+///
+/// Adding an algorithm touches only an interface like this one: the generic
+/// `mac` surface is closed. Keys returned here drive `mac.mac-key.sign` and
+/// `verify`.
+interface hmac-sha2 {
+    use types.{error};
+    use mac.{mac-key};
+    use sha2.{sha2-variant};
+
+    /// Import raw key material as an HMAC key over the declared SHA-2
+    /// variant. Empty keys are rejected with `error.invalid-key`.
+    /// Implementations generally accept any non-empty length (per RFC 2104;
+    /// keys longer than the block size are hashed first), but an
+    /// implementation enforcing a security policy (for example FIPS 140-3
+    /// approved mode, which requires keys of at least 112 bits) MAY reject
+    /// shorter keys with `error.invalid-key`. An implementation not serving
+    /// the variant fails with `error.unsupported`.
+    import-key: async func(%variant: sha2-variant, raw: list<u8>, extractable: bool) -> result<mac-key, error>;
+
+    /// Generate a fresh random HMAC key over the declared SHA-2 variant,
+    /// with the underlying hash's block size of key material (WebCrypto's
+    /// `generateKey` default: 64 bytes for SHA-256, 128 for SHA-384/512).
+    /// Fails with `error.unsupported` if this implementation does not serve
+    /// the variant.
+    generate-key: async func(%variant: sha2-variant, extractable: bool) -> result<mac-key, error>;
+}

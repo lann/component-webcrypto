@@ -5,12 +5,6 @@ later. Amend this file as part of any change that fixes, obsoletes, or
 invalidates an item: delete the item (don't mark it done) and prune empty
 sections. See AGENTS.md ("Maintaining TODO.md").
 
-## WIT (pre-freeze: cheap now, breaking later)
-
-- **Split `wit/webcrypto.wit` into multiple files.** The package is one long
-  file; WIT packages can span files in a directory. Organize by layer
-  (types/kinds/minting) before it grows further.
-
 ## Implementation hardening
 
 - **jco internals coupling.** `webcrypto.js` throws bare `{ tag: ... }`
