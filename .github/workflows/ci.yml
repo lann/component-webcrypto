@@ -16,7 +16,7 @@ jobs:
   # normally this job is a single download. Only when no component exists
   # for the current inputs does it build one — restoring the componentize-js
   # CLI from the Actions cache (so SpiderMonkey is recompiled only when the
-  # componentize-js.rev pin or the runtime patch changes) — and, on main, it
+  # componentize-js.rev pin changes) — and, on main, it
   # publishes the new component so later runs are downloads again.
   wpt-component:
     runs-on: ubuntu-latest
@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/componentize-js
-          key: componentize-js-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('componentize-sdk/componentize-js.rev', 'componentize-sdk/componentize-js-rooting-fix.patch') }}
+          key: componentize-js-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('componentize-sdk/componentize-js.rev') }}
 
       - name: Build the componentize-js CLI
         if: steps.fetch.outputs.found == 'false'
@@ -67,7 +67,6 @@ jobs:
           rustup target add wasm32-wasip2
           git clone https://github.com/dicej/componentize-js "$RUNNER_TEMP/componentize-js"
           git -C "$RUNNER_TEMP/componentize-js" checkout "$(cat componentize-sdk/componentize-js.rev)"
-          git -C "$RUNNER_TEMP/componentize-js" apply "$PWD/componentize-sdk/componentize-js-rooting-fix.patch"
           cargo install --path "$RUNNER_TEMP/componentize-js"
 
       - name: Build the WPT runner component

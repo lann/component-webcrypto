@@ -5,9 +5,9 @@
 # repository's rolling `wpt-components` GitHub release, keyed by the hash of
 # an input lock over everything it is generated from (the library, the
 # harness and runner, the concatenated suites, the WIT surface, and the
-# componentize-js revision pin and runtime patch). CI's builder job and the
-# justfile recipes both drive this script, so the lock and build logic live
-# in exactly one place.
+# componentize-js revision pin). CI's builder job and the justfile recipes
+# both drive this script, so the lock and build logic live in exactly one
+# place.
 #
 # Subcommands:
 #   lock     regenerate the suite modules under build/ and the input lock
@@ -46,7 +46,6 @@ gen_lock() {
         echo "componentize-js-rev $(cat componentize-sdk/componentize-js.rev)"
         sha256sum \
             componentize-sdk/webcrypto.js \
-            componentize-sdk/componentize-js-rooting-fix.patch \
             componentize-sdk/wpt/harness.js \
             componentize-sdk/wpt/runner.js \
             "$B"/group-hmac.js \

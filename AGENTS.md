@@ -46,12 +46,12 @@ guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
 componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   ComponentizeJS reboot): webcrypto.js exposes a
                         #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,
-                        #   raw keys) over the lann:webcrypto imports; carries
-                        #   the componentize-js runtime patch its README
-                        #   documents; wpt/ vendors the WebCryptoAPI
-                        #   web-platform-tests and gates in CI via a
-                        #   release-artifact runner component keyed by an
-                        #   input lock (wpt/component.sh)
+                        #   raw keys) over the lann:webcrypto imports; the
+                        #   toolchain revision is pinned in
+                        #   componentize-js.rev; wpt/ vendors the
+                        #   WebCryptoAPI web-platform-tests and gates in CI
+                        #   via a release-artifact runner component keyed by
+                        #   an input lock (wpt/component.sh)
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
     wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package

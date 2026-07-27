@@ -103,13 +103,13 @@ function rethrow(e) {
 /**
  * Await an async `lann:webcrypto` import and normalize its settlement.
  *
- * componentize-js (as of rev e69ace2) settles async imports through two
- * paths: an import that suspends resolves with the `ok` value unwrapped and
- * rejects an `err` as a `ComponentError`, but an import that completes
- * without blocking resolves with the raw canonical `result` wrapper
- * (`{ tag: "ok" | "err", val }`). Detecting the wrapper is unambiguous for
- * this surface: every `ok` payload is a resource, typed array, or
- * `undefined` — never a plain `{ tag }` object.
+ * componentize-js (as of the revision pinned in componentize-js.rev)
+ * settles async imports through two paths: an import that suspends resolves
+ * with the `ok` value unwrapped and rejects an `err` as a `ComponentError`,
+ * but an import that completes without blocking resolves with the raw
+ * canonical `result` wrapper (`{ tag: "ok" | "err", val }`). Detecting the
+ * wrapper is unambiguous for this surface: every `ok` payload is a
+ * resource, typed array, or `undefined` — never a plain `{ tag }` object.
  */
 async function callImport(promise) {
   let value;
