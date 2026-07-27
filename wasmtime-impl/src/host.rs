@@ -13,7 +13,10 @@ use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use futures::channel::oneshot;
-use wasmtime::component::{Accessor, Resource, Source, StreamConsumer, StreamReader, StreamResult};
+use wasmtime::component::{
+    Accessor, AsAccessor as _, Destination, Resource, Source, StreamConsumer, StreamProducer,
+    StreamReader, StreamResult, VecBuffer,
+};
 use wasmtime::{Result, StoreContextMut};
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
@@ -31,6 +34,7 @@ use crate::bindings::webcrypto::{
     signature as signature_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
+use crate::limits::Reservation;
 use crate::{
     AeadKey, Digest, InternalNonceKey, MacKey, SigningKey, VerifyingKey, WasiWebcrypto,
     WasiWebcryptoCtxView, AES_GCM_NAME, CHACHA20_POLY1305_NAME, ECDSA_NAME, ED25519_NAME,
@@ -65,9 +69,18 @@ impl bytes_iface::Host for WasiWebcryptoCtxView<'_> {
 /// never be mistaken for the complete input.
 struct ByteCollector {
     buf: Vec<u8>,
+    /// The per-call buffering cap: bytes beyond it are drained (the WIT
+    /// drain rule holds) but discarded, and the operation reports the
+    /// overflow instead of a result.
+    cap: usize,
+    overflowed: bool,
     failed: bool,
-    done_tx: Option<oneshot::Sender<Vec<u8>>>,
+    done_tx: Option<oneshot::Sender<std::result::Result<Vec<u8>, InputOverflow>>>,
 }
+
+/// Marker for an input stream that exceeded the per-call buffering cap.
+#[derive(Debug, PartialEq)]
+struct InputOverflow;
 
 impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
     type Item = u8;
@@ -83,6 +96,12 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
 
         let available = source.remaining(&mut store);
         if available > 0 {
+            if !this.overflowed && this.buf.len().saturating_add(available) > this.cap {
+                // Over the per-call cap: stop retaining (free what we
+                // held), keep draining-and-discarding below.
+                this.overflowed = true;
+                this.buf = Vec::new();
+            }
             let mut chunk = Vec::with_capacity(available);
             if let Err(err) = source.read(&mut store, &mut chunk) {
                 // Never let `Drop` deliver a partial buffer as if it were
@@ -90,7 +109,9 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
                 this.failed = true;
                 return Poll::Ready(Err(err));
             }
-            this.buf.extend_from_slice(&chunk);
+            if !this.overflowed {
+                this.buf.extend_from_slice(&chunk);
+            }
             return Poll::Ready(Ok(StreamResult::Completed));
         }
 
@@ -109,33 +130,108 @@ impl Drop for ByteCollector {
     fn drop(&mut self) {
         if !self.failed {
             if let Some(tx) = self.done_tx.take() {
-                let _ = tx.send(std::mem::take(&mut self.buf));
+                let _ = tx.send(if self.overflowed {
+                    Err(InputOverflow)
+                } else {
+                    Ok(std::mem::take(&mut self.buf))
+                });
             }
         }
     }
 }
 
 /// Drain an entire `stream<u8>` into a buffer, resolving once the stream ends
-/// (its writer dropped). Fails if the consumer was torn down without
-/// delivering the complete input (a host-side pipe error).
+/// (its writer dropped). The outer `Result` is a host-side pipe error (the
+/// consumer torn down without delivering the complete input); the inner one
+/// reports an input that exceeded the admitted per-call buffering cap as
+/// the WIT's recoverable operational error.
 async fn drain_stream<T: Send>(
     accessor: &Accessor<T, WasiWebcrypto>,
     data: StreamReader<u8>,
-) -> Result<Vec<u8>> {
+    cap: usize,
+) -> Result<std::result::Result<Vec<u8>, Error>> {
     let (done_tx, done_rx) = oneshot::channel();
     accessor.with(|access| {
         data.pipe(
             access,
             ByteCollector {
                 buf: Vec::new(),
+                cap,
+                overflowed: false,
                 failed: false,
                 done_tx: Some(done_tx),
             },
         )
     })?;
-    done_rx
+    Ok(done_rx
         .await
-        .map_err(|_| wasmtime::Error::msg("input stream ended without completing"))
+        .map_err(|_| wasmtime::Error::msg("input stream ended without completing"))?
+        .map_err(|InputOverflow| {
+            Error::Other(format!(
+                "input exceeds the per-call buffer limit ({cap} bytes); see \
+                 WasiWebcryptoCtx::set_per_call_buffer_limit and \
+                 Store::set_hostcall_fuel"
+            ))
+        }))
+}
+
+/// Admit one stream-draining operation against the context's buffer limits
+/// (waiting FIFO for pool capacity), returning the reservation guard and
+/// the operation's buffering cap.
+async fn admit_input<T: Send>(
+    accessor: &Accessor<T, WasiWebcrypto>,
+) -> Result<(Reservation, usize)> {
+    let (pool, per_call, total) = accessor.as_accessor().with(|mut access| {
+        let fuel = wasmtime::AsContextMut::as_context_mut(&mut access).hostcall_fuel() as u64;
+        let view = access.get();
+        let (per_call, total) = view.ctx.buffer_limits(fuel);
+        Ok::<_, wasmtime::Error>((view.ctx.pool().clone(), per_call, total))
+    })?;
+    let reservation = pool.admit(per_call, total).await;
+    Ok((reservation, usize::try_from(per_call).unwrap_or(usize::MAX)))
+}
+
+/// A host-produced output stream that carries the operation's buffer-pool
+/// [`Reservation`]: the reservation releases only when the output bytes have
+/// been handed off (or the stream is dropped), so pool capacity tracks the
+/// bytes the host actually retains.
+struct GuardedOutput {
+    data: Option<Vec<u8>>,
+    _reservation: Reservation,
+}
+
+impl GuardedOutput {
+    fn new(data: Vec<u8>, reservation: Reservation) -> Self {
+        Self {
+            data: (!data.is_empty()).then_some(data),
+            _reservation: reservation,
+        }
+    }
+}
+
+impl<D> StreamProducer<D> for GuardedOutput {
+    type Item = u8;
+    type Buffer = VecBuffer<u8>;
+
+    fn poll_produce<'a>(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _store: StoreContextMut<'a, D>,
+        mut dst: Destination<'a, Self::Item, Self::Buffer>,
+        _finish: bool,
+    ) -> Poll<Result<StreamResult>> {
+        let this = self.get_mut();
+        match this.data.take() {
+            // Hand the whole buffer over but stay alive (`Completed`): we
+            // are polled again once it has drained, and only then drop —
+            // releasing the reservation after the bytes have left.
+            Some(bytes) => {
+                dst.set_buffer(bytes.into());
+                Poll::Ready(Ok(StreamResult::Completed))
+            }
+            None => Poll::Ready(Ok(StreamResult::Dropped)),
+        }
+    }
 }
 
 // --- mac ---------------------------------------------------------------------
@@ -247,6 +343,7 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<MacKey>,
         data: StreamReader<u8>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        let (_reservation, cap) = admit_input(accessor).await?;
         let (variant, raw) = accessor.with(|mut access| {
             let key = access.get().table.get(&self_)?;
             Ok::<_, wasmtime::Error>((key.variant, key.raw.clone()))
@@ -256,7 +353,10 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         //
         // The WIT `err` case exists for operational keystore failures; this
         // implementation holds the material in-process, so it never errs.
-        let bytes = drain_stream(accessor, data).await?;
+        let bytes = match drain_stream(accessor, data, cap).await? {
+            Ok(bytes) => bytes,
+            Err(err) => return Ok(Err(err)),
+        };
         Ok(Ok(variant.sign(&raw, &bytes)?))
     }
 
@@ -266,11 +366,15 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         data: StreamReader<u8>,
         tag: Vec<u8>,
     ) -> Result<std::result::Result<(), Error>> {
+        let (_reservation, cap) = admit_input(accessor).await?;
         let (variant, raw) = accessor.with(|mut access| {
             let key = access.get().table.get(&self_)?;
             Ok::<_, wasmtime::Error>((key.variant, key.raw.clone()))
         })?;
-        let bytes = drain_stream(accessor, data).await?;
+        let bytes = match drain_stream(accessor, data, cap).await? {
+            Ok(bytes) => bytes,
+            Err(err) => return Ok(Err(err)),
+        };
         variant.verify(&raw, &bytes, &tag)
     }
 
@@ -427,13 +531,17 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         aad: Vec<u8>,
         plaintext: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let (reservation, cap) = admit_input(accessor).await?;
         let cipher = accessor.with(|mut access| {
             Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
         })?;
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(accessor, plaintext).await?;
+        let msg = match drain_stream(accessor, plaintext, cap).await? {
+            Ok(msg) => msg,
+            Err(err) => return Ok(Err(err)),
+        };
         if let Err(err) = cipher.check_nonce(&nonce) {
             return Ok(Err(err));
         }
@@ -452,7 +560,8 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
                 ))))
             }
         };
-        let reader = accessor.with(|access| StreamReader::new(access, sealed))?;
+        let reader = accessor
+            .with(|access| StreamReader::new(access, GuardedOutput::new(sealed, reservation)))?;
         Ok(Ok(reader))
     }
 
@@ -463,6 +572,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         aad: Vec<u8>,
         ciphertext: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let (reservation, cap) = admit_input(accessor).await?;
         let cipher = accessor.with(|mut access| {
             Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
         })?;
@@ -470,7 +580,10 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         // the call resolves with an error, so the caller's writer always
         // completes. Buffering the whole message is inherent to `open`: no
         // unverified plaintext may be observable.
-        let msg = drain_stream(accessor, ciphertext).await?;
+        let msg = match drain_stream(accessor, ciphertext, cap).await? {
+            Ok(msg) => msg,
+            Err(err) => return Ok(Err(err)),
+        };
         if let Err(err) = cipher.check_nonce(&nonce) {
             return Ok(Err(err));
         }
@@ -487,7 +600,8 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
             Ok(opened) => opened,
             Err(_) => return Ok(Err(Error::AuthenticationFailed)),
         };
-        let reader = accessor.with(|access| StreamReader::new(access, opened))?;
+        let reader = accessor
+            .with(|access| StreamReader::new(access, GuardedOutput::new(opened, reservation)))?;
         Ok(Ok(reader))
     }
 
@@ -530,6 +644,7 @@ impl<T: Send> HostDigestWithStore<T> for WasiWebcrypto {
         self_: Resource<Digest>,
         data: StreamReader<u8>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        let (_reservation, cap) = admit_input(accessor).await?;
         let variant = accessor
             .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.variant))?;
         // Buffer the whole stream, then hash it; the result is
@@ -538,7 +653,10 @@ impl<T: Send> HostDigestWithStore<T> for WasiWebcrypto {
         // The WIT `err` case exists for operational failures (e.g. an
         // external digest engine); this implementation computes in-process,
         // so it never errs.
-        let bytes = drain_stream(accessor, data).await?;
+        let bytes = match drain_stream(accessor, data, cap).await? {
+            Ok(bytes) => bytes,
+            Err(err) => return Ok(Err(err)),
+        };
         Ok(Ok(variant.digest(&bytes)))
     }
 
@@ -842,13 +960,17 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
         aad: Vec<u8>,
         plaintext: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let (reservation, cap) = admit_input(accessor).await?;
         let cipher = accessor.with(|mut access| {
             Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
         })?;
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(accessor, plaintext).await?;
+        let msg = match drain_stream(accessor, plaintext, cap).await? {
+            Ok(msg) => msg,
+            Err(err) => return Ok(Err(err)),
+        };
         // Count this invocation against the algorithm's nonce budget before
         // drawing the nonce, per the minting interfaces' SHOULD-enforce
         // contract.
@@ -887,7 +1009,8 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
             }
         };
         sealed.extend(body);
-        let reader = accessor.with(|access| StreamReader::new(access, sealed))?;
+        let reader = accessor
+            .with(|access| StreamReader::new(access, GuardedOutput::new(sealed, reservation)))?;
         Ok(Ok(reader))
     }
 
@@ -897,13 +1020,17 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
         aad: Vec<u8>,
         sealed: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        let (reservation, cap) = admit_input(accessor).await?;
         let cipher = accessor.with(|mut access| {
             Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.cipher.clone())
         })?;
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, and buffering the whole message
         // is inherent to `open`: no unverified plaintext may be observable.
-        let msg = drain_stream(accessor, sealed).await?;
+        let msg = match drain_stream(accessor, sealed, cap).await? {
+            Ok(msg) => msg,
+            Err(err) => return Ok(Err(err)),
+        };
         // Any failure -- input too short to carry the wire format, a bad
         // tag, wrong key, wrong associated data -- reports
         // `authentication-failed` with no detail, per the WIT contract.
@@ -921,7 +1048,8 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
             Ok(opened) => opened,
             Err(_) => return Ok(Err(Error::AuthenticationFailed)),
         };
-        let reader = accessor.with(|access| StreamReader::new(access, opened))?;
+        let reader = accessor
+            .with(|access| StreamReader::new(access, GuardedOutput::new(opened, reservation)))?;
         Ok(Ok(reader))
     }
 
@@ -1184,7 +1312,11 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         data: StreamReader<u8>,
         sig: Vec<u8>,
     ) -> Result<std::result::Result<(), Error>> {
-        let bytes = drain_stream(accessor, data).await?;
+        let (_reservation, cap) = admit_input(accessor).await?;
+        let bytes = match drain_stream(accessor, data, cap).await? {
+            Ok(bytes) => bytes,
+            Err(err) => return Ok(Err(err)),
+        };
         accessor.with(|mut access| {
             let key = access.get().table.get(&self_)?;
             Ok(key.public.verify(&bytes, &sig))
@@ -1250,7 +1382,11 @@ impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<SigningKey>,
         data: StreamReader<u8>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        let bytes = drain_stream(accessor, data).await?;
+        let (_reservation, cap) = admit_input(accessor).await?;
+        let bytes = match drain_stream(accessor, data, cap).await? {
+            Ok(bytes) => bytes,
+            Err(err) => return Ok(Err(err)),
+        };
         // The WIT `err` case exists for operational keystore failures; this
         // implementation holds the material in-process, so it never errs.
         accessor.with(|mut access| {
@@ -1488,10 +1624,27 @@ mod tests {
         let (done_tx, mut done_rx) = oneshot::channel();
         drop(ByteCollector {
             buf: b"collected".to_vec(),
+            cap: usize::MAX,
+            overflowed: false,
             failed: false,
             done_tx: Some(done_tx),
         });
-        assert_eq!(done_rx.try_recv(), Ok(Some(b"collected".to_vec())));
+        assert_eq!(done_rx.try_recv(), Ok(Some(Ok(b"collected".to_vec()))));
+    }
+
+    /// An over-cap collector delivers the overflow marker, not the (already
+    /// discarded) buffer.
+    #[test]
+    fn byte_collector_overflow_delivers_marker() {
+        let (done_tx, mut done_rx) = oneshot::channel();
+        drop(ByteCollector {
+            buf: Vec::new(),
+            cap: 4,
+            overflowed: true,
+            failed: false,
+            done_tx: Some(done_tx),
+        });
+        assert_eq!(done_rx.try_recv(), Ok(Some(Err(super::InputOverflow))));
     }
 
     /// After a pipe error, dropping the collector must NOT deliver the
@@ -1499,9 +1652,12 @@ mod tests {
     /// unsent, which `drain_stream` maps to an error.
     #[test]
     fn byte_collector_drop_after_failure_delivers_nothing() {
-        let (done_tx, mut done_rx) = oneshot::channel::<Vec<u8>>();
+        let (done_tx, mut done_rx) =
+            oneshot::channel::<std::result::Result<Vec<u8>, super::InputOverflow>>();
         drop(ByteCollector {
             buf: b"partial".to_vec(),
+            cap: usize::MAX,
+            overflowed: false,
             failed: true,
             done_tx: Some(done_tx),
         });
