@@ -4,22 +4,33 @@
 // Run with:  npm run build:component && npm run transpile && npm test
 import { demo } from "../generated/crypto-demo.js";
 
+/**
+ * Unwrap jco's representation of a WIT `result<string, string>` returned by
+ * an exported function — a convention, not documented API, so it is
+ * isolated here and version-anchored: validated against jco 1.26.1 /
+ * jco-transpile 0.5.2. The ok value is returned directly and the err case
+ * thrown (with a `{ tag, val }` result object tolerated too); revalidate
+ * when bumping jco.
+ * @param {() => Promise<unknown>} call
+ */
+async function unwrapResult(call) {
+  let value;
+  try {
+    value = await call();
+  } catch (err) {
+    throw new Error(`returned err: ${err?.payload ?? err?.val ?? err}`);
+  }
+  if (typeof value === "object" && value !== null && "tag" in value) {
+    if (value.tag !== "ok") {
+      throw new Error(`returned err: ${value.val}`);
+    }
+    value = value.val;
+  }
+  return value;
+}
 
 async function main() {
-  // jco represents `result<string, string>` by returning the ok value and
-  // throwing on err; a `{ tag, val }` result object is tolerated too.
-  let summary;
-  try {
-    summary = await demo.run();
-  } catch (err) {
-    throw new Error(`demo.run returned err: ${err?.payload ?? err?.val ?? err}`);
-  }
-  if (typeof summary === "object" && summary !== null && "tag" in summary) {
-    if (summary.tag !== "ok") {
-      throw new Error(`demo.run returned err: ${summary.val}`);
-    }
-    summary = summary.val;
-  }
+  const summary = await unwrapResult(() => demo.run());
 
   console.log("crypto-demo (Node / Web Crypto host) result:");
   console.log(`  ${summary}`);
