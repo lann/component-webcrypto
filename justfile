@@ -3,7 +3,7 @@ default:
     @just --list
 
 # Run every CI check locally: each CI job runs exactly one job recipe below.
-ci: rust-checks jco-checks
+ci: rust-checks jco-checks componentize-checks
 
 # Everything the rust-checks CI job runs, in order.
 rust-checks:
@@ -17,6 +17,11 @@ rust-checks:
 # Everything the jco CI job runs.
 jco-checks:
     @just _step test-node
+
+# Everything the componentize CI job runs: the WPT WebCryptoAPI suites
+# against the componentize-sdk JS guest library.
+componentize-checks:
+    @just _step test-webcrypto-componentize-wpt
 
 # Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
 # error annotation naming the recipe) when running under Actions; a plain
@@ -58,6 +63,7 @@ validate-wit:
     wasm-tools component wit wasmtime-impl/wit
     wasm-tools component wit guest-impl/wit
     wasm-tools component wit examples/crypto-demo/wit
+    wasm-tools component wit examples/componentize-demo/wit
     wasm-tools component wit conformance/guest/wit
 
 # Run the Rust tests, including the wasmtime-demo integration test (which
@@ -108,6 +114,75 @@ compose-demo: build-component build-guest-provider
 test-webcrypto-composed: compose-demo
     timeout 120 wasmtime run -W component-model-async=y -S cli \
         target/crypto-demo-composed.wasm
+
+# --- componentize-js (JS guest) demo ------------------------------------------
+
+# The componentize-js CLI (dicej's ComponentizeJS reboot) used to
+# (re)generate the JS guest components. Deliberately not installed by
+# scripts/setup.sh and never needed by CI's gating checks: building it
+# compiles SpiderMonkey to wasm and needs WASI-SDK 30, and it currently
+# needs one runtime patch — see componentize-sdk/README.md for install
+# steps. The pinned revision lives in componentize-sdk/componentize-js.rev.
+componentize-js := env_var_or_default("COMPONENTIZE_JS", "componentize-js")
+
+# Componentize the JS WebCrypto-subset demo guest (componentize-sdk library +
+# examples/componentize-demo app) into examples/componentize-demo/build/.
+# The base directory is the repository root, so the app's module specifiers
+# (./componentize-sdk/webcrypto.js) resolve against it.
+build-componentize-demo:
+    mkdir -p examples/componentize-demo/build
+    {{componentize-js}} -q -d examples/componentize-demo/wit -w componentize-demo \
+        componentize examples/componentize-demo/app.js -p . \
+        -o examples/componentize-demo/build/componentize-demo.component.wasm
+
+# Compose the fully in-guest JS demo (the `compose-demo` recipe with the JS
+# guest in place of the Rust one): the JS guest's lann:webcrypto imports are
+# satisfied by the in-guest provider, then the CLI driver is plugged on top.
+compose-componentize-demo: build-componentize-demo build-guest-provider
+    cargo build --release -p crypto-demo-driver --target wasm32-wasip2
+    wac plug examples/componentize-demo/build/componentize-demo.component.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        -o target/componentize-demo-with-crypto.wasm
+    wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
+        --plug target/componentize-demo-with-crypto.wasm \
+        -o target/componentize-demo-composed.wasm
+
+# JS-guest integration test: run the composed JS demo under `wasmtime` — the
+# WebCrypto-subset library's checks execute against RustCrypto running
+# entirely inside wasm. Needs the componentize-js CLI (see above), plus
+# `wasmtime` (v47+) and `wac` on PATH.
+test-webcrypto-componentize: compose-componentize-demo
+    timeout 120 wasmtime run -W component-model-async=y -S cli \
+        target/componentize-demo-composed.wasm
+
+# Rebuild the componentized WPT runner locally (needs the componentize-js
+# CLI, see above): run this when test-webcrypto-componentize-wpt reports no
+# published component for the current inputs and you want to test before
+# pushing — CI's wpt-component job builds and publishes the component for
+# new inputs on merge to main.
+update-wpt-component:
+    COMPONENTIZE_JS={{componentize-js}} componentize-sdk/wpt/component.sh build
+
+# Run the vendored web-platform-tests WebCryptoAPI suites against the
+# componentize-sdk library: every in-subset test must pass; out-of-subset
+# tests are reported by count (componentize-sdk/wpt/README.md has the
+# vendoring and subset policy). The componentized runner is a release
+# artifact keyed by an input lock (componentize-sdk/wpt/component.sh):
+# `ensure` reuses a fresh local build or downloads the published component,
+# which is then composed with a freshly built in-guest provider and driver —
+# so no componentize-js toolchain is needed: only `wasmtime` (v47+) and
+# `wac`, like test-webcrypto-composed.
+test-webcrypto-componentize-wpt: build-guest-provider
+    componentize-sdk/wpt/component.sh ensure
+    cargo build --release -p crypto-demo-driver --target wasm32-wasip2
+    wac plug componentize-sdk/wpt/build/runner.component.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        -o target/wpt-runner-with-crypto.wasm
+    wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
+        --plug target/wpt-runner-with-crypto.wasm \
+        -o target/wpt-runner-composed.wasm
+    timeout 600 wasmtime run -W component-model-async=y -S cli \
+        target/wpt-runner-composed.wasm
 
 # --- conformance -------------------------------------------------------------
 

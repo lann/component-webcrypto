@@ -1,0 +1,22 @@
+// Demo-only WIT for the `componentize-demo` example component: the world the
+// JS guest is componentized against. The shared `lann:webcrypto` package
+// lives once at the repository root `wit/` and is pulled in through the
+// `deps/lann-webcrypto` symlink; the `demo:webcrypto-demo` package (the demo
+// entry-point interface shared with the Rust `crypto-demo` guest) comes in
+// through the `deps/webcrypto-demo` symlink.
+package demo:componentize-webcrypto-demo@0.1.0;
+
+/// The world for a JS guest using the WebCrypto-subset library in
+/// `componentize-sdk/`: it imports exactly the `lann:webcrypto` surface the
+/// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
+/// `aes-gcm`/`aead`) and exports the same demo entry point as the Rust
+/// `crypto-demo` guest, so the existing `crypto-demo-driver` can drive it.
+world componentize-demo {
+    import lann:webcrypto/types@0.1.0;
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+
+    export demo:webcrypto-demo/demo@0.1.0;
+}
