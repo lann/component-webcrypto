@@ -5,7 +5,7 @@
 
 use crate::translate::Schedule;
 use crate::util::{
-    compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
+    compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, unhex, verify,
 };
 use crate::FEATURE_CHACHA;
 use lann_webcrypto_guest::raw::aead::AeadKey;
@@ -32,7 +32,10 @@ use lann_webcrypto_guest::raw::types::Error;
 use lann_webcrypto_guest::raw::xchacha20_poly1305::{
     generate_key as generate_xchacha_key, import_key as import_xchacha_key,
 };
-use lann_webcrypto_guest::raw::xchacha20_poly1305_internal_nonce::generate_key as generate_xchacha_internal_nonce_key;
+use lann_webcrypto_guest::raw::xchacha20_poly1305_internal_nonce::{
+    generate_key as generate_xchacha_internal_nonce_key,
+    import_key as import_xchacha_internal_nonce_key,
+};
 
 /// One probe: its name (`probe/<name>` case ids) and the features it
 /// exercises beyond the baseline surface.
@@ -81,6 +84,9 @@ pub const PROBES: &[Probe] = &[
     probe("verifying-key-export-roundtrip"),
     probe("internal-nonce-shape"),
     chacha_probe("chacha-internal-nonce-roundtrip"),
+    probe("aes128-shape"),
+    probe("ed25519-sign-known-answer"),
+    probe("open-short-input"),
 ];
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
@@ -111,6 +117,9 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         21 => verifying_key_export_roundtrip().await,
         22 => internal_nonce_shape().await,
         23 => chacha_internal_nonce_roundtrip().await,
+        24 => aes128_shape().await,
+        25 => ed25519_sign_known_answer().await,
+        26 => open_short_input().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -851,10 +860,10 @@ async fn sig_key_metadata() -> Result<(), String> {
     // An ECDSA public key (any valid point works; this is the RFC 6979
     // A.2.5 public key).
     let mut point = vec![0x04];
-    point.extend(crate::util::unhex(
+    point.extend(unhex(
         "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
     ));
-    point.extend(crate::util::unhex(
+    point.extend(unhex(
         "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
     ));
     let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
@@ -907,7 +916,7 @@ async fn sig_import_invalid() -> Result<(), String> {
     )?;
     // A compressed encoding of the RFC 6979 A.2.5 public key (y is odd).
     let mut compressed = vec![0x03];
-    compressed.extend(crate::util::unhex(
+    compressed.extend(unhex(
         "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
     ));
     expect_invalid(
@@ -942,7 +951,30 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
         .map_err(|e| describe("re-import of exported public key", &e))?;
     let (verified, fed) = sig_verify(&reimported, payload, &sig, Schedule::Whole).await;
     fed?;
-    verified.map_err(|e| describe("re-imported key did not verify", &e))
+    verified.map_err(|e| describe("re-imported key did not verify", &e))?;
+
+    // ECDSA verifying keys: SEC1 import -> export is the identity, on
+    // every target serving ecdsa-verify (including the composed provider,
+    // which exports verification while declining class-D signing).
+    for (variant, public) in [
+        (
+            EcdsaVariant::P256Sha256,
+            // The vendored Wycheproof P-256 file's group public key.
+            unhex("042927b10512bae3eddcfe467828128bad2903269919f7086069c8c4df6c732838c7787964eaac00e5921fb1498a60f4606766b3d9685001558d1a974e7341513e"),
+        ),
+        (
+            EcdsaVariant::P384Sha384,
+            // The vendored Wycheproof P-384 file's group public key.
+            unhex("042da57dda1089276a543f9ffdac0bff0d976cad71eb7280e7d9bfd9fee4bdb2f20f47ff888274389772d98cc5752138aa4b6d054d69dcf3e25ec49df870715e34883b1836197d76f8ad962e78f6571bbc7407b0d6091f9e4d88f014274406174f"),
+        ),
+    ] {
+        let key = import_ecdsa_verifying_key(variant, public.clone())
+            .await
+            .map_err(|e| describe("import-verifying-key (ecdsa)", &e))?;
+        let exported = key.export_key().await;
+        expect_bytes(&exported, &public, "exported ECDSA public key")?;
+    }
+    Ok(())
 }
 
 /// The internal-nonce API contract the vectors cannot express: sealed
@@ -1068,6 +1100,41 @@ async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
     let key = generate_xchacha_internal_nonce_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
+    if key.algorithm_name() != "XChaCha20-Poly1305" {
+        return Err(format!(
+            "algorithm-name: got {:?}, want \"XChaCha20-Poly1305\"",
+            key.algorithm_name()
+        ));
+    }
+    if key.algorithm_length() != 256 {
+        return Err(format!(
+            "algorithm-length: got {}, want 256",
+            key.algorithm_length()
+        ));
+    }
+    // 24-byte random nonces have no enforced budget.
+    if let Some(budget) = key.seals_remaining() {
+        return Err(format!(
+            "seals-remaining: got {budget}, want none (no enforced budget)"
+        ));
+    }
+    // A non-extractable key refuses export; an extractable import
+    // round-trips its 32 bytes.
+    match key.export_key().await {
+        Err(Error::NotExtractable) => {}
+        Err(other) => return Err(describe("expected not-extractable, got", &other)),
+        Ok(_) => return Err("non-extractable key exported".into()),
+    }
+    let raw = vec![0x42u8; 32];
+    let imported = import_xchacha_internal_nonce_key(raw.clone(), true)
+        .await
+        .map_err(|e| describe("import-key", &e))?;
+    let exported = imported
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    expect_bytes(&exported, &raw, "exported key material")?;
+
     let plaintext = b"chacha internal-nonce payload".to_vec();
     let (sealed, fed) = in_seal(&key, b"aad", &plaintext, Schedule::Whole).await;
     fed.map_err(|e| format!("seal feeder: {e}"))?;
@@ -1084,4 +1151,121 @@ async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
     fed.map_err(|e| format!("open feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open", &e))?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
+}
+
+/// AES-128-GCM minting and round trip: every implementation serves the
+/// variant, so its key shape (16-byte material, 128-bit length, the same
+/// 12/16 nonce/tag contract) and a seal/open round trip are pinned for
+/// both nonce disciplines.
+async fn aes128_shape() -> Result<(), String> {
+    let key = generate_key(AesVariant::Aes128, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    if key.algorithm_length() != 128 {
+        return Err(format!(
+            "algorithm-length: got {}, want 128",
+            key.algorithm_length()
+        ));
+    }
+    if key.nonce_size() != 12 || key.tag_size() != 16 {
+        return Err(format!(
+            "nonce/tag size: got {}/{}, want 12/16",
+            key.nonce_size(),
+            key.tag_size()
+        ));
+    }
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    if exported.len() != 16 {
+        return Err(format!(
+            "exported key length: got {}, want 16",
+            exported.len()
+        ));
+    }
+
+    let plaintext = b"aes-128 round trip payload".to_vec();
+    let nonce = [3u8; 12];
+    let (sealed, fed) = seal(&key, &nonce, b"aad", &plaintext, Schedule::Straddle).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    let (opened, fed) = open(&key, &nonce, b"aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open", &e))?;
+    expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
+
+    // The internal-nonce discipline serves AES-128 too.
+    let key = generate_internal_nonce_key(AesVariant::Aes128, false)
+        .await
+        .map_err(|e| describe("generate-key (internal nonce)", &e))?;
+    if key.algorithm_length() != 128 {
+        return Err(format!(
+            "internal-nonce algorithm-length: got {}, want 128",
+            key.algorithm_length()
+        ));
+    }
+    let (sealed, fed) = in_seal(&key, b"aad", &plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("internal-nonce seal feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("internal-nonce seal", &e))?;
+    let (opened, fed) = in_open(&key, b"aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("internal-nonce open feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("internal-nonce open", &e))?;
+    expect_bytes(&opened, &plaintext, "internal-nonce round trip")
+}
+
+/// The RFC 8032 §7.1 TEST 2 known answer, in the corpus rather than only
+/// the demo guest: `import-signing-key` succeeds, signing is deterministic
+/// and byte-exact, the seed round-trips through `export-key`, and the
+/// derived public key matches the vector's.
+async fn ed25519_sign_known_answer() -> Result<(), String> {
+    let seed = unhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
+    let public = unhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
+    let message = [0x72u8];
+    let sig = unhex(
+        "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
+         085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
+    );
+
+    let key = import_ed25519_signing_key(seed.clone(), true)
+        .await
+        .map_err(|e| describe("import-signing-key", &e))?;
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    expect_bytes(&exported, &seed, "exported seed")?;
+    expect_bytes(
+        &key.verifying_key().export_key().await,
+        &public,
+        "derived public key",
+    )?;
+
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (got, fed) = futures::join!(key.sign(rx), crate::util::feed_whole(tx, &message));
+    fed?;
+    let got = got.map_err(|e| describe("sign", &e))?;
+    expect_bytes(&got, &sig, "RFC 8032 test-2 signature")
+}
+
+/// Caller-nonce `open` of inputs shorter than the tag fails
+/// `authentication-failed` (the internal-nonce analogue is covered by
+/// `internal-nonce-shape`).
+async fn open_short_input() -> Result<(), String> {
+    let key = generate_key_256(false).await?;
+    for len in [0usize, 1, 15] {
+        let (opened, fed) = open(&key, &[0u8; 12], b"", &vec![0xa5; len], Schedule::Whole).await;
+        fed.map_err(|e| format!("{len}-byte open feeder: {e}"))?;
+        match opened {
+            Err(Error::AuthenticationFailed) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("{len}-byte input: expected authentication-failed, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{len}-byte input opened")),
+        }
+    }
+    Ok(())
 }
