@@ -30,7 +30,9 @@ export const CORPORA = [
 /**
  * Run both corpora with the given missing-features declaration, invoking
  * `report` with `{ kind: "start", corpus, total }` before each corpus and
- * `{ kind: "result", corpus, name, features, outcome, detail }` per case.
+ * `{ kind: "result", corpus, index, name, features, outcome, detail }` per
+ * case (`index` is the case's position in the corpus, letting consumers of
+ * a sharded run restore corpus order).
  *
  * `shard` selects a stripe of each corpus (case `i` belongs to shard
  * `i % count`), letting several workers — each with its own instances of
@@ -44,17 +46,19 @@ export const CORPORA = [
 export async function runAll(missing, report, shard = { index: 0, count: 1 }) {
   for (const { corpus, module } of CORPORA) {
     const { tests } = await import(module);
-    const cases = tests
-      .all(missing)
-      .filter((_, i) => i % shard.count === shard.index);
-    report({ kind: "start", corpus, total: cases.length });
-    for (const testCase of cases) {
+    const mine = [];
+    tests.all(missing).forEach((testCase, index) => {
+      if (index % shard.count === shard.index) mine.push([index, testCase]);
+    });
+    report({ kind: "start", corpus, total: mine.length });
+    for (const [index, testCase] of mine) {
       const name = String(testCase.name());
       const features = Array.from(testCase.features(), String);
       const { tag, val } = await testCase.run();
       report({
         kind: "result",
         corpus,
+        index,
         name,
         features,
         outcome: String(tag),
