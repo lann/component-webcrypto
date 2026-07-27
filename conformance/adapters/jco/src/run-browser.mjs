@@ -39,10 +39,24 @@ import { runAll } from "/conformance/web/harness.mjs";
 const missing = ${JSON.stringify(missing)};
 const collected = { shared: [], signing: [] };
 
+// Heartbeats for the Node-side stall watchdog: fire-and-forget (a closing
+// page must not turn a heartbeat into an unhandled rejection), throttled to
+// one per hundred results.
+const beat = (note) => {
+  try { window.__progress(note).catch(() => {}); } catch {}
+};
+let beats = 0;
+
 const collect = (message) => {
+  if (message.kind === "start") {
+    beat("suite " + message.suite + ": " + message.total + " cases");
+    return;
+  }
   if (message.kind !== "result") return;
   const { suite, index, name, features, outcome, detail } = message;
   collected[suite].push({ index, name, features, outcome, detail });
+  beats += 1;
+  if (beats % 100 === 0) beat("result " + beats + ": " + suite + "/" + name);
 };
 
 /** Run one suite stripe per worker; resolve to null on success or the
@@ -84,11 +98,13 @@ const runInWorkers = (count) =>
 
 (async () => {
   try {
+    beat("starting worker run");
     const failure = await runInWorkers(
       Math.min(navigator.hardwareConcurrency || 2, 8),
     );
     if (failure !== null) {
       console.warn("worker run failed (" + failure + "); retrying on the main thread");
+      beat("worker run failed; starting the main-thread fallback");
       collected.shared.length = 0;
       collected.signing.length = 0;
       await runAll(missing, collect);
@@ -169,6 +185,15 @@ async function findChrome() {
   );
 }
 
+// Watchdog bounds: browser launch and page load get hard timeouts; the run
+// itself is bounded by *inactivity* — the harness heartbeats as results
+// stream in, so a stall means the page hung (a wedged worker, a deadlocked
+// JSPI suspension, an uncaught error nothing was listening for), and the
+// watchdog fails fast with the last heartbeat naming where.
+const LAUNCH_TIMEOUT_MS = 120_000;
+const LOAD_TIMEOUT_MS = 60_000;
+const STALL_TIMEOUT_MS = 90_000;
+
 async function main() {
   const missing = await missingFeatures("jco-browser");
   const [{ chromium }, server, executablePath] = await Promise.all([
@@ -178,17 +203,53 @@ async function main() {
   ]);
   const { port } = server.address();
 
-  const browser = await chromium.launch({ executablePath, headless: true });
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    timeout: LAUNCH_TIMEOUT_MS,
+  });
   try {
     const page = await browser.newPage();
     page.on("console", (msg) => {
       if (msg.type() === "error") console.error("[page]", msg.text());
     });
-    const report = new Promise((resolve) => {
-      page.exposeFunction("__report", resolve);
+
+    let lastBeat = { at: Date.now(), note: "page created" };
+    await page.exposeFunction("__progress", (note) => {
+      lastBeat = { at: Date.now(), note: String(note) };
     });
-    await page.goto(`http://127.0.0.1:${port}/`);
-    const outcome = await report;
+    let settled = false;
+    const report = new Promise((resolve, reject) => {
+      page.exposeFunction("__report", resolve);
+      page.on("crash", () =>
+        reject(new Error(`page crashed (last heartbeat: ${lastBeat.note})`)),
+      );
+      page.on("pageerror", (err) =>
+        reject(new Error(`uncaught page error: ${err} (last heartbeat: ${lastBeat.note})`)),
+      );
+      const watchdog = setInterval(() => {
+        if (settled) {
+          clearInterval(watchdog);
+          return;
+        }
+        const stalled = Date.now() - lastBeat.at;
+        if (stalled > STALL_TIMEOUT_MS) {
+          clearInterval(watchdog);
+          reject(
+            new Error(
+              `harness stalled: no heartbeat for ${Math.round(stalled / 1000)}s ` +
+                `(last: ${lastBeat.note})`,
+            ),
+          );
+        }
+      }, 5_000);
+      watchdog.unref?.();
+    });
+
+    await page.goto(`http://127.0.0.1:${port}/`, { timeout: LOAD_TIMEOUT_MS });
+    const outcome = await report.finally(() => {
+      settled = true;
+    });
     if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
     await writeReport("jco-browser", "shared", missing, outcome.shared);
     await writeReport("jco-browser", "signing", missing, outcome.signing, "jco-browser-signing");
