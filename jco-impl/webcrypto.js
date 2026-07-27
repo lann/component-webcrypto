@@ -913,6 +913,18 @@ export class VerifyingKey {
           throw errAuthenticationFailed();
         }
       }
+      // The `ecdsa-verify` WIT contract fixes the signature width (P1363
+      // `r ‖ s`: 64 bytes for P-256, 96 for P-384). Chromium's engine
+      // rejects other lengths itself; Firefox zero-pads short halves and
+      // accepts truncated encodings (observed accepting a 2-byte
+      // signature), so enforce the width here — a pure length check on
+      // public data, strictly monotone like the Ed25519 predicates above.
+      if (this.#key.algorithm.name === "ECDSA") {
+        const width = this.#key.algorithm.namedCurve === "P-256" ? 64 : 96;
+        if (sig.length !== width) {
+          throw errAuthenticationFailed();
+        }
+      }
       const params = signParams(this.#key.algorithm.name, this.#hash);
       if (!(await subtle.verify(params, this.#key, sig, message))) {
         throw errAuthenticationFailed();
@@ -1032,14 +1044,31 @@ function base64UrlDecode(text) {
 /**
  * Derive the public `CryptoKey` for `privateKey` by round-tripping its JWK
  * without the private field.
+ *
+ * Engines genuinely differ here on keys imported from *private-only*
+ * material (the raw-scalar ECDSA import path): Chromium-family engines
+ * compute the missing public point at import, so the JWK export carries
+ * `x`/`y`; Firefox stores only what was imported and its `exportKey`
+ * throws `OperationError` — even though signing with the key works. A
+ * platform that cannot produce the public half cannot serve this package's
+ * `signing-key` resource, whose `verifying-key` derivation is infallible
+ * by contract, so the failure is lifted to the WIT `unsupported` error at
+ * minting time rather than escaping as an uncaught platform error.
  * @param {CryptoKey} privateKey
  * @param {object} importParams
  */
 async function derivePublicKey(privateKey, importParams) {
-  const jwk = await subtle.exportKey("jwk", privateKey);
-  delete jwk.d;
-  jwk.key_ops = ["verify"];
-  return subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
+  try {
+    const jwk = await subtle.exportKey("jwk", privateKey);
+    delete jwk.d;
+    jwk.key_ops = ["verify"];
+    return await subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
+  } catch (err) {
+    throw errUnsupported(
+      "this platform cannot derive the public key from imported private " +
+        `material: ${err?.message ?? err}`,
+    );
+  }
 }
 
 /**
