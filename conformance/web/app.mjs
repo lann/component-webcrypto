@@ -391,20 +391,63 @@ function makeRun(model) {
   function handle(message) {
     switch (message.kind) {
       case "start":
-        status.textContent = `running the ${message.corpus} corpus…`;
+        // Several workers announce their shards; the flush timer's
+        // progress counter is the real status line.
+        status.textContent = "running…";
         break;
       case "result":
         pending.push(message);
         break;
-      case "done":
-        finish();
-        break;
-      case "error":
-        finish(message.error);
-        break;
       default:
         break;
     }
+  }
+
+  /**
+   * Run the corpus across `count` parallel workers, each with its own
+   * instances of the guests, running the `i % count` stripe of the cases.
+   * Resolves to null when every worker finished, or to the first failure
+   * (any worker failing aborts them all).
+   */
+  function runInWorkers(count) {
+    return new Promise((resolve) => {
+      const workers = [];
+      let done = 0;
+      let settled = false;
+      const settle = (failure) => {
+        if (settled) return;
+        settled = true;
+        for (const worker of workers) worker.terminate();
+        resolve(failure);
+      };
+      for (let index = 0; index < count; index += 1) {
+        let worker;
+        try {
+          worker = new Worker(new URL("./worker.mjs", import.meta.url), {
+            type: "module",
+          });
+        } catch (err) {
+          settle(String(err));
+          return;
+        }
+        worker.onmessage = ({ data }) => {
+          if (settled) return;
+          if (data.kind === "error") {
+            settle(data.error);
+          } else if (data.kind === "done") {
+            done += 1;
+            if (done === count) settle(null);
+          } else {
+            handle(data);
+          }
+        };
+        worker.onerror = (event) => {
+          settle(String(event.message ?? "worker failed to start"));
+        };
+        worker.postMessage({ missing, shard: { index, count } });
+        workers.push(worker);
+      }
+    });
   }
 
   async function start() {
@@ -415,37 +458,23 @@ function makeRun(model) {
     flushTimer = setInterval(() => {
       flush();
       if (received > 0) {
-        status.textContent = `running… ${received} / ${total} (this can take a few minutes)`;
+        status.textContent = `running… ${received} / ${total}`;
       }
     }, 100);
 
-    // Prefer a Web Worker; fall back to the main thread if the worker path
-    // fails before producing anything (e.g. no JSPI in workers). The run is
-    // fully async either way, so the page stays responsive.
-    let workerFailed;
-    const worker = new Promise((resolve) => (workerFailed = resolve));
-    try {
-      const w = new Worker(new URL("./worker.mjs", import.meta.url), {
-        type: "module",
-      });
-      w.onmessage = ({ data }) => {
-        if (data.kind === "error" && received === 0 && pending.length === 0) {
-          w.terminate();
-          workerFailed(data.error);
-        } else {
-          handle(data);
-        }
-      };
-      w.onerror = (event) => {
-        w.terminate();
-        workerFailed(String(event.message ?? "worker failed to start"));
-      };
-      w.postMessage({ missing });
-    } catch (err) {
-      workerFailed(String(err));
+    // Parallel workers, one corpus stripe each; cases are self-contained
+    // one-shots and each worker holds its own guest instances, so shards
+    // cannot interfere. Fall back to a sequential main-thread run if the
+    // worker path fails (e.g. no JSPI in workers) — partial worker results
+    // are discarded by reset(). The run is fully async either way, so the
+    // page stays responsive.
+    const failure = await runInWorkers(
+      Math.min(navigator.hardwareConcurrency || 2, 8),
+    );
+    if (failure === null) {
+      finish();
+      return;
     }
-
-    const failure = await worker;
     console.warn(`worker run failed (${failure}); retrying on the main thread`);
     reset();
     try {
@@ -459,6 +488,11 @@ function makeRun(model) {
   function download() {
     for (const [corpus, results] of Object.entries(collected)) {
       if (results.length === 0) continue;
+      // Workers interleave arbitrarily; restore corpus (lockfile) order.
+      results.sort(
+        (a, b) =>
+          (model.indexByName.get(a.name) ?? 0) - (model.indexByName.get(b.name) ?? 0),
+      );
       const report = {
         target: "this-browser",
         corpus,
