@@ -1,6 +1,6 @@
 // The jco browser conformance adapter: serves the transpiled guests (shared
 // and signing) and the browser-first host module over localhost, runs both
-// corpora in headless Chromium (137+, which ships JSPI), and writes
+// suites in headless Chromium (137+, which ships JSPI), and writes
 // `conformance/results/jco-browser.json` + `jco-browser-signing.json`.
 //
 // Gates in CI (the Actions runner image ships Chrome); locally it needs a
@@ -20,13 +20,13 @@ const MIME = {
   ".map": "application/json",
 };
 
-// The in-page harness: drives both corpora — the shared guest and the
+// The in-page harness: drives both suites — the shared guest and the
 // host-only signing guest — through the results viewer's harness modules
 // (conformance/web/harness.mjs + worker.mjs, served from the repo root), so
 // the gating adapter and the page's live "test this browser" run share one
 // driver: striped across parallel Web Workers, each with its own instances
 // of the guests, falling back to a sequential main-thread run if the worker
-// path fails. Results are re-sorted into corpus order (workers interleave)
+// path fails. Results are re-sorted into suite order (workers interleave)
 // before reporting. The target's missing-features declaration is resolved
 // Node-side from targets.toml and inlined (the page cannot import the
 // Node-side helper).
@@ -41,11 +41,11 @@ const collected = { shared: [], signing: [] };
 
 const collect = (message) => {
   if (message.kind !== "result") return;
-  const { corpus, index, name, features, outcome, detail } = message;
-  collected[corpus].push({ index, name, features, outcome, detail });
+  const { suite, index, name, features, outcome, detail } = message;
+  collected[suite].push({ index, name, features, outcome, detail });
 };
 
-/** Run one corpus stripe per worker; resolve to null on success or the
+/** Run one suite stripe per worker; resolve to null on success or the
  *  first failure (any worker failing aborts them all). */
 const runInWorkers = (count) =>
   new Promise((resolve) => {

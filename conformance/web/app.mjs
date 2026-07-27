@@ -1,7 +1,7 @@
 // The conformance results viewer: renders the cross-target matrix emitted
 // by the conformance runner (`--json-out`) as a collapsing tree — rows are
 // test cases grouped by the `/` segments of their names, columns are
-// targets — and drives a live run of the same corpus against *this*
+// targets — and drives a live run of the same cases against *this*
 // browser's WebCrypto via the transpiled guests (see harness.mjs).
 import { runAll } from "./harness.mjs";
 
@@ -224,8 +224,8 @@ function renderTable(model) {
   totalRow.classList.remove("branch");
   totalRow.querySelector(".toggle").textContent = "";
   body.append(totalRow);
-  for (const suite of model.root.children.values()) {
-    body.append(renderRow(model, suite));
+  for (const group of model.root.children.values()) {
+    body.append(renderRow(model, group));
   }
   // The root always shows its children; its own toggle is disabled.
   model.root.expanded = true;
@@ -381,11 +381,11 @@ function makeRun(model) {
     const link = document.createElement("a");
     link.href = JSPI_SUPPORT_URL;
     link.textContent = "WebAssembly JSPI";
-    status.append(link, ", which the transpiled test suite needs");
+    status.append(link, ", which the transpiled tests need");
     return;
   }
 
-  // Per-corpus collected results, results-file-shaped for download.
+  // Per-suite collected results, results-file-shaped for download.
   let collected;
   let received;
   let unexpected;
@@ -424,7 +424,7 @@ function makeRun(model) {
   }
 
   function apply(result) {
-    (collected[result.corpus] ?? (collected[result.corpus] = [])).push({
+    (collected[result.suite] ?? (collected[result.suite] = [])).push({
       name: result.name,
       features: result.features,
       outcome: result.outcome,
@@ -432,8 +432,8 @@ function makeRun(model) {
     });
     received += 1;
     const index = model.indexByName.get(result.name);
-    if (index === undefined || model.data.cases[index].corpus !== result.corpus) {
-      unexpected.push(`${result.corpus}/${result.name}`);
+    if (index === undefined || model.data.cases[index].suite !== result.suite) {
+      unexpected.push(`${result.suite}/${result.name}`);
       return;
     }
     const expectedTags = (model.data.cases[index].features ?? []).join(",");
@@ -458,18 +458,18 @@ function makeRun(model) {
   function crossCheck() {
     const expected = new Map();
     for (const c of model.data.cases) {
-      expected.set(c.corpus, (expected.get(c.corpus) ?? 0) + 1);
+      expected.set(c.suite, (expected.get(c.suite) ?? 0) + 1);
     }
     const problems = [];
-    for (const [corpus, count] of expected) {
-      const got = (collected[corpus] ?? []).length;
+    for (const [suite, count] of expected) {
+      const got = (collected[suite] ?? []).length;
       if (got !== count) {
-        problems.push(`${corpus}: ran ${got} of ${count} known cases`);
+        problems.push(`${suite}: ran ${got} of ${count} known cases`);
       }
     }
     if (unexpected.length > 0) {
       problems.push(
-        `${unexpected.length} case(s) not in the static corpus (first: ${unexpected[0]})`,
+        `${unexpected.length} case(s) not in the static cases (first: ${unexpected[0]})`,
       );
     }
     if (tagMismatches > 0) {
@@ -477,7 +477,7 @@ function makeRun(model) {
     }
     if (problems.length > 0) {
       warn(
-        "this browser's run diverged from the static corpus (stale transpiled " +
+        "this browser's run diverged from the static cases (stale transpiled " +
           `guests? rerun \`just conformance-web\`):\n${problems.join("\n")}`,
       );
     }
@@ -518,7 +518,7 @@ function makeRun(model) {
   }
 
   /**
-   * Run the corpus across `count` parallel workers, each with its own
+   * Run every suite across `count` parallel workers, each with its own
    * instances of the guests, running the `i % count` stripe of the cases.
    * Resolves to null when every worker finished, or to the first failure
    * (any worker failing aborts them all).
@@ -568,7 +568,7 @@ function makeRun(model) {
     runButton.disabled = true;
     downloadButton.hidden = true;
     reset();
-    status.textContent = "loading the test suite…";
+    status.textContent = "loading the tests…";
     flushTimer = setInterval(() => {
       flush();
       if (received > 0) {
@@ -576,7 +576,7 @@ function makeRun(model) {
       }
     }, 100);
 
-    // Parallel workers, one corpus stripe each; cases are self-contained
+    // Parallel workers, one suite stripe each; cases are self-contained
     // one-shots and each worker holds its own guest instances, so shards
     // cannot interfere. Fall back to a sequential main-thread run if the
     // worker path fails (e.g. no JSPI in workers) — partial worker results
@@ -600,16 +600,16 @@ function makeRun(model) {
   }
 
   function download() {
-    for (const [corpus, results] of Object.entries(collected)) {
+    for (const [suite, results] of Object.entries(collected)) {
       if (results.length === 0) continue;
-      // Workers interleave arbitrarily; restore corpus (lockfile) order.
+      // Workers interleave arbitrarily; restore suite (lockfile) order.
       results.sort(
         (a, b) =>
           (model.indexByName.get(a.name) ?? 0) - (model.indexByName.get(b.name) ?? 0),
       );
       const report = {
         target: "this-browser",
-        corpus,
+        suite,
         "missing-features": missing,
         results,
       };
@@ -618,7 +618,7 @@ function makeRun(model) {
       });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = corpus === "shared" ? "this-browser.json" : `this-browser-${corpus}.json`;
+      a.download = suite === "shared" ? "this-browser.json" : `this-browser-${suite}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
     }
@@ -640,7 +640,7 @@ async function main() {
     el("run").disabled = true;
     el("main").textContent =
       `no results data at ${DATA_URL} (${err}) — serve this page with ` +
-      "`just conformance-web`, which runs the conformance suite first";
+      "`just conformance-web`, which runs the conformance tests first";
     return;
   }
   const model = buildModel(data);

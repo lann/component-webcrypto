@@ -1,6 +1,6 @@
 // Web Worker wrapper around the in-browser conformance harness: keeps the
 // run off the main thread and streams results back via postMessage. The
-// page spawns several of these, each running one shard of the corpus
+// page spawns several of these, each running one shard of the suites
 // against its own instances of the guests.
 import { runAll } from "./harness.mjs";
 

@@ -1,22 +1,22 @@
 //! `conformance-runner`: the aggregator for the cross-target conformance
-//! results. Expectation policy lives in the corpus (self-describing cases)
+//! results. Expectation policy lives in the cases (self-describing)
 //! and target facts in `conformance/targets.toml`; this program only checks
 //! that the mail arrived intact, gates on failures, and renders
 //! `conformance/matrix.md`.
 //!
 //! Usage: `conformance-runner --targets <toml> --results <dir>
-//!         --lock <corpus>=<lockfile> ... --matrix-out <md>
+//!         --lock <suite>=<lockfile> ... --matrix-out <md>
 //!         [--json-out <json>]`
 //!
 //! Transport invariants, each an error (exit nonzero):
-//! - every non-`optional` target produced a results file for each corpus it
-//!   runs — derived: every corpus except those whose `requires` names a
+//! - every non-`optional` target produced a results file for each suite it
+//!   runs — derived: every suite except those whose `requires` names a
 //!   feature the target is missing (an `optional` target's missing file is
-//!   a warning, and results for an excluded corpus are an error);
-//! - at most one results file per (target, corpus), with no duplicate case
+//!   a warning, and results for an excluded suite are an error);
+//! - at most one results file per (target, suite), with no duplicate case
 //!   names inside it;
 //! - each results file's case names and feature tags exactly match its
-//!   corpus's checked-in lockfile (corpus changes land intentionally via
+//!   suite's checked-in lockfile (suite changes land intentionally via
 //!   `just update-conformance-lock`);
 //! - each results file's declared `missing` features match the target's
 //!   entry in targets.toml (adapters and the manifest cannot drift apart);
@@ -29,14 +29,14 @@ use anyhow::Context as _;
 
 #[derive(serde::Deserialize)]
 struct Targets {
-    corpora: BTreeMap<String, Corpus>,
+    suites: BTreeMap<String, Suite>,
     targets: BTreeMap<String, Target>,
 }
 
 #[derive(serde::Deserialize)]
-struct Corpus {
-    /// Features the corpus needs structurally (its world imports them): a
-    /// target missing one cannot run this corpus at all.
+struct Suite {
+    /// Features the suite needs structurally (its guest's world imports
+    /// them): a target missing one cannot run this suite at all.
     #[serde(default)]
     requires: Vec<String>,
 }
@@ -50,10 +50,10 @@ struct Target {
 }
 
 impl Target {
-    /// Whether this target runs `corpus`: it does unless the corpus
-    /// requires a feature the target is missing.
-    fn runs(&self, corpus: &Corpus) -> bool {
-        corpus
+    /// Whether this target runs `suite`: it does unless the suite requires
+    /// a feature the target is missing.
+    fn runs(&self, suite: &Suite) -> bool {
+        suite
             .requires
             .iter()
             .all(|feature| !self.missing_features.contains(feature))
@@ -63,7 +63,7 @@ impl Target {
 #[derive(serde::Deserialize)]
 struct ResultsFile {
     target: String,
-    corpus: String,
+    suite: String,
     #[serde(rename = "missing-features")]
     missing_features: Vec<String>,
     results: Vec<CaseResult>,
@@ -79,7 +79,7 @@ struct CaseResult {
     detail: String,
 }
 
-/// One corpus lockfile: case name -> feature tags, plus the corpus order
+/// One suite lockfile: case name -> feature tags, plus the suite order
 /// (the canonical case order the results viewer renders).
 struct Lock {
     features: BTreeMap<String, Vec<String>>,
@@ -113,8 +113,8 @@ fn parse_lock(text: &str) -> anyhow::Result<Lock> {
     Ok(Lock { features, order })
 }
 
-/// The suite group a case name belongs to: `probe`, or its first two
-/// path segments (e.g. `aes-gcm/wycheproof`).
+/// The group a case name belongs to: `probe`, or its first two path
+/// segments — algorithm and vector source (e.g. `aes-gcm/wycheproof`).
 fn group_of(name: &str) -> String {
     if let Some(rest) = name.split_once('/') {
         if rest.0 == "probe" {
@@ -128,7 +128,7 @@ fn group_of(name: &str) -> String {
     name.to_string()
 }
 
-/// Validate one results file against the target table and its corpus lock,
+/// Validate one results file against the target table and its suite lock,
 /// appending human-readable problems to `problems`.
 fn validate_file(
     file: &ResultsFile,
@@ -136,7 +136,7 @@ fn validate_file(
     locks: &BTreeMap<String, Lock>,
     problems: &mut Vec<String>,
 ) {
-    let at = format!("{}/{}", file.target, file.corpus);
+    let at = format!("{}/{}", file.target, file.suite);
 
     match targets.targets.get(&file.target) {
         None => problems.push(format!("{at}: target not declared in targets.toml")),
@@ -151,28 +151,28 @@ fn validate_file(
                      declares {declared:?}"
                 ));
             }
-            if let Some(corpus) = targets.corpora.get(&file.corpus) {
-                if !target.runs(corpus) {
+            if let Some(suite) = targets.suites.get(&file.suite) {
+                if !target.runs(suite) {
                     problems.push(format!(
-                        "{at}: results for a corpus this target's missing-features exclude \
+                        "{at}: results for a suite this target's missing-features exclude \
                          (it requires {:?})",
-                        corpus.requires
+                        suite.requires
                     ));
                 }
             }
         }
     }
 
-    if !targets.corpora.contains_key(&file.corpus) {
+    if !targets.suites.contains_key(&file.suite) {
         problems.push(format!(
-            "{at}: corpus {:?} is not declared in targets.toml",
-            file.corpus
+            "{at}: suite {:?} is not declared in targets.toml",
+            file.suite
         ));
     }
-    let Some(lock) = locks.get(&file.corpus) else {
+    let Some(lock) = locks.get(&file.suite) else {
         problems.push(format!(
-            "{at}: no lockfile for corpus {:?} (pass --lock {}=<path>)",
-            file.corpus, file.corpus
+            "{at}: no lockfile for suite {:?} (pass --lock {}=<path>)",
+            file.suite, file.suite
         ));
         return;
     };
@@ -185,13 +185,13 @@ fn validate_file(
         }
         match lock.features.get(&case.name) {
             None => problems.push(format!(
-                "{at}: case {:?} is not in the corpus lockfile (run `just \
-                 update-conformance-lock` if the corpus changed intentionally)",
+                "{at}: case {:?} is not in the suite lockfile (run `just \
+                 update-conformance-lock` if the suite changed intentionally)",
                 case.name
             )),
             Some(tags) if *tags != case.features => problems.push(format!(
                 "{at}: case {:?} reports feature tags {:?}, but the lockfile has {:?} (run \
-                 `just update-conformance-lock` if the corpus changed intentionally)",
+                 `just update-conformance-lock` if the suite changed intentionally)",
                 case.name, case.features, tags
             )),
             Some(_) => {}
@@ -206,14 +206,14 @@ fn validate_file(
     for name in lock.features.keys() {
         if !seen.contains(name.as_str()) {
             problems.push(format!(
-                "{at}: case {name:?} is in the corpus lockfile but produced no result (run \
-                 `just update-conformance-lock` if the corpus changed intentionally)"
+                "{at}: case {name:?} is in the suite lockfile but produced no result (run \
+                 `just update-conformance-lock` if the suite changed intentionally)"
             ));
         }
     }
 }
 
-/// Check every declared (target, corpus) pair produced exactly one results
+/// Check every declared (target, suite) pair produced exactly one results
 /// file, appending problems (or warnings for `optional` targets).
 fn check_presence(
     targets: &Targets,
@@ -224,24 +224,24 @@ fn check_presence(
     let mut seen: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     for file in files {
         *seen
-            .entry((file.target.as_str(), file.corpus.as_str()))
+            .entry((file.target.as_str(), file.suite.as_str()))
             .or_default() += 1;
     }
     for (pair, count) in &seen {
         if *count > 1 {
             problems.push(format!(
-                "{}/{}: {count} results files for one (target, corpus) pair",
+                "{}/{}: {count} results files for one (target, suite) pair",
                 pair.0, pair.1
             ));
         }
     }
     for (name, target) in &targets.targets {
-        for (corpus_name, corpus) in &targets.corpora {
-            if !target.runs(corpus) {
+        for (suite_name, suite) in &targets.suites {
+            if !target.runs(suite) {
                 continue;
             }
-            if !seen.contains_key(&(name.as_str(), corpus_name.as_str())) {
-                let message = format!("{name}/{corpus_name}: no results file");
+            if !seen.contains_key(&(name.as_str(), suite_name.as_str())) {
+                let message = format!("{name}/{suite_name}: no results file");
                 if target.optional {
                     warnings.push(format!("{message} (target is optional)"));
                 } else {
@@ -270,12 +270,12 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
     md.push_str("# Conformance matrix\n\n");
     md.push_str(
         "Generated by `conformance-runner` from `conformance/results/*.json` against \
-         `conformance/targets.toml` and the corpus lockfiles. Cells are `passed/total` \
-         per suite group; `-N` counts cases skipped because the target declares a \
+         `conformance/targets.toml` and the suite lockfiles. Cells are `passed/total` \
+         per group; `-N` counts cases skipped because the target declares a \
          feature missing (see targets.toml).\n\n",
     );
 
-    md.push_str("| Suite |");
+    md.push_str("| Group |");
     for target in &target_names {
         md.push_str(&format!(" {target} |"));
     }
@@ -379,10 +379,10 @@ struct Args {
 }
 
 /// Render the machine-readable aggregate the results viewer
-/// (`conformance/web/`) consumes: the declared targets and corpora, every
-/// lockfile case in corpus order, and per-target outcome columns aligned to
+/// (`conformance/web/`) consumes: the declared targets and suites, every
+/// lockfile case in suite order, and per-target outcome columns aligned to
 /// that case order (compact codes: `p`/`f`/`s`; `null` where the (target,
-/// corpus) pair produced no results). Details ride a sparse side map (case
+/// suite) pair produced no results). Details ride a sparse side map (case
 /// index -> detail) for fail/skip outcomes only, keeping the file small.
 fn render_json(
     targets: &Targets,
@@ -396,31 +396,31 @@ fn render_json(
         optional: bool,
     }
     #[derive(serde::Serialize)]
-    struct ViewerCorpus<'a> {
+    struct ViewerSuite<'a> {
         requires: &'a [String],
     }
     #[derive(serde::Serialize)]
     struct ViewerCase<'a> {
         name: &'a str,
-        corpus: &'a str,
+        suite: &'a str,
         #[serde(skip_serializing_if = "<[String]>::is_empty")]
         features: &'a [String],
     }
     #[derive(serde::Serialize)]
     struct ViewerData<'a> {
         targets: BTreeMap<&'a str, ViewerTarget<'a>>,
-        corpora: BTreeMap<&'a str, ViewerCorpus<'a>>,
+        suites: BTreeMap<&'a str, ViewerSuite<'a>>,
         cases: Vec<ViewerCase<'a>>,
         outcomes: BTreeMap<&'a str, Vec<Option<&'static str>>>,
         details: BTreeMap<&'a str, BTreeMap<String, &'a str>>,
     }
 
     let mut cases = Vec::new();
-    for (corpus, lock) in locks {
+    for (suite, lock) in locks {
         for name in &lock.order {
             cases.push(ViewerCase {
                 name,
-                corpus,
+                suite,
                 features: &lock.features[name],
             });
         }
@@ -431,11 +431,12 @@ fn render_json(
     for name in targets.targets.keys() {
         let mut column = Vec::with_capacity(cases.len());
         let mut target_details = BTreeMap::new();
-        // Iterate corpora exactly as `cases` was built, so indexes align.
-        for (corpus, lock) in locks {
+        // Iterate the suites exactly as `cases` was built, so indexes
+        // align.
+        for (suite, lock) in locks {
             let by_name: Option<BTreeMap<&str, &CaseResult>> = files
                 .iter()
-                .find(|f| &f.target == name && &f.corpus == corpus)
+                .find(|f| &f.target == name && &f.suite == suite)
                 .map(|f| f.results.iter().map(|c| (c.name.as_str(), c)).collect());
             for case_name in &lock.order {
                 let result = by_name
@@ -475,14 +476,14 @@ fn render_json(
                 )
             })
             .collect(),
-        corpora: targets
-            .corpora
+        suites: targets
+            .suites
             .iter()
-            .map(|(name, c)| {
+            .map(|(name, suite)| {
                 (
                     name.as_str(),
-                    ViewerCorpus {
-                        requires: &c.requires,
+                    ViewerSuite {
+                        requires: &suite.requires,
                     },
                 )
             })
@@ -524,11 +525,11 @@ fn parse_args() -> anyhow::Result<Args> {
                 ))
             }
             "--lock" => {
-                let value = args.next().context("--lock needs <corpus>=<path>")?;
-                let (corpus, path) = value
+                let value = args.next().context("--lock needs <suite>=<path>")?;
+                let (suite, path) = value
                     .split_once('=')
-                    .context("--lock needs <corpus>=<path>")?;
-                locks.insert(corpus.to_string(), PathBuf::from(path));
+                    .context("--lock needs <suite>=<path>")?;
+                locks.insert(suite.to_string(), PathBuf::from(path));
             }
             other => anyhow::bail!("unknown argument {other:?}"),
         }
@@ -552,13 +553,13 @@ fn main() -> anyhow::Result<()> {
     .with_context(|| format!("parsing {}", args.targets.display()))?;
 
     let mut locks = BTreeMap::new();
-    for (corpus, path) in &args.locks {
+    for (suite, path) in &args.locks {
         let lock = parse_lock(
             &std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?,
         )
         .with_context(|| format!("parsing {}", path.display()))?;
-        locks.insert(corpus.clone(), lock);
+        locks.insert(suite.clone(), lock);
     }
 
     // Read every results file in the directory.
@@ -647,9 +648,9 @@ mod tests {
     fn targets() -> Targets {
         toml::from_str(
             r#"
-            [corpora.shared]
+            [suites.shared]
 
-            [corpora.signing]
+            [suites.signing]
             requires = ["ecdsa-sign"]
 
             [targets.native]
@@ -671,8 +672,8 @@ mod tests {
             r#"
             # comment
             cases = [
-                { name = "suite/src/tc1/whole" },
-                { name = "suite/src/tc2/whole", features = ["chacha20-poly1305"] },
+                { name = "alg/src/tc1/whole" },
+                { name = "alg/src/tc2/whole", features = ["chacha20-poly1305"] },
                 { name = "probe/check" },
             ]
             "#,
@@ -680,7 +681,7 @@ mod tests {
         .unwrap()
     }
 
-    fn file(target: &str, corpus: &str, results: Vec<CaseResult>) -> ResultsFile {
+    fn file(target: &str, suite: &str, results: Vec<CaseResult>) -> ResultsFile {
         let missing_features = match target {
             "web" => vec!["chacha20-poly1305".to_string()],
             "composed-like" => vec!["ecdsa-sign".to_string()],
@@ -688,7 +689,7 @@ mod tests {
         };
         ResultsFile {
             target: target.to_string(),
-            corpus: corpus.to_string(),
+            suite: suite.to_string(),
             missing_features,
             results,
         }
@@ -705,8 +706,8 @@ mod tests {
 
     fn full_results() -> Vec<CaseResult> {
         vec![
-            case("suite/src/tc1/whole", &[], "pass"),
-            case("suite/src/tc2/whole", &["chacha20-poly1305"], "pass"),
+            case("alg/src/tc1/whole", &[], "pass"),
+            case("alg/src/tc2/whole", &["chacha20-poly1305"], "pass"),
             case("probe/check", &[], "pass"),
         ]
     }
@@ -751,10 +752,10 @@ mod tests {
     #[test]
     fn extra_case_is_a_problem() {
         let mut results = full_results();
-        results.push(case("suite/src/tc99/whole", &[], "pass"));
+        results.push(case("alg/src/tc99/whole", &[], "pass"));
         let problems = validate(&file("native", "shared", results));
         assert!(
-            problems[0].contains("not in the corpus lockfile"),
+            problems[0].contains("not in the suite lockfile"),
             "{problems:?}"
         );
     }
@@ -787,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn results_for_an_excluded_corpus_are_a_problem() {
+    fn results_for_an_excluded_suite_are_a_problem() {
         let problems = validate(&file("composed-like", "signing", full_results()));
         assert!(
             problems
@@ -798,8 +799,8 @@ mod tests {
     }
 
     #[test]
-    fn undeclared_corpus_is_a_problem() {
-        // "mystery" has no [corpora] entry and no lock.
+    fn undeclared_suite_is_a_problem() {
+        // "mystery" has no [suites] entry and no lock.
         let problems = validate(&file("native", "mystery", full_results()));
         assert!(
             problems
@@ -810,12 +811,10 @@ mod tests {
     }
 
     #[test]
-    fn unknown_corpus_is_a_problem() {
+    fn unknown_suite_is_a_problem() {
         let problems = validate(&file("native", "mystery", full_results()));
         assert!(
-            problems
-                .iter()
-                .any(|p| p.contains("no lockfile for corpus")),
+            problems.iter().any(|p| p.contains("no lockfile for suite")),
             "{problems:?}"
         );
     }
@@ -830,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn presence_is_derived_from_corpus_requirements() {
+    fn presence_is_derived_from_suite_requirements() {
         let files = vec![
             file("native", "shared", full_results()),
             file("composed-like", "shared", full_results()),
@@ -839,7 +838,7 @@ mod tests {
         let mut warnings = Vec::new();
         check_presence(&targets(), &files, &mut problems, &mut warnings);
         // native/signing is required and absent; composed-like/signing is
-        // excluded (it is missing ecdsa-sign, which the corpus requires);
+        // excluded (it is missing ecdsa-sign, which the suite requires);
         // web/shared and web/signing are optional.
         assert_eq!(
             problems,
@@ -851,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_target_corpus_pair_is_a_problem() {
+    fn duplicate_target_suite_pair_is_a_problem() {
         let files = vec![
             file("native", "shared", full_results()),
             file("native", "shared", full_results()),
@@ -876,7 +875,7 @@ mod tests {
     #[test]
     fn json_out_aligns_outcomes_with_lock_order() {
         let mut results = full_results();
-        results[1] = case("suite/src/tc2/whole", &["chacha20-poly1305"], "skipped");
+        results[1] = case("alg/src/tc2/whole", &["chacha20-poly1305"], "skipped");
         results[1].detail = "feature declared missing".to_string();
         results[2] = case("probe/check", &[], "fail");
         results[2].detail = "boom".to_string();
@@ -886,7 +885,7 @@ mod tests {
         let json = render_json(&targets(), &locks, &files).unwrap();
         let data: serde_json::Value = serde_json::from_str(&json).unwrap();
 
-        // Cases follow the lockfile order and carry corpus + feature tags.
+        // Cases follow the lockfile order and carry suite + feature tags.
         let names: Vec<&str> = data["cases"]
             .as_array()
             .unwrap()
@@ -895,9 +894,9 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["suite/src/tc1/whole", "suite/src/tc2/whole", "probe/check"]
+            ["alg/src/tc1/whole", "alg/src/tc2/whole", "probe/check"]
         );
-        assert_eq!(data["cases"][0]["corpus"], "shared");
+        assert_eq!(data["cases"][0]["suite"], "shared");
         assert_eq!(data["cases"][0].get("features"), None);
         assert_eq!(data["cases"][1]["features"][0], "chacha20-poly1305");
 
@@ -923,13 +922,13 @@ mod tests {
             "chacha20-poly1305"
         );
         assert_eq!(data["targets"]["web"]["optional"], true);
-        assert_eq!(data["corpora"]["signing"]["requires"][0], "ecdsa-sign");
+        assert_eq!(data["suites"]["signing"]["requires"][0], "ecdsa-sign");
     }
 
     #[test]
     fn json_out_treats_unknown_outcomes_as_absent() {
         let mut results = full_results();
-        results[0] = case("suite/src/tc1/whole", &[], "mystery");
+        results[0] = case("alg/src/tc1/whole", &[], "mystery");
         let files = vec![file("native", "shared", results)];
         let locks = BTreeMap::from([("shared".to_string(), lock())]);
         let json = render_json(&targets(), &locks, &files).unwrap();

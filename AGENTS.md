@@ -9,7 +9,7 @@ Guidance for automated agents (and humans) working in this repository.
 and a jco host (browser Web Crypto API). It is a sibling of
 `lann:webrtc-datachannels` and deliberately mirrors its architecture — prefer
 clarity and correctness over features, and keep the implementations
-behaviourally in sync (the conformance suite and the `crypto-demo` guest's
+behaviourally in sync (the conformance tests and the `crypto-demo` guest's
 checks are the cross-implementation gate).
 See [`README.md`](README.md) for the design.
 
@@ -54,10 +54,10 @@ examples/
                         #   crypto-demo with jco (the --async-*/--map flags
                         #   live in its package.json) and runs it against
                         #   jco-impl/webcrypto.js
-conformance/            # cross-implementation conformance suite — see
+conformance/            # cross-implementation conformance tests — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
-                        #   from the WebRTC sibling's suite
+                        #   from the WebRTC sibling's machinery
   vectors/              #   vendored Wycheproof JSON + the translation policy
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
@@ -70,12 +70,12 @@ conformance/            # cross-implementation conformance suite — see
                         #     via CONFORMANCE_BROWSER=1 with Chrome installed)
                         #     — jco reads its missing-features from targets.toml
   runner/               #   aggregates results: validates them against
-                        #     targets.toml + the corpus lockfiles, renders
+                        #     targets.toml + the suite lockfiles, renders
                         #     conformance/matrix.md + the viewer data
   web/                  #   results viewer: static page (collapsing
                         #     cross-target tree + a live "test this
                         #     browser" run); serve with `just conformance-web`
-  targets.toml          #   corpus facts (required features) + target facts
+  targets.toml          #   suite facts (required features) + target facts
                         #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
@@ -164,20 +164,20 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional corpus changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
+| `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
 Behavioral changes must keep all three implementations in sync: the
-conformance suite (`just conformance`) gates the wasmtime, composed, and
+conformance tests (`just conformance`) gate the wasmtime, composed, and
 jco-node targets, and the same guest component must report every check
 passing under `just test` (Wasmtime), `just test-node` (jco), and
 `just test-webcrypto-composed` (in-guest). When adding behavior, extend the
-conformance corpus (vectors or
+conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
-its vector suite exists (see conformance/README.md, "Growing the corpus").
+its vector cases exist (see conformance/README.md, "Growing the suites").
 
 ## Code comments and docs
 
@@ -186,7 +186,7 @@ it was arrived at. Rationale like "we removed X because Y" belongs in commit
 messages or PR descriptions, not in source files.
 
 Docs state invariants, not inventories. Never embed values a build or test
-run computes — corpus sizes, check counts, probe indexes. If a number
+run computes — case counts, check counts, probe indexes. If a number
 matters, a gate asserts it (e.g. the demo harness's expected-summary check);
 if it doesn't, omit it. Machine-derived counts belong only in generated
 artifacts like `conformance/matrix.md`.

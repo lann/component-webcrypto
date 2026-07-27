@@ -1,5 +1,5 @@
 //! Stream, error-rendering, and comparison helpers shared by the vector
-//! corpus and the API-contract probes.
+//! cases and the API-contract probes.
 
 use crate::translate::Schedule;
 use lann_webcrypto_guest::raw::aead::AeadKey;

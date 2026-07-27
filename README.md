@@ -82,7 +82,7 @@ examples/
   wasmtime-demo/        # thin native host + the integration test
   jco-demo/             # Node 24+ driver: transpiles crypto-demo with jco
                         #   against the jco-impl host and runs it
-conformance/            # cross-implementation conformance suite: vendored
+conformance/            # cross-implementation conformance tests: vendored
                         #   Wycheproof vectors + translation policy, a shared
                         #   conformance guest (vectors under chunking
                         #   schedules, plus API-contract probes), per-target
@@ -107,7 +107,7 @@ just demo-wasmtime           # run the guest under the Wasmtime (RustCrypto) hos
 just test-node               # transpile and run the same guest under the jco host
 just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
                              #   and run the whole thing under `wasmtime run`
-just conformance             # the Wycheproof-derived conformance corpus over the
+just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally
                              #   (published with the public crates' rustdoc at
@@ -118,9 +118,9 @@ just ci                      # everything CI runs
 ```
 
 All three implementations run identical guest components. The conformance
-suite (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
+tests (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
 NIST CAVP SHA-2 vectors under multiple stream-chunking schedules, plus
-API-contract probes) gates the wasmtime, composed, and jco-node
+API-contract probes) gate the wasmtime, composed, and jco-node
 targets everywhere, and the jco-browser target in CI (locally, opt in
 with `CONFORMANCE_BROWSER=1`; needs Chrome/Chromium 137+); the
 `crypto-demo` guest additionally covers the jco host end to end.
@@ -135,18 +135,18 @@ them fail at `wac plug` time instead of running quietly degraded.
 ## Findings
 
 - **jco component-model-async guest-heap corruption.** Running the full
-  conformance corpus in one instance under jco (JSPI, Node 24) corrupts the
+  shared conformance suite in one instance under jco (JSPI, Node 24) corrupts the
   guest's heap — surfacing as `memory access out of bounds` in dlmalloc
   during async event delivery — while the *identical* guest binary runs the
-  full corpus clean under Wasmtime, both natively and fully composed. The
+  full suite clean under Wasmtime, both natively and fully composed. The
   trigger involves many drain-input-then-reject stream operations followed
   by async imports returning `result<list<u8>>`; failure is deterministic
-  per corpus window but layout-dependent (a superset window can pass while
+  per case window but layout-dependent (a superset window can pass while
   its subset fails), i.e. the corruption is planted silently and detonates
   elsewhere. Diagnosed here, fixed upstream (jco #1768, released in 1.26.0);
   the jco-node conformance target gates again since the fix.
 - **Streams-only interfaces make delivery schedules part of the contract.**
   Running every vector under multiple chunking schedules (whole / 1-byte /
   block-straddling) tests a claim a buffer-based API could
-  never even express — and precisely this corpus shape is what surfaced the
+  never even express — and precisely this suite shape is what surfaced the
   runtime bug above.

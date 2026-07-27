@@ -1214,7 +1214,7 @@ async fn aes128_shape() -> Result<(), String> {
     expect_bytes(&opened, &plaintext, "internal-nonce round trip")
 }
 
-/// The RFC 8032 §7.1 TEST 2 known answer, in the corpus rather than only
+/// The RFC 8032 §7.1 TEST 2 known answer, in the suite rather than only
 /// the demo guest: `import-signing-key` succeeds, signing is deterministic
 /// and byte-exact, the seed round-trips through `export-key`, and the
 /// derived public key matches the vector's.

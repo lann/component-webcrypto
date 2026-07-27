@@ -1,5 +1,5 @@
 // The shared conformance guest world. One guest binary carries the whole
-// corpus and runs it against whichever `lann:webcrypto` implementation the
+// cases and runs them against whichever `lann:webcrypto` implementation the
 // target under test provides: the Wasmtime host, the jco host (Node and
 // browser), or the composed in-guest provider.
 //
@@ -7,13 +7,13 @@
 // is pulled in through the `deps/lann-webcrypto` symlink.
 package conformance:webcrypto@0.1.0;
 
-/// The conformance corpus as self-describing test cases.
+/// The conformance suite as self-describing test cases.
 ///
 /// Expectation policy lives in the cases, not in the harness. Each case
 /// declares the `features` it exercises beyond the baseline surface every
 /// implementation serves; a target declares only the features it is
 /// `missing`. Feature tags are inert by default — a case runs everywhere
-/// until a target opts out — so growing the corpus never silently sheds
+/// until a target opts out — so growing the suite never silently sheds
 /// coverage: a target genuinely lacking the feature fails loudly until its
 /// gap is recorded.
 ///
@@ -26,7 +26,7 @@ package conformance:webcrypto@0.1.0;
 ///
 /// The feature names, and which target declares which missing, are
 /// documented in conformance/README.md; the checked-in `tests.lock` files
-/// pin each corpus's case names and feature tags.
+/// pin each suite's case names and feature tags.
 interface tests {
     /// The outcome of one executed test case.
     variant outcome {
@@ -42,7 +42,7 @@ interface tests {
 
     /// One conformance test case.
     resource test-case {
-        /// Stable identity: `<suite>/<source>/<case>/<schedule>` for
+        /// Stable identity: `<algorithm>/<source>/<case>/<schedule>` for
         /// vector-driven cases (e.g. `aes-gcm/wycheproof/tc42/bytes`) or
         /// `probe/<name>` for hand-written API-contract probes.
         name: func() -> string;
@@ -56,8 +56,8 @@ interface tests {
         run: async func() -> outcome;
     }
 
-    /// Materialize the corpus for a target missing the named features, in
-    /// corpus order. Unknown feature names trap: a misspelled declaration
+    /// Materialize the suite for a target missing the named features, in
+    /// suite order. Unknown feature names trap: a misspelled declaration
     /// is a harness bug, not a test outcome.
     all: func(missing-features: list<string>) -> list<test-case>;
 }

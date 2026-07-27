@@ -6,7 +6,7 @@
 //! must compose with that provider. This guest runs only under the
 //! host-backed targets (wasmtime, jco).
 //!
-//! The corpus here is probes only: ECDSA signing has no cross-implementation
+//! This suite is probes only: ECDSA signing has no cross-implementation
 //! known answers (WebCrypto signs with a randomized `k`, RustCrypto with
 //! RFC 6979's deterministic one), so behavior is pinned by round trips plus
 //! one deterministic known-answer probe tagged with the
@@ -30,7 +30,7 @@ use lann_webcrypto_guest::raw::types::Error;
 
 /// The feature names shared with the conformance guest (`all` traps on
 /// anything else), so a target passes one `missing` declaration to every
-/// guest it runs. `chacha20-poly1305` tags nothing in this corpus.
+/// guest it runs. `chacha20-poly1305` tags nothing in this suite.
 const FEATURE_CHACHA: &str = "chacha20-poly1305";
 const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
 const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
@@ -58,7 +58,7 @@ struct Probe {
     features: &'static [&'static str],
 }
 
-/// The probes, in corpus order. `run_one(i)` runs `PROBES[i]`.
+/// The probes, in suite order. `run_one(i)` runs `PROBES[i]`.
 const PROBES: &[Probe] = &[
     Probe {
         name: "ecdsa-p256-sign-roundtrip",
