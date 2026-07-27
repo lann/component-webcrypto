@@ -75,6 +75,22 @@ pub async fn feed(mut tx: StreamWriter<u8>, data: &[u8]) -> Vec<u8> {
     tx.write_all(data.to_vec()).await
 }
 
+/// Write `chunks` to `tx` in order, then drop the writer to end the
+/// stream. Returns the bytes left unwritten when the reader stopped early
+/// (always empty for a callee honoring the drain rule).
+pub async fn feed_chunks(
+    mut tx: StreamWriter<u8>,
+    chunks: impl IntoIterator<Item = Vec<u8>>,
+) -> Vec<u8> {
+    for chunk in chunks {
+        let leftover = tx.write_all(chunk).await;
+        if !leftover.is_empty() {
+            return leftover;
+        }
+    }
+    Vec::new()
+}
+
 /// Drain a byte stream to its end.
 pub async fn read_all(mut rx: StreamReader<u8>) -> Vec<u8> {
     let mut out = Vec::new();

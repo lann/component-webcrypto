@@ -1,12 +1,12 @@
 //! Stream, error-rendering, and comparison helpers shared by the vector
 //! corpus and the API-contract probes.
 
-use crate::lann::webcrypto::aead::AeadKey;
-use crate::lann::webcrypto::aead_internal_nonce::InternalNonceKey;
-use crate::lann::webcrypto::digest::Digest;
-use crate::lann::webcrypto::mac::MacKey;
-use crate::lann::webcrypto::types::Error;
 use crate::translate::Schedule;
+use lann_webcrypto_guest::raw::aead::AeadKey;
+use lann_webcrypto_guest::raw::aead_internal_nonce::InternalNonceKey;
+use lann_webcrypto_guest::raw::digest::Digest;
+use lann_webcrypto_guest::raw::mac::MacKey;
+use lann_webcrypto_guest::raw::types::Error;
 
 /// Render a WIT `error` with a context prefix.
 pub fn describe(context: &str, error: &Error) -> String {
@@ -49,43 +49,31 @@ pub fn expect_bytes(got: &[u8], want: &[u8], what: &str) -> Result<(), String> {
 }
 
 /// Write `chunks` to `tx` in order, then drop the writer to end the stream.
-pub async fn feed(
-    mut tx: wit_bindgen::StreamWriter<u8>,
-    chunks: Vec<Vec<u8>>,
-) -> Result<(), String> {
-    for chunk in chunks {
-        let leftover = tx.write_all(chunk).await;
-        if !leftover.is_empty() {
-            return Err(format!(
-                "stream writer closed early with {} bytes unwritten",
-                leftover.len()
-            ));
-        }
+pub async fn feed(tx: wit_bindgen::StreamWriter<u8>, chunks: Vec<Vec<u8>>) -> Result<(), String> {
+    let leftover = lann_webcrypto_guest::feed_chunks(tx, chunks).await;
+    if leftover.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "stream writer closed early with {} bytes unwritten",
+            leftover.len()
+        ))
     }
-    Ok(())
 }
 
-/// Drain a byte stream to its end.
-pub async fn read_all(mut rx: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let (status, batch) = rx.read(Vec::with_capacity(8 * 1024)).await;
-        out.extend(batch);
-        if matches!(
-            status,
-            wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
-        ) {
-            break;
-        }
-    }
-    out
+/// Write `data` to `tx` as one write, then drop the writer to end the
+/// stream.
+pub async fn feed_whole(tx: wit_bindgen::StreamWriter<u8>, data: &[u8]) -> Result<(), String> {
+    feed(tx, vec![data.to_vec()]).await
 }
+
+pub use lann_webcrypto_guest::read_all;
 
 /// `sign`, feeding `data` per `schedule` concurrently with the call. Returns
 /// the tag and the feeder's outcome separately, so feeder failures are
 /// distinguishable from the call's own result.
 pub async fn sign(key: &MacKey, data: &[u8], schedule: Schedule) -> (Vec<u8>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (tag, fed) = futures::join!(key.sign(rx), feed(tx, schedule.chunks(data)));
     match tag {
         Ok(tag) => (tag, fed),
@@ -104,7 +92,7 @@ pub async fn verify(
     tag: &[u8],
     schedule: Schedule,
 ) -> (Result<(), Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     futures::join!(
         key.verify(rx, tag.to_vec()),
         feed(tx, schedule.chunks(data))
@@ -118,7 +106,7 @@ pub async fn compute(
     data: &[u8],
     schedule: Schedule,
 ) -> (Vec<u8>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (got, fed) = futures::join!(digest.compute(rx), feed(tx, schedule.chunks(data)));
     match got {
         Ok(got) => (got, fed),
@@ -137,7 +125,7 @@ pub async fn in_seal(
     plaintext: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sealed, fed) = futures::join!(
         key.seal(aad.to_vec(), rx),
         feed(tx, schedule.chunks(plaintext))
@@ -157,7 +145,7 @@ pub async fn in_open(
     sealed: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (opened, fed) = futures::join!(
         key.open(aad.to_vec(), rx),
         feed(tx, schedule.chunks(sealed))
@@ -180,7 +168,7 @@ pub async fn seal(
     plaintext: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sealed, fed) = futures::join!(
         key.seal(nonce.to_vec(), aad.to_vec(), rx),
         feed(tx, schedule.chunks(plaintext))
@@ -201,7 +189,7 @@ pub async fn open(
     ciphertext: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (opened, fed) = futures::join!(
         key.open(nonce.to_vec(), aad.to_vec(), rx),
         feed(tx, schedule.chunks(ciphertext))
@@ -216,21 +204,16 @@ pub async fn open(
 /// `verifying-key.verify`, feeding `data` per `schedule` concurrently with
 /// the call; same outcome split as [`verify`].
 pub async fn sig_verify(
-    key: &crate::lann::webcrypto::signature::VerifyingKey,
+    key: &lann_webcrypto_guest::raw::signature::VerifyingKey,
     data: &[u8],
     sig: &[u8],
     schedule: Schedule,
 ) -> (Result<(), Error>, Result<(), String>) {
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     futures::join!(
         key.verify(rx, sig.to_vec()),
         feed(tx, schedule.chunks(data))
     )
-}
-
-/// [`feed`] with the whole payload as one chunk.
-pub async fn feed_whole(tx: wit_bindgen::StreamWriter<u8>, data: &[u8]) -> Result<(), String> {
-    feed(tx, vec![data.to_vec()]).await
 }
 
 /// Decode a hex constant (probe-internal known-answer material).

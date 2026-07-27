@@ -23,10 +23,10 @@ wit_bindgen::generate!({
 use std::collections::BTreeSet;
 
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
-use lann::webcrypto::ecdsa_sign::{generate_key, import_signing_key};
-use lann::webcrypto::ecdsa_verify::{import_verifying_key, EcdsaVariant};
-use lann::webcrypto::signature::{SigningKey, VerifyingKey};
-use lann::webcrypto::types::Error;
+use lann_webcrypto_guest::raw::ecdsa_sign::{generate_key, import_signing_key};
+use lann_webcrypto_guest::raw::ecdsa_verify::{import_verifying_key, EcdsaVariant};
+use lann_webcrypto_guest::raw::signature::{SigningKey, VerifyingKey};
+use lann_webcrypto_guest::raw::types::Error;
 
 /// The feature names shared with the conformance guest (`all` traps on
 /// anything else), so a target passes one `missing` declaration to every
@@ -189,7 +189,7 @@ fn describe(context: &str, error: &Error) -> String {
 
 /// Sign an entire byte stream (whole-write).
 async fn sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
-    let (mut tx, rx) = wit_stream::new();
+    let (mut tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sig, ()) = futures::join!(key.sign(rx), async {
         let leftover = tx.write_all(data.to_vec()).await;
         assert!(leftover.is_empty(), "stream writer closed early");
@@ -200,7 +200,7 @@ async fn sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Verify `sig` over an entire byte stream (whole-write).
 async fn verify(key: &VerifyingKey, data: &[u8], sig: &[u8]) -> Result<(), Error> {
-    let (mut tx, rx) = wit_stream::new();
+    let (mut tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (verified, ()) = futures::join!(key.verify(rx, sig.to_vec()), async {
         let leftover = tx.write_all(data.to_vec()).await;
         assert!(leftover.is_empty(), "stream writer closed early");

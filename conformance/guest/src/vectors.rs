@@ -1,20 +1,6 @@
 //! Execution of the normalized vector cases against the imported
 //! `lann:webcrypto` interfaces.
 
-use crate::lann::webcrypto::aead::AeadKey;
-use crate::lann::webcrypto::aes_gcm::{import_key, AesVariant};
-use crate::lann::webcrypto::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
-use crate::lann::webcrypto::bytes::constant_time_equal;
-use crate::lann::webcrypto::chacha20_poly1305::import_key as import_chacha_key;
-use crate::lann::webcrypto::ecdsa_verify::{
-    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
-};
-use crate::lann::webcrypto::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use crate::lann::webcrypto::hmac_sha2::import_key as import_hmac_key;
-use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
-use crate::lann::webcrypto::types::Error;
-use crate::lann::webcrypto::xchacha20_poly1305::import_key as import_xchacha_key;
-use crate::lann::webcrypto::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
 use crate::translate::{
     AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, InternalNonceAlg, InternalNonceCase,
     Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
@@ -22,6 +8,20 @@ use crate::translate::{
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
 };
+use lann_webcrypto_guest::raw::aead::AeadKey;
+use lann_webcrypto_guest::raw::aes_gcm::{import_key, AesVariant};
+use lann_webcrypto_guest::raw::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
+use lann_webcrypto_guest::raw::bytes::constant_time_equal;
+use lann_webcrypto_guest::raw::chacha20_poly1305::import_key as import_chacha_key;
+use lann_webcrypto_guest::raw::ecdsa_verify::{
+    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+};
+use lann_webcrypto_guest::raw::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::raw::hmac_sha2::import_key as import_hmac_key;
+use lann_webcrypto_guest::raw::sha2::{make_digest, Sha2Variant};
+use lann_webcrypto_guest::raw::types::Error;
+use lann_webcrypto_guest::raw::xchacha20_poly1305::import_key as import_xchacha_key;
+use lann_webcrypto_guest::raw::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
 
 /// Run one SHA-2 digest vector under its schedule.
 pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
