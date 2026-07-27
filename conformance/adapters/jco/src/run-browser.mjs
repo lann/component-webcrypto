@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
 import { join, extname } from "node:path";
 
-import { REPO_ROOT, writeReport } from "./report.mjs";
+import { MISSING, REPO_ROOT, writeReport } from "./report.mjs";
 
 const MIME = {
   ".html": "text/html",
@@ -20,15 +20,27 @@ const MIME = {
   ".map": "application/json",
 };
 
-// The in-page harness: mirrors run-node.mjs, then reports back.
+// The in-page harness: mirrors run-node.mjs (the same missing-feature
+// declaration, inlined — the page cannot import the Node-side helper),
+// then reports back.
 const HARNESS = `<!doctype html>
 <title>lann:webcrypto conformance</title>
 <script type="module">
 (async () => {
   try {
     const { tests } = await import("/conformance/adapters/jco/generated/conformance-guest.js");
-    const results = await tests.runAll();
-    window.__report({ results: results.map(({ id, passed, detail }) => ({ id, passed, detail })) });
+    const missing = ${JSON.stringify(MISSING)};
+    const results = [];
+    for (const testCase of tests.all(missing)) {
+      const { tag, val } = await testCase.run();
+      results.push({
+        name: String(testCase.name()),
+        features: Array.from(testCase.features(), String),
+        outcome: String(tag),
+        detail: String(val ?? ""),
+      });
+    }
+    window.__report({ results });
   } catch (err) {
     window.__report({ error: String(err?.stack ?? err) });
   }
@@ -120,7 +132,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/`);
     const outcome = await report;
     if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
-    await writeReport("jco-browser", outcome.results);
+    await writeReport("jco-browser", "shared", outcome.results);
   } finally {
     await browser.close();
     server.close();

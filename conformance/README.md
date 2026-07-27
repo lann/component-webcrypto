@@ -1,9 +1,31 @@
 # Conformance suite
 
-One shared guest component runs the whole corpus against every
-implementation of `lann:webcrypto`; the runner classifies per-target results
-against [`manifests.toml`](manifests.toml) and renders `matrix.md`. Run it
-with `just conformance` (see that recipe for the currently enabled targets).
+One shared guest component carries the whole corpus as self-describing test
+cases and runs it against every implementation of `lann:webcrypto`; the
+runner aggregates per-target results — validating them against the target
+facts in [`targets.toml`](targets.toml) and the checked-in corpus lockfiles —
+and renders `matrix.md`. Run it with `just conformance` (see that recipe for
+the currently enabled targets).
+
+## Self-describing cases, target facts, and the lockfiles
+
+Expectation policy lives in the corpus, not the harness. The guest exports
+`all(missing) -> list<test-case>`; each case carries its stable `name`, the
+`features` it exercises beyond the baseline surface (feature tags are inert
+by default), and an async `run` returning `pass | fail(detail) |
+skipped(detail)`. A target declares only the features it is **missing**
+(`targets.toml`, cross-checked against what each adapter passed to `all`):
+cases tagged with a missing feature report `skipped`, and the feature-tagged
+*probes* assert the correct decline in both directions — a target that
+serves a feature it declares missing, or declines one it doesn't, fails.
+Growing the corpus therefore never silently sheds coverage: a new suite runs
+everywhere until a target consciously opts out.
+
+The corpus inventory is pinned by lockfiles (`guest/tests.lock`,
+`signing-guest/tests.lock`; TOML, one case per line with its feature tags,
+Cargo.lock-style): the runner rejects any results file whose case names or
+tags diverge, so corpus changes land intentionally via
+`just update-conformance-lock` with a reviewable diff.
 
 ## Architecture
 
@@ -12,12 +34,13 @@ vectors/           # vendored Wycheproof JSON + the translation policy
                    #   (vectors/README.md) mapping vector expectations into
                    #   this package's stricter contract
 guest/             # the conformance guest: vectors compiled in (no I/O
-                   #   imports, so the composed target runs under a
-                   #   plain `wasmtime run`); exports count/run-all/run-slice
+                   #   imports, so the composed target runs under a plain
+                   #   `wasmtime run`); exports all(missing) ->
+                   #   list<test-case>; tests.lock pins its corpus
 signing-guest/     # host-only guest: probes for interfaces the in-guest
                    #   provider deliberately does not export (ecdsa-sign);
-                   #   runs under the wasmtime and jco targets only, results
-                   #   merged into the same per-target files
+                   #   runs under the wasmtime and jco targets only, with
+                   #   its own tests.lock
 adapters/
   wasmtime/        # native adapter over wasmtime-webcrypto's add_to_linker
   composed-driver/   # CLI driver for the composed in-guest target (guest +
@@ -26,12 +49,20 @@ adapters/
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
                    #   with Chrome/Chromium 137+ installed)
-runner/            # classification + matrix.md rendering
+runner/            # aggregation: transport invariants + matrix.md rendering
+targets.toml       # target facts: missing features (and why), required
+                   #   corpora, optionality
 ```
 
-Result files are `results/<target>.json`:
-`{ "target": ..., "results": [{ "id", "passed", "detail" }] }`. Adapters exit
-nonzero only on harness errors — failing *tests* are the runner's business.
+Result files are `results/<target>.json` (or `<target>-<corpus>.json`):
+`{ "target", "corpus", "missing", "results": [{ "name", "features",
+"outcome", "detail" }] }`. Adapters exit nonzero only on harness errors —
+failing *cases* are the runner's business. The runner errors (exit nonzero)
+when a required (target, corpus) pair has no results file, a file's cases
+diverge from its corpus lockfile, a file's `missing` diverges from
+targets.toml, any (target, corpus) pair appears twice, or any case fails;
+`just conformance` clears `results/` first, so stale files never classify
+as current.
 
 ## Test identity
 
@@ -67,15 +98,15 @@ crypto conformance tests *functions against mathematics*.
 - **The "environment" axis is input adversity × delivery schedule**, not
   network topology: Wycheproof's negative vectors replace hostile networks,
   chunking schedules replace routing scenarios.
-- **Expectations in `manifests.toml` encode policy, not capability**: the
-  jco targets expected-fail the ChaCha20-Poly1305 corpus (browser WebCrypto
-  implements no ChaCha20-Poly1305, so the jco host declines those keys as
-  `unsupported` — a missing platform feature a caller routes around with
-  another provider) and the deterministic-ECDSA signing probe (WebCrypto's
-  randomized `k` makes RFC 6979's known-answer bytes unobservable, though the
-  signatures still verify). The anticipated future entries are profile
-  divergence (e.g. a FIPS-profile target expected-failing the short-key HMAC
-  vectors). Bugs get fixed, not manifested.
+- **Divergence is declared as missing features, not expected failures**: the
+  jco targets are missing `chacha20-poly1305` (browser WebCrypto implements
+  none of it; minting declines `unsupported` — a platform gap a caller
+  routes around with another provider) and `deterministic-ecdsa`
+  (WebCrypto's randomized `k` makes RFC 6979's known-answer bytes
+  unobservable, though the signatures still verify — the decline assertion
+  checks exactly that). The anticipated future declarations are profile
+  divergence (e.g. a FIPS-profile target missing a permissive-key-policy
+  feature). Bugs get fixed, not declared.
 
 ## Deliberately deferred
 
@@ -98,7 +129,10 @@ crypto conformance tests *functions against mathematics*.
 
 Adding an algorithm interface to the package is not done until its vector
 suite is here: vendor the vectors, extend the translation policy in
-`vectors/README.md` + `guest/src/translate.rs` (they must agree), and update
-the per-target manifests/profiles if the algorithm's policy differs by
-implementation (e.g. an algorithm the in-guest provider deliberately does not
-export appears in no composed results — that is absence, not failure).
+`vectors/README.md` + `guest/src/translate.rs` (they must agree), tag the
+new cases with a feature name if any target legitimately cannot serve them
+(declaring it missing in `targets.toml` for those targets), and run
+`just update-conformance-lock` so the corpus change lands as a reviewable
+lockfile diff. An algorithm the in-guest provider deliberately does not
+export lives in the host-only signing guest, whose corpus the composed
+target never runs — that is absence, not failure.

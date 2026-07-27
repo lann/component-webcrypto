@@ -1,52 +1,65 @@
-// The shared conformance guest world. One guest binary runs the whole corpus
-// against whichever `lann:webcrypto` implementation the target under test
-// provides: the Wasmtime host, the jco host (Node and browser), or the
-// composed in-guest provider.
+// The shared conformance guest world. One guest binary carries the whole
+// corpus and runs it against whichever `lann:webcrypto` implementation the
+// target under test provides: the Wasmtime host, the jco host (Node and
+// browser), or the composed in-guest provider.
 //
 // The `lann:webcrypto` package lives once at the repository root `wit/` and
 // is pulled in through the `deps/lann-webcrypto` symlink.
 package conformance:webcrypto@0.1.0;
 
-/// The conformance corpus, executed in-guest.
+/// The conformance corpus as self-describing test cases.
+///
+/// Expectation policy lives in the cases, not in the harness. Each case
+/// declares the `features` it exercises beyond the baseline surface every
+/// implementation serves; a target declares only the features it is
+/// `missing`. Feature tags are inert by default — a case runs everywhere
+/// until a target opts out — so growing the corpus never silently sheds
+/// coverage: a target genuinely lacking the feature fails loudly until its
+/// gap is recorded.
+///
+/// A case whose feature the target declares missing reports `skipped`
+/// instead of exercising its subject; the feature-tagged *probe* cases
+/// additionally assert the correct decline (for example, that every
+/// minting path for the missing algorithm fails `unsupported`). The
+/// assertion cuts both ways — a target that serves a feature it declares
+/// missing, or declines one it doesn't, fails.
+///
+/// The feature names, and which target declares which missing, are
+/// documented in conformance/README.md; the checked-in `tests.lock` files
+/// pin each corpus's case names and feature tags.
 interface tests {
-    /// One executed conformance test.
-    record test-result {
-        /// Stable identity: `<suite>/<source>/<case>/<schedule>` for
-        /// vector-driven tests (e.g. `aes-gcm/wycheproof/tc42/bytes`) or
-        /// `probe/<name>` for hand-written API-contract probes.
-        id: string,
-        /// Whether the observed behavior matched the expected outcome.
-        passed: bool,
-        /// Failure detail; empty when passed.
-        detail: string,
+    /// The outcome of one executed test case.
+    variant outcome {
+        /// The observed behavior matched the expectation.
+        pass,
+        /// The observed behavior diverged; the payload says how.
+        fail(string),
+        /// The case's feature is declared missing by the target: the case
+        /// asserted the correct decline instead of exercising its subject.
+        /// The payload says what was asserted.
+        skipped(string),
     }
 
-    /// The number of tests in the corpus (stable for a given guest build).
-    count: func() -> u32;
+    /// One conformance test case.
+    resource test-case {
+        /// Stable identity: `<suite>/<source>/<case>/<schedule>` for
+        /// vector-driven cases (e.g. `aes-gcm/wycheproof/tc42/bytes`) or
+        /// `probe/<name>` for hand-written API-contract probes.
+        name: func() -> string;
 
-    /// The ids of every test in the corpus, in corpus order
-    /// (`list-tests()[i]` is the test `run-slice(i, 1)` runs).
-    list-tests: func() -> list<string>;
+        /// The feature names this case exercises beyond the baseline
+        /// surface (empty for most cases).
+        features: func() -> list<string>;
 
-    /// Run the entire corpus and report per-test results. Equivalent to
-    /// `run-slice(0, count())`.
-    run-all: async func() -> list<test-result>;
+        /// Run the case. Expectation mismatches are reported as `fail`,
+        /// never traps, so a run always yields an outcome.
+        run: async func() -> outcome;
+    }
 
-    /// Run the named tests (ids as reported by `list-tests`), in the order
-    /// given. An unknown id yields a failed `test-result` for that id.
-    ///
-    /// Like `run-slice`, a harness-debugging aid: it selects an arbitrary
-    /// subset of the corpus, where `run-slice` can only select a contiguous
-    /// window.
-    run-many: async func(tests: list<string>) -> list<test-result>;
-
-    /// Run `take` tests starting at `skip`, in corpus order.
-    ///
-    /// A harness-debugging aid: running a window of the corpus is how a
-    /// misbehaving target gets bisected (it is how a past jco runtime issue
-    /// affecting the jco conformance targets was isolated). Gating targets
-    /// run `run-all`.
-    run-slice: async func(skip: u32, take: u32) -> list<test-result>;
+    /// Materialize the corpus for a target missing the named features, in
+    /// corpus order. Unknown feature names trap: a misspelled declaration
+    /// is a harness bug, not a test outcome.
+    all: func(missing: list<string>) -> list<test-case>;
 }
 
 world conformance-guest {

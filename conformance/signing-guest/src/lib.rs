@@ -4,14 +4,15 @@
 //! does not export — `ecdsa-sign` is class D (see guest-impl/README.md) —
 //! which the shared `conformance-guest` therefore cannot import, since it
 //! must compose with that provider. This guest runs only under the
-//! host-backed targets (wasmtime, jco); its results merge into the same
-//! per-target files the runner consumes.
+//! host-backed targets (wasmtime, jco).
 //!
 //! The corpus here is probes only: ECDSA signing has no cross-implementation
 //! known answers (WebCrypto signs with a randomized `k`, RustCrypto with
 //! RFC 6979's deterministic one), so behavior is pinned by round trips plus
-//! one deterministic known-answer probe that per-target manifests expect to
-//! fail on randomized implementations.
+//! one deterministic known-answer probe tagged with the
+//! `deterministic-ecdsa` feature — a target declaring that feature missing
+//! gets the two-way decline assertion (its signatures must actually be
+//! randomized) instead.
 
 wit_bindgen::generate!({
     path: "../guest/wit",
@@ -19,11 +20,20 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use exports::conformance::webcrypto::tests::{Guest, TestResult};
+use std::collections::BTreeSet;
+
+use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use lann::webcrypto::ecdsa_sign::{generate_key, import_signing_key};
 use lann::webcrypto::ecdsa_verify::{import_verifying_key, EcdsaVariant};
 use lann::webcrypto::signature::{SigningKey, VerifyingKey};
 use lann::webcrypto::types::Error;
+
+/// The feature names shared with the conformance guest (`all` traps on
+/// anything else), so a target passes one `missing` declaration to every
+/// guest it runs. `chacha20-poly1305` tags nothing in this corpus.
+const FEATURE_CHACHA: &str = "chacha20-poly1305";
+const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
+const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_DETERMINISTIC_ECDSA];
 
 // --- RFC 6979 A.2.5 (ECDSA P-256 + SHA-256, message "sample") ----------------
 
@@ -36,16 +46,38 @@ const P256_SIG_S: &str = "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab
 
 struct Component;
 
-/// The probe names, in corpus order (`probe/<name>` ids).
-const NAMES: &[&str] = &[
-    "ecdsa-p256-sign-roundtrip",
-    "ecdsa-p384-generate-roundtrip",
-    "ecdsa-sign-key-export",
-    "ecdsa-sign-invalid-scalar",
-    "ecdsa-sign-deterministic-rfc6979",
+/// One probe: its name (`probe/<name>` case ids) and the features it
+/// exercises beyond the baseline surface.
+struct Probe {
+    name: &'static str,
+    features: &'static [&'static str],
+}
+
+/// The probes, in corpus order. `run_one(i)` runs `PROBES[i]`.
+const PROBES: &[Probe] = &[
+    Probe {
+        name: "ecdsa-p256-sign-roundtrip",
+        features: &[],
+    },
+    Probe {
+        name: "ecdsa-p384-generate-roundtrip",
+        features: &[],
+    },
+    Probe {
+        name: "ecdsa-sign-key-export",
+        features: &[],
+    },
+    Probe {
+        name: "ecdsa-sign-invalid-scalar",
+        features: &[],
+    },
+    Probe {
+        name: "ecdsa-sign-deterministic-rfc6979",
+        features: &[FEATURE_DETERMINISTIC_ECDSA],
+    },
 ];
 
-/// Run the probe at `index` (into [`NAMES`]).
+/// Run the probe at `index` on a target providing its features.
 async fn run_one(index: usize) -> Result<(), String> {
     match index {
         0 => p256_sign_roundtrip().await,
@@ -57,63 +89,77 @@ async fn run_one(index: usize) -> Result<(), String> {
     }
 }
 
-impl Guest for Component {
-    fn count() -> u32 {
-        NAMES.len() as u32
-    }
-
-    fn list_tests() -> Vec<String> {
-        NAMES.iter().map(|name| format!("probe/{name}")).collect()
-    }
-
-    async fn run_all() -> Vec<TestResult> {
-        run_slice_impl(0, u32::MAX).await
-    }
-
-    async fn run_slice(skip: u32, take: u32) -> Vec<TestResult> {
-        run_slice_impl(skip, take).await
-    }
-
-    async fn run_many(tests: Vec<String>) -> Vec<TestResult> {
-        let mut results = Vec::with_capacity(tests.len());
-        for id in tests {
-            let index = NAMES.iter().position(|name| format!("probe/{name}") == id);
-            results.push(match index {
-                Some(index) => to_result(id, run_one(index).await),
-                None => TestResult {
-                    id,
-                    passed: false,
-                    detail: "no test with this id in the corpus".into(),
-                },
-            });
+/// Run the probe at `index` on a target declaring its features missing:
+/// assert the correct alternative behavior. The only tagged probe is the
+/// RFC 6979 known answer, whose decline assertion is that signing is
+/// actually randomized (and still verifies) — a target signing
+/// deterministically while declaring `deterministic-ecdsa` missing fails.
+async fn run_declined(index: usize) -> Result<String, String> {
+    match PROBES.get(index).map(|probe| probe.features) {
+        Some(features) if features == [FEATURE_DETERMINISTIC_ECDSA] => {
+            sign_randomized_declined().await
         }
-        results
+        Some(_) => Err("probe has no decline assertion for its features".into()),
+        None => Err(format!("no probe at index {index}")),
     }
 }
 
-/// Run the probes with indices in `[skip, skip + take)`.
-async fn run_slice_impl(skip: u32, take: u32) -> Vec<TestResult> {
-    let skip = (skip as usize).min(NAMES.len());
-    let end = skip.saturating_add(take as usize).min(NAMES.len());
-    let mut results = Vec::with_capacity(end - skip);
-    for (index, name) in NAMES.iter().enumerate().take(end).skip(skip) {
-        results.push(to_result(format!("probe/{name}"), run_one(index).await));
-    }
-    results
+/// One materialized signing probe.
+struct Case {
+    index: usize,
+    provided: bool,
 }
 
-fn to_result(id: String, outcome: Result<(), String>) -> TestResult {
-    match outcome {
-        Ok(()) => TestResult {
-            id,
-            passed: true,
-            detail: String::new(),
-        },
-        Err(detail) => TestResult {
-            id,
-            passed: false,
-            detail,
-        },
+impl GuestTestCase for Case {
+    fn name(&self) -> String {
+        format!("probe/{}", PROBES[self.index].name)
+    }
+
+    fn features(&self) -> Vec<String> {
+        PROBES[self.index]
+            .features
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    async fn run(&self) -> Outcome {
+        if self.provided {
+            match run_one(self.index).await {
+                Ok(()) => Outcome::Pass,
+                Err(detail) => Outcome::Fail(detail),
+            }
+        } else {
+            match run_declined(self.index).await {
+                Ok(detail) => Outcome::Skipped(detail),
+                Err(detail) => Outcome::Fail(detail),
+            }
+        }
+    }
+}
+
+impl Guest for Component {
+    type TestCase = Case;
+
+    fn all(missing: Vec<String>) -> Vec<TestCase> {
+        let mut set = BTreeSet::new();
+        for feature in &missing {
+            assert!(
+                KNOWN_FEATURES.contains(&feature.as_str()),
+                "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"
+            );
+            set.insert(feature.as_str());
+        }
+        PROBES
+            .iter()
+            .enumerate()
+            .map(|(index, probe)| {
+                TestCase::new(Case {
+                    index,
+                    provided: probe.features.iter().all(|f| !set.contains(f)),
+                })
+            })
+            .collect()
     }
 }
 
@@ -308,9 +354,10 @@ async fn sign_invalid_scalar() -> Result<(), String> {
 }
 
 /// The RFC 6979 deterministic known answer: signing "sample" with the A.2.5
-/// key reproduces the vector's `r ‖ s` exactly. Deterministic-`k`
-/// implementations (RustCrypto) pass; randomized-`k` ones (WebCrypto) fail
-/// by design — the per-target manifests encode which is expected.
+/// key reproduces the vector's `r ‖ s` exactly. Runs only on targets
+/// providing the `deterministic-ecdsa` feature (RustCrypto); randomized-`k`
+/// targets (WebCrypto) declare it missing and get
+/// [`sign_randomized_declined`] instead.
 async fn sign_deterministic_rfc6979() -> Result<(), String> {
     let key = import_signing_key(EcdsaVariant::P256Sha256, unhex(P256_PRIVATE), false)
         .await
@@ -320,11 +367,35 @@ async fn sign_deterministic_rfc6979() -> Result<(), String> {
     expected.extend(unhex(P256_SIG_S));
     if sig != expected {
         return Err(format!(
-            "signature is not the RFC 6979 deterministic one (randomized k?): got {}",
+            "signature is not the RFC 6979 deterministic one (randomized k? declare the \
+             deterministic-ecdsa feature missing): got {}",
             hex::encode(&sig)
         ));
     }
     Ok(())
+}
+
+/// The decline assertion for a target declaring `deterministic-ecdsa`
+/// missing: two signatures over the same message must differ (randomized
+/// `k`) while still verifying. A target that signs deterministically while
+/// declaring the feature missing fails.
+async fn sign_randomized_declined() -> Result<String, String> {
+    let key = import_signing_key(EcdsaVariant::P256Sha256, unhex(P256_PRIVATE), false)
+        .await
+        .map_err(|e| describe("import-signing-key", &e))?;
+    let first = sign(&key, P256_MESSAGE).await?;
+    let second = sign(&key, P256_MESSAGE).await?;
+    if first == second {
+        return Err(
+            "two signatures over the same message are identical: the target signs \
+             deterministically but declares the deterministic-ecdsa feature missing"
+                .into(),
+        );
+    }
+    verify(&key.verifying_key(), P256_MESSAGE, &first)
+        .await
+        .map_err(|e| describe("randomized signature did not verify", &e))?;
+    Ok("signatures are randomized (and verify); deterministic-ecdsa declared missing".into())
 }
 
 export!(Component);

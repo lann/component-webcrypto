@@ -1,0 +1,44 @@
+# The conformance targets: facts about each implementation under test.
+#
+# Expectation policy lives in the corpus itself — each case declares the
+# `features` it exercises, and a case whose feature a target is `missing`
+# reports `skipped` (with the feature-tagged probes asserting the correct
+# decline both ways). This file carries only what has no other home: which
+# targets exist, which features each is missing (and why), which corpora
+# each must produce results for, and whether a missing results file is an
+# error.
+#
+# The runner cross-checks every results file's declared `missing` against
+# this table, so a target's adapter and this manifest cannot drift apart
+# silently.
+
+[targets.wasmtime]
+# The native RustCrypto host serves the whole corpus.
+missing = []
+corpora = ["shared", "signing"]
+
+[targets.composed]
+# The in-guest RustCrypto provider serves the whole shared corpus; the
+# signing corpus needs `ecdsa-sign`, which the provider deliberately does
+# not export (class D), so the composed target cannot run it at all.
+missing = []
+corpora = ["shared"]
+
+[targets.jco-node]
+# Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
+# unimplemented), and signs ECDSA with a randomized k (RFC 6979
+# deterministic known answers are unobservable). Policy, not bugs: a
+# composition needing either must supply another provider.
+missing = ["chacha20-poly1305", "deterministic-ecdsa"]
+corpora = ["shared", "signing"]
+
+[targets.jco-browser]
+# The same host module as jco-node, in headless Chromium. The browser
+# adapter has no signing mode, so only the shared corpus is required.
+missing = ["chacha20-poly1305", "deterministic-ecdsa"]
+corpora = ["shared"]
+# Gates in CI (the Actions runner ships Chrome); locally it needs a
+# Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so a missing results file is a warning, not an
+# error.
+optional = true

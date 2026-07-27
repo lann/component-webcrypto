@@ -1,15 +1,23 @@
-//! `conformance-runner`: classifies per-target conformance results against
-//! `conformance/manifests.toml` and renders `conformance/matrix.md`.
+//! `conformance-runner`: the aggregator for the cross-target conformance
+//! results. Expectation policy lives in the corpus (self-describing cases)
+//! and target facts in `conformance/targets.toml`; this program only checks
+//! that the mail arrived intact, gates on failures, and renders
+//! `conformance/matrix.md`.
 //!
-//! Usage: `conformance-runner --manifests <toml> --results <dir> --matrix-out <md>`.
+//! Usage: `conformance-runner --targets <toml> --results <dir>
+//!         --lock <corpus>=<lockfile> ... --matrix-out <md>`
 //!
-//! Every `<dir>/*.json` results file (as written by the adapters) is read and
-//! each test classified: **pass**, **fail**, **expected-fail** (failed and
-//! matched by the target's `expected-fail` list), or **unexpected-pass**
-//! (passed but matched — treated as an error so stale manifest entries get
-//! pruned). Targets present in the manifests but missing a results file are
-//! warned about, not failed. Exits nonzero iff any fail or unexpected-pass
-//! exists across the results present.
+//! Transport invariants, each an error (exit nonzero):
+//! - every non-`optional` target produced a results file for each of its
+//!   declared corpora (an `optional` target's missing file is a warning);
+//! - at most one results file per (target, corpus), with no duplicate case
+//!   names inside it;
+//! - each results file's case names and feature tags exactly match its
+//!   corpus's checked-in lockfile (corpus changes land intentionally via
+//!   `just update-conformance-lock`);
+//! - each results file's declared `missing` features match the target's
+//!   entry in targets.toml (adapters and the manifest cannot drift apart);
+//! - no case reports `fail`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -17,60 +25,70 @@ use std::path::PathBuf;
 use anyhow::Context as _;
 
 #[derive(serde::Deserialize)]
-struct Manifests {
-    targets: BTreeMap<String, TargetManifest>,
+struct Targets {
+    targets: BTreeMap<String, Target>,
 }
 
 #[derive(serde::Deserialize)]
-struct TargetManifest {
-    #[serde(rename = "expected-fail", default)]
-    expected_fail: Vec<String>,
+struct Target {
+    missing: Vec<String>,
+    corpora: Vec<String>,
+    #[serde(default)]
+    optional: bool,
 }
 
 #[derive(serde::Deserialize)]
 struct ResultsFile {
     target: String,
-    results: Vec<TestResult>,
+    corpus: String,
+    missing: Vec<String>,
+    results: Vec<CaseResult>,
 }
 
 #[derive(serde::Deserialize)]
-struct TestResult {
-    id: String,
-    passed: bool,
+struct CaseResult {
+    name: String,
+    #[serde(default)]
+    features: Vec<String>,
+    outcome: String,
     #[serde(default)]
     detail: String,
 }
 
-/// The classification of one test result against the target's manifest.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Class {
-    Pass,
-    Fail,
-    ExpectedFail,
-    UnexpectedPass,
+/// One corpus lockfile: case name -> feature tags.
+struct Lock {
+    features: BTreeMap<String, Vec<String>>,
 }
 
-/// One classified result.
-struct Classified {
-    target: String,
-    id: String,
-    detail: String,
-    class: Class,
+#[derive(serde::Deserialize)]
+struct LockFile {
+    cases: Vec<LockCase>,
 }
 
-/// Whether a manifest entry (an exact id, or a prefix ending in `*`) matches
-/// a test id.
-fn entry_matches(entry: &str, id: &str) -> bool {
-    match entry.strip_suffix('*') {
-        Some(prefix) => id.starts_with(prefix),
-        None => entry == id,
+#[derive(serde::Deserialize)]
+struct LockCase {
+    name: String,
+    #[serde(default)]
+    features: Vec<String>,
+}
+
+/// Parse a lockfile (TOML: a `cases` array of `{ name, features? }` inline
+/// tables, as written by `just update-conformance-lock`).
+fn parse_lock(text: &str) -> anyhow::Result<Lock> {
+    let file: LockFile = toml::from_str(text)?;
+    let mut features = BTreeMap::new();
+    for case in file.cases {
+        if features.insert(case.name.clone(), case.features).is_some() {
+            anyhow::bail!("duplicate case {:?}", case.name);
+        }
     }
+    Ok(Lock { features })
 }
 
-/// The suite group a test id belongs to: `probe`, or its first two
+/// The suite group a case name belongs to: `probe`, or its first two
 /// path segments (e.g. `aes-gcm/wycheproof`).
-fn group_of(id: &str) -> String {
-    if let Some(rest) = id.split_once('/') {
+fn group_of(name: &str) -> String {
+    if let Some(rest) = name.split_once('/') {
         if rest.0 == "probe" {
             return "probe".to_string();
         }
@@ -79,35 +97,240 @@ fn group_of(id: &str) -> String {
         }
         return format!("{}/{}", rest.0, rest.1);
     }
-    id.to_string()
+    name.to_string()
 }
 
-/// Flatten a detail string for one-line markdown rendering, truncating long
-/// tails.
-fn render_detail(detail: &str) -> String {
-    let mut flat = detail.replace('\n', "; ");
-    const MAX: usize = 200;
-    if flat.len() > MAX {
-        let mut end = MAX;
-        while !flat.is_char_boundary(end) {
-            end -= 1;
+/// Validate one results file against the target table and its corpus lock,
+/// appending human-readable problems to `problems`.
+fn validate_file(
+    file: &ResultsFile,
+    targets: &Targets,
+    locks: &BTreeMap<String, Lock>,
+    problems: &mut Vec<String>,
+) {
+    let at = format!("{}/{}", file.target, file.corpus);
+
+    match targets.targets.get(&file.target) {
+        None => problems.push(format!("{at}: target not declared in targets.toml")),
+        Some(target) => {
+            let declared: BTreeSet<&str> = target.missing.iter().map(String::as_str).collect();
+            let reported: BTreeSet<&str> = file.missing.iter().map(String::as_str).collect();
+            if declared != reported {
+                problems.push(format!(
+                    "{at}: adapter declared missing features {reported:?}, but targets.toml \
+                     declares {declared:?}"
+                ));
+            }
         }
-        flat.truncate(end);
-        flat.push('…');
     }
-    flat
+
+    let Some(lock) = locks.get(&file.corpus) else {
+        problems.push(format!(
+            "{at}: no lockfile for corpus {:?} (pass --lock {}=<path>)",
+            file.corpus, file.corpus
+        ));
+        return;
+    };
+
+    let mut seen = BTreeSet::new();
+    for case in &file.results {
+        if !seen.insert(case.name.as_str()) {
+            problems.push(format!("{at}: duplicate case {:?}", case.name));
+            continue;
+        }
+        match lock.features.get(&case.name) {
+            None => problems.push(format!(
+                "{at}: case {:?} is not in the corpus lockfile (run `just \
+                 update-conformance-lock` if the corpus changed intentionally)",
+                case.name
+            )),
+            Some(tags) if *tags != case.features => problems.push(format!(
+                "{at}: case {:?} reports feature tags {:?}, but the lockfile has {:?} (run \
+                 `just update-conformance-lock` if the corpus changed intentionally)",
+                case.name, case.features, tags
+            )),
+            Some(_) => {}
+        }
+        if !matches!(case.outcome.as_str(), "pass" | "fail" | "skipped") {
+            problems.push(format!(
+                "{at}: case {:?} reports unknown outcome {:?}",
+                case.name, case.outcome
+            ));
+        }
+    }
+    for name in lock.features.keys() {
+        if !seen.contains(name.as_str()) {
+            problems.push(format!(
+                "{at}: case {name:?} is in the corpus lockfile but produced no result (run \
+                 `just update-conformance-lock` if the corpus changed intentionally)"
+            ));
+        }
+    }
 }
 
-fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
-    let mut manifests = None;
+/// Check every declared (target, corpus) pair produced exactly one results
+/// file, appending problems (or warnings for `optional` targets).
+fn check_presence(
+    targets: &Targets,
+    files: &[ResultsFile],
+    problems: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let mut seen: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for file in files {
+        *seen
+            .entry((file.target.as_str(), file.corpus.as_str()))
+            .or_default() += 1;
+    }
+    for (pair, count) in &seen {
+        if *count > 1 {
+            problems.push(format!(
+                "{}/{}: {count} results files for one (target, corpus) pair",
+                pair.0, pair.1
+            ));
+        }
+    }
+    for (name, target) in &targets.targets {
+        for corpus in &target.corpora {
+            if !seen.contains_key(&(name.as_str(), corpus.as_str())) {
+                let message = format!("{name}/{corpus}: no results file");
+                if target.optional {
+                    warnings.push(format!("{message} (target is optional)"));
+                } else {
+                    problems.push(message);
+                }
+            }
+        }
+    }
+}
+
+/// Render the cross-target matrix.
+fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
+    // Targets: manifest order first, then any result-only ones.
+    let mut target_names: Vec<String> = targets.targets.keys().cloned().collect();
+    for file in files {
+        if !target_names.contains(&file.target) {
+            target_names.push(file.target.clone());
+        }
+    }
+    let groups: BTreeSet<String> = files
+        .iter()
+        .flat_map(|f| f.results.iter().map(|c| group_of(&c.name)))
+        .collect();
+
+    let mut md = String::new();
+    md.push_str("# Conformance matrix\n\n");
+    md.push_str(
+        "Generated by `conformance-runner` from `conformance/results/*.json` against \
+         `conformance/targets.toml` and the corpus lockfiles. Cells are `passed/total` \
+         per suite group; `-N` counts cases skipped because the target declares a \
+         feature missing (see targets.toml).\n\n",
+    );
+
+    md.push_str("| Suite |");
+    for target in &target_names {
+        md.push_str(&format!(" {target} |"));
+    }
+    md.push_str("\n| --- |");
+    for _ in &target_names {
+        md.push_str(" --- |");
+    }
+    md.push('\n');
+    for group in &groups {
+        md.push_str(&format!("| {group} |"));
+        for target in &target_names {
+            let in_cell: Vec<&CaseResult> = files
+                .iter()
+                .filter(|f| &f.target == target)
+                .flat_map(|f| f.results.iter())
+                .filter(|c| group_of(&c.name) == *group)
+                .collect();
+            if in_cell.is_empty() {
+                md.push_str(" — |");
+                continue;
+            }
+            let total = in_cell.len();
+            let passed = in_cell.iter().filter(|c| c.outcome == "pass").count();
+            let skipped = in_cell.iter().filter(|c| c.outcome == "skipped").count();
+            let mut cell = format!("{passed}/{total}");
+            if skipped > 0 {
+                cell.push_str(&format!(" -{skipped} skipped"));
+            }
+            md.push_str(&format!(" {cell} |"));
+        }
+        md.push('\n');
+    }
+    md.push('\n');
+
+    md.push_str("## Failures\n\n");
+    let mut any_failures = false;
+    for file in files {
+        for case in &file.results {
+            if case.outcome == "fail" {
+                any_failures = true;
+                let mut detail = case.detail.replace('\n', "; ");
+                const MAX: usize = 200;
+                if detail.len() > MAX {
+                    let mut end = MAX;
+                    while !detail.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    detail.truncate(end);
+                    detail.push('…');
+                }
+                md.push_str(&format!(
+                    "- FAIL `{}` `{}`: {detail}\n",
+                    file.target, case.name
+                ));
+            }
+        }
+    }
+    if !any_failures {
+        md.push_str("None.\n");
+    }
+    md.push('\n');
+
+    md.push_str("## Skips\n\n");
+    md.push_str(
+        "Cases whose feature the target declares missing (grouped; the feature-tagged \
+         probes assert the correct decline).\n\n",
+    );
+    let mut any_skips = false;
+    for file in files {
+        let mut by_group: BTreeMap<String, (usize, &str)> = BTreeMap::new();
+        for case in &file.results {
+            if case.outcome == "skipped" {
+                let entry = by_group
+                    .entry(group_of(&case.name))
+                    .or_insert((0, case.detail.as_str()));
+                entry.0 += 1;
+            }
+        }
+        for (group, (count, detail)) in by_group {
+            any_skips = true;
+            md.push_str(&format!(
+                "- `{}` `{group}`: {count} skipped — {detail}\n",
+                file.target
+            ));
+        }
+    }
+    if !any_skips {
+        md.push_str("None.\n");
+    }
+    md
+}
+
+fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf, BTreeMap<String, PathBuf>)> {
+    let mut targets = None;
     let mut results = None;
     let mut matrix_out = None;
+    let mut locks = BTreeMap::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--manifests" => {
-                manifests = Some(PathBuf::from(
-                    args.next().context("--manifests needs a value")?,
+            "--targets" => {
+                targets = Some(PathBuf::from(
+                    args.next().context("--targets needs a value")?,
                 ))
             }
             "--results" => {
@@ -120,27 +343,45 @@ fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
                     args.next().context("--matrix-out needs a value")?,
                 ))
             }
+            "--lock" => {
+                let value = args.next().context("--lock needs <corpus>=<path>")?;
+                let (corpus, path) = value
+                    .split_once('=')
+                    .context("--lock needs <corpus>=<path>")?;
+                locks.insert(corpus.to_string(), PathBuf::from(path));
+            }
             other => anyhow::bail!("unknown argument {other:?}"),
         }
     }
     Ok((
-        manifests.context("--manifests <toml> is required")?,
+        targets.context("--targets <toml> is required")?,
         results.context("--results <dir> is required")?,
         matrix_out.context("--matrix-out <md> is required")?,
+        locks,
     ))
 }
 
 fn main() -> anyhow::Result<()> {
-    let (manifests_path, results_dir, matrix_path) = parse_args()?;
+    let (targets_path, results_dir, matrix_path, lock_paths) = parse_args()?;
 
-    let manifests: Manifests = toml::from_str(
-        &std::fs::read_to_string(&manifests_path)
-            .with_context(|| format!("reading {}", manifests_path.display()))?,
+    let targets: Targets = toml::from_str(
+        &std::fs::read_to_string(&targets_path)
+            .with_context(|| format!("reading {}", targets_path.display()))?,
     )
-    .with_context(|| format!("parsing {}", manifests_path.display()))?;
+    .with_context(|| format!("parsing {}", targets_path.display()))?;
+
+    let mut locks = BTreeMap::new();
+    for (corpus, path) in &lock_paths {
+        let lock = parse_lock(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?,
+        )
+        .with_context(|| format!("parsing {}", path.display()))?;
+        locks.insert(corpus.clone(), lock);
+    }
 
     // Read every results file in the directory.
-    let mut result_files: Vec<ResultsFile> = Vec::new();
+    let mut files: Vec<ResultsFile> = Vec::new();
     let mut entries: Vec<_> = std::fs::read_dir(&results_dir)
         .with_context(|| format!("reading {}", results_dir.display()))?
         .collect::<Result<_, _>>()?;
@@ -155,185 +396,246 @@ fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("reading {}", path.display()))?,
         )
         .with_context(|| format!("parsing {}", path.display()))?;
-        result_files.push(file);
+        files.push(file);
     }
 
-    // Classify every result against its target's manifest.
-    let empty: Vec<String> = Vec::new();
-    let mut classified: Vec<Classified> = Vec::new();
-    for file in &result_files {
-        let expected_fail = manifests
-            .targets
-            .get(&file.target)
-            .map(|t| &t.expected_fail)
-            .unwrap_or(&empty);
-        for result in &file.results {
-            let matched = expected_fail
-                .iter()
-                .any(|entry| entry_matches(entry, &result.id));
-            let class = match (result.passed, matched) {
-                (true, false) => Class::Pass,
-                (true, true) => Class::UnexpectedPass,
-                (false, true) => Class::ExpectedFail,
-                (false, false) => Class::Fail,
-            };
-            classified.push(Classified {
-                target: file.target.clone(),
-                id: result.id.clone(),
-                detail: result.detail.clone(),
-                class,
-            });
-        }
+    let mut problems = Vec::new();
+    let mut warnings = Vec::new();
+    check_presence(&targets, &files, &mut problems, &mut warnings);
+    for file in &files {
+        validate_file(file, &targets, &locks, &mut problems);
     }
-
-    // Targets: manifest order (alphabetical) first, then any result-only ones.
-    let mut targets: Vec<String> = manifests.targets.keys().cloned().collect();
-    for file in &result_files {
-        if !targets.contains(&file.target) {
-            targets.push(file.target.clone());
-        }
-    }
-    let targets_with_results: BTreeSet<&str> =
-        result_files.iter().map(|f| f.target.as_str()).collect();
-    let missing: Vec<&String> = manifests
-        .targets
-        .keys()
-        .filter(|t| !targets_with_results.contains(t.as_str()))
-        .collect();
-
-    let groups: BTreeSet<String> = classified.iter().map(|c| group_of(&c.id)).collect();
-
-    // --- render the matrix ---------------------------------------------------
-
-    let mut md = String::new();
-    md.push_str("# Conformance matrix\n\n");
-    md.push_str(
-        "Generated by `conformance-runner` from `conformance/results/*.json` \
-         against `conformance/manifests.toml`. Cells are `passed/total` per \
-         suite group (`+N expected-fail` counts expected failures).\n\n",
-    );
-
-    md.push_str("| Suite |");
-    for target in &targets {
-        md.push_str(&format!(" {target} |"));
-    }
-    md.push('\n');
-    md.push_str("| --- |");
-    for _ in &targets {
-        md.push_str(" --- |");
-    }
-    md.push('\n');
-    for group in &groups {
-        md.push_str(&format!("| {group} |"));
-        for target in &targets {
-            let in_cell: Vec<&Classified> = classified
-                .iter()
-                .filter(|c| &c.target == target && group_of(&c.id) == *group)
-                .collect();
-            if in_cell.is_empty() {
-                md.push_str(" — |");
-                continue;
-            }
-            let total = in_cell.len();
-            let passed = in_cell.iter().filter(|c| c.class == Class::Pass).count();
-            let expected_fail = in_cell
-                .iter()
-                .filter(|c| c.class == Class::ExpectedFail)
-                .count();
-            let mut cell = format!("{passed}/{total}");
-            if expected_fail > 0 {
-                cell.push_str(&format!(" +{expected_fail} expected-fail"));
-            }
-            md.push_str(&format!(" {cell} |"));
-        }
-        md.push('\n');
-    }
-    md.push('\n');
-
-    let fails: Vec<&Classified> = classified
+    let failures: usize = files
         .iter()
-        .filter(|c| c.class == Class::Fail)
-        .collect();
-    let unexpected: Vec<&Classified> = classified
+        .flat_map(|f| f.results.iter())
+        .filter(|c| c.outcome == "fail")
+        .count();
+    let total: usize = files.iter().map(|f| f.results.len()).sum();
+    let skipped: usize = files
         .iter()
-        .filter(|c| c.class == Class::UnexpectedPass)
-        .collect();
-    let expected_fails: Vec<&Classified> = classified
-        .iter()
-        .filter(|c| c.class == Class::ExpectedFail)
-        .collect();
+        .flat_map(|f| f.results.iter())
+        .filter(|c| c.outcome == "skipped")
+        .count();
 
-    md.push_str("## Failures and unexpected passes\n\n");
-    if fails.is_empty() && unexpected.is_empty() {
-        md.push_str("None.\n");
-    } else {
-        for c in &fails {
-            md.push_str(&format!(
-                "- FAIL `{}` `{}`: {}\n",
-                c.target,
-                c.id,
-                render_detail(&c.detail)
-            ));
-        }
-        for c in &unexpected {
-            md.push_str(&format!(
-                "- UNEXPECTED-PASS `{}` `{}`: passed but listed in expected-fail\n",
-                c.target, c.id
-            ));
-        }
-    }
-    md.push('\n');
-
-    md.push_str("## Expected failures\n\n");
-    if expected_fails.is_empty() {
-        md.push_str("None.\n");
-    } else {
-        for c in &expected_fails {
-            md.push_str(&format!(
-                "- EXPECTED-FAIL `{}` `{}`: {}\n",
-                c.target,
-                c.id,
-                render_detail(&c.detail)
-            ));
-        }
-    }
-    md.push('\n');
-
-    md.push_str("## Targets without results\n\n");
-    if missing.is_empty() {
-        md.push_str("None.\n");
-    } else {
-        for target in &missing {
-            md.push_str(&format!(
-                "- `{target}`: in manifests but no results file (warning only)\n"
-            ));
-        }
-    }
-
+    let md = render_matrix(&targets, &files);
     if let Some(parent) = matrix_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&matrix_path, &md)
         .with_context(|| format!("writing {}", matrix_path.display()))?;
 
-    for target in &missing {
-        eprintln!(
-            "warning: target {target} has no results file in {}",
-            results_dir.display()
-        );
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    for problem in &problems {
+        eprintln!("error: {problem}");
     }
     println!(
-        "conformance: {} results across {} target(s): {} fail, {} unexpected-pass, {} expected-fail -> {}",
-        classified.len(),
-        targets_with_results.len(),
-        fails.len(),
-        unexpected.len(),
-        expected_fails.len(),
+        "conformance: {total} results across {} file(s): {failures} failed, {skipped} \
+         skipped, {} transport problem(s) -> {}",
+        files.len(),
+        problems.len(),
         matrix_path.display()
     );
 
-    if !fails.is_empty() || !unexpected.is_empty() {
+    if failures > 0 || !problems.is_empty() {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn targets() -> Targets {
+        toml::from_str(
+            r#"
+            [targets.native]
+            missing = []
+            corpora = ["shared", "signing"]
+
+            [targets.web]
+            missing = ["chacha20-poly1305"]
+            corpora = ["shared"]
+            optional = true
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn lock() -> Lock {
+        parse_lock(
+            r#"
+            # comment
+            cases = [
+                { name = "suite/src/tc1/whole" },
+                { name = "suite/src/tc2/whole", features = ["chacha20-poly1305"] },
+                { name = "probe/check" },
+            ]
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn file(target: &str, corpus: &str, results: Vec<CaseResult>) -> ResultsFile {
+        let missing = match target {
+            "web" => vec!["chacha20-poly1305".to_string()],
+            _ => Vec::new(),
+        };
+        ResultsFile {
+            target: target.to_string(),
+            corpus: corpus.to_string(),
+            missing,
+            results,
+        }
+    }
+
+    fn case(name: &str, features: &[&str], outcome: &str) -> CaseResult {
+        CaseResult {
+            name: name.to_string(),
+            features: features.iter().map(|s| s.to_string()).collect(),
+            outcome: outcome.to_string(),
+            detail: String::new(),
+        }
+    }
+
+    fn full_results() -> Vec<CaseResult> {
+        vec![
+            case("suite/src/tc1/whole", &[], "pass"),
+            case("suite/src/tc2/whole", &["chacha20-poly1305"], "pass"),
+            case("probe/check", &[], "pass"),
+        ]
+    }
+
+    fn validate(file: &ResultsFile) -> Vec<String> {
+        let mut problems = Vec::new();
+        let locks = BTreeMap::from([("shared".to_string(), lock())]);
+        validate_file(file, &targets(), &locks, &mut problems);
+        problems
+    }
+
+    #[test]
+    fn group_of_splits_suites_and_probes() {
+        assert_eq!(
+            group_of("aes-gcm/wycheproof/tc42/bytes"),
+            "aes-gcm/wycheproof"
+        );
+        assert_eq!(group_of("probe/chacha-key-metadata"), "probe");
+        assert_eq!(
+            group_of("sha2/nist-cavp/sha256-len8/whole"),
+            "sha2/nist-cavp"
+        );
+    }
+
+    #[test]
+    fn complete_results_validate() {
+        assert_eq!(
+            validate(&file("native", "shared", full_results())),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn missing_case_is_a_problem() {
+        let mut results = full_results();
+        results.remove(1);
+        let problems = validate(&file("native", "shared", results));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("produced no result"), "{problems:?}");
+    }
+
+    #[test]
+    fn extra_case_is_a_problem() {
+        let mut results = full_results();
+        results.push(case("suite/src/tc99/whole", &[], "pass"));
+        let problems = validate(&file("native", "shared", results));
+        assert!(
+            problems[0].contains("not in the corpus lockfile"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_case_is_a_problem() {
+        let mut results = full_results();
+        results.push(case("probe/check", &[], "pass"));
+        let problems = validate(&file("native", "shared", results));
+        assert!(problems[0].contains("duplicate case"), "{problems:?}");
+    }
+
+    #[test]
+    fn feature_tag_drift_is_a_problem() {
+        let mut results = full_results();
+        results[1].features.clear();
+        let problems = validate(&file("native", "shared", results));
+        assert!(problems[0].contains("feature tags"), "{problems:?}");
+    }
+
+    #[test]
+    fn missing_declaration_drift_is_a_problem() {
+        let mut file = file("web", "shared", full_results());
+        file.missing.clear();
+        let problems = validate(&file);
+        assert!(
+            problems[0].contains("targets.toml declares"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_corpus_is_a_problem() {
+        let problems = validate(&file("native", "mystery", full_results()));
+        assert!(
+            problems[0].contains("no lockfile for corpus"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_target_is_a_problem() {
+        let problems = validate(&file("rogue", "shared", full_results()));
+        assert!(
+            problems[0].contains("not declared in targets.toml"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn presence_is_enforced_per_corpus_with_optional_warnings() {
+        let files = vec![file("native", "shared", full_results())];
+        let mut problems = Vec::new();
+        let mut warnings = Vec::new();
+        check_presence(&targets(), &files, &mut problems, &mut warnings);
+        // native/signing is required and absent; web/shared is optional.
+        assert_eq!(
+            problems,
+            vec!["native/signing: no results file".to_string()]
+        );
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("web/shared"), "{warnings:?}");
+    }
+
+    #[test]
+    fn duplicate_target_corpus_pair_is_a_problem() {
+        let files = vec![
+            file("native", "shared", full_results()),
+            file("native", "shared", full_results()),
+        ];
+        let mut problems = Vec::new();
+        let mut warnings = Vec::new();
+        check_presence(&targets(), &files, &mut problems, &mut warnings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("2 results files for one")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("native/signing: no results file")),
+            "{problems:?}"
+        );
+    }
 }

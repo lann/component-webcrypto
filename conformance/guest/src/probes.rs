@@ -32,36 +32,59 @@ use crate::translate::Schedule;
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
 };
+use crate::FEATURE_CHACHA;
 
-/// The probe names, in execution order. `run_one(i)` runs `NAMES[i]`.
-pub const NAMES: &[&str] = &[
-    "hmac-import-empty-key",
-    "hmac-sha384-sha512",
-    "sha2-truncated-unsupported",
-    "aes-import-wrong-length",
-    "aes192-unsupported",
-    "seal-drains-on-invalid-nonce",
-    "open-drains-on-invalid-nonce",
-    "sealed-length",
-    "key-export-roundtrip",
-    "not-extractable",
-    "generated-key-shape",
-    "algorithm-names",
-    "mac-verify-rejects-truncated",
-    "sign-prefix-drop",
-    "digest-reuse",
-    "constant-time-equal",
-    "chacha-key-metadata",
-    "chacha-nonce-lengths",
-    "ed25519-sign-roundtrip",
-    "sig-key-metadata",
-    "sig-import-invalid",
-    "verifying-key-export-roundtrip",
-    "internal-nonce-shape",
-    "chacha-internal-nonce-roundtrip",
+/// One probe: its name (`probe/<name>` case ids) and the features it
+/// exercises beyond the baseline surface.
+pub struct Probe {
+    pub name: &'static str,
+    pub features: &'static [&'static str],
+}
+
+const fn probe(name: &'static str) -> Probe {
+    Probe {
+        name,
+        features: &[],
+    }
+}
+
+const fn chacha_probe(name: &'static str) -> Probe {
+    Probe {
+        name,
+        features: &[FEATURE_CHACHA],
+    }
+}
+
+/// The probes, in execution order. `run_one(i)` runs `PROBES[i]`.
+pub const PROBES: &[Probe] = &[
+    probe("hmac-import-empty-key"),
+    probe("hmac-sha384-sha512"),
+    probe("sha2-truncated-unsupported"),
+    probe("aes-import-wrong-length"),
+    probe("aes192-unsupported"),
+    probe("seal-drains-on-invalid-nonce"),
+    probe("open-drains-on-invalid-nonce"),
+    probe("sealed-length"),
+    probe("key-export-roundtrip"),
+    probe("not-extractable"),
+    probe("generated-key-shape"),
+    probe("algorithm-names"),
+    probe("mac-verify-rejects-truncated"),
+    probe("sign-prefix-drop"),
+    probe("digest-reuse"),
+    probe("constant-time-equal"),
+    chacha_probe("chacha-key-metadata"),
+    chacha_probe("chacha-nonce-lengths"),
+    probe("ed25519-sign-roundtrip"),
+    probe("sig-key-metadata"),
+    probe("sig-import-invalid"),
+    probe("verifying-key-export-roundtrip"),
+    probe("internal-nonce-shape"),
+    chacha_probe("chacha-internal-nonce-roundtrip"),
 ];
 
-/// Run the probe at `index` (into [`NAMES`]).
+/// Run the probe at `index` (into [`PROBES`]) on a target providing its
+/// features.
 pub async fn run_one(index: usize) -> Result<(), String> {
     match index {
         0 => hmac_import_empty_key().await,
@@ -90,6 +113,71 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         23 => chacha_internal_nonce_roundtrip().await,
         _ => Err(format!("no probe at index {index}")),
     }
+}
+
+/// Run the probe at `index` on a target that declares its features missing:
+/// assert the correct decline. Every feature-tagged probe here exercises
+/// ChaCha20-Poly1305, so the assertion is shared — each ChaCha minting path
+/// must fail `unsupported`. This is the two-way guarantee behind the plain
+/// `skipped` the vector cases report: a target cannot silently serve a
+/// feature it declares missing.
+pub async fn run_declined(index: usize) -> Result<String, String> {
+    match PROBES.get(index).map(|probe| probe.features) {
+        Some(features) if features == [FEATURE_CHACHA] => chacha_minting_declined().await,
+        Some(_) => Err("probe has no decline assertion for its features".into()),
+        None => Err(format!("no probe at index {index}")),
+    }
+}
+
+/// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
+async fn chacha_minting_declined() -> Result<String, String> {
+    for (name, import, generate) in CHACHA_MINTERS {
+        match import(vec![0x42u8; 32], false).await {
+            Err(Error::Unsupported(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("{name} import-key: expected unsupported from a missing feature, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => {
+                return Err(format!(
+                "{name} import-key minted a key: the target serves a feature it declares missing"
+            ))
+            }
+        }
+        match generate(false).await {
+            Err(Error::Unsupported(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!(
+                        "{name} generate-key: expected unsupported from a missing feature, got"
+                    ),
+                    &other,
+                ))
+            }
+            Ok(_) => {
+                return Err(format!(
+                "{name} generate-key minted a key: the target serves a feature it declares missing"
+            ))
+            }
+        }
+    }
+    match generate_xchacha_internal_nonce_key(false).await {
+        Err(Error::Unsupported(_)) => {}
+        Err(other) => return Err(describe(
+            "xchacha internal-nonce generate-key: expected unsupported from a missing feature, got",
+            &other,
+        )),
+        Ok(_) => {
+            return Err(
+                "xchacha internal-nonce generate-key minted a key for a feature \
+                 declared missing"
+                    .into(),
+            )
+        }
+    }
+    Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
 }
 
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
