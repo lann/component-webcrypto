@@ -104,7 +104,8 @@ impl MacGuest for Component {
 
 /// An exported `mac-key`: raw HMAC key material bound to a SHA-2 variant.
 pub struct MacKey {
-    raw: Vec<u8>,
+    /// Raw key material; zeroized on drop.
+    raw: zeroize::Zeroizing<Vec<u8>>,
     variant: Sha2,
     extractable: bool,
 }
@@ -496,7 +497,7 @@ impl HmacSha2Guest for Component {
             ));
         }
         Ok(mac::MacKey::new(MacKey {
-            raw,
+            raw: zeroize::Zeroizing::new(raw),
             variant,
             extractable,
         }))
@@ -507,7 +508,7 @@ impl HmacSha2Guest for Component {
         let mut raw = vec![0u8; variant.block_len()];
         getrandom::fill(&mut raw).expect("WASI random source is always available");
         Ok(mac::MacKey::new(MacKey {
-            raw,
+            raw: zeroize::Zeroizing::new(raw),
             variant,
             extractable,
         }))
