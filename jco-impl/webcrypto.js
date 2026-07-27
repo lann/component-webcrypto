@@ -1045,17 +1045,17 @@ function base64UrlDecode(text) {
  * Derive the public `CryptoKey` for `privateKey` by round-tripping its JWK
  * without the private field.
  *
- * On keys imported from *private-only* PKCS#8 (the raw-scalar ECDSA import
- * path; RFC 5915 makes `publicKey` optional and notes the public key "can
- * always be recomputed" from the private one), the WebCrypto spec's JWK
- * export algorithm sets `x`/`y` unconditionally — so a conforming engine
- * must derive the public point. Chromium does, at import; Firefox stores
- * only what was imported and its `exportKey` throws `OperationError`
- * (non-conforming — signing with the key works). A platform that cannot
- * produce the public half cannot serve this package's `signing-key`
- * resource, whose `verifying-key` derivation is infallible by contract,
- * so the failure is lifted to the WIT `unsupported` error at minting time
- * rather than escaping as an uncaught platform error.
+ * This depends on keys imported from *private-only* PKCS#8 (the
+ * raw-scalar ECDSA import path), whose platform behavior is unspecified
+ * and inconsistent across engines — w3c/webcrypto#356: a 2023 survey had
+ * most engines rejecting the import outright; current Chromium accepts
+ * and derives the public point; current Firefox accepts and signs but
+ * throws `OperationError` from the JWK export here. A platform that
+ * cannot produce the public half cannot serve this package's
+ * `signing-key` resource, whose `verifying-key` derivation is infallible
+ * by contract, so any failure on this path is lifted to the WIT
+ * `unsupported` error at minting time rather than escaping as an
+ * uncaught platform error.
  * @param {CryptoKey} privateKey
  * @param {object} importParams
  */

@@ -35,11 +35,6 @@ use translate::{
 /// implements none of them, so the jco targets declare it missing.
 pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 
-/// The `deterministic-ecdsa` feature: RFC 6979 deterministic ECDSA
-/// signatures (exercised only by the host-only signing suite;
-/// declared here so every guest validates the same feature names).
-pub const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
-
 /// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
 /// Nothing in this suite is tagged with it — the signing suite's world
 /// *imports* the interface, so a target missing the feature (the composed
@@ -50,11 +45,7 @@ pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 /// Every feature name a target may declare missing. `all` traps on names
 /// outside this set, so a misspelled declaration is a harness bug rather
 /// than a silently-inert one.
-pub const KNOWN_FEATURES: &[&str] = &[
-    FEATURE_CHACHA,
-    FEATURE_DETERMINISTIC_ECDSA,
-    FEATURE_ECDSA_SIGN,
-];
+pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
 
 /// Validate a `missing-features` declaration against [`KNOWN_FEATURES`],
 /// returning the set. Panics (traps) on unknown names.
