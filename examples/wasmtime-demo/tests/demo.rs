@@ -75,3 +75,24 @@ async fn crypto_demo_all_checks_pass() {
         "summary declares {declared} checks but lists {listed}: {summary}"
     );
 }
+
+/// With a tiny per-call buffer limit every check's input overflows: the
+/// operation drains its stream (the feeder completes) and reports the
+/// recoverable limit error, which the guest surfaces as a check failure —
+/// pinning the end-to-end path of `WasiWebcryptoCtx`'s buffering limits.
+#[tokio::test(flavor = "multi_thread")]
+async fn tiny_buffer_limit_fails_recoverably() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_component(&workspace_root);
+
+    let mut ctx = wasmtime_webcrypto::WasiWebcryptoCtx::new();
+    ctx.set_per_call_buffer_limit(Some(4));
+    let err = wasmtime_webcrypto_demo::run_demo_with(&component, ctx)
+        .await
+        .expect_err("a 4-byte buffer limit must fail the demo's checks");
+    let rendered = format!("{err:#}");
+    assert!(
+        rendered.contains("per-call buffer limit"),
+        "expected the recoverable limit error, got: {rendered}"
+    );
+}

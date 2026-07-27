@@ -73,8 +73,13 @@ export class MacKey {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
-    const message = await collectByteStream(data);
-    return new Uint8Array(await subtle.sign("HMAC", this.#key, message));
+    const reservation = await admitInput();
+    try {
+      const message = await collectByteStream(data, reservation.cap);
+      return new Uint8Array(await subtle.sign("HMAC", this.#key, message));
+    } finally {
+      reservation.release();
+    }
   }
 
   /**
@@ -85,9 +90,14 @@ export class MacKey {
    * @param {Uint8Array} tag
    */
   async verify(data, tag) {
-    const message = await collectByteStream(data);
-    if (!(await subtle.verify("HMAC", this.#key, tag, message))) {
-      throw { tag: "authentication-failed" };
+    const reservation = await admitInput();
+    try {
+      const message = await collectByteStream(data, reservation.cap);
+      if (!(await subtle.verify("HMAC", this.#key, tag, message))) {
+        throw { tag: "authentication-failed" };
+      }
+    } finally {
+      reservation.release();
     }
   }
 
@@ -145,14 +155,21 @@ export class AeadKey {
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
   async seal(nonce, aad, plaintext) {
-    const message = await collectByteStream(plaintext);
-    requireGcmNonce(nonce);
-    const sealed = await subtle.encrypt(
-      { name: "AES-GCM", iv: nonce, additionalData: aad },
-      this.#key,
-      message,
-    );
-    return bytesToStream(new Uint8Array(sealed));
+    const reservation = await admitInput();
+    let handedOff = false;
+    try {
+      const message = await collectByteStream(plaintext, reservation.cap);
+      requireGcmNonce(nonce);
+      const sealed = await subtle.encrypt(
+        { name: "AES-GCM", iv: nonce, additionalData: aad },
+        this.#key,
+        message,
+      );
+      handedOff = true;
+      return bytesToStream(new Uint8Array(sealed), reservation);
+    } finally {
+      if (!handedOff) reservation.release();
+    }
   }
 
   /**
@@ -166,21 +183,29 @@ export class AeadKey {
    * @param {AsyncIterable<unknown> | ReadableStream} ciphertext
    */
   async open(nonce, aad, ciphertext) {
-    const message = await collectByteStream(ciphertext);
-    requireGcmNonce(nonce);
-    let opened;
+    const reservation = await admitInput();
+    let handedOff = false;
     try {
-      opened = await subtle.decrypt(
-        { name: "AES-GCM", iv: nonce, additionalData: aad },
-        this.#key,
-        message,
-      );
-    } catch {
-      // WebCrypto reports every decrypt failure as an opaque OperationError;
-      // the WIT error deliberately carries no detail either.
-      throw { tag: "authentication-failed" };
+      const message = await collectByteStream(ciphertext, reservation.cap);
+      requireGcmNonce(nonce);
+      let opened;
+      try {
+        opened = await subtle.decrypt(
+          { name: "AES-GCM", iv: nonce, additionalData: aad },
+          this.#key,
+          message,
+        );
+      } catch {
+        // WebCrypto reports every decrypt failure as an opaque
+        // OperationError; the WIT error deliberately carries no detail
+        // either.
+        throw { tag: "authentication-failed" };
+      }
+      handedOff = true;
+      return bytesToStream(new Uint8Array(opened), reservation);
+    } finally {
+      if (!handedOff) reservation.release();
     }
-    return bytesToStream(new Uint8Array(opened));
   }
 
   /**
@@ -279,8 +304,13 @@ export class Digest {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async compute(data) {
-    const message = await collectByteStream(data);
-    return new Uint8Array(await subtle.digest(this.#hash, message));
+    const reservation = await admitInput();
+    try {
+      const message = await collectByteStream(data, reservation.cap);
+      return new Uint8Array(await subtle.digest(this.#hash, message));
+    } finally {
+      reservation.release();
+    }
   }
 
   /** The registry name of the algorithm, e.g. `"SHA-256"`. */
@@ -451,19 +481,26 @@ export class InternalNonceKey {
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
   async seal(aad, plaintext) {
-    const message = await collectByteStream(plaintext);
-    if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
-      throw { tag: "key-exhausted" };
+    const reservation = await admitInput();
+    let handedOff = false;
+    try {
+      const message = await collectByteStream(plaintext, reservation.cap);
+      if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
+        throw { tag: "key-exhausted" };
+      }
+      this.#sealed += 1n;
+      const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
+      const body = new Uint8Array(
+        await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
+      );
+      const sealed = new Uint8Array(iv.length + body.length);
+      sealed.set(iv, 0);
+      sealed.set(body, iv.length);
+      handedOff = true;
+      return bytesToStream(sealed, reservation);
+    } finally {
+      if (!handedOff) reservation.release();
     }
-    this.#sealed += 1n;
-    const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
-    const body = new Uint8Array(
-      await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
-    );
-    const sealed = new Uint8Array(iv.length + body.length);
-    sealed.set(iv, 0);
-    sealed.set(body, iv.length);
-    return bytesToStream(sealed);
   }
 
   /**
@@ -476,23 +513,30 @@ export class InternalNonceKey {
    * @param {AsyncIterable<unknown> | ReadableStream} sealed
    */
   async open(aad, sealed) {
-    const message = await collectByteStream(sealed);
-    if (message.length < InternalNonceKey.#IV_BYTES) {
-      throw { tag: "authentication-failed" };
-    }
-    const iv = message.subarray(0, InternalNonceKey.#IV_BYTES);
-    const body = message.subarray(InternalNonceKey.#IV_BYTES);
-    let opened;
+    const reservation = await admitInput();
+    let handedOff = false;
     try {
-      opened = await subtle.decrypt(
-        { name: "AES-GCM", iv, additionalData: aad },
-        this.#key,
-        body,
-      );
-    } catch {
-      throw { tag: "authentication-failed" };
+      const message = await collectByteStream(sealed, reservation.cap);
+      if (message.length < InternalNonceKey.#IV_BYTES) {
+        throw { tag: "authentication-failed" };
+      }
+      const iv = message.subarray(0, InternalNonceKey.#IV_BYTES);
+      const body = message.subarray(InternalNonceKey.#IV_BYTES);
+      let opened;
+      try {
+        opened = await subtle.decrypt(
+          { name: "AES-GCM", iv, additionalData: aad },
+          this.#key,
+          body,
+        );
+      } catch {
+        throw { tag: "authentication-failed" };
+      }
+      handedOff = true;
+      return bytesToStream(new Uint8Array(opened), reservation);
+    } finally {
+      if (!handedOff) reservation.release();
     }
-    return bytesToStream(new Uint8Array(opened));
   }
 
   /** The algorithm getters: direct `AesKeyAlgorithm` projections. */
@@ -582,12 +626,90 @@ function requireGcmNonce(nonce) {
   }
 }
 
-/** A single-chunk byte `ReadableStream` over `bytes`. */
-function bytesToStream(bytes) {
+/**
+ * Input-buffering limits. Every stream-taking operation buffers its whole
+ * input (the single-message contract), and concurrent calls multiply — so
+ * admission bounds aggregate retention: each operation reserves its
+ * per-call cap from a shared pool before collecting, waiting FIFO when the
+ * pool is full, and releases when its buffers are gone (including the
+ * returned output stream). Inputs beyond the per-call cap are drained and
+ * discarded (the WIT drain rule holds) and the operation throws a
+ * recoverable `{ tag: 'other' }`. Defaults mirror the wasmtime host: a
+ * 128 MiB pool, per-call cap of a quarter of it.
+ */
+const DEFAULT_TOTAL_BUFFER_LIMIT = 128 * 1024 * 1024;
+
+const bufferLimits = { perCall: undefined, total: undefined };
+
+/**
+ * Configure the input-buffering limits (bytes). `undefined` restores a
+ * value's default.
+ * @param {{ perCallBufferLimit?: number, totalBufferLimit?: number }} options
+ */
+export function configure({ perCallBufferLimit, totalBufferLimit } = {}) {
+  bufferLimits.perCall = perCallBufferLimit;
+  bufferLimits.total = totalBufferLimit;
+}
+
+/** The effective `(perCall, total)` limits, clamped like the wasmtime host. */
+function effectiveBufferLimits() {
+  const total = Math.max(1, bufferLimits.total ?? DEFAULT_TOTAL_BUFFER_LIMIT);
+  const perCall = Math.max(1, Math.min(bufferLimits.perCall ?? Math.floor(total / 4), total));
+  return { perCall, total };
+}
+
+let reservedBytes = 0;
+/** @type {{ amount: number, total: number, resolve: () => void }[]} */
+const admitQueue = [];
+
+/** Admit queued reservations from the front while they fit (FIFO). */
+function admitFromFront() {
+  while (admitQueue.length > 0 && reservedBytes + admitQueue[0].amount <= admitQueue[0].total) {
+    const entry = admitQueue.shift();
+    reservedBytes += entry.amount;
+    entry.resolve();
+  }
+}
+
+/**
+ * Reserve one operation's buffering capacity, waiting FIFO for the pool.
+ * The returned reservation's `release` is idempotent.
+ * @returns {Promise<{ cap: number, release: () => void }>}
+ */
+async function admitInput() {
+  const { perCall, total } = effectiveBufferLimits();
+  const amount = Math.min(perCall, total);
+  await new Promise((resolve) => {
+    admitQueue.push({ amount, total, resolve });
+    admitFromFront();
+  });
+  let released = false;
+  return {
+    cap: amount,
+    release() {
+      if (!released) {
+        released = true;
+        reservedBytes -= amount;
+        admitFromFront();
+      }
+    },
+  };
+}
+
+/**
+ * A single-chunk byte `ReadableStream` over `bytes`, releasing
+ * `reservation` (when given) once the bytes are handed off or the stream
+ * is cancelled.
+ */
+function bytesToStream(bytes, reservation = undefined) {
   return new ReadableStream({
-    start(controller) {
+    pull(controller) {
       if (bytes.length) controller.enqueue(bytes);
       controller.close();
+      reservation?.release();
+    },
+    cancel() {
+      reservation?.release();
     },
   });
 }
@@ -603,14 +725,26 @@ function toByteChunk(value) {
   return Uint8Array.from(value);
 }
 
-/** Collect every byte of a WIT byte stream into one `Uint8Array`. */
-async function collectByteStream(stream) {
-  const chunks = [];
+/**
+ * Collect every byte of a WIT byte stream into one `Uint8Array`, retaining
+ * at most `cap` bytes: past the cap the stream is still drained (the WIT
+ * drain rule) but discarded, and a recoverable `{ tag: 'other' }` is thrown
+ * once the stream ends.
+ */
+async function collectByteStream(stream, cap = Infinity) {
+  let chunks = [];
   let total = 0;
+  let overflowed = false;
   const push = (value) => {
     if (value === undefined || value === null) return;
     const chunk = toByteChunk(value);
-    if (chunk.length) {
+    if (!chunk.length) return;
+    if (!overflowed && total + chunk.length > cap) {
+      // Stop retaining (free what we held), keep draining below.
+      overflowed = true;
+      chunks = [];
+    }
+    if (!overflowed) {
       chunks.push(chunk);
       total += chunk.length;
     }
@@ -637,6 +771,12 @@ async function collectByteStream(stream) {
     for await (const value of stream) {
       push(value);
     }
+  }
+  if (overflowed) {
+    throw {
+      tag: "other",
+      val: `input exceeds the per-call buffer limit (${cap} bytes); see configure()`,
+    };
   }
   return concatChunks(chunks, total);
 }
@@ -705,22 +845,27 @@ export class VerifyingKey {
    * @param {Uint8Array} sig
    */
   async verify(data, sig) {
-    const message = await collectByteStream(data);
-    // The `ed25519-verify` WIT criterion (verify_strict semantics): the
-    // engine implements plain RFC 8032, so reject non-canonical `S`,
-    // and non-canonical or small-order `R`, before delegating. The
-    // message stream is drained first, per the WIT drain rule.
-    if (this.#key.algorithm.name === "Ed25519" && sig.length === 64) {
-      if (!ltLittleEndian(sig.subarray(32), ED25519_L)) {
+    const reservation = await admitInput();
+    try {
+      const message = await collectByteStream(data, reservation.cap);
+      // The `ed25519-verify` WIT criterion (verify_strict semantics): the
+      // engine implements plain RFC 8032, so reject non-canonical `S`,
+      // and non-canonical or small-order `R`, before delegating. The
+      // message stream is drained first, per the WIT drain rule.
+      if (this.#key.algorithm.name === "Ed25519" && sig.length === 64) {
+        if (!ltLittleEndian(sig.subarray(32), ED25519_L)) {
+          throw { tag: "authentication-failed" };
+        }
+        if (!ed25519PointStrict(sig.subarray(0, 32))) {
+          throw { tag: "authentication-failed" };
+        }
+      }
+      const params = signParams(this.#key.algorithm.name, this.#hash);
+      if (!(await subtle.verify(params, this.#key, sig, message))) {
         throw { tag: "authentication-failed" };
       }
-      if (!ed25519PointStrict(sig.subarray(0, 32))) {
-        throw { tag: "authentication-failed" };
-      }
-    }
-    const params = signParams(this.#key.algorithm.name, this.#hash);
-    if (!(await subtle.verify(params, this.#key, sig, message))) {
-      throw { tag: "authentication-failed" };
+    } finally {
+      reservation.release();
     }
   }
 
@@ -777,9 +922,14 @@ export class SigningKey {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
-    const message = await collectByteStream(data);
-    const params = signParams(this.#privateKey.algorithm.name, this.#hash);
-    return new Uint8Array(await subtle.sign(params, this.#privateKey, message));
+    const reservation = await admitInput();
+    try {
+      const message = await collectByteStream(data, reservation.cap);
+      const params = signParams(this.#privateKey.algorithm.name, this.#hash);
+      return new Uint8Array(await subtle.sign(params, this.#privateKey, message));
+    } finally {
+      reservation.release();
+    }
   }
 
   /** The corresponding public key. */

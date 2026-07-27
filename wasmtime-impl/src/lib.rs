@@ -16,6 +16,7 @@
 
 pub mod bindings;
 mod host;
+mod limits;
 
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
@@ -46,16 +47,86 @@ pub(crate) const ECDSA_NAME: &str = "ECDSA";
 ///
 /// This is intentionally minimal (mirroring `wasmtime_wasi_http`'s
 /// `WasiHttpCtx`); it exists so hosts have a stable place to grow
-/// configuration without changing the [`WasiWebcryptoView`] shape. There are
-/// no knobs yet.
+/// configuration without changing the [`WasiWebcryptoView`] shape.
+///
+/// # Input-buffering limits
+///
+/// Every stream-taking operation buffers its whole input host-side (the
+/// single-message contract), and the component-model async ABI lets a guest
+/// run many calls concurrently — so without limits a guest could make the
+/// host retain unbounded memory. Two limits bound that retention (wasmtime's
+/// per-call lift budget, [`Store::set_hostcall_fuel`], bounds each stream
+/// *delivery*; these bound what operations *accumulate*):
+///
+/// - **Per call** ([`set_per_call_buffer_limit`]): the most one operation
+///   may buffer. Inputs beyond it are drained and discarded (the WIT drain
+///   rule holds) and the operation fails with a recoverable `error.other`.
+///   Defaults to ¼ of the store's hostcall fuel at admission time.
+/// - **Total** ([`set_total_buffer_limit`]): the admission pool. Each
+///   operation reserves its per-call bound before draining and waits
+///   (FIFO) for capacity when the pool is full, releasing when its buffers
+///   are gone — including the returned output stream. Defaults to 1× the
+///   store's hostcall fuel, so untouched configurations retain at most the
+///   embedder's one configured number, at a default concurrency of four
+///   operations.
+///
+/// Admission shares one pool per context: an operation may therefore wait
+/// on *unrelated* operations' completion (the same shape of coupling as
+/// wasi:http body backpressure). Do not withhold an admitted operation's
+/// input while awaiting a queued one.
+///
+/// Cloning the context shares the pool (a clone is a view, not a second
+/// budget).
+///
+/// [`set_per_call_buffer_limit`]: WasiWebcryptoCtx::set_per_call_buffer_limit
+/// [`set_total_buffer_limit`]: WasiWebcryptoCtx::set_total_buffer_limit
+/// [`Store::set_hostcall_fuel`]: wasmtime::Store::set_hostcall_fuel
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
-pub struct WasiWebcryptoCtx {}
+pub struct WasiWebcryptoCtx {
+    /// The most one operation may buffer, in bytes; `None` defaults to ¼ of
+    /// the store's hostcall fuel.
+    per_call_buffer_limit: Option<u64>,
+    /// The admission pool, in bytes; `None` defaults to the store's
+    /// hostcall fuel.
+    total_buffer_limit: Option<u64>,
+    /// The shared admission pool state.
+    pool: std::sync::Arc<crate::limits::BufferPool>,
+}
 
 impl WasiWebcryptoCtx {
     /// Create a new, default context.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the most one operation may buffer, in bytes. `None` (the
+    /// default) derives ¼ of the store's hostcall fuel at admission time.
+    pub fn set_per_call_buffer_limit(&mut self, limit: Option<u64>) {
+        self.per_call_buffer_limit = limit;
+    }
+
+    /// Set the total input-buffering admission pool, in bytes. `None` (the
+    /// default) derives the store's hostcall fuel at admission time.
+    pub fn set_total_buffer_limit(&mut self, limit: Option<u64>) {
+        self.total_buffer_limit = limit;
+    }
+
+    /// The effective `(per-call, total)` limits given the store's hostcall
+    /// fuel, clamped so a reservation always fits an empty pool and no
+    /// limit is zero.
+    pub(crate) fn buffer_limits(&self, hostcall_fuel: u64) -> (u64, u64) {
+        let total = self.total_buffer_limit.unwrap_or(hostcall_fuel).max(1);
+        let per_call = self
+            .per_call_buffer_limit
+            .unwrap_or(hostcall_fuel / 4)
+            .clamp(1, total);
+        (per_call, total)
+    }
+
+    /// The shared admission pool.
+    pub(crate) fn pool(&self) -> &std::sync::Arc<crate::limits::BufferPool> {
+        &self.pool
     }
 }
 

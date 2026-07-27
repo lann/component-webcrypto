@@ -46,9 +46,12 @@ interface types {
         key-exhausted,
         /// An implementation-specific operational failure — for example, an
         /// implementation backed by an external keystore (an HSM, a platform
-        /// key service) that cannot complete the operation right now. The
-        /// string is human-readable. API misuse remains unrepresentable by
-        /// construction and never appears here.
+        /// key service) that cannot complete the operation right now, or an
+        /// input exceeding a resource limit the implementation enforces
+        /// (implementations MAY bound how much input one operation may
+        /// buffer; the stream is still fully drained first, per the drain
+        /// rule). The string is human-readable. API misuse remains
+        /// unrepresentable by construction and never appears here.
         other(string),
     }
 }

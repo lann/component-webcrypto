@@ -65,6 +65,15 @@ fn engine() -> anyhow::Result<Engine> {
 /// A check failure reported by the guest (its `result<string, string>` `err`
 /// case) is mapped into the returned error.
 pub async fn run_demo(component_path: &Path) -> anyhow::Result<String> {
+    run_demo_with(component_path, WasiWebcryptoCtx::new()).await
+}
+
+/// Like [`run_demo`], with a caller-provided [`WasiWebcryptoCtx`] (e.g. to
+/// exercise its buffering limits).
+pub async fn run_demo_with(
+    component_path: &Path,
+    webcrypto: WasiWebcryptoCtx,
+) -> anyhow::Result<String> {
     let engine = engine()?;
     let component = Component::from_file(&engine, component_path)
         .with_context(|| format!("loading component {}", component_path.display()))?;
@@ -76,7 +85,7 @@ pub async fn run_demo(component_path: &Path) -> anyhow::Result<String> {
     let mut store = Store::new(
         &engine,
         Ctx {
-            webcrypto: WasiWebcryptoCtx::new(),
+            webcrypto,
             table: ResourceTable::new(),
         },
     );
