@@ -4,18 +4,26 @@
 // Web Worker (worker.mjs) and the main-thread fallback (app.mjs), so both
 // paths run identically.
 //
-// The module paths are absolute: the repo root is the server root (see
-// serve.mjs), which also lets the transpiled guests resolve their relative
-// imports of jco-impl/webcrypto.js.
+// The module paths are resolved relative to this file, so they work from
+// any base path (the local server's repo root, or a GitHub Pages project
+// subpath); the transpiled guests resolve their own relative imports of
+// jco-impl/webcrypto.js the same way, so the serving tree must mirror the
+// repository layout (see serve.mjs and the `conformance-web-site` recipe).
 
 export const CORPORA = [
   {
     corpus: "shared",
-    module: "/conformance/adapters/jco/generated/conformance-guest.js",
+    module: new URL(
+      "../adapters/jco/generated/conformance-guest.js",
+      import.meta.url,
+    ).href,
   },
   {
     corpus: "signing",
-    module: "/conformance/adapters/jco/generated-signing/conformance-signing-guest.js",
+    module: new URL(
+      "../adapters/jco/generated-signing/conformance-signing-guest.js",
+      import.meta.url,
+    ).href,
   },
 ];
 

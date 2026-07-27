@@ -1,0 +1,74 @@
+name: pages
+
+# Publish the conformance results viewer (conformance/web/) to GitHub Pages:
+# run the full conformance suite (under Actions this includes the
+# jco-browser target, so the published matrix carries every column), then
+# assemble the self-contained static site and deploy it. The page's URLs are
+# all relative, so it serves correctly from the project subpath.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-checks
+          cache-all-crates: true
+          # The CI workflow owns this cache; this job only reads it.
+          save-if: false
+
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Run the conformance suite
+        run: just conformance
+
+      - name: Assemble the static site
+        run: just conformance-web-site
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: target/conformance-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

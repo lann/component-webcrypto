@@ -5,7 +5,9 @@
 // browser's WebCrypto via the transpiled guests (see harness.mjs).
 import { runAll } from "./harness.mjs";
 
-const DATA_URL = "/conformance/results/matrix.json";
+// Resolved relative to this module, so the viewer works from any base path
+// (the local server's repo root, or a GitHub Pages project subpath).
+const DATA_URL = new URL("../results/matrix.json", import.meta.url);
 const JSPI_SUPPORT_URL = "https://caniuse.com/wf-wasm-jspi";
 // The browser column reuses this target's missing-features declaration:
 // any WebCrypto browser is missing the same features.

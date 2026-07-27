@@ -109,8 +109,14 @@ and cross-checking the run against the static corpus. It needs
 still renders the static matrix. A finished run can be downloaded in the
 results-file shape (the `this-browser` target is deliberately not declared
 in targets.toml, so the runner would reject it — it is for inspection, not
-gating). Publishing the viewer (e.g. GitHub Pages) is a possible follow-up;
-today it is local-only.
+gating).
+
+The viewer is published at
+<https://lann.github.io/component-webcrypto/> by the `pages` workflow: every
+push to main reruns the conformance suite (including the jco-browser target)
+and deploys the site assembled by `just conformance-web-site` — a pruned
+mirror of the repository layout, which the page's relative URLs and the
+transpiled guests' relative imports of `jco-impl/webcrypto.js` both rely on.
 
 ## Why this suite is shaped unlike its WebRTC sibling
 
