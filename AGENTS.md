@@ -53,16 +53,21 @@ conformance/            # cross-implementation conformance suite — see
                         #   the rationale for how it deliberately diverges
                         #   from the WebRTC sibling's suite
   vectors/              #   vendored Wycheproof JSON + the translation policy
-  guest/                #   the shared conformance guest (vectors compiled in)
+  guest/                #   the shared conformance guest (vectors compiled
+                        #     in; self-describing cases with feature tags,
+                        #     pinned by its tests.lock)
   signing-guest/        #   host-only guest for surfaces the in-guest
                         #     provider does not export (ecdsa-sign)
   adapters/             #   per-target drivers: wasmtime, composed-driver (for
                         #     the composed target), jco (Node gates everywhere;
                         #     the browser target gates in CI, locally opt-in
                         #     via CONFORMANCE_BROWSER=1 with Chrome installed)
-  runner/               #   classifies results against manifests.toml and
-                        #     renders conformance/matrix.md
-  manifests.toml        #   per-target expectations (policy-driven)
+                        #     — jco reads its missing-features from targets.toml
+  runner/               #   aggregates results: validates them against
+                        #     targets.toml + the corpus lockfiles, renders
+                        #     conformance/matrix.md
+  targets.toml          #   corpus facts (required features) + target facts
+                        #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
@@ -150,7 +155,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or manifests. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
+| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional corpus changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |

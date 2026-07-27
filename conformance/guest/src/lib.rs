@@ -1,16 +1,16 @@
 //! `conformance-guest`: the shared conformance component.
 //!
-//! One guest binary runs the whole corpus — the Wycheproof-derived vector
+//! One guest binary carries the whole corpus — the Wycheproof-derived vector
 //! cases (translated per `conformance/vectors/README.md` in [`translate`])
-//! plus the hand-written API-contract [`probes`] — against whichever
-//! `lann:webcrypto` implementation the target under test provides, and
-//! reports one `test-result` per executed test. Expectation mismatches are
-//! reported as failures, never traps, so a single run always yields the full
-//! result list.
+//! plus the hand-written API-contract [`probes`] — as self-describing
+//! `test-case` resources. Each case declares the [`features`] it exercises;
+//! `all(missing)` materializes the corpus for a target missing those
+//! features, and a case whose feature is missing asserts the correct
+//! decline (reporting `skipped`) instead of exercising its subject.
+//! Expectation mismatches are reported as `fail`, never traps, so a run
+//! always yields an outcome per case.
 //!
-//! The corpus is indexable (`count`/`list-tests` + `run-slice`/`run-many`) so
-//! a harness can split one run across several fresh component instances or
-//! select an arbitrary subset; `run-all` is `run-slice(0, count())`.
+//! [`features`]: exports::conformance::webcrypto::tests::GuestTestCase::features
 
 wit_bindgen::generate!({
     path: "wit",
@@ -23,220 +23,228 @@ mod translate;
 mod util;
 mod vectors;
 
-use exports::conformance::webcrypto::tests::{Guest, TestResult};
+use std::collections::BTreeSet;
+
+use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
     ChaChaCase, GcmCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase,
 };
 
-struct Component;
+/// The `chacha20-poly1305` feature: both ChaCha20-Poly1305 constructions
+/// and the XChaCha internal-nonce minting interface. Browser WebCrypto
+/// implements none of them, so the jco targets declare it missing.
+pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 
-/// The materialized corpus, in corpus order.
-struct Corpus {
-    hmac: Vec<HmacCase>,
-    gcm: Vec<GcmCase>,
-    chacha: Vec<ChaChaCase>,
-    internal_nonce: Vec<InternalNonceCase>,
-    sha2: Vec<Sha2Case>,
-    sig: Vec<SigCase>,
-    speccheck: Vec<SpeccheckCase>,
+/// The `deterministic-ecdsa` feature: RFC 6979 deterministic ECDSA
+/// signatures (exercised only by the host-only signing guest's corpus;
+/// declared here so every guest validates the same feature names).
+pub const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
+
+/// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
+/// Nothing in this corpus is tagged with it — the signing corpus's world
+/// *imports* the interface, so a target missing the feature (the composed
+/// target: class D) is excluded from that corpus structurally rather than
+/// case by case. Declared here so every guest validates the same names.
+pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
+
+/// Every feature name a target may declare missing. `all` traps on names
+/// outside this set, so a misspelled declaration is a harness bug rather
+/// than a silently-inert one.
+pub const KNOWN_FEATURES: &[&str] = &[
+    FEATURE_CHACHA,
+    FEATURE_DETERMINISTIC_ECDSA,
+    FEATURE_ECDSA_SIGN,
+];
+
+/// Validate a `missing-features` declaration against [`KNOWN_FEATURES`],
+/// returning the set. Panics (traps) on unknown names.
+pub fn missing_set(missing: &[String]) -> BTreeSet<&str> {
+    let mut set = BTreeSet::new();
+    for feature in missing {
+        assert!(
+            KNOWN_FEATURES.contains(&feature.as_str()),
+            "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"
+        );
+        set.insert(feature.as_str());
+    }
+    set
 }
 
-/// One corpus entry: a vector case or a probe index.
-enum Test<'a> {
-    Hmac(&'a HmacCase),
-    Gcm(&'a GcmCase),
-    ChaCha(&'a ChaChaCase),
-    InternalNonce(&'a InternalNonceCase),
-    Sha2(&'a Sha2Case),
-    Sig(&'a SigCase),
-    Speccheck(&'a SpeccheckCase),
+struct Component;
+
+/// One materialized conformance case: its stable name, the features it
+/// exercises, whether the target provides them, and the data to run it.
+pub struct Case {
+    name: String,
+    features: &'static [&'static str],
+    /// Whether every feature this case exercises is provided by the target
+    /// (i.e. none is declared missing). When false, `run` asserts the
+    /// correct decline and reports `skipped`.
+    provided: bool,
+    kind: CaseKind,
+}
+
+enum CaseKind {
+    Hmac(HmacCase),
+    Gcm(GcmCase),
+    ChaCha(ChaChaCase),
+    InternalNonce(InternalNonceCase),
+    Sha2(Sha2Case),
+    Sig(SigCase),
+    Speccheck(SpeccheckCase),
     Probe(usize),
 }
 
-impl Corpus {
-    fn load() -> Self {
-        Corpus {
-            hmac: translate::hmac_cases(),
-            gcm: translate::gcm_cases(),
-            chacha: translate::chacha_cases(),
-            internal_nonce: translate::internal_nonce_cases(),
-            sha2: translate::sha2_cases(),
-            sig: translate::sig_cases(),
-            speccheck: translate::speccheck_cases(),
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.hmac.len()
-            + self.gcm.len()
-            + self.chacha.len()
-            + self.internal_nonce.len()
-            + self.sha2.len()
-            + self.sig.len()
-            + self.speccheck.len()
-            + probes::NAMES.len()
-    }
-
-    /// The test at corpus index `index`.
-    fn test(&self, index: usize) -> Option<Test<'_>> {
-        let mut index = index;
-        if index < self.hmac.len() {
-            return Some(Test::Hmac(&self.hmac[index]));
-        }
-        index -= self.hmac.len();
-        if index < self.gcm.len() {
-            return Some(Test::Gcm(&self.gcm[index]));
-        }
-        index -= self.gcm.len();
-        if index < self.chacha.len() {
-            return Some(Test::ChaCha(&self.chacha[index]));
-        }
-        index -= self.chacha.len();
-        if index < self.internal_nonce.len() {
-            return Some(Test::InternalNonce(&self.internal_nonce[index]));
-        }
-        index -= self.internal_nonce.len();
-        if index < self.sha2.len() {
-            return Some(Test::Sha2(&self.sha2[index]));
-        }
-        index -= self.sha2.len();
-        if index < self.sig.len() {
-            return Some(Test::Sig(&self.sig[index]));
-        }
-        index -= self.sig.len();
-        if index < self.speccheck.len() {
-            return Some(Test::Speccheck(&self.speccheck[index]));
-        }
-        index -= self.speccheck.len();
-        (index < probes::NAMES.len()).then_some(Test::Probe(index))
-    }
+/// Materialize one case as an exported `test-case` resource.
+fn materialize(
+    name: String,
+    features: &'static [&'static str],
+    missing: &BTreeSet<&str>,
+    kind: CaseKind,
+) -> TestCase {
+    TestCase::new(Case {
+        name,
+        features,
+        provided: features.iter().all(|feature| !missing.contains(feature)),
+        kind,
+    })
 }
 
-impl Test<'_> {
-    fn id(&self) -> String {
-        match self {
-            Test::Hmac(case) => format!(
-                "hmac-sha256/wycheproof/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::Gcm(case) => format!(
-                "aes-gcm/wycheproof/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::ChaCha(case) => format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::InternalNonce(case) => format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::Sha2(case) => format!(
-                "sha2/nist-cavp/{}-len{}/{}",
-                case.alg.name(),
-                case.len_bits,
-                case.schedule.name()
-            ),
-            Test::Sig(case) => format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::Speccheck(case) => format!(
-                "ed25519/speccheck/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            ),
-            Test::Probe(index) => format!("probe/{}", probes::NAMES[*index]),
-        }
+impl GuestTestCase for Case {
+    fn name(&self) -> String {
+        self.name.clone()
     }
 
-    async fn run(&self) -> TestResult {
-        let outcome = match self {
-            Test::Hmac(case) => vectors::run_hmac_case(case).await,
-            Test::Gcm(case) => vectors::run_gcm_case(case).await,
-            Test::ChaCha(case) => vectors::run_chacha_case(case).await,
-            Test::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
-            Test::Sha2(case) => vectors::run_sha2_case(case).await,
-            Test::Sig(case) => vectors::run_sig_case(case).await,
-            Test::Speccheck(case) => vectors::run_speccheck_case(case).await,
-            Test::Probe(index) => probes::run_one(*index).await,
-        };
-        to_result(self.id(), outcome)
+    fn features(&self) -> Vec<String> {
+        self.features.iter().map(|s| s.to_string()).collect()
+    }
+
+    async fn run(&self) -> Outcome {
+        if self.provided {
+            let outcome = match &self.kind {
+                CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
+                CaseKind::Gcm(case) => vectors::run_gcm_case(case).await,
+                CaseKind::ChaCha(case) => vectors::run_chacha_case(case).await,
+                CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
+                CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
+                CaseKind::Sig(case) => vectors::run_sig_case(case).await,
+                CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
+                CaseKind::Probe(index) => probes::run_one(*index).await,
+            };
+            match outcome {
+                Ok(()) => Outcome::Pass,
+                Err(detail) => Outcome::Fail(detail),
+            }
+        } else {
+            // The target declares this case's feature missing. The
+            // feature-tagged *probes* assert the correct decline on every
+            // minting path (the two-way guarantee that a target cannot
+            // serve a feature it declares missing); vector cases skip
+            // without re-asserting it thousands of times.
+            let asserted = match &self.kind {
+                CaseKind::Probe(index) => probes::run_declined(*index).await,
+                _ => Ok(format!(
+                    "feature {} declared missing by the target",
+                    self.features.join("+")
+                )),
+            };
+            match asserted {
+                Ok(detail) => Outcome::Skipped(detail),
+                Err(detail) => Outcome::Fail(detail),
+            }
+        }
     }
 }
 
 impl Guest for Component {
-    fn count() -> u32 {
-        Corpus::load().len() as u32
-    }
+    type TestCase = Case;
 
-    fn list_tests() -> Vec<String> {
-        let corpus = Corpus::load();
-        (0..corpus.len())
-            .map(|index| corpus.test(index).unwrap().id())
-            .collect()
-    }
-
-    async fn run_all() -> Vec<TestResult> {
-        run_slice_impl(0, u32::MAX).await
-    }
-
-    async fn run_slice(skip: u32, take: u32) -> Vec<TestResult> {
-        run_slice_impl(skip, take).await
-    }
-
-    async fn run_many(tests: Vec<String>) -> Vec<TestResult> {
-        let corpus = Corpus::load();
-        let by_id: std::collections::HashMap<String, usize> = (0..corpus.len())
-            .map(|index| (corpus.test(index).unwrap().id(), index))
-            .collect();
-        let mut results = Vec::with_capacity(tests.len());
-        for id in tests {
-            results.push(match by_id.get(&id) {
-                Some(&index) => corpus.test(index).unwrap().run().await,
-                None => TestResult {
-                    id,
-                    passed: false,
-                    detail: "no test with this id in the corpus".into(),
-                },
-            });
+    fn all(missing_features: Vec<String>) -> Vec<TestCase> {
+        let missing = missing_set(&missing_features);
+        let mut cases = Vec::new();
+        for case in translate::hmac_cases() {
+            let name = format!(
+                "hmac-sha256/wycheproof/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            );
+            cases.push(materialize(name, &[], &missing, CaseKind::Hmac(case)));
         }
-        results
-    }
-}
-
-/// Run the corpus tests with global indices in `[skip, skip + take)`.
-async fn run_slice_impl(skip: u32, take: u32) -> Vec<TestResult> {
-    let corpus = Corpus::load();
-    let skip = (skip as usize).min(corpus.len());
-    let end = skip.saturating_add(take as usize).min(corpus.len());
-    let mut results = Vec::with_capacity(end - skip);
-    for index in skip..end {
-        results.push(corpus.test(index).unwrap().run().await);
-    }
-    results
-}
-
-fn to_result(id: String, outcome: Result<(), String>) -> TestResult {
-    match outcome {
-        Ok(()) => TestResult {
-            id,
-            passed: true,
-            detail: String::new(),
-        },
-        Err(detail) => TestResult {
-            id,
-            passed: false,
-            detail,
-        },
+        for case in translate::gcm_cases() {
+            let name = format!(
+                "aes-gcm/wycheproof/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            );
+            cases.push(materialize(name, &[], &missing, CaseKind::Gcm(case)));
+        }
+        for case in translate::chacha_cases() {
+            let name = format!(
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
+                case.tc_id,
+                case.schedule.name()
+            );
+            cases.push(materialize(
+                name,
+                &[FEATURE_CHACHA],
+                &missing,
+                CaseKind::ChaCha(case),
+            ));
+        }
+        for case in translate::internal_nonce_cases() {
+            let name = format!(
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
+                case.tc_id,
+                case.schedule.name()
+            );
+            let features: &'static [&'static str] = match case.alg {
+                translate::InternalNonceAlg::AesGcm => &[],
+                translate::InternalNonceAlg::XChaCha20Poly1305 => &[FEATURE_CHACHA],
+            };
+            cases.push(materialize(
+                name,
+                features,
+                &missing,
+                CaseKind::InternalNonce(case),
+            ));
+        }
+        for case in translate::sha2_cases() {
+            let name = format!(
+                "sha2/nist-cavp/{}-len{}/{}",
+                case.alg.name(),
+                case.len_bits,
+                case.schedule.name()
+            );
+            cases.push(materialize(name, &[], &missing, CaseKind::Sha2(case)));
+        }
+        for case in translate::sig_cases() {
+            let name = format!(
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
+                case.tc_id,
+                case.schedule.name()
+            );
+            cases.push(materialize(name, &[], &missing, CaseKind::Sig(case)));
+        }
+        for case in translate::speccheck_cases() {
+            let name = format!(
+                "ed25519/speccheck/tc{}/{}",
+                case.tc_id,
+                case.schedule.name()
+            );
+            cases.push(materialize(name, &[], &missing, CaseKind::Speccheck(case)));
+        }
+        for (index, probe) in probes::PROBES.iter().enumerate() {
+            cases.push(materialize(
+                format!("probe/{}", probe.name),
+                probe.features,
+                &missing,
+                CaseKind::Probe(index),
+            ));
+        }
+        cases
     }
 }
 

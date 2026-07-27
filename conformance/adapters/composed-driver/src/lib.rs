@@ -6,10 +6,16 @@
 //! the fully composed component — conformance guest + `guest-webcrypto`
 //! provider + this driver — runs under a plain `wasmtime run -S cli`.
 //!
-//! It calls `run-all` and prints the results JSON (the same shape the other
-//! adapters write) on stdout, which must carry ONLY the JSON; diagnostics go
-//! to stderr. Test failures never affect the exit status; only harness
-//! errors do.
+//! The composition fixes the implementation under test, so the target's
+//! `missing-features` declaration is fixed with it: the in-guest provider
+//! serves every feature the shared corpus exercises, and deliberately does
+//! not export `ecdsa-sign` (class D) — which is why the signing corpus,
+//! whose world imports that interface, never runs composed at all.
+//!
+//! It materializes the corpus, runs every case, and prints the results JSON
+//! (the same shape the other adapters write) on stdout, which must carry
+//! ONLY the JSON; diagnostics go to stderr. Case failures never affect the
+//! exit status; only harness errors do.
 
 mod bindings {
     wit_bindgen::generate!({
@@ -24,13 +30,14 @@ mod bindings {
     });
 }
 
-use bindings::conformance::webcrypto::tests;
+use bindings::conformance::webcrypto::tests::{all, Outcome};
 
-/// One test result, as serialized into the results JSON.
+/// One case result, as serialized into the results JSON.
 #[derive(serde::Serialize)]
 struct JsonResult {
-    id: String,
-    passed: bool,
+    name: String,
+    features: Vec<String>,
+    outcome: &'static str,
     detail: String,
 }
 
@@ -38,6 +45,9 @@ struct JsonResult {
 #[derive(serde::Serialize)]
 struct Output {
     target: &'static str,
+    corpus: &'static str,
+    #[serde(rename = "missing-features")]
+    missing_features: Vec<String>,
     results: Vec<JsonResult>,
 }
 
@@ -45,25 +55,39 @@ struct Component;
 
 impl wasip3::exports::cli::run::Guest for Component {
     async fn run() -> Result<(), ()> {
-        let results = tests::run_all().await;
-        let total = results.len();
-        let failed = results.iter().filter(|r| !r.passed).count();
+        // The provider's one gap is class D's ecdsa-sign, which nothing in
+        // the shared corpus is tagged with (the exclusion is structural —
+        // see the module doc); declared for the runner's cross-check
+        // against targets.toml.
+        let missing_features: Vec<String> = vec!["ecdsa-sign".to_string()];
+        let cases = all(&missing_features);
+        let mut results = Vec::with_capacity(cases.len());
+        for case in &cases {
+            let (outcome, detail) = match case.run().await {
+                Outcome::Pass => ("pass", String::new()),
+                Outcome::Fail(detail) => ("fail", detail),
+                Outcome::Skipped(detail) => ("skipped", detail),
+            };
+            results.push(JsonResult {
+                name: case.name(),
+                features: case.features(),
+                outcome,
+                detail,
+            });
+        }
 
+        let total = results.len();
+        let failed = results.iter().filter(|r| r.outcome == "fail").count();
         let output = Output {
             target: "composed",
-            results: results
-                .into_iter()
-                .map(|result| JsonResult {
-                    id: result.id,
-                    passed: result.passed,
-                    detail: result.detail,
-                })
-                .collect(),
+            corpus: "shared",
+            missing_features,
+            results,
         };
         match serde_json::to_string_pretty(&output) {
             Ok(json) => {
                 println!("{json}");
-                eprintln!("composed conformance: {total} tests, {failed} failed");
+                eprintln!("composed conformance: {total} cases, {failed} failed");
                 Ok(())
             }
             Err(err) => {

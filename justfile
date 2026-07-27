@@ -114,22 +114,41 @@ test-webcrypto-composed: compose-demo
 # The whole-run safety cap (seconds) for each conformance target invocation.
 conformance-timeout := "600"
 
-# Run the cross-implementation conformance suite: build the shared conformance
-# guest, run the enabled targets over the Wycheproof-derived corpus +
-# API-contract probes, then classify against conformance/manifests.toml and
-# render conformance/matrix.md, exiting nonzero on any fail or
-# unexpected-pass.
+# Run the cross-implementation conformance suite: build the conformance
+# guests, run the enabled targets over the corpus of self-describing cases,
+# then aggregate — validating every results file against the target facts in
+# conformance/targets.toml and the checked-in corpus lockfiles — and render
+# conformance/matrix.md, exiting nonzero on any failure or transport problem.
 #
 # Enabled targets: wasmtime, composed, and jco-node (Node 24+ with npm
 # required) — plus jco-browser under GitHub Actions (the runner image ships
 # Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
-# Chrome/Chromium 137+; the runner warns on targets without results rather
-# than failing).
-conformance: conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
+# Chrome/Chromium 137+; targets.toml marks it optional, so the runner warns
+# on its missing results rather than failing).
+conformance: _conformance-clean conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
     cargo run --release -p conformance-runner -- \
-        --manifests conformance/manifests.toml \
+        --targets conformance/targets.toml \
         --results conformance/results \
+        --lock shared=conformance/guest/tests.lock \
+        --lock signing=conformance/signing-guest/tests.lock \
         --matrix-out conformance/matrix.md
+
+# Clear stale results before a conformance run (a dependency of
+# `conformance`, so month-old files never classify as current).
+_conformance-clean:
+    mkdir -p conformance/results
+    rm -f conformance/results/*.json
+
+# Regenerate the corpus lockfiles (case names + feature tags) from the built
+# guests. Run after any intentional corpus change — the runner rejects
+# results that diverge from the checked-in locks.
+update-conformance-lock: build-conformance-guest build-signing-guest
+    cargo run --release -p conformance-adapter-wasmtime -- \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --lock-out conformance/guest/tests.lock
+    cargo run --release -p conformance-adapter-wasmtime -- \
+        --guest conformance/signing-guest/build/conformance-signing-guest.component.wasm \
+        --lock-out conformance/signing-guest/tests.lock
 
 # Run the jco-browser conformance target when gating applies: always under
 # GitHub Actions, locally only with CONFORMANCE_BROWSER=1 (skips with a
@@ -169,10 +188,10 @@ conformance-wasmtime: build-conformance-guest build-signing-guest
     mkdir -p conformance/results
     timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
         --guest conformance/guest/build/conformance-guest.component.wasm \
-        --out conformance/results/wasmtime.json
+        --corpus shared --out conformance/results/wasmtime.json
     timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
         --guest conformance/signing-guest/build/conformance-signing-guest.component.wasm \
-        --out conformance/results/wasmtime-signing.json
+        --corpus signing --out conformance/results/wasmtime-signing.json
 
 # Build the composed conformance component: the conformance guest
 # plugged with the in-guest provider, under the CLI driver that prints the
@@ -201,11 +220,12 @@ conformance-jco-node: build-conformance-guest build-signing-guest
         timeout {{conformance-timeout}} npm run run:node && \
         timeout {{conformance-timeout}} npm run run:node-signing
 
-# Run the conformance corpus under the jco host in headless Chromium (137+;
-# auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json.
-# Gates in CI; local `just conformance` runs it only with CONFORMANCE_BROWSER=1.
-conformance-jco-browser: build-conformance-guest
-    cd conformance/adapters/jco && npm run transpile && \
+# Run both conformance corpora under the jco host in headless Chromium (137+;
+# auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json
+# and jco-browser-signing.json. Gates in CI; local `just conformance` runs it
+# only with CONFORMANCE_BROWSER=1.
+conformance-jco-browser: build-conformance-guest build-signing-guest
+    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
         timeout {{conformance-timeout}} npm run run:browser
 
 # --- timing lab ---------------------------------------------------------------

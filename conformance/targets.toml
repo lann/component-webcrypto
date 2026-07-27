@@ -1,0 +1,51 @@
+# The conformance corpora and targets: facts about the test sets and the
+# implementations under test.
+#
+# Expectation policy lives in the corpus itself — each case declares the
+# `features` it exercises, and a case whose feature a target declares in
+# `missing-features` reports `skipped` (with the feature-tagged probes
+# asserting the correct decline both ways). This file carries only what has
+# no other home: which corpora and targets exist, which features each
+# target is missing (and why), and whether a target's missing results file
+# is an error.
+#
+# Which corpora a target must produce results for is *derived*: every
+# target runs every corpus except those whose `requires` names a feature
+# the target is missing. The runner cross-checks each results file's
+# declared missing-features against this table, so a target's adapter and
+# this manifest cannot drift apart silently.
+
+[corpora.shared]
+# The shared conformance guest: importable against every implementation.
+
+[corpora.signing]
+# The host-only signing guest. Its world imports `ecdsa-sign`, which the
+# class-D policy keeps out of the in-guest provider, so a target missing
+# `ecdsa-sign` cannot even link this corpus's world — the requirement is
+# structural, not behavioral.
+requires = ["ecdsa-sign"]
+
+[targets.wasmtime]
+# The native RustCrypto host serves everything.
+missing-features = []
+
+[targets.composed]
+# The in-guest RustCrypto provider deliberately does not export
+# `ecdsa-sign` (class D — see guest-impl/README.md), which excludes the
+# signing corpus structurally.
+missing-features = ["ecdsa-sign"]
+
+[targets.jco-node]
+# Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
+# unimplemented), and signs ECDSA with a randomized k (RFC 6979
+# deterministic known answers are unobservable). Policy, not bugs: a
+# composition needing either must supply another provider.
+missing-features = ["chacha20-poly1305", "deterministic-ecdsa"]
+
+[targets.jco-browser]
+# The same host module as jco-node, in headless Chromium.
+missing-features = ["chacha20-poly1305", "deterministic-ecdsa"]
+# Gates in CI (the Actions runner ships Chrome); locally it needs a
+# Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
+optional = true
