@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- The GitHub Pages site root, copied by `just conformance-web-site`:
+     links the conformance results viewer and the API docs for the
+     public-facing crates. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>lann:webcrypto</title>
+<style>
+  body {
+    font: 15px/1.5 system-ui, sans-serif;
+    color: #1f2328;
+    max-width: 44rem;
+    margin: 3rem auto;
+    padding: 0 1rem;
+  }
+  h1 { font-size: 1.3rem; }
+  li { margin: 0.4rem 0; }
+  .dim { color: #656d76; }
+</style>
+</head>
+<body>
+<h1><code>lann:webcrypto</code></h1>
+<p>
+  A WIT interface for web-platform-compatible cryptography, with a Wasmtime
+  host, a browser (jco) host, and an in-guest provider —
+  <a href="https://github.com/lann/component-webcrypto">source repository</a>.
+</p>
+<ul>
+  <li>
+    <a href="conformance/web/">Conformance results viewer</a>
+    <span class="dim">— the cross-target matrix, with a live "test this
+    browser" run</span>
+  </li>
+  <li>
+    <a href="doc/wasmtime_webcrypto/">wasmtime-webcrypto</a>
+    <span class="dim">— API docs for the Wasmtime host crate</span>
+  </li>
+  <li>
+    <a href="doc/lann_webcrypto_guest/">lann-webcrypto-guest</a>
+    <span class="dim">— API docs for the guest-side SDK</span>
+  </li>
+</ul>
+</body>
+</html>
