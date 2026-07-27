@@ -151,12 +151,17 @@ crypto conformance tests *functions against mathematics*.
 - **Divergence is declared as missing features, not expected failures**: the
   jco targets are missing `chacha20-poly1305` (browser WebCrypto implements
   none of it; minting declines `unsupported` — a platform gap a caller
-  routes around with another provider) and `deterministic-ecdsa`
-  (WebCrypto's randomized `k` makes RFC 6979's known-answer bytes
-  unobservable, though the signatures still verify — the decline assertion
-  checks exactly that). The anticipated future declarations are profile
-  divergence (e.g. a FIPS-profile target missing a permissive-key-policy
-  feature). Bugs get fixed, not declared.
+  routes around with another provider). The anticipated future declarations
+  are profile divergence (e.g. a FIPS-profile target missing a
+  permissive-key-policy feature). Bugs get fixed, not declared.
+- **The tests avoid platform-unspecified ground**: the signing probes
+  exercise generated keys, never imported private ones — browser hosts can
+  only realize `import-signing-key` via private-only PKCS#8, whose
+  `importKey` behavior is unspecified and inconsistent across engines
+  (w3c/webcrypto#356). The private-import known answers (RFC 6979
+  determinism, scalar export identity, known-point derivation, scalar
+  range rejection) are pinned by `webcrypto-impl-core`'s unit tests for
+  both Rust implementations instead.
 
 ## Deliberately deferred
 

@@ -913,6 +913,18 @@ export class VerifyingKey {
           throw errAuthenticationFailed();
         }
       }
+      // The `ecdsa-verify` WIT contract fixes the signature width (P1363
+      // `r ‖ s`: 64 bytes for P-256, 96 for P-384). Chromium's engine
+      // rejects other lengths itself; Firefox zero-pads short halves and
+      // accepts truncated encodings (observed accepting a 2-byte
+      // signature), so enforce the width here — a pure length check on
+      // public data, strictly monotone like the Ed25519 predicates above.
+      if (this.#key.algorithm.name === "ECDSA") {
+        const width = this.#key.algorithm.namedCurve === "P-256" ? 64 : 96;
+        if (sig.length !== width) {
+          throw errAuthenticationFailed();
+        }
+      }
       const params = signParams(this.#key.algorithm.name, this.#hash);
       if (!(await subtle.verify(params, this.#key, sig, message))) {
         throw errAuthenticationFailed();
@@ -1032,14 +1044,39 @@ function base64UrlDecode(text) {
 /**
  * Derive the public `CryptoKey` for `privateKey` by round-tripping its JWK
  * without the private field.
+ *
+ * This depends on keys imported from *private-only* PKCS#8 (the
+ * raw-scalar ECDSA import path), whose platform behavior is unspecified
+ * and inconsistent across engines — w3c/webcrypto#356: a 2023 survey had
+ * most engines rejecting the import outright; current Chromium accepts
+ * and derives the public point; current Firefox accepts and signs but
+ * throws `OperationError` from the JWK export here.
+ *
+ * A failure here is not attributable: under lazy engine validation it can
+ * be the first point genuinely invalid material surfaces (`invalid-key`
+ * territory — Firefox imports an out-of-range scalar without complaint),
+ * or a missing engine capability, or a transient platform fault — and the
+ * engine reports them all as the same opaque `OperationError`. Claiming
+ * either semantic error would be unfounded, so the failure is lifted to
+ * the WIT `other` error, the taxonomy's carrier for operational platform
+ * failures, rather than escaping as an uncaught platform error. (Either
+ * way a key whose public half cannot be produced cannot be minted:
+ * `signing-key.verifying-key` derivation is infallible by contract.)
  * @param {CryptoKey} privateKey
  * @param {object} importParams
  */
 async function derivePublicKey(privateKey, importParams) {
-  const jwk = await subtle.exportKey("jwk", privateKey);
-  delete jwk.d;
-  jwk.key_ops = ["verify"];
-  return subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
+  try {
+    const jwk = await subtle.exportKey("jwk", privateKey);
+    delete jwk.d;
+    jwk.key_ops = ["verify"];
+    return await subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
+  } catch (err) {
+    throw errOther(
+      "deriving the public key from the imported private material failed: " +
+        `${err?.message ?? err}`,
+    );
+  }
 }
 
 /**
