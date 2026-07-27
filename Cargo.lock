@@ -208,6 +208,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "hex",
+ "lann-webcrypto-guest",
  "serde",
  "serde_json",
  "wit-bindgen 0.59.0",
@@ -229,6 +230,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "hex",
+ "lann-webcrypto-guest",
  "wit-bindgen 0.59.0",
 ]
 
@@ -464,6 +466,7 @@ name = "crypto-demo"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "lann-webcrypto-guest",
  "wit-bindgen 0.59.0",
 ]
 
@@ -1028,6 +1031,14 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "lann-webcrypto-guest"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "wit-bindgen 0.59.0",
 ]
 
 [[package]]

@@ -1,0 +1,28 @@
+// Bindings-only WIT for the `lann-webcrypto-guest` library crate. The
+// shared `lann:webcrypto` package lives once at the repository root `wit/`
+// and is pulled in through the `deps/lann-webcrypto` symlink.
+package lann:webcrypto-guest;
+
+/// The full `lann:webcrypto` import surface, bound once here and re-exported
+/// to consumer components: a consumer that links this crate imports whatever
+/// it actually calls (unused imports are stripped at componentization), so
+/// most consumer worlds need no `lann:webcrypto` imports at all.
+world imports {
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/aead-internal-nonce@0.1.0;
+    import lann:webcrypto/digest@0.1.0;
+    import lann:webcrypto/bytes@0.1.0;
+    import lann:webcrypto/sha2@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/chacha20-poly1305@0.1.0;
+    import lann:webcrypto/xchacha20-poly1305@0.1.0;
+    import lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
+    import lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
+    import lann:webcrypto/signature@0.1.0;
+    import lann:webcrypto/ed25519-verify@0.1.0;
+    import lann:webcrypto/ed25519-sign@0.1.0;
+    import lann:webcrypto/ecdsa-verify@0.1.0;
+    import lann:webcrypto/ecdsa-sign@0.1.0;
+}

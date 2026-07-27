@@ -3,36 +3,36 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
-use crate::lann::webcrypto::aead::AeadKey;
-use crate::lann::webcrypto::aes_gcm::{generate_key, import_key, AesVariant};
-use crate::lann::webcrypto::aes_gcm_internal_nonce::{
-    generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
-};
-use crate::lann::webcrypto::bytes::constant_time_equal;
-use crate::lann::webcrypto::chacha20_poly1305::{
-    generate_key as generate_chacha_key, import_key as import_chacha_key,
-};
-use crate::lann::webcrypto::ecdsa_verify::{
-    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
-};
-use crate::lann::webcrypto::ed25519_sign::{
-    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
-};
-use crate::lann::webcrypto::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use crate::lann::webcrypto::hmac_sha2::{
-    generate_key as generate_hmac_key, import_key as import_hmac_key,
-};
-use crate::lann::webcrypto::sha2::{make_digest, Sha2Variant};
-use crate::lann::webcrypto::types::Error;
-use crate::lann::webcrypto::xchacha20_poly1305::{
-    generate_key as generate_xchacha_key, import_key as import_xchacha_key,
-};
-use crate::lann::webcrypto::xchacha20_poly1305_internal_nonce::generate_key as generate_xchacha_internal_nonce_key;
 use crate::translate::Schedule;
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
 };
 use crate::FEATURE_CHACHA;
+use lann_webcrypto_guest::raw::aead::AeadKey;
+use lann_webcrypto_guest::raw::aes_gcm::{generate_key, import_key, AesVariant};
+use lann_webcrypto_guest::raw::aes_gcm_internal_nonce::{
+    generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
+};
+use lann_webcrypto_guest::raw::bytes::constant_time_equal;
+use lann_webcrypto_guest::raw::chacha20_poly1305::{
+    generate_key as generate_chacha_key, import_key as import_chacha_key,
+};
+use lann_webcrypto_guest::raw::ecdsa_verify::{
+    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+};
+use lann_webcrypto_guest::raw::ed25519_sign::{
+    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
+};
+use lann_webcrypto_guest::raw::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::raw::hmac_sha2::{
+    generate_key as generate_hmac_key, import_key as import_hmac_key,
+};
+use lann_webcrypto_guest::raw::sha2::{make_digest, Sha2Variant};
+use lann_webcrypto_guest::raw::types::Error;
+use lann_webcrypto_guest::raw::xchacha20_poly1305::{
+    generate_key as generate_xchacha_key, import_key as import_xchacha_key,
+};
+use lann_webcrypto_guest::raw::xchacha20_poly1305_internal_nonce::generate_key as generate_xchacha_internal_nonce_key;
 
 /// One probe: its name (`probe/<name>` case ids) and the features it
 /// exercises beyond the baseline surface.
@@ -183,7 +183,7 @@ async fn chacha_minting_declined() -> Result<String, String> {
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
 async fn generate_key_256(
     extractable: bool,
-) -> Result<crate::lann::webcrypto::aead::AeadKey, String> {
+) -> Result<lann_webcrypto_guest::raw::aead::AeadKey, String> {
     generate_key(AesVariant::Aes256, extractable)
         .await
         .map_err(|e| describe("generate-key", &e))
@@ -595,7 +595,7 @@ async fn sign_prefix_drop() -> Result<(), String> {
 
     // Feed only a prefix of the message's chunk schedule, then drop the
     // writer as if the producer failed midway.
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let feed_prefix = async {
         let mut tx = tx;
         let mut sent = 0usize;
@@ -784,7 +784,7 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"conformance signature payload";
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sig, fed) = futures::join!(key.sign(rx), crate::util::feed_whole(tx, payload));
     fed?;
     let sig = sig.map_err(|e| describe("sign", &e))?;
@@ -925,7 +925,7 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"export roundtrip payload";
-    let (tx, rx) = crate::wit_stream::new();
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sig, fed) = futures::join!(signing.sign(rx), crate::util::feed_whole(tx, payload));
     fed?;
     let sig = sig.map_err(|e| describe("sign", &e))?;
