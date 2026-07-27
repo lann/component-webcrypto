@@ -49,6 +49,7 @@
 
 #![deny(missing_docs)]
 
+use std::borrow::Cow;
 use std::fmt;
 
 use wit_bindgen::StreamWriter;
@@ -61,28 +62,9 @@ pub use wit_bindgen;
 /// friends and accepted by [`DataSource`].
 pub use wit_bindgen::StreamReader;
 
-mod generated {
-    #![allow(missing_docs)]
-    wit_bindgen::generate!({
-        path: "wit",
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-}
+mod generated;
 
-/// The generated bindings for the full `lann:webcrypto` import surface.
-///
-/// The newtype wrappers cover the common cases; these are the escape hatch
-/// for callers driving the streams themselves and for passing resources
-/// through a consumer's own interfaces (via [`Mac::into_raw`] and friends).
-pub mod bindings {
-    pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
-        digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hmac_sha2, mac, sha2,
-        signature, types, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
-    };
-}
+pub mod bindings;
 
 pub use generated::wit_stream;
 
@@ -174,11 +156,13 @@ impl std::error::Error for Error {
 /// The input to a wrapped operation: anything this crate knows how to feed
 /// into a WIT `stream<u8>`.
 ///
-/// Operation methods take `impl Into<DataSource>`, so byte slices, owned
+/// Operation methods take `impl Into<DataSource<'_>>`, so byte slices, owned
 /// buffers, and streams received from other components all work directly:
 ///
-/// - `&[u8]`, `&[u8; N]`, `Vec<u8>`, `&Vec<u8>` — buffered sources, copied
-///   once and fed whole.
+/// - `&[u8]`, `&[u8; N]`, `Vec<u8>`, `&Vec<u8>`, [`Cow<'a, [u8]>`](Cow) —
+///   buffered sources. Borrowed data is held borrowed and copied only when
+///   fed (the ABI requires an owned buffer); owned data is moved, never
+///   copied.
 /// - [`StreamReader<u8>`] — passed through to the operation as-is, without
 ///   buffering.
 /// - `DataSource::from_buf` (feature `bytes`) — fed chunk by chunk.
@@ -196,53 +180,59 @@ impl std::error::Error for Error {
 /// producer failure. A `DataSource::from_reader` source is handled for
 /// you: its failure is observed locally and reported as [`Error::Read`]
 /// instead of the operation's result.
-pub struct DataSource(Inner);
+pub struct DataSource<'a>(Inner<'a>);
 
-enum Inner {
-    Bytes(Vec<u8>),
+enum Inner<'a> {
+    Bytes(Cow<'a, [u8]>),
     Stream(StreamReader<u8>),
     #[cfg(feature = "bytes")]
-    Buf(Box<dyn ::bytes::Buf>),
+    Buf(Box<dyn ::bytes::Buf + 'a>),
     #[cfg(feature = "futures-io")]
-    Reader(std::pin::Pin<Box<dyn futures_io::AsyncRead>>),
+    Reader(std::pin::Pin<Box<dyn futures_io::AsyncRead + 'a>>),
 }
 
-impl From<&[u8]> for DataSource {
-    fn from(data: &[u8]) -> Self {
-        Self(Inner::Bytes(data.to_vec()))
+impl<'a> From<&'a [u8]> for DataSource<'a> {
+    fn from(data: &'a [u8]) -> Self {
+        Self(Inner::Bytes(Cow::Borrowed(data)))
     }
 }
 
-impl<const N: usize> From<&[u8; N]> for DataSource {
-    fn from(data: &[u8; N]) -> Self {
-        Self(Inner::Bytes(data.to_vec()))
+impl<'a, const N: usize> From<&'a [u8; N]> for DataSource<'a> {
+    fn from(data: &'a [u8; N]) -> Self {
+        Self(Inner::Bytes(Cow::Borrowed(data)))
     }
 }
 
-impl From<Vec<u8>> for DataSource {
+impl From<Vec<u8>> for DataSource<'_> {
     fn from(data: Vec<u8>) -> Self {
+        Self(Inner::Bytes(Cow::Owned(data)))
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for DataSource<'a> {
+    fn from(data: &'a Vec<u8>) -> Self {
+        Self(Inner::Bytes(Cow::Borrowed(data)))
+    }
+}
+
+impl<'a> From<Cow<'a, [u8]>> for DataSource<'a> {
+    fn from(data: Cow<'a, [u8]>) -> Self {
         Self(Inner::Bytes(data))
     }
 }
 
-impl From<&Vec<u8>> for DataSource {
-    fn from(data: &Vec<u8>) -> Self {
-        Self(Inner::Bytes(data.clone()))
-    }
-}
-
-impl From<StreamReader<u8>> for DataSource {
+impl From<StreamReader<u8>> for DataSource<'_> {
     fn from(stream: StreamReader<u8>) -> Self {
         Self(Inner::Stream(stream))
     }
 }
 
-impl DataSource {
+impl<'a> DataSource<'a> {
     /// A source that feeds the operation from `buf`, chunk by chunk.
     ///
     /// `Buf` is infallible, so this source cannot produce [`Error::Read`].
     #[cfg(feature = "bytes")]
-    pub fn from_buf(buf: impl ::bytes::Buf + 'static) -> Self {
+    pub fn from_buf(buf: impl ::bytes::Buf + 'a) -> Self {
         Self(Inner::Buf(Box::new(buf)))
     }
 
@@ -253,7 +243,7 @@ impl DataSource {
     /// [`Error::Read`] — never the result computed over the truncated
     /// prefix.
     #[cfg(feature = "futures-io")]
-    pub fn from_reader(reader: impl futures_io::AsyncRead + 'static) -> Self {
+    pub fn from_reader(reader: impl futures_io::AsyncRead + 'a) -> Self {
         Self(Inner::Reader(Box::pin(reader)))
     }
 }
@@ -269,14 +259,14 @@ fn writer_closed(leftover: usize) -> Error {
     ))
 }
 
-impl Inner {
+impl Inner<'_> {
     /// Feed this source into `tx`, then drop the writer to end the stream.
     async fn feed(self, mut tx: StreamWriter<u8>) -> Result<(), Error> {
         match self {
             // Pass-through sources never reach the feeder.
             Inner::Stream(_) => unreachable!("stream sources are passed through"),
             Inner::Bytes(data) => {
-                let leftover = tx.write_all(data).await;
+                let leftover = tx.write_all(data.into_owned()).await;
                 match leftover.len() {
                     0 => Ok(()),
                     n => Err(writer_closed(n)),
@@ -285,29 +275,39 @@ impl Inner {
             #[cfg(feature = "bytes")]
             Inner::Buf(mut buf) => {
                 use ::bytes::Buf as _;
+                // `write_all` returns its argument's allocation (emptied on
+                // success), so one scratch buffer serves every chunk: the
+                // per-chunk copy into it is the ABI's unavoidable one.
+                let mut scratch = Vec::new();
                 while buf.has_remaining() {
-                    let chunk = buf.chunk().to_vec();
-                    buf.advance(chunk.len());
-                    let leftover = tx.write_all(chunk).await;
-                    if !leftover.is_empty() {
-                        return Err(writer_closed(leftover.len()));
+                    let chunk = buf.chunk();
+                    let n = chunk.len();
+                    scratch.extend_from_slice(chunk);
+                    buf.advance(n);
+                    scratch = tx.write_all(scratch).await;
+                    if !scratch.is_empty() {
+                        return Err(writer_closed(scratch.len()));
                     }
                 }
                 Ok(())
             }
             #[cfg(feature = "futures-io")]
             Inner::Reader(mut reader) => {
-                let mut buf = vec![0u8; 8192];
+                // As for `Buf`: one reusable scratch buffer, one copy per
+                // chunk (out of the read buffer `poll_read` requires).
+                let mut chunk = [0u8; 8192];
+                let mut scratch = Vec::new();
                 loop {
-                    let n = std::future::poll_fn(|cx| reader.as_mut().poll_read(cx, &mut buf))
+                    let n = std::future::poll_fn(|cx| reader.as_mut().poll_read(cx, &mut chunk))
                         .await
                         .map_err(Error::Read)?;
                     if n == 0 {
                         return Ok(());
                     }
-                    let leftover = tx.write_all(buf[..n].to_vec()).await;
-                    if !leftover.is_empty() {
-                        return Err(writer_closed(leftover.len()));
+                    scratch.extend_from_slice(&chunk[..n]);
+                    scratch = tx.write_all(scratch).await;
+                    if !scratch.is_empty() {
+                        return Err(writer_closed(scratch.len()));
                     }
                 }
             }
@@ -322,7 +322,7 @@ impl Inner {
 /// feeder wins over the operation's result: the operation only saw a
 /// truncated input.
 async fn run_sourced<T, F>(
-    source: DataSource,
+    source: DataSource<'_>,
     op: impl FnOnce(StreamReader<u8>) -> F,
 ) -> Result<T, Error>
 where
@@ -385,7 +385,7 @@ impl Mac {
     /// Fails only for operational reasons ([`Error::Other`], or
     /// [`Error::Read`] for a failing `DataSource::from_reader` source) —
     /// never for misuse, which is unrepresentable.
-    pub async fn sign(&self, data: impl Into<DataSource>) -> Result<Vec<u8>, Error> {
+    pub async fn sign(&self, data: impl Into<DataSource<'_>>) -> Result<Vec<u8>, Error> {
         run_sourced(data.into(), |rx| self.0.sign(rx)).await
     }
 
@@ -394,8 +394,13 @@ impl Mac {
     /// Fails closed with [`Error::AuthenticationFailed`] if the tag does not
     /// verify — deliberately a `Result` rather than a `bool`: an ignored
     /// boolean fails open, a dropped `Result` does not.
-    pub async fn verify(&self, data: impl Into<DataSource>, tag: &[u8]) -> Result<(), Error> {
-        run_sourced(data.into(), |rx| self.0.verify(rx, tag.to_vec())).await
+    pub async fn verify(
+        &self,
+        data: impl Into<DataSource<'_>>,
+        tag: impl Into<Cow<'_, [u8]>>,
+    ) -> Result<(), Error> {
+        let tag = tag.into().into_owned();
+        run_sourced(data.into(), |rx| self.0.verify(rx, tag)).await
     }
 
     /// The name of the key's algorithm family, e.g. `"HMAC"` — WebCrypto's
@@ -451,14 +456,12 @@ impl Aead {
     /// reuse unrepresentable.
     pub async fn seal(
         &self,
-        nonce: &[u8],
-        aad: &[u8],
-        plaintext: impl Into<DataSource>,
+        nonce: impl Into<Cow<'_, [u8]>>,
+        aad: impl Into<Cow<'_, [u8]>>,
+        plaintext: impl Into<DataSource<'_>>,
     ) -> Result<StreamReader<u8>, Error> {
-        run_sourced(plaintext.into(), |rx| {
-            self.0.seal(nonce.to_vec(), aad.to_vec(), rx)
-        })
-        .await
+        let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
+        run_sourced(plaintext.into(), |rx| self.0.seal(nonce, aad, rx)).await
     }
 
     /// Decrypt and verify `ciphertext` (ciphertext followed by tag, as
@@ -470,14 +473,12 @@ impl Aead {
     /// [`Error::AuthenticationFailed`] if verification fails.
     pub async fn open(
         &self,
-        nonce: &[u8],
-        aad: &[u8],
-        ciphertext: impl Into<DataSource>,
+        nonce: impl Into<Cow<'_, [u8]>>,
+        aad: impl Into<Cow<'_, [u8]>>,
+        ciphertext: impl Into<DataSource<'_>>,
     ) -> Result<StreamReader<u8>, Error> {
-        run_sourced(ciphertext.into(), |rx| {
-            self.0.open(nonce.to_vec(), aad.to_vec(), rx)
-        })
-        .await
+        let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
+        run_sourced(ciphertext.into(), |rx| self.0.open(nonce, aad, rx)).await
     }
 
     /// The name of the key's algorithm family, e.g. `"AES-GCM"` —
@@ -537,10 +538,11 @@ impl AeadInternalNonce {
     /// continue sealing.
     pub async fn seal(
         &self,
-        aad: &[u8],
-        plaintext: impl Into<DataSource>,
+        aad: impl Into<Cow<'_, [u8]>>,
+        plaintext: impl Into<DataSource<'_>>,
     ) -> Result<StreamReader<u8>, Error> {
-        run_sourced(plaintext.into(), |rx| self.0.seal(aad.to_vec(), rx)).await
+        let aad = aad.into().into_owned();
+        run_sourced(plaintext.into(), |rx| self.0.seal(aad, rx)).await
     }
 
     /// Decrypt and verify a sealed message (as produced by
@@ -553,10 +555,11 @@ impl AeadInternalNonce {
     /// fails closed with [`Error::AuthenticationFailed`], with no detail.
     pub async fn open(
         &self,
-        aad: &[u8],
-        sealed: impl Into<DataSource>,
+        aad: impl Into<Cow<'_, [u8]>>,
+        sealed: impl Into<DataSource<'_>>,
     ) -> Result<StreamReader<u8>, Error> {
-        run_sourced(sealed.into(), |rx| self.0.open(aad.to_vec(), rx)).await
+        let aad = aad.into().into_owned();
+        run_sourced(sealed.into(), |rx| self.0.open(aad, rx)).await
     }
 
     /// The name of the key's algorithm family, e.g. `"AES-GCM"` — spelled as
@@ -601,7 +604,7 @@ newtype_common!(Digest, bindings::digest::Digest, "digest");
 impl Digest {
     /// Digest `data`. The resource is reusable; the result is
     /// chunking-invariant.
-    pub async fn compute(&self, data: impl Into<DataSource>) -> Result<Vec<u8>, Error> {
+    pub async fn compute(&self, data: impl Into<DataSource<'_>>) -> Result<Vec<u8>, Error> {
         run_sourced(data.into(), |rx| self.0.compute(rx)).await
     }
 
@@ -632,8 +635,13 @@ impl VerifyingKey {
     /// verification criterion (which degenerate keys and signatures must be
     /// rejected) is defined by the key's minting interface, exactly like
     /// the wire format.
-    pub async fn verify(&self, data: impl Into<DataSource>, sig: &[u8]) -> Result<(), Error> {
-        run_sourced(data.into(), |rx| self.0.verify(rx, sig.to_vec())).await
+    pub async fn verify(
+        &self,
+        data: impl Into<DataSource<'_>>,
+        sig: impl Into<Cow<'_, [u8]>>,
+    ) -> Result<(), Error> {
+        let sig = sig.into().into_owned();
+        run_sourced(data.into(), |rx| self.0.verify(rx, sig)).await
     }
 
     /// The name of the key's algorithm family, e.g. `"Ed25519"` or
@@ -678,7 +686,7 @@ impl SigningKey {
     /// Fails only for operational reasons ([`Error::Other`], or
     /// [`Error::Read`] for a failing `DataSource::from_reader` source) —
     /// never for misuse, which is unrepresentable.
-    pub async fn sign(&self, data: impl Into<DataSource>) -> Result<Vec<u8>, Error> {
+    pub async fn sign(&self, data: impl Into<DataSource<'_>>) -> Result<Vec<u8>, Error> {
         run_sourced(data.into(), |rx| self.0.sign(rx)).await
     }
 
@@ -719,224 +727,15 @@ impl SigningKey {
 
 // --- key & digest creation -------------------------------------------------------
 
-/// `hmac-sha2` key creation.
-pub mod hmac_sha2 {
-    use super::*;
-    pub use bindings::sha2::Sha2Variant;
-
-    /// Import raw key material as an HMAC key over `variant`.
-    pub async fn import_key(
-        variant: Sha2Variant,
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<Mac, Error> {
-        Ok(Mac::from_raw(
-            bindings::hmac_sha2::import_key(variant, raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random HMAC key over `variant`.
-    pub async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<Mac, Error> {
-        Ok(Mac::from_raw(
-            bindings::hmac_sha2::generate_key(variant, extractable).await?,
-        ))
-    }
-}
-
-/// `aes-gcm` key creation (caller-nonce; prefer
-/// [`aes_gcm_internal_nonce`] — see
-/// [`Aead`]'s nonce warning).
-pub mod aes_gcm {
-    use super::*;
-    pub use bindings::aes_gcm::AesVariant;
-
-    /// Import raw key material as the declared AES variant.
-    pub async fn import_key(
-        variant: AesVariant,
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::aes_gcm::import_key(variant, raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random key of the declared AES variant.
-    pub async fn generate_key(variant: AesVariant, extractable: bool) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::aes_gcm::generate_key(variant, extractable).await?,
-        ))
-    }
-}
-
-/// `chacha20-poly1305` key creation (IETF construction, caller-nonce; see
-/// [`Aead`]'s nonce warning).
-pub mod chacha20_poly1305 {
-    use super::*;
-
-    /// Import 32 bytes of raw key material.
-    pub async fn import_key(raw_material: Vec<u8>, extractable: bool) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::chacha20_poly1305::import_key(raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random 256-bit key.
-    pub async fn generate_key(extractable: bool) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::chacha20_poly1305::generate_key(extractable).await?,
-        ))
-    }
-}
-
-/// `xchacha20-poly1305` key creation (extended-nonce construction,
-/// caller-nonce; see [`Aead`]'s nonce warning).
-pub mod xchacha20_poly1305 {
-    use super::*;
-
-    /// Import 32 bytes of raw key material.
-    pub async fn import_key(raw_material: Vec<u8>, extractable: bool) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::xchacha20_poly1305::import_key(raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random 256-bit key.
-    pub async fn generate_key(extractable: bool) -> Result<Aead, Error> {
-        Ok(Aead::from_raw(
-            bindings::xchacha20_poly1305::generate_key(extractable).await?,
-        ))
-    }
-}
-
-/// `aes-gcm-internal-nonce` key creation.
-pub mod aes_gcm_internal_nonce {
-    use super::*;
-    pub use bindings::aes_gcm::AesVariant;
-
-    /// Import raw key material as an internal-nonce AES-GCM key.
-    pub async fn import_key(
-        variant: AesVariant,
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<AeadInternalNonce, Error> {
-        Ok(AeadInternalNonce::from_raw(
-            bindings::aes_gcm_internal_nonce::import_key(variant, raw_material, extractable)
-                .await?,
-        ))
-    }
-
-    /// Generate a fresh random internal-nonce AES-GCM key.
-    pub async fn generate_key(
-        variant: AesVariant,
-        extractable: bool,
-    ) -> Result<AeadInternalNonce, Error> {
-        Ok(AeadInternalNonce::from_raw(
-            bindings::aes_gcm_internal_nonce::generate_key(variant, extractable).await?,
-        ))
-    }
-}
-
-/// `xchacha20-poly1305-internal-nonce` key creation — the recommended
-/// internal-nonce algorithm.
-pub mod xchacha20_poly1305_internal_nonce {
-    use super::*;
-
-    /// Import 32 bytes of raw key material as an internal-nonce key.
-    pub async fn import_key(
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<AeadInternalNonce, Error> {
-        Ok(AeadInternalNonce::from_raw(
-            bindings::xchacha20_poly1305_internal_nonce::import_key(raw_material, extractable)
-                .await?,
-        ))
-    }
-
-    /// Generate a fresh random internal-nonce key.
-    pub async fn generate_key(extractable: bool) -> Result<AeadInternalNonce, Error> {
-        Ok(AeadInternalNonce::from_raw(
-            bindings::xchacha20_poly1305_internal_nonce::generate_key(extractable).await?,
-        ))
-    }
-}
-
-/// `sha2` digest creation.
-pub mod sha2 {
-    use super::*;
-    pub use bindings::sha2::Sha2Variant;
-
-    /// Mint a digest bound to the declared SHA-2 variant.
-    pub fn make_digest(variant: Sha2Variant) -> Result<Digest, Error> {
-        Ok(Digest::from_raw(bindings::sha2::make_digest(variant)?))
-    }
-}
-
-/// `ed25519-verify` / `ed25519-sign` key creation.
-pub mod ed25519 {
-    use super::*;
-
-    /// Import a 32-byte raw public key.
-    pub async fn import_verifying_key(raw_material: Vec<u8>) -> Result<VerifyingKey, Error> {
-        Ok(VerifyingKey::from_raw(
-            bindings::ed25519_verify::import_verifying_key(raw_material).await?,
-        ))
-    }
-
-    /// Import a 32-byte raw private key (the RFC 8032 seed).
-    pub async fn import_signing_key(
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<SigningKey, Error> {
-        Ok(SigningKey::from_raw(
-            bindings::ed25519_sign::import_signing_key(raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random signing key.
-    pub async fn generate_key(extractable: bool) -> Result<SigningKey, Error> {
-        Ok(SigningKey::from_raw(
-            bindings::ed25519_sign::generate_key(extractable).await?,
-        ))
-    }
-}
-
-/// `ecdsa-verify` / `ecdsa-sign` key creation.
-pub mod ecdsa {
-    use super::*;
-    pub use bindings::ecdsa_verify::EcdsaVariant;
-
-    /// Import a public key as an uncompressed SEC1 point.
-    pub async fn import_verifying_key(
-        variant: EcdsaVariant,
-        raw_material: Vec<u8>,
-    ) -> Result<VerifyingKey, Error> {
-        Ok(VerifyingKey::from_raw(
-            bindings::ecdsa_verify::import_verifying_key(variant, raw_material).await?,
-        ))
-    }
-
-    /// Import a raw scalar as a signing key of the declared variant.
-    pub async fn import_signing_key(
-        variant: EcdsaVariant,
-        raw_material: Vec<u8>,
-        extractable: bool,
-    ) -> Result<SigningKey, Error> {
-        Ok(SigningKey::from_raw(
-            bindings::ecdsa_sign::import_signing_key(variant, raw_material, extractable).await?,
-        ))
-    }
-
-    /// Generate a fresh random signing key of the declared variant.
-    pub async fn generate_key(
-        variant: EcdsaVariant,
-        extractable: bool,
-    ) -> Result<SigningKey, Error> {
-        Ok(SigningKey::from_raw(
-            bindings::ecdsa_sign::generate_key(variant, extractable).await?,
-        ))
-    }
-}
+pub mod aes_gcm;
+pub mod aes_gcm_internal_nonce;
+pub mod chacha20_poly1305;
+pub mod ecdsa;
+pub mod ed25519;
+pub mod hmac_sha2;
+pub mod sha2;
+pub mod xchacha20_poly1305;
+pub mod xchacha20_poly1305_internal_nonce;
 
 /// `bytes.constant-time-equal`: whether `a` and `b` are equal, in time
 /// independent of their *contents* (necessarily dependent on their
