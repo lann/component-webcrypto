@@ -74,6 +74,10 @@ guest-impl/            # in-guest wasm component: RustCrypto in wasm,
                         #   EXPORTS the package surface, composable via
                         #   `wac plug` — see its README for the wasm
                         #   timing-channel classification & export policy
+componentize-sdk/       # WebCrypto-subset library (crypto.subtle) for JS
+                        #   guests built with componentize-js, backed by the
+                        #   lann:webcrypto imports; the JS counterpart of
+                        #   guest-sdk
 examples/
   crypto-demo/          # guest component: RFC 4231 + NIST GCM known-answer
                         #   vectors, chunked streams, error taxonomy,
@@ -82,6 +86,9 @@ examples/
   wasmtime-demo/        # thin native host + the integration test
   jco-demo/             # Node 24+ driver: transpiles crypto-demo with jco
                         #   against the jco-impl host and runs it
+  componentize-demo/    # JS guest (componentize-js) exercising the
+                        #   componentize-sdk library; drives through the
+                        #   same demo interface and composed pipeline
 conformance/            # cross-implementation conformance tests: vendored
                         #   Wycheproof vectors + translation policy, a shared
                         #   conformance guest (vectors under chunking
@@ -107,6 +114,13 @@ just demo-wasmtime           # run the guest under the Wasmtime (RustCrypto) hos
 just test-node               # transpile and run the same guest under the jco host
 just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
                              #   and run the whole thing under `wasmtime run`
+just test-webcrypto-componentize-wpt # the WPT WebCryptoAPI suites against the
+                             #   componentize-sdk JS guest library, via its
+                             #   published runner component (no componentize-js
+                             #   toolchain needed — see componentize-sdk/wpt/)
+just test-webcrypto-componentize # the composed pipeline with the JS demo guest
+                             #   (needs the componentize-js CLI — see
+                             #   componentize-sdk/README.md)
 just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally

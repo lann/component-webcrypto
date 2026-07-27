@@ -43,6 +43,15 @@ guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
                         #   crate: guest-webcrypto — see its README for the
                         #   timing-channel classification and export policy
+componentize-sdk/       # JS guest library for componentize-js (dicej's
+                        #   ComponentizeJS reboot): webcrypto.js exposes a
+                        #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,
+                        #   raw keys) over the lann:webcrypto imports; carries
+                        #   the componentize-js runtime patch its README
+                        #   documents; wpt/ vendors the WebCryptoAPI
+                        #   web-platform-tests and gates in CI via a
+                        #   release-artifact runner component keyed by an
+                        #   input lock (wpt/component.sh)
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
     wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package
@@ -54,6 +63,11 @@ examples/
                         #   crypto-demo with jco (the --async-*/--map flags
                         #   live in its package.json) and runs it against
                         #   jco-impl/webcrypto.js
+  componentize-demo/    # JS guest (componentize-js) exercising the
+                        #   componentize-sdk library; exports the same demo
+                        #   interface as crypto-demo, composed and run via
+                        #   `just test-webcrypto-componentize` (not in ci —
+                        #   needs the componentize-js CLI)
 conformance/            # cross-implementation conformance tests — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
@@ -164,6 +178,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just test-webcrypto-componentize-wpt` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI; no componentize-js toolchain needed — the runner component is a release artifact keyed by an input lock (`componentize-sdk/wpt/component.sh`), downloaded on demand. If no component exists for your inputs, CI's `wpt-component` job builds and publishes one (on merge to main); to test locally first, `just update-wpt-component` (needs the CLI — componentize-sdk/README.md). |
 | `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |

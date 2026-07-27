@@ -10,6 +10,95 @@ permissions:
   contents: read
 
 jobs:
+  # Make the componentized WPT runner available to the componentize job. The
+  # runner is a release artifact (the rolling `wpt-components` release),
+  # keyed by the hash of its input lock (componentize-sdk/wpt/component.sh):
+  # normally this job is a single download. Only when no component exists
+  # for the current inputs does it build one — restoring the componentize-js
+  # CLI from the Actions cache (so SpiderMonkey is recompiled only when the
+  # componentize-js.rev pin or the runtime patch changes) — and, on main, it
+  # publishes the new component so later runs are downloads again.
+  wpt-component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # publish new components on the wpt-components release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Compute the runner's input lock
+        id: lock
+        run: echo "hash=$(componentize-sdk/wpt/component.sh lock)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the published component
+        id: fetch
+        run: |
+          if componentize-sdk/wpt/component.sh ensure; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          WPT_COMPONENT_RELEASE: https://github.com/${{ github.repository }}/releases/download/wpt-components
+
+      - name: Install Rust toolchain
+        if: steps.fetch.outputs.found == 'false'
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache the componentize-js CLI
+        if: steps.fetch.outputs.found == 'false'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/componentize-js
+          key: componentize-js-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('componentize-sdk/componentize-js.rev', 'componentize-sdk/componentize-js-rooting-fix.patch') }}
+
+      - name: Build the componentize-js CLI
+        if: steps.fetch.outputs.found == 'false'
+        run: |
+          if command -v componentize-js >/dev/null; then
+            echo "componentize-js restored from cache"
+            exit 0
+          fi
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          curl -fsSLO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-x86_64-linux.tar.gz
+          tar -C "$RUNNER_TEMP" -xf wasi-sdk-30.0-x86_64-linux.tar.gz
+          export WASI_SDK_PATH="$RUNNER_TEMP/wasi-sdk-30.0-x86_64-linux"
+          rustup target add wasm32-wasip2
+          git clone https://github.com/dicej/componentize-js "$RUNNER_TEMP/componentize-js"
+          git -C "$RUNNER_TEMP/componentize-js" checkout "$(cat componentize-sdk/componentize-js.rev)"
+          git -C "$RUNNER_TEMP/componentize-js" apply "$PWD/componentize-sdk/componentize-js-rooting-fix.patch"
+          cargo install --path "$RUNNER_TEMP/componentize-js"
+
+      - name: Build the WPT runner component
+        if: steps.fetch.outputs.found == 'false'
+        run: componentize-sdk/wpt/component.sh build
+
+      - name: Publish the component on the wpt-components release
+        if: >-
+          steps.fetch.outputs.found == 'false' &&
+          github.event_name != 'pull_request' &&
+          github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="wpt-runner-${{ steps.lock.outputs.hash }}.component.wasm"
+          cp componentize-sdk/wpt/build/runner.component.wasm "$asset"
+          gh release view wpt-components >/dev/null 2>&1 || \
+            gh release create wpt-components --latest=false \
+              --title "WPT runner components (CI artifacts)" \
+              --notes "Componentized WPT runners built by the wpt-component CI job, keyed by input-lock hash. See componentize-sdk/wpt/README.md."
+          gh release upload wpt-components "$asset" --clobber
+
+      - name: Upload the component for the componentize job
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-runner-component
+          path: |
+            componentize-sdk/wpt/build/runner.component.wasm
+            componentize-sdk/wpt/build/runner.lock.built
+          if-no-files-found: error
+
   # Native Rust checks: formatting, lints, WIT validation, and the
   # guest-under-Wasmtime integration test.
   rust-checks:
@@ -47,6 +136,42 @@ jobs:
       # emits ::group::/::error:: annotations per recipe.
       - name: Run rust checks
         run: just rust-checks
+
+  # The WPT WebCryptoAPI suites against the componentize-sdk JS guest
+  # library: composes the runner component staged by the wpt-component job
+  # with a freshly built in-guest provider and driver, and runs it under
+  # wasmtime — no componentize-js toolchain here.
+  componentize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: wpt-component
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: componentize
+          cache-all-crates: true
+
+      - name: Install dependencies
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SKIP_NODE: "1"
+
+      - name: Fetch the WPT runner component
+        uses: actions/download-artifact@v4
+        with:
+          name: wpt-runner-component
+          path: componentize-sdk/wpt/build
+
+      - name: Run the componentize checks
+        run: just componentize-checks
 
   # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
