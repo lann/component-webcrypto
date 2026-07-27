@@ -2,8 +2,8 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::translate::{
-    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacCase, InternalNonceAlg, InternalNonceCase,
-    Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
+    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacAlg, HmacCase, InternalNonceAlg,
+    InternalNonceCase, Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
 };
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
@@ -42,9 +42,14 @@ pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
     Ok(())
 }
 
-/// Run one HMAC-SHA-256 vector under its schedule.
+/// Run one HMAC vector under its schedule.
 pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
-    let key = import_hmac_key(Sha2Variant::Sha256, case.key.clone(), false)
+    let variant = match case.alg {
+        HmacAlg::Sha256 => Sha2Variant::Sha256,
+        HmacAlg::Sha384 => Sha2Variant::Sha384,
+        HmacAlg::Sha512 => Sha2Variant::Sha512,
+    };
+    let key = import_hmac_key(variant, case.key.clone(), false)
         .await
         .map_err(|e| describe("import-key", &e))?;
     if case.valid {
@@ -72,9 +77,14 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
     Ok(())
 }
 
-/// Run one AES-256-GCM vector under its schedule.
+/// Run one AES-GCM vector under its schedule.
 pub async fn run_gcm_case(case: &GcmCase) -> Result<(), String> {
-    let key = import_key(AesVariant::Aes256, case.key.clone(), false)
+    let variant = match case.key_bits {
+        128 => AesVariant::Aes128,
+        256 => AesVariant::Aes256,
+        bits => return Err(format!("untranslatable AES key size: {bits}")),
+    };
+    let key = import_key(variant, case.key.clone(), false)
         .await
         .map_err(|e| describe("import-key", &e))?;
     run_aead_expectation(
@@ -174,7 +184,12 @@ async fn run_aead_expectation(
 pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), String> {
     let key = match case.alg {
         InternalNonceAlg::AesGcm => {
-            import_gcm_internal_key(AesVariant::Aes256, case.key.clone(), false)
+            let variant = match case.key_bits {
+                128 => AesVariant::Aes128,
+                256 => AesVariant::Aes256,
+                bits => return Err(format!("untranslatable AES key size: {bits}")),
+            };
+            import_gcm_internal_key(variant, case.key.clone(), false)
                 .await
                 .map_err(|e| describe("import-key", &e))?
         }

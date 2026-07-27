@@ -3,7 +3,8 @@
 Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 (`testvectors_v1`, schema v1; Apache-2.0 — see [LICENSE](LICENSE)):
 
-- `hmac_sha256_test.json` — HMAC-SHA-256 MAC vectors.
+- `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
+  — HMAC MAC vectors for every served SHA-2 parameterization.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
 - `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
   ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.
@@ -34,6 +35,15 @@ subject to copyright):
   SHA-2 digest vectors (message lengths 0 bits to two block lengths, in
   byte steps).
 
+## Schedule policy
+
+Vectors whose expected outcome is *acceptance* run under every chunking
+schedule (`whole`, 1-byte `bytes`, block-straddling `straddle`):
+assembled-input correctness is the claim chunking can affect.
+Rejection-expectation vectors run only `whole` — their verdict is computed
+after assembly, and mis-assembly is already a detected failure of the
+accepted cases — so chunking them adds runs without adding a claim.
+
 ## Translation policy
 
 Wycheproof describes the *algorithms*; the `lann:webcrypto` WIT is
@@ -44,18 +54,18 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 
 | Vector property | Our expectation |
 | --- | --- |
-| GCM, keySize ≠ 256 | **Skipped** — `aes-gcm.import-key` rejects the key before any vector semantics apply; import rejection is covered by dedicated probes. |
-| GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` fail `invalid-nonce` regardless of the vector's own result (the WIT mandates 12-byte nonces; Wycheproof merely *discourages* other sizes). |
-| GCM, keySize 256, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
-| GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
+| GCM, keySize 192 | **Skipped** — no implementation serves AES-192 (`import-key` declines it `unsupported`; probed). keySize 128 and 256 both run, in the caller-nonce *and* internal-nonce suites. |
+| GCM, ivSize ≠ 96 | `seal`/`open` fail `invalid-nonce` regardless of the vector's own result (the WIT mandates 12-byte nonces; Wycheproof merely *discourages* other sizes). |
+| GCM, ivSize 96, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
+| GCM, ivSize 96, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
 | ChaCha20-Poly1305 (either variant), ivSize ≠ the variant's (96, or 192 for XChaCha) | `seal`/`open` fail `invalid-nonce` — the declared `chacha-variant` selects the accepted nonce length. Nothing is skipped: both files are all-keySize-256. |
 | ChaCha20-Poly1305, variant ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed` (open direction only). |
 | Internal-nonce AEAD (same AEAD files, `aes-gcm-internal-nonce`/`*-internal-nonce` suites), keySize 256, variant ivSize, `valid` | `open(iv ‖ ct ‖ tag)` recovers `msg` — the only deterministic direction; a fresh `seal` is additionally round-tripped for self-consistency (its nonce is random, so only shape and reopening are checkable). |
 | Internal-nonce AEAD, anything else (`invalid` result, or ivSize ≠ the algorithm's) | `open(iv ‖ ct ‖ tag)` fails `authentication-failed` — the nonce is carried in-band, so there is no invalid-nonce case: a wrong-length IV just misparses as a malformed sealed message. |
-| HMAC, tagSize ≠ 256 | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
-| HMAC, tagSize 256, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
-| HMAC, tagSize 256, `invalid` | `verify(tag)` fails with `authentication-failed`. |
+| HMAC, truncated tagSize | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
+| HMAC, full-length tagSize, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
+| HMAC, full-length tagSize, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 | SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
 | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
 | ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |

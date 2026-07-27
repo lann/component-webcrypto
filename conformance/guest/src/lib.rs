@@ -164,7 +164,8 @@ impl Guest for Component {
         let mut cases = Vec::new();
         for case in translate::hmac_cases() {
             let name = format!(
-                "hmac-sha256/wycheproof/tc{}/{}",
+                "{}/wycheproof/tc{}/{}",
+                case.alg.name(),
                 case.tc_id,
                 case.schedule.name()
             );

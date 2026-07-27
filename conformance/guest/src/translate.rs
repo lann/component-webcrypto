@@ -77,15 +77,54 @@ impl Schedule {
 
 /// The schedule set for a vector whose longest stream input is
 /// `max_input_len` bytes.
-fn schedules(max_input_len: usize) -> Vec<Schedule> {
-    if max_input_len == 0 {
+/// The schedule set for a vector whose longest stream input is
+/// `max_input_len` bytes and whose expected outcome is acceptance
+/// (`valid`) or rejection.
+///
+/// Rejection-expectation vectors run only `whole`: the verdict is computed
+/// after the stream is assembled, and assembly-under-chunking correctness
+/// is pinned by the valid cases (a mis-assembled valid input produces
+/// wrong bytes — a distinct, detected failure), so chunking a rejection
+/// adds runs without adding a claim.
+fn schedules(max_input_len: usize, valid: bool) -> Vec<Schedule> {
+    if max_input_len == 0 || !valid {
         return vec![Schedule::Whole];
     }
     vec![Schedule::Whole, Schedule::Bytes, Schedule::Straddle]
 }
 
-/// One executed HMAC-SHA-256 vector under one schedule.
+/// A served HMAC digest parameterization, as named in test ids.
+#[derive(Clone, Copy)]
+pub enum HmacAlg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl HmacAlg {
+    /// The suite name used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            HmacAlg::Sha256 => "hmac-sha256",
+            HmacAlg::Sha384 => "hmac-sha384",
+            HmacAlg::Sha512 => "hmac-sha512",
+        }
+    }
+
+    /// The full-length tag size in bits (truncated-tag groups are skipped
+    /// per the translation policy).
+    fn tag_bits(self) -> u32 {
+        match self {
+            HmacAlg::Sha256 => 256,
+            HmacAlg::Sha384 => 384,
+            HmacAlg::Sha512 => 512,
+        }
+    }
+}
+
+/// One executed HMAC vector under one schedule.
 pub struct HmacCase {
+    pub alg: HmacAlg,
     pub tc_id: u64,
     pub schedule: Schedule,
     pub key: Vec<u8>,
@@ -109,6 +148,8 @@ pub enum AeadExpectation {
 
 /// One executed AES-256-GCM vector under one schedule.
 pub struct GcmCase {
+    /// The AES key size in bits (128 or 256).
+    pub key_bits: u32,
     pub tc_id: u64,
     pub schedule: Schedule,
     pub key: Vec<u8>,
@@ -182,6 +223,9 @@ impl InternalNonceAlg {
 /// direction (the only deterministic one; `seal` draws a random nonce).
 pub struct InternalNonceCase {
     pub alg: InternalNonceAlg,
+    /// The AES key size in bits for [`InternalNonceAlg::AesGcm`] (128 or
+    /// 256); always 256 for XChaCha.
+    pub key_bits: u32,
     pub tc_id: u64,
     pub schedule: Schedule,
     pub key: Vec<u8>,
@@ -210,7 +254,8 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
                 file: &VectorFile<AeadGroup>,
                 cases: &mut Vec<InternalNonceCase>| {
         for group in &file.test_groups {
-            if group.key_size != 256 {
+            // AES-192 is declined at minting (probed); 128 and 256 run.
+            if group.key_size == 192 {
                 continue;
             }
             for test in &group.tests {
@@ -222,9 +267,10 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
                 sealed.extend(unhex(&field, &test.ct));
                 sealed.extend(unhex(&field, &test.tag));
                 let valid = is_valid(&field, &test.result) && group.iv_size == valid_iv_bits;
-                for schedule in schedules(sealed.len()) {
+                for schedule in schedules(sealed.len(), valid) {
                     cases.push(InternalNonceCase {
                         alg,
+                        key_bits: group.key_size,
                         tc_id: test.tc_id,
                         schedule,
                         key: key.clone(),
@@ -252,7 +298,20 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
     cases
 }
 
-const HMAC_VECTORS: &str = include_str!("../../vectors/hmac_sha256_test.json");
+const HMAC_VECTORS: [(HmacAlg, &str); 3] = [
+    (
+        HmacAlg::Sha256,
+        include_str!("../../vectors/hmac_sha256_test.json"),
+    ),
+    (
+        HmacAlg::Sha384,
+        include_str!("../../vectors/hmac_sha384_test.json"),
+    ),
+    (
+        HmacAlg::Sha512,
+        include_str!("../../vectors/hmac_sha512_test.json"),
+    ),
+];
 const GCM_VECTORS: &str = include_str!("../../vectors/aes_gcm_test.json");
 const CHACHA_VECTORS: [(ChaChaAlg, &str); 2] = [
     (
@@ -382,53 +441,59 @@ fn is_valid(field: &str, result: &str) -> bool {
     }
 }
 
-/// The normalized HMAC-SHA-256 corpus: every tagSize-256 vector, expanded
-/// over its schedule set.
+/// The normalized HMAC corpus: every full-length-tag vector of every
+/// served digest parameterization, expanded over its schedule set.
 pub fn hmac_cases() -> Vec<HmacCase> {
-    let file: VectorFile<HmacGroup> =
-        serde_json::from_str(HMAC_VECTORS).expect("parsing hmac_sha256_test.json");
     let mut cases = Vec::new();
-    for group in &file.test_groups {
-        if group.tag_size != 256 {
-            continue;
-        }
-        for test in &group.tests {
-            let field = format!("hmac tc{}", test.tc_id);
-            let key = unhex(&field, &test.key);
-            let msg = unhex(&field, &test.msg);
-            let tag = unhex(&field, &test.tag);
-            let valid = is_valid(&field, &test.result);
-            for schedule in schedules(msg.len()) {
-                cases.push(HmacCase {
-                    tc_id: test.tc_id,
-                    schedule,
-                    key: key.clone(),
-                    msg: msg.clone(),
-                    tag: tag.clone(),
-                    valid,
-                });
+    for (alg, text) in HMAC_VECTORS {
+        let file: VectorFile<HmacGroup> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        for group in &file.test_groups {
+            if group.tag_size != alg.tag_bits() {
+                continue;
+            }
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                let key = unhex(&field, &test.key);
+                let msg = unhex(&field, &test.msg);
+                let tag = unhex(&field, &test.tag);
+                let valid = is_valid(&field, &test.result);
+                for schedule in schedules(msg.len(), valid) {
+                    cases.push(HmacCase {
+                        alg,
+                        tc_id: test.tc_id,
+                        schedule,
+                        key: key.clone(),
+                        msg: msg.clone(),
+                        tag: tag.clone(),
+                        valid,
+                    });
+                }
             }
         }
     }
     cases
 }
 
-/// The normalized AES-256-GCM corpus: every keySize-256 vector, expanded
-/// over its schedule set.
+/// The normalized AES-GCM corpus: every keySize-128 and -256 vector
+/// (AES-192 is declined at minting, covered by probes), expanded over its
+/// schedule set.
 pub fn gcm_cases() -> Vec<GcmCase> {
     let file: VectorFile<AeadGroup> =
         serde_json::from_str(GCM_VECTORS).expect("parsing aes_gcm_test.json");
     let mut cases = Vec::new();
     for group in &file.test_groups {
-        if group.key_size != 256 {
+        if group.key_size == 192 {
             continue;
         }
         for test in &group.tests {
             let field = format!("gcm tc{}", test.tc_id);
             let (fields, expectation, max_input_len) = translate_aead(&field, group, test, 96);
-            for schedule in schedules(max_input_len) {
+            let valid = matches!(expectation, AeadExpectation::Valid);
+            for schedule in schedules(max_input_len, valid) {
                 let (key, iv, aad, msg, ct_tag) = fields.clone();
                 cases.push(GcmCase {
+                    key_bits: group.key_size,
                     tc_id: test.tc_id,
                     schedule,
                     key,
@@ -463,7 +528,8 @@ pub fn chacha_cases() -> Vec<ChaChaCase> {
                 let field = format!("{} tc{}", alg.name(), test.tc_id);
                 let (fields, expectation, max_input_len) =
                     translate_aead(&field, group, test, alg.iv_bits());
-                for schedule in schedules(max_input_len) {
+                let valid = matches!(expectation, AeadExpectation::Valid);
+                for schedule in schedules(max_input_len, valid) {
                     let (key, iv, aad, msg, ct_tag) = fields.clone();
                     cases.push(ChaChaCase {
                         alg,
@@ -540,7 +606,7 @@ pub fn sha2_cases() -> Vec<Sha2Case> {
                     let mut msg = msg.take().expect("MD before Msg");
                     msg.truncate((len_bits / 8) as usize);
                     let md = unhex(&format!("{} len{len_bits} md", alg.name()), value);
-                    for schedule in schedules(msg.len()) {
+                    for schedule in schedules(msg.len(), true) {
                         cases.push(Sha2Case {
                             alg,
                             len_bits,
@@ -631,14 +697,15 @@ pub fn speccheck_cases() -> Vec<SpeccheckCase> {
     for (index, vector) in vectors.iter().enumerate() {
         let field = format!("speccheck tc{index}");
         let msg = unhex(&field, &vector.message);
-        for schedule in schedules(msg.len()) {
+        let valid = index as u64 == SPECCHECK_VALID_CASE;
+        for schedule in schedules(msg.len(), valid) {
             cases.push(SpeccheckCase {
                 tc_id: index as u64,
                 schedule,
                 public: unhex(&field, &vector.pub_key),
                 msg: msg.clone(),
                 sig: unhex(&field, &vector.signature),
-                valid: index as u64 == SPECCHECK_VALID_CASE,
+                valid,
             });
         }
     }
@@ -688,7 +755,7 @@ pub fn sig_cases() -> Vec<SigCase> {
             let msg = unhex(&field, &test.msg);
             let sig = unhex(&field, &test.sig);
             let valid = is_valid(&field, &test.result);
-            for schedule in schedules(msg.len()) {
+            for schedule in schedules(msg.len(), valid) {
                 cases.push(SigCase {
                     alg,
                     tc_id: test.tc_id,
