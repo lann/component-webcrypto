@@ -13,17 +13,73 @@
 // `MacKey`, `AeadKey`, and `Digest` class exports), while the minting and
 // utility interfaces map to named exports (`--map '…=./webcrypto.js#hmacSha2'`,
 // `#aesGcm`, `#chacha20Poly1305`, `#sha2`, `#bytes`) since the minting names
-// would otherwise collide. Errors are surfaced to the guest by throwing the WIT
-// `error` variant value (for example `{ tag: 'invalid-key', val }` or
-// `{ tag: 'authentication-failed' }`), which jco lifts into the
-// `result<_, error>` the WIT declares.
+// would otherwise collide.
 //
-// The bulk data paths are byte `stream`s: guest-provided streams arrive as
-// jco's async-iterable `Stream` objects (a web `ReadableStream` is also
-// tolerated) and are drained with `collectByteStream`; host-returned
-// `stream<u8>` values are web `ReadableStream`s of `Uint8Array`.
+// ## jco conventions this host relies on
+//
+// Two aspects of the jco runtime's host-facing surface are conventions
+// rather than documented API, so they are isolated behind single functions
+// and version-anchored here. Validated against jco 1.26.1 /
+// jco-transpile 0.5.2 (the versions pinned by this repo's npm consumers);
+// revalidate both functions when bumping either package.
+//
+// - **Error lifting** (`witError`, and every throw site through it): a WIT
+//   `result<_, error>` err case is produced by throwing the variant's
+//   payload value — `{ tag, val? }` — which the generated bindings lift.
+// - **Stream ingestion** (`collectByteStream`): guest-provided `stream<u8>`
+//   values arrive as jco's async-iterable `Stream` objects (a web
+//   `ReadableStream` is also tolerated), with chunk batching left to the
+//   runtime. Host-returned `stream<u8>` values are web `ReadableStream`s
+//   of `Uint8Array`.
 
 const subtle = globalThis.crypto.subtle;
+
+/**
+ * Construct the throwable representation of a WIT `types.error` case: jco's
+ * convention lifts a thrown `{ tag, val? }` into the declared
+ * `result<_, error>` (see the header note; the sole place that convention
+ * is encoded).
+ * @param {string} tag
+ * @param {string} [val]
+ */
+function witError(tag, val) {
+  return val === undefined ? { tag } : { tag, val };
+}
+
+/** `error.invalid-key` with a human-readable detail. */
+function errInvalidKey(val) {
+  return witError("invalid-key", val);
+}
+
+/** `error.invalid-nonce` with a human-readable detail. */
+function errInvalidNonce(val) {
+  return witError("invalid-nonce", val);
+}
+
+/** `error.authentication-failed` (deliberately detail-free). */
+function errAuthenticationFailed() {
+  return witError("authentication-failed");
+}
+
+/** `error.not-extractable`. */
+function errNotExtractable() {
+  return witError("not-extractable");
+}
+
+/** `error.unsupported` with a human-readable detail. */
+function errUnsupported(val) {
+  return witError("unsupported", val);
+}
+
+/** `error.key-exhausted`. */
+function errKeyExhausted() {
+  return witError("key-exhausted");
+}
+
+/** `error.other` with a human-readable detail. */
+function errOther(val) {
+  return witError("other", val);
+}
 
 /**
  * The hash name and block length for each served `sha2-variant` enum case
@@ -45,7 +101,7 @@ const SHA2_VARIANTS = {
 function sha2Variant(variant) {
   const entry = SHA2_VARIANTS[variant];
   if (entry === undefined) {
-    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+    throw errUnsupported(`${variant} is not served by this implementation`);
   }
   return entry;
 }
@@ -94,7 +150,7 @@ export class MacKey {
     try {
       const message = await collectByteStream(data, reservation.cap);
       if (!(await subtle.verify("HMAC", this.#key, tag, message))) {
-        throw { tag: "authentication-failed" };
+        throw errAuthenticationFailed();
       }
     } finally {
       reservation.release();
@@ -123,7 +179,7 @@ export class MacKey {
    * rather than relying on the `DOMException` from `exportKey`).
    */
   async exportKey() {
-    if (!this.#key.extractable) throw { tag: "not-extractable" };
+    if (!this.#key.extractable) throw errNotExtractable();
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
 }
@@ -199,7 +255,7 @@ export class AeadKey {
         // WebCrypto reports every decrypt failure as an opaque
         // OperationError; the WIT error deliberately carries no detail
         // either.
-        throw { tag: "authentication-failed" };
+        throw errAuthenticationFailed();
       }
       handedOff = true;
       return bytesToStream(new Uint8Array(opened), reservation);
@@ -236,7 +292,7 @@ export class AeadKey {
    * rather than relying on the `DOMException` from `exportKey`).
    */
   async exportKey() {
-    if (!this.#key.extractable) throw { tag: "not-extractable" };
+    if (!this.#key.extractable) throw errNotExtractable();
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
 }
@@ -252,7 +308,7 @@ export class AeadKey {
  */
 async function importHmacKey(variant, raw, extractable) {
   const { hash } = sha2Variant(variant);
-  if (raw.length === 0) throw { tag: "invalid-key", val: "empty key" };
+  if (raw.length === 0) throw errInvalidKey("empty key");
   let key;
   try {
     key = await subtle.importKey("raw", raw, { name: "HMAC", hash }, extractable, [
@@ -260,7 +316,7 @@ async function importHmacKey(variant, raw, extractable) {
       "verify",
     ]);
   } catch (err) {
-    throw { tag: "invalid-key", val: String(err) };
+    throw errInvalidKey(String(err));
   }
   return new MacKey(key);
 }
@@ -366,7 +422,7 @@ const AES_VARIANT_BYTES = { aes128: 16, aes256: 32 };
 function aesVariantByteLength(variant) {
   const expected = AES_VARIANT_BYTES[variant];
   if (expected === undefined) {
-    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+    throw errUnsupported(`${variant} is not served by this implementation`);
   }
   return expected;
 }
@@ -382,10 +438,9 @@ function aesVariantByteLength(variant) {
 async function importAesKey(variant, raw, extractable) {
   const expected = aesVariantByteLength(variant);
   if (raw.length !== expected) {
-    throw {
-      tag: "invalid-key",
-      val: `${variant} requires ${expected} key bytes, got ${raw.length}`,
-    };
+    throw errInvalidKey(
+      `${variant} requires ${expected} key bytes, got ${raw.length}`,
+    );
   }
   let key;
   try {
@@ -394,7 +449,7 @@ async function importAesKey(variant, raw, extractable) {
       "decrypt",
     ]);
   } catch (err) {
-    throw { tag: "invalid-key", val: String(err) };
+    throw errInvalidKey(String(err));
   }
   return new AeadKey(key);
 }
@@ -426,7 +481,7 @@ export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
  * @param {string} name
  */
 function unsupportedChacha(name) {
-  throw { tag: "unsupported", val: `${name} is not served by this implementation` };
+  throw errUnsupported(`${name} is not served by this implementation`);
 }
 
 /** The `lann:webcrypto/chacha20-poly1305` interface (`--map '…#chacha20Poly1305'`). */
@@ -486,7 +541,7 @@ export class InternalNonceKey {
     try {
       const message = await collectByteStream(plaintext, reservation.cap);
       if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
-        throw { tag: "key-exhausted" };
+        throw errKeyExhausted();
       }
       this.#sealed += 1n;
       const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
@@ -518,7 +573,7 @@ export class InternalNonceKey {
     try {
       const message = await collectByteStream(sealed, reservation.cap);
       if (message.length < InternalNonceKey.#IV_BYTES) {
-        throw { tag: "authentication-failed" };
+        throw errAuthenticationFailed();
       }
       const iv = message.subarray(0, InternalNonceKey.#IV_BYTES);
       const body = message.subarray(InternalNonceKey.#IV_BYTES);
@@ -530,7 +585,7 @@ export class InternalNonceKey {
           body,
         );
       } catch {
-        throw { tag: "authentication-failed" };
+        throw errAuthenticationFailed();
       }
       handedOff = true;
       return bytesToStream(new Uint8Array(opened), reservation);
@@ -562,7 +617,7 @@ export class InternalNonceKey {
    * key was created with `extractable` true.
    */
   async exportKey() {
-    if (!this.#key.extractable) throw { tag: "not-extractable" };
+    if (!this.#key.extractable) throw errNotExtractable();
     return new Uint8Array(await subtle.exportKey("raw", this.#key));
   }
 }
@@ -577,10 +632,9 @@ export class InternalNonceKey {
 async function importAesInternalNonceKey(variant, raw, extractable) {
   const expected = aesVariantByteLength(variant);
   if (raw.length !== expected) {
-    throw {
-      tag: "invalid-key",
-      val: `${variant} requires ${expected} key bytes, got ${raw.length}`,
-    };
+    throw errInvalidKey(
+      `${variant} requires ${expected} key bytes, got ${raw.length}`,
+    );
   }
   let key;
   try {
@@ -589,7 +643,7 @@ async function importAesInternalNonceKey(variant, raw, extractable) {
       "decrypt",
     ]);
   } catch (err) {
-    throw { tag: "invalid-key", val: String(err) };
+    throw errInvalidKey(String(err));
   }
   return new InternalNonceKey(key);
 }
@@ -622,7 +676,7 @@ export const aesGcmInternalNonce = {
  */
 function requireGcmNonce(nonce) {
   if (nonce.length !== 12) {
-    throw { tag: "invalid-nonce", val: `AES-GCM requires a 12-byte nonce, got ${nonce.length}` };
+    throw errInvalidNonce(`AES-GCM requires a 12-byte nonce, got ${nonce.length}`);
   }
 }
 
@@ -773,10 +827,9 @@ async function collectByteStream(stream, cap = Infinity) {
     }
   }
   if (overflowed) {
-    throw {
-      tag: "other",
-      val: `input exceeds the per-call buffer limit (${cap} bytes); see configure()`,
-    };
+    throw errOther(
+      `input exceeds the per-call buffer limit (${cap} bytes); see configure()`,
+    );
   }
   return concatChunks(chunks, total);
 }
@@ -808,7 +861,7 @@ const ECDSA_VARIANTS = {
 function ecdsaVariant(variant) {
   const entry = ECDSA_VARIANTS[variant];
   if (entry === undefined) {
-    throw { tag: "unsupported", val: `${variant} is not served by this implementation` };
+    throw errUnsupported(`${variant} is not served by this implementation`);
   }
   return entry;
 }
@@ -854,15 +907,15 @@ export class VerifyingKey {
       // message stream is drained first, per the WIT drain rule.
       if (this.#key.algorithm.name === "Ed25519" && sig.length === 64) {
         if (!ltLittleEndian(sig.subarray(32), ED25519_L)) {
-          throw { tag: "authentication-failed" };
+          throw errAuthenticationFailed();
         }
         if (!ed25519PointStrict(sig.subarray(0, 32))) {
-          throw { tag: "authentication-failed" };
+          throw errAuthenticationFailed();
         }
       }
       const params = signParams(this.#key.algorithm.name, this.#hash);
       if (!(await subtle.verify(params, this.#key, sig, message))) {
-        throw { tag: "authentication-failed" };
+        throw errAuthenticationFailed();
       }
     } finally {
       reservation.release();
@@ -960,7 +1013,7 @@ export class SigningKey {
    * true.
    */
   async exportKey() {
-    if (!this.#extractable) throw { tag: "not-extractable" };
+    if (!this.#extractable) throw errNotExtractable();
     const jwk = await subtle.exportKey("jwk", this.#privateKey);
     return base64UrlDecode(jwk.d);
   }
@@ -1061,7 +1114,7 @@ function ed25519PointStrict(encoded) {
 
 /** Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`. */
 function invalidKey(err, what) {
-  throw { tag: "invalid-key", val: `invalid ${what}: ${err.message ?? err}` };
+  throw errInvalidKey(`invalid ${what}: ${err.message ?? err}`);
 }
 
 /**
@@ -1071,10 +1124,10 @@ function invalidKey(err, what) {
  */
 async function importEd25519VerifyingKey(raw) {
   if (raw.length !== 32) {
-    throw { tag: "invalid-key", val: `Ed25519 public keys are 32 bytes, got ${raw.length}` };
+    throw errInvalidKey(`Ed25519 public keys are 32 bytes, got ${raw.length}`);
   }
   if (!ed25519PointStrict(raw)) {
-    throw { tag: "invalid-key", val: "non-canonical or small-order Ed25519 public key" };
+    throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
   let key;
   try {
@@ -1099,7 +1152,7 @@ const ED25519_PKCS8_PREFIX = new Uint8Array([
 /** Import a 32-byte raw Ed25519 private seed. */
 async function importEd25519SigningKey(raw, extractable) {
   if (raw.length !== 32) {
-    throw { tag: "invalid-key", val: `Ed25519 private keys are 32-byte seeds, got ${raw.length}` };
+    throw errInvalidKey(`Ed25519 private keys are 32-byte seeds, got ${raw.length}`);
   }
   const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + raw.length);
   pkcs8.set(ED25519_PKCS8_PREFIX);
@@ -1132,10 +1185,9 @@ export const ed25519Sign = {
 async function importEcdsaVerifyingKey(variant, raw) {
   const entry = ecdsaVariant(variant);
   if (raw.length !== entry.publicLength || raw[0] !== 0x04) {
-    throw {
-      tag: "invalid-key",
-      val: `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
-    };
+    throw errInvalidKey(
+      `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
+    );
   }
   let key;
   try {
@@ -1160,10 +1212,9 @@ async function importEcdsaSigningKey(variant, raw, extractable) {
   const entry = ecdsaVariant(variant);
   const scalarLength = entry.namedCurve === "P-256" ? 32 : 48;
   if (raw.length !== scalarLength) {
-    throw {
-      tag: "invalid-key",
-      val: `${variant} private keys are raw ${scalarLength}-byte scalars, got ${raw.length}`,
-    };
+    throw errInvalidKey(
+      `${variant} private keys are raw ${scalarLength}-byte scalars, got ${raw.length}`,
+    );
   }
   // WebCrypto imports EC private keys as pkcs8 or jwk only, and a JWK
   // private key requires the public coordinates — which plain JS cannot
