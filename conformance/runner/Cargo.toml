@@ -3,7 +3,7 @@ name = "conformance-runner"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Aggregates per-target conformance results against targets.toml and the corpus lockfiles; renders conformance/matrix.md and the results-viewer JSON."
+description = "Aggregates per-target conformance results against targets.toml and the suite lockfiles; renders conformance/matrix.md and the results-viewer JSON."
 
 [dependencies]
 anyhow = "1"

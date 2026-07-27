@@ -102,7 +102,7 @@ pub enum HmacAlg {
 }
 
 impl HmacAlg {
-    /// The suite name used in test ids.
+    /// The algorithm name used in test ids.
     pub fn name(self) -> &'static str {
         match self {
             HmacAlg::Sha256 => "hmac-sha256",
@@ -239,8 +239,8 @@ pub struct InternalNonceCase {
     pub valid: bool,
 }
 
-/// The normalized internal-nonce corpus, derived from the same AEAD vector
-/// files as the caller-nonce suites: `open(iv || ct || tag)` must recover
+/// The normalized internal-nonce cases, derived from the same AEAD vector
+/// files as the caller-nonce cases: `open(iv || ct || tag)` must recover
 /// `msg` exactly when the vector is valid and its IV is the algorithm's
 /// nonce length; every other case must fail `authentication-failed` (there
 /// is no invalid-nonce case -- the nonce is carried in-band, so a
@@ -441,7 +441,7 @@ fn is_valid(field: &str, result: &str) -> bool {
     }
 }
 
-/// The normalized HMAC corpus: every full-length-tag vector of every
+/// The normalized HMAC cases: every full-length-tag vector of every
 /// served digest parameterization, expanded over its schedule set.
 pub fn hmac_cases() -> Vec<HmacCase> {
     let mut cases = Vec::new();
@@ -475,7 +475,7 @@ pub fn hmac_cases() -> Vec<HmacCase> {
     cases
 }
 
-/// The normalized AES-GCM corpus: every keySize-128 and -256 vector
+/// The normalized AES-GCM cases: every keySize-128 and -256 vector
 /// (AES-192 is declined at minting, covered by probes), expanded over its
 /// schedule set.
 pub fn gcm_cases() -> Vec<GcmCase> {
@@ -509,7 +509,7 @@ pub fn gcm_cases() -> Vec<GcmCase> {
     cases
 }
 
-/// The normalized ChaCha20-Poly1305 corpus (both variants): every vector,
+/// The normalized ChaCha20-Poly1305 cases (both variants): every vector,
 /// expanded over its schedule set. Both files are all-keySize-256, so unlike
 /// GCM nothing is skipped.
 pub fn chacha_cases() -> Vec<ChaChaCase> {
@@ -580,7 +580,7 @@ fn translate_aead(
     ((key, iv, aad, msg, ct_tag), expectation, max_input_len)
 }
 
-/// The normalized SHA-2 digest corpus: every NIST CAVP ShortMsg vector,
+/// The normalized SHA-2 digest cases: every NIST CAVP ShortMsg vector,
 /// expanded over its schedule set. The `.rsp` format is line-oriented
 /// `Field = value` triples (`Len` in bits, `Msg`, `MD`); a zero-length case
 /// spells its message `00`, so `Msg` is truncated to `Len` bits.
@@ -689,7 +689,7 @@ const SPECCHECK_VECTORS: &str = include_str!("../../vectors/ed25519_speccheck.js
 /// `verify_strict`'s published result set.
 const SPECCHECK_VALID_CASE: u64 = 3;
 
-/// The normalized speccheck corpus, expanded over its schedule set.
+/// The normalized speccheck cases, expanded over their schedule set.
 pub fn speccheck_cases() -> Vec<SpeccheckCase> {
     let vectors: Vec<SpeccheckVector> =
         serde_json::from_str(SPECCHECK_VECTORS).expect("parsing ed25519_speccheck.json");
@@ -745,7 +745,7 @@ struct SigTest {
     result: String,
 }
 
-/// The normalized signature-verification corpus (Wycheproof Ed25519 plus
+/// The normalized signature-verification cases (Wycheproof Ed25519 plus
 /// the ECDSA P1363-signature files, whose fixed-width `r ‖ s` encoding is
 /// exactly this package's wire format), expanded over its schedule set.
 pub fn sig_cases() -> Vec<SigCase> {

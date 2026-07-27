@@ -3,7 +3,7 @@ name = "conformance-guest"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "The shared conformance guest: executes the Wycheproof-derived vector corpus and the API-contract probes against whichever lann:webcrypto implementation the target provides."
+description = "The shared conformance guest: executes the Wycheproof-derived vector cases and the API-contract probes against whichever lann:webcrypto implementation the target provides."
 
 [lib]
 crate-type = ["cdylib"]

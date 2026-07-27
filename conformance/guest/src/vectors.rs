@@ -122,7 +122,7 @@ pub async fn run_chacha_case(case: &ChaChaCase) -> Result<(), String> {
 }
 
 /// Drive one imported AEAD key through a vector's expectation; shared by
-/// every AEAD algorithm's vector suite.
+/// every AEAD algorithm's vector cases.
 async fn run_aead_expectation(
     key: &AeadKey,
     expectation: AeadExpectation,

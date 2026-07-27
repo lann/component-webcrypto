@@ -1,27 +1,27 @@
-# The conformance corpora and targets: facts about the test sets and the
+# The conformance suites and targets: facts about the test sets and the
 # implementations under test.
 #
-# Expectation policy lives in the corpus itself — each case declares the
+# Expectation policy lives in the cases themselves — each case declares the
 # `features` it exercises, and a case whose feature a target declares in
 # `missing-features` reports `skipped` (with the feature-tagged probes
 # asserting the correct decline both ways). This file carries only what has
-# no other home: which corpora and targets exist, which features each
+# no other home: which suites and targets exist, which features each
 # target is missing (and why), and whether a target's missing results file
 # is an error.
 #
-# Which corpora a target must produce results for is *derived*: every
-# target runs every corpus except those whose `requires` names a feature
+# Which suites a target must produce results for is *derived*: every
+# target runs every suite except those whose `requires` names a feature
 # the target is missing. The runner cross-checks each results file's
 # declared missing-features against this table, so a target's adapter and
 # this manifest cannot drift apart silently.
 
-[corpora.shared]
+[suites.shared]
 # The shared conformance guest: importable against every implementation.
 
-[corpora.signing]
+[suites.signing]
 # The host-only signing guest. Its world imports `ecdsa-sign`, which the
 # class-D policy keeps out of the in-guest provider, so a target missing
-# `ecdsa-sign` cannot even link this corpus's world — the requirement is
+# `ecdsa-sign` cannot even link this suite's world — the requirement is
 # structural, not behavioral.
 requires = ["ecdsa-sign"]
 
@@ -32,7 +32,7 @@ missing-features = []
 [targets.composed]
 # The in-guest RustCrypto provider deliberately does not export
 # `ecdsa-sign` (class D — see guest-impl/README.md), which excludes the
-# signing corpus structurally.
+# signing suite structurally.
 missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]

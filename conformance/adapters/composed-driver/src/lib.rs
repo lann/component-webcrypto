@@ -8,11 +8,11 @@
 //!
 //! The composition fixes the implementation under test, so the target's
 //! `missing-features` declaration is fixed with it: the in-guest provider
-//! serves every feature the shared corpus exercises, and deliberately does
-//! not export `ecdsa-sign` (class D) — which is why the signing corpus,
+//! serves every feature the shared suite exercises, and deliberately does
+//! not export `ecdsa-sign` (class D) — which is why the signing suite,
 //! whose world imports that interface, never runs composed at all.
 //!
-//! It materializes the corpus, runs every case, and prints the results JSON
+//! It materializes the cases, runs every one, and prints the results JSON
 //! (the same shape the other adapters write) on stdout, which must carry
 //! ONLY the JSON; diagnostics go to stderr. Case failures never affect the
 //! exit status; only harness errors do.
@@ -45,7 +45,7 @@ struct JsonResult {
 #[derive(serde::Serialize)]
 struct Output {
     target: &'static str,
-    corpus: &'static str,
+    suite: &'static str,
     #[serde(rename = "missing-features")]
     missing_features: Vec<String>,
     results: Vec<JsonResult>,
@@ -56,7 +56,7 @@ struct Component;
 impl wasip3::exports::cli::run::Guest for Component {
     async fn run() -> Result<(), ()> {
         // The provider's one gap is class D's ecdsa-sign, which nothing in
-        // the shared corpus is tagged with (the exclusion is structural —
+        // the shared suite is tagged with (the exclusion is structural —
         // see the module doc); declared for the runner's cross-check
         // against targets.toml.
         let missing_features: Vec<String> = vec!["ecdsa-sign".to_string()];
@@ -80,7 +80,7 @@ impl wasip3::exports::cli::run::Guest for Component {
         let failed = results.iter().filter(|r| r.outcome == "fail").count();
         let output = Output {
             target: "composed",
-            corpus: "shared",
+            suite: "shared",
             missing_features,
             results,
         };

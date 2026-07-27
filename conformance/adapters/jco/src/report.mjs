@@ -29,8 +29,8 @@ export async function missingFeatures(target) {
 
 /**
  * Drive every materialized case of a guest's `tests` export, returning the
- * results rows the runner consumes. `only` (a substring) selects a corpus
- * subset for bisection.
+ * results rows the runner consumes. `only` (a substring) selects a
+ * subset of the cases for bisection.
  * @param {{ all: (missingFeatures: string[]) => any[] }} tests
  * @param {string[]} missing
  * @param {string | undefined} only
@@ -50,10 +50,10 @@ export async function runCases(tests, missing, only) {
 /**
  * Write `conformance/results/<basename ?? target>.json` for `results` and
  * print the summary line. `basename` lets several guests report for the
- * same target (one results file per corpus).
+ * same target (one results file per suite).
  */
-export async function writeReport(target, corpus, missing, results, basename) {
-  const report = { target, corpus, "missing-features": missing, results };
+export async function writeReport(target, suite, missing, results, basename) {
+  const report = { target, suite, "missing-features": missing, results };
   await mkdir(RESULTS_DIR, { recursive: true });
   const outPath = join(RESULTS_DIR, `${basename ?? target}.json`);
   await writeFile(outPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -61,7 +61,7 @@ export async function writeReport(target, corpus, missing, results, basename) {
   const failed = report.results.filter((r) => r.outcome === "fail").length;
   const skipped = report.results.filter((r) => r.outcome === "skipped").length;
   console.log(
-    `${target}/${corpus}: ${report.results.length} cases, ${failed} failed, ${skipped} skipped (wrote ${outPath})`,
+    `${target}/${suite}: ${report.results.length} cases, ${failed} failed, ${skipped} skipped (wrote ${outPath})`,
   );
   for (const r of report.results) {
     if (r.outcome === "fail") console.error(`  FAIL ${r.name}: ${r.detail}`);

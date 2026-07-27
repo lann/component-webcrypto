@@ -1,10 +1,10 @@
 //! `conformance-guest`: the shared conformance component.
 //!
-//! One guest binary carries the whole corpus — the Wycheproof-derived vector
+//! One guest binary carries the whole suite — the Wycheproof-derived vector
 //! cases (translated per `conformance/vectors/README.md` in [`translate`])
 //! plus the hand-written API-contract [`probes`] — as self-describing
 //! `test-case` resources. Each case declares the [`features`] it exercises;
-//! `all(missing)` materializes the corpus for a target missing those
+//! `all(missing)` materializes the suite for a target missing those
 //! features, and a case whose feature is missing asserts the correct
 //! decline (reporting `skipped`) instead of exercising its subject.
 //! Expectation mismatches are reported as `fail`, never traps, so a run
@@ -36,14 +36,14 @@ use translate::{
 pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 
 /// The `deterministic-ecdsa` feature: RFC 6979 deterministic ECDSA
-/// signatures (exercised only by the host-only signing guest's corpus;
+/// signatures (exercised only by the host-only signing suite;
 /// declared here so every guest validates the same feature names).
 pub const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
 
 /// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
-/// Nothing in this corpus is tagged with it — the signing corpus's world
+/// Nothing in this suite is tagged with it — the signing suite's world
 /// *imports* the interface, so a target missing the feature (the composed
-/// target: class D) is excluded from that corpus structurally rather than
+/// target: class D) is excluded from that suite structurally rather than
 /// case by case. Declared here so every guest validates the same names.
 pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 

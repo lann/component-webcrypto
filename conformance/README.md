@@ -1,15 +1,16 @@
-# Conformance suite
+# Conformance tests
 
-One shared guest component carries the whole corpus as self-describing test
-cases and runs it against every implementation of `lann:webcrypto`; the
-runner aggregates per-target results — validating them against the target
-facts in [`targets.toml`](targets.toml) and the checked-in corpus lockfiles —
-and renders `matrix.md`. Run it with `just conformance` (see that recipe for
-the currently enabled targets).
+Two test **suites** — the shared suite and the host-only signing suite, each
+a guest component carrying its cases — run against every implementation of
+`lann:webcrypto`; the runner aggregates per-target results — validating them
+against the target facts in [`targets.toml`](targets.toml) and the
+checked-in suite lockfiles — and renders `matrix.md`. Run it with
+`just conformance` (see that recipe for the currently enabled targets).
 
 ## Self-describing cases, target facts, and the lockfiles
 
-Expectation policy lives in the corpus, not the harness. The guest exports
+Expectation policy lives in the cases, not the harness. Each suite's guest
+exports
 `all(missing) -> list<test-case>`; each case carries its stable `name`, the
 `features` it exercises beyond the baseline surface (feature tags are inert
 by default), and an async `run` returning `pass | fail(detail) |
@@ -18,20 +19,20 @@ skipped(detail)`. A target declares only the features it is **missing**
 cases tagged with a missing feature report `skipped`, and the feature-tagged
 *probes* assert the correct decline in both directions — a target that
 serves a feature it declares missing, or declines one it doesn't, fails.
-Growing the corpus therefore never silently sheds coverage: a new suite runs
+Growing the suites therefore never silently sheds coverage: new cases run
 everywhere until a target consciously opts out.
 
-Corpora work the same way one level up: a corpus may `require` features
-**structurally** (its world imports them — the signing corpus requires
-`ecdsa-sign`, which class D keeps out of the in-guest provider), and which
-corpora a target must produce results for is *derived*: every corpus except
-those requiring a feature the target is missing. There is no per-target
-corpus list to maintain.
+Suites work the same way one level up: a suite may `require` features
+**structurally** (its guest's world imports them — the signing suite
+requires `ecdsa-sign`, which class D keeps out of the in-guest provider),
+and which suites a target must produce results for is *derived*: every
+suite except those requiring a feature the target is missing. There is no
+per-target suite list to maintain.
 
-The corpus inventory is pinned by lockfiles (`guest/tests.lock`,
+Each suite's case inventory is pinned by a lockfile (`guest/tests.lock`,
 `signing-guest/tests.lock`; TOML, one case per line with its feature tags,
 Cargo.lock-style): the runner rejects any results file whose case names or
-tags diverge, so corpus changes land intentionally via
+tags diverge, so case changes land intentionally via
 `just update-conformance-lock` with a reviewable diff.
 
 ## Architecture
@@ -40,11 +41,12 @@ tags diverge, so corpus changes land intentionally via
 vectors/           # vendored Wycheproof JSON + the translation policy
                    #   (vectors/README.md) mapping vector expectations into
                    #   this package's stricter contract
-guest/             # the conformance guest: vectors compiled in (no I/O
+guest/             # the shared suite's guest: vectors compiled in (no I/O
                    #   imports, so the composed target runs under a plain
                    #   `wasmtime run`); exports all(missing) ->
-                   #   list<test-case>; tests.lock pins its corpus
-signing-guest/     # host-only guest: probes for interfaces the in-guest
+                   #   list<test-case>; tests.lock pins its cases
+signing-guest/     # the signing suite's host-only guest: probes for
+                   #   interfaces the in-guest
                    #   provider deliberately does not export (ecdsa-sign);
                    #   runs under the wasmtime and jco targets only, with
                    #   its own tests.lock
@@ -56,34 +58,35 @@ adapters/
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
                    #   with Chrome/Chromium 137+ installed); the browser
-                   #   adapter drives the corpus through web/'s harness
+                   #   adapter drives the suites through web/'s harness
                    #   (parallel workers), so gate and viewer cannot drift
 runner/            # aggregation: transport invariants + matrix.md rendering
                    #   + the results-viewer data (--json-out)
 web/               # the results viewer: a dependency-free static page
                    #   rendering the cross-target matrix as a collapsing
                    #   tree, with a live "test this browser" run
-targets.toml       # corpus facts (structurally required features) and
+targets.toml       # suite facts (structurally required features) and
                    #   target facts (missing features and why, optionality)
 ```
 
-Result files are `results/<target>.json` (or `<target>-<corpus>.json`):
-`{ "target", "corpus", "missing-features", "results": [{ "name",
+Result files are `results/<target>.json` (or `<target>-<suite>.json`):
+`{ "target", "suite", "missing-features", "results": [{ "name",
 "features", "outcome", "detail" }] }`. Adapters exit nonzero only on harness
 errors — failing *cases* are the runner's business. The runner errors (exit
-nonzero) when a derived-required (target, corpus) pair has no results file
-or an excluded pair has one, a file's cases diverge from its corpus
+nonzero) when a derived-required (target, suite) pair has no results file
+or an excluded pair has one, a file's cases diverge from its suite
 lockfile, a file's `missing-features` diverges from targets.toml, any
-(target, corpus) pair appears twice, or any case fails; `just conformance`
+(target, suite) pair appears twice, or any case fails; `just conformance`
 clears `results/` first, so stale files never classify as current.
 
 ## Test identity
 
-`<suite>/<source>/<case>/<schedule>` for vector tests (e.g.
+`<algorithm>/<source>/<case>/<schedule>` for vector tests (e.g.
 `aes-gcm/wycheproof/tc42/bytes`) and `probe/<name>` for API-contract probes.
 One vector test runs both directions (seal and open) where applicable;
-failures name the direction in `detail`. Matrix rows aggregate by suite
-group, so ids must stay stable as the corpus grows.
+failures name the direction in `detail`. Matrix rows aggregate by group
+(`<algorithm>/<source>`, or `probe`), so ids must stay stable as the suites
+grow.
 
 Every executed vector runs under multiple **chunking schedules** (`whole`,
 1-byte `bytes`, and block-boundary `straddle`; empty stream inputs collapse
@@ -103,12 +106,13 @@ target facts), written alongside `matrix.md` and cleared with the rest of
 `results/` each run.
 
 The page is also itself a live target: **Test this browser** runs both
-transpiled corpora (the same bundles the jco adapters use) against
+transpiled suites (the same bundles the jco adapters use) against
 `jco-impl/webcrypto.js` in the visiting browser — striped across parallel
 Web Workers, each with its own instances of the guests (cases are
 self-contained one-shots, so shards cannot interfere), falling back to a
 sequential main-thread run — streaming results into a "this browser" column
-and cross-checking the run against the static corpus. A completed run is
+and cross-checking the run against the static case inventory. A completed
+run is
 summarized at the bottom of the page, with nested expandable details for
 any failing cases. It needs
 [WebAssembly JSPI](https://caniuse.com/wf-wasm-jspi); without it the page
@@ -120,7 +124,7 @@ gating).
 The viewer is published at
 <https://lann.github.io/component-webcrypto/> (the site root links it
 alongside the public crates' API docs) by the `pages` workflow: every
-push to main reruns the conformance suite (including the jco-browser target)
+push to main reruns the conformance tests (including the jco-browser target)
 and deploys the site assembled by `just conformance-web-site` — a pruned
 mirror of the repository layout, which the page's relative URLs and the
 transpiled guests' relative imports of `jco-impl/webcrypto.js` both rely on.
@@ -133,8 +137,8 @@ conformance machinery it is otherwise modeled on, because the thing under
 test is different in kind: WebRTC conformance tests *sessions between peers*;
 crypto conformance tests *functions against mathematics*.
 
-- **The oracle is published vectors, not peer convergence** — so the corpus
-  is data-driven (Wycheproof + a translation policy) rather than hand-written
+- **The oracle is published vectors, not peer convergence** — so the cases
+  are data-driven (Wycheproof + a translation policy) rather than hand-written
   behavioral probes; probes exist only for the API contract itself (drain
   rule, extractability, error variants, algorithm names).
 - **There are no interop pairs, signaling server, or live pairing.** The
@@ -171,14 +175,14 @@ crypto conformance tests *functions against mathematics*.
   artifacts) but does **not** gate — statistical p-values flapping in CI
   train people to ignore red.
 
-## Growing the corpus
+## Growing the suites
 
 Adding an algorithm interface to the package is not done until its vector
-suite is here: vendor the vectors, extend the translation policy in
+cases are here: vendor the vectors, extend the translation policy in
 `vectors/README.md` + `guest/src/translate.rs` (they must agree), tag the
 new cases with a feature name if any target legitimately cannot serve them
 (declaring it missing in `targets.toml` for those targets), and run
-`just update-conformance-lock` so the corpus change lands as a reviewable
+`just update-conformance-lock` so the change lands as a reviewable
 lockfile diff. An algorithm the in-guest provider deliberately does not
-export lives in the host-only signing guest, whose corpus the composed
-target never runs — that is absence, not failure.
+export lives in the signing suite, which the composed target never runs —
+that is absence, not failure.
