@@ -23,11 +23,6 @@ mod bindings {
         exports: {
             default: async,
         },
-        with: {
-            "lann:webcrypto/mac.mac-key": wasmtime_webcrypto::MacKey,
-            "lann:webcrypto/aead.aead-key": wasmtime_webcrypto::AeadKey,
-            "lann:webcrypto/digest.digest": wasmtime_webcrypto::Digest,
-        },
     });
 }
 
