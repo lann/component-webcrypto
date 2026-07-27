@@ -195,19 +195,31 @@ const LOAD_TIMEOUT_MS = 60_000;
 const STALL_TIMEOUT_MS = 90_000;
 
 async function main() {
+  // Experimental: CONFORMANCE_ENGINE=firefox runs the same harness in
+  // Playwright's Firefox (JSPI pref enabled) and reports as jco-firefox;
+  // it never gates (targets.toml declares no such target).
+  const engine = process.env.CONFORMANCE_ENGINE ?? "chromium";
   const missing = await missingFeatures("jco-browser");
-  const [{ chromium }, server, executablePath] = await Promise.all([
+  const [playwright, server] = await Promise.all([
     import("playwright-core"),
     serve(harness(missing)),
-    findChrome(),
   ]);
   const { port } = server.address();
 
-  const browser = await chromium.launch({
-    executablePath,
-    headless: true,
-    timeout: LAUNCH_TIMEOUT_MS,
-  });
+  const browser =
+    engine === "firefox"
+      ? await playwright.firefox.launch({
+          headless: true,
+          timeout: LAUNCH_TIMEOUT_MS,
+          firefoxUserPrefs: {
+            "javascript.options.wasm_js_promise_integration": true,
+          },
+        })
+      : await playwright.chromium.launch({
+          executablePath: await findChrome(),
+          headless: true,
+          timeout: LAUNCH_TIMEOUT_MS,
+        });
   try {
     const page = await browser.newPage();
     page.on("console", (msg) => {
@@ -251,8 +263,9 @@ async function main() {
       settled = true;
     });
     if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
-    await writeReport("jco-browser", "shared", missing, outcome.shared);
-    await writeReport("jco-browser", "signing", missing, outcome.signing, "jco-browser-signing");
+    const target = engine === "firefox" ? "jco-firefox" : "jco-browser";
+    await writeReport(target, "shared", missing, outcome.shared);
+    await writeReport(target, "signing", missing, outcome.signing, `${target}-signing`);
   } finally {
     await browser.close();
     server.close();
