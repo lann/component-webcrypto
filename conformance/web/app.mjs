@@ -16,6 +16,10 @@ const CODE = { pass: "p", fail: "f", skipped: "s" };
 const GLYPH = { p: ["✓", "pass"], f: ["✗", "fail"], s: ["skip", "skip"] };
 // Cap on paths auto-expanded to failing leaves at load.
 const AUTO_EXPAND_LIMIT = 50;
+// Cap on failing cases given expandable detail blocks in the run summary.
+const FAILURE_DETAIL_LIMIT = 200;
+// A run with at most this many failures renders its summary tree expanded.
+const OPEN_FAILURES_LIMIT = 10;
 
 const el = (id) => document.getElementById(id);
 
@@ -253,6 +257,112 @@ function autoExpandFailures(model) {
   }
 }
 
+// --- the run summary ------------------------------------------------------
+
+/**
+ * Nested expandable failure details: one `<details>` per name segment with
+ * a failing-case count, single-child chains collapsed into one label
+ * (`aes-gcm/wycheproof/tc42`), and each failing case's detail in a `<pre>`.
+ * Counts cover every failure; detail blocks stop at FAILURE_DETAIL_LIMIT.
+ */
+function failureTree(model, failing) {
+  const root = { children: new Map(), count: 0, detail: undefined };
+  failing.forEach((index, position) => {
+    let node = root;
+    node.count += 1;
+    for (const segment of model.data.cases[index].name.split("/")) {
+      let child = node.children.get(segment);
+      if (!child) {
+        child = { children: new Map(), count: 0, detail: undefined };
+        node.children.set(segment, child);
+      }
+      child.count += 1;
+      node = child;
+    }
+    if (position < FAILURE_DETAIL_LIMIT) {
+      node.detail = model.liveDetails[index] || "(no detail)";
+    }
+  });
+
+  const open = failing.length <= OPEN_FAILURES_LIMIT;
+  const emit = (label, node) => {
+    // Collapse single-child chains so one failing case is one row, not
+    // four nested ones.
+    while (node.children.size === 1 && node.detail === undefined) {
+      const [childLabel, child] = node.children.entries().next().value;
+      label = `${label}/${childLabel}`;
+      node = child;
+    }
+    const details = document.createElement("details");
+    details.open = open;
+    const summary = document.createElement("summary");
+    summary.append(label);
+    if (node.children.size > 0) {
+      summary.append(" — ");
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = `✗${node.count}`;
+      summary.append(count);
+    }
+    details.append(summary);
+    if (node.detail !== undefined) {
+      const pre = document.createElement("pre");
+      pre.textContent = node.detail;
+      details.append(pre);
+    }
+    for (const [childLabel, child] of node.children) {
+      details.append(emit(childLabel, child));
+    }
+    return details;
+  };
+
+  const fragment = document.createDocumentFragment();
+  for (const [label, child] of root.children) {
+    fragment.append(emit(label, child));
+  }
+  return fragment;
+}
+
+/** Render the completed live run's summary at the bottom of the page. */
+function renderSummary(model, received) {
+  const section = el("summary");
+  const live = model.root.counts[model.liveColumn];
+  const fragment = document.createDocumentFragment();
+
+  const heading = document.createElement("h2");
+  heading.textContent = "This browser's results";
+  fragment.append(heading);
+  const line = document.createElement("p");
+  line.textContent =
+    `${live.p} passed, ${live.f} failed, ${live.s} skipped ` +
+    `of ${received} run.`;
+  fragment.append(line);
+
+  const failing = [];
+  model.liveOutcomes.forEach((code, index) => {
+    if (code === "f") failing.push(index);
+  });
+  if (failing.length === 0) {
+    const none = document.createElement("p");
+    none.className = "note";
+    none.textContent = "No failures.";
+    fragment.append(none);
+  } else {
+    fragment.append(failureTree(model, failing));
+    if (failing.length > FAILURE_DETAIL_LIMIT) {
+      const note = document.createElement("p");
+      note.className = "note";
+      note.textContent =
+        `Details shown for the first ${FAILURE_DETAIL_LIMIT} of ` +
+        `${failing.length} failing cases.`;
+      fragment.append(note);
+    }
+  }
+
+  section.replaceChildren(fragment);
+  section.hidden = false;
+}
+
 // --- the live run --------------------------------------------------------
 
 function makeRun(model) {
@@ -295,6 +405,9 @@ function makeRun(model) {
     pending = [];
     model.liveOutcomes.fill(null);
     model.liveDetails.fill("");
+    const summary = el("summary");
+    summary.hidden = true;
+    summary.replaceChildren();
     for (const node of iterateNodes(model.root)) {
       const live = node.counts[model.liveColumn];
       live.p = 0;
@@ -385,6 +498,7 @@ function makeRun(model) {
       `done: ${live.p} passed, ${live.f} failed, ${live.s} skipped ` +
       `of ${received} run`;
     crossCheck();
+    renderSummary(model, received);
     downloadButton.hidden = false;
   }
 

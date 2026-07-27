@@ -108,7 +108,9 @@ transpiled corpora (the same bundles the jco adapters use) against
 Web Workers, each with its own instances of the guests (cases are
 self-contained one-shots, so shards cannot interfere), falling back to a
 sequential main-thread run — streaming results into a "this browser" column
-and cross-checking the run against the static corpus. It needs
+and cross-checking the run against the static corpus. A completed run is
+summarized at the bottom of the page, with nested expandable details for
+any failing cases. It needs
 [WebAssembly JSPI](https://caniuse.com/wf-wasm-jspi); without it the page
 still renders the static matrix. A finished run can be downloaded in the
 results-file shape (the `this-browser` target is deliberately not declared
