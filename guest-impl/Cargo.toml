@@ -13,26 +13,8 @@ crate-type = ["cdylib"]
 # the `wit_stream` helpers; `async-spawn` provides `wit_bindgen::spawn`, used
 # to feed returned byte streams after an export has returned.
 wit-bindgen = { version = "0.59", features = ["async", "async-spawn"] }
-# RustCrypto backing implementations. The soft (fixsliced, table-free) AES
-# backend is what makes AES-256-GCM acceptable in-guest — see the README's
-# timing-channel classification.
-sha2 = "0.10"
-hmac = "0.12"
-subtle = "2"
-aes-gcm = "0.10"
-# Zeroize the AES round-key schedule on drop (the `aes-gcm` cipher owns an
-# expanded schedule; `chacha20poly1305` and the signature crates already
-# zeroize their key material by default).
-aes = { version = "0.8", features = ["zeroize"] }
-chacha20poly1305 = "0.10"
-# Key generation, via the target's WASI random backend.
-getrandom = "0.3"
-# Scrub raw key material on drop.
-zeroize = "1"
-# Signature algorithms. Ed25519 signing is constant-time by construction
-# (class A/B — see the README's classification), so both halves are
-# exported; the ECDSA crates back *verification only* (signing is class D
-# and its interface is never exported by this provider).
-ed25519-dalek = "2"
-p256 = { version = "0.13", features = ["ecdsa"] }
-p384 = { version = "0.13", features = ["ecdsa"] }
+# The cryptography itself, shared verbatim with the Wasmtime host. On this
+# wasm target the core selects the soft (fixsliced, table-free) AES backend
+# — what makes AES-GCM acceptable in-guest (see the README's timing-channel
+# classification) — and compiles no ECDSA signing code (class D).
+webcrypto-impl-core = { path = "../impl-core" }

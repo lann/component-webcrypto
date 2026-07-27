@@ -20,29 +20,6 @@ mod limits;
 
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
-/// The `algorithm-name` reported by HMAC keys and computations
-/// (WebCrypto's `KeyAlgorithm.name`).
-pub(crate) const HMAC_NAME: &str = "HMAC";
-
-/// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
-/// `KeyAlgorithm.name`).
-pub(crate) const AES_GCM_NAME: &str = "AES-GCM";
-
-/// The `algorithm-name` reported by ChaCha20-Poly1305 keys (the spelling of
-/// the WICG WebCrypto proposal; the algorithm is not in the W3C registry).
-pub(crate) const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
-
-/// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
-pub(crate) const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
-
-/// The `algorithm-name` reported by Ed25519 keys (WebCrypto's
-/// `KeyAlgorithm.name`, per the Secure Curves registry entry).
-pub(crate) const ED25519_NAME: &str = "Ed25519";
-
-/// The `algorithm-name` reported by ECDSA keys (WebCrypto's
-/// `KeyAlgorithm.name`).
-pub(crate) const ECDSA_NAME: &str = "ECDSA";
-
 /// Configuration and per-store state for the WebCrypto host.
 ///
 /// This is intentionally minimal (mirroring `wasmtime_wasi_http`'s
@@ -161,33 +138,25 @@ impl HasData for WasiWebcrypto {
 
 /// Backing type for the `mac.mac-key` resource.
 ///
-/// Holds the raw key material, the SHA-2 variant the key is bound to, and
-/// the key's extractability; `sign`/`verify` are one-shot and stateless per
-/// call, so the key carries no per-operation state. `extractable` gates
-/// `%export` only — the material necessarily lives host-side either way.
+/// Holds the shared core's HMAC key material (raw bytes zeroized on drop,
+/// the bound SHA-2 variant, and extractability); `sign`/`verify` are
+/// one-shot and stateless per call, so the key carries no per-operation
+/// state. `extractable` gates `export-key` only — the material necessarily
+/// lives host-side either way.
+#[derive(Debug)]
 pub struct MacKey {
-    /// The raw key material, retained for `sign`/`verify` and (when
-    /// extractable) `%export`; zeroized on drop.
-    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
-    /// The SHA-2 variant this key is bound to.
-    pub(crate) variant: crate::host::Sha2,
-    /// Whether `%export` may return the raw material.
-    pub(crate) extractable: bool,
+    pub(crate) material: webcrypto_impl_core::MacKeyMaterial,
 }
 
 /// Backing type for the `aead.aead-key` resource.
 ///
-/// Holds the ready-to-use cipher alongside the raw key material
-/// (for `%export` on extractable keys). `seal`/`open` are stateless per call,
-/// so the key carries no per-operation state.
+/// Holds the shared core's AEAD key material (the ready-to-use cipher bound
+/// to its algorithm at minting, raw bytes zeroized on drop, and
+/// extractability). `seal`/`open` are stateless per call, so the key
+/// carries no per-operation state.
+#[derive(Debug)]
 pub struct AeadKey {
-    /// The cipher keyed by `raw`, bound to its algorithm at minting.
-    pub(crate) cipher: crate::host::AeadCipher,
-    /// The raw key material, retained for `%export` on extractable keys;
-    /// zeroized on drop.
-    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
-    /// Whether `%export` may return the raw material.
-    pub(crate) extractable: bool,
+    pub(crate) material: webcrypto_impl_core::AeadKeyMaterial,
 }
 
 /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
@@ -196,14 +165,9 @@ pub struct AeadKey {
 /// 800-38D §8.2.2 RBG-based construction) and carried in the sealed output.
 /// The key tracks its seal count to enforce the WIT nonce budget
 /// (`error.key-exhausted`) for 12-byte-nonce algorithms.
+#[derive(Debug)]
 pub struct InternalNonceKey {
-    /// The cipher keyed by `raw`, bound to its algorithm at minting.
-    pub(crate) cipher: crate::host::AeadCipher,
-    /// The raw key material, retained for `export-key` on extractable keys;
-    /// zeroized on drop.
-    pub(crate) raw: zeroize::Zeroizing<Vec<u8>>,
-    /// Whether `export-key` may return the raw material.
-    pub(crate) extractable: bool,
+    pub(crate) material: webcrypto_impl_core::AeadKeyMaterial,
     /// The number of `seal` invocations so far, counted against the
     /// algorithm's nonce budget.
     pub(crate) sealed: u64,
@@ -214,88 +178,36 @@ pub struct InternalNonceKey {
 /// A digest holds no key material — just the SHA-2 variant it is bound to;
 /// `compute` is one-shot and stateless per call, so the resource is
 /// reusable and carries no per-operation state.
+#[derive(Debug)]
 pub struct Digest {
     /// The SHA-2 variant this digest is bound to.
-    pub(crate) variant: crate::host::Sha2,
+    pub(crate) variant: webcrypto_impl_core::Sha2,
 }
 
 /// Backing type for the `signature.verifying-key` resource.
 ///
 /// Public material only — verification is secret-free, and there is no
 /// extractability gate (`%export` always succeeds).
+#[derive(Debug)]
 pub struct VerifyingKey {
     /// The public key, bound to its algorithm (and, for ECDSA, its
     /// curve/digest variant) at minting.
-    pub(crate) public: crate::host::SigPublic,
+    pub(crate) public: webcrypto_impl_core::SigPublic,
 }
 
 /// Backing type for the `signature.signing-key` resource.
 ///
 /// `sign` is one-shot and stateless per call, so the key carries no
 /// per-operation state. `extractable` gates `%export` only.
+#[derive(Debug)]
 pub struct SigningKey {
-    /// The private key, bound to its algorithm (and, for ECDSA, its
-    /// curve/digest variant) at minting.
-    pub(crate) private: crate::host::SigPrivate,
-    /// Whether `%export` may return the private material.
-    pub(crate) extractable: bool,
+    pub(crate) material: webcrypto_impl_core::SigningKeyMaterial,
 }
 
-// Debug is implemented by hand for every key-holding type so that key
-// material can never reach logs: only the algorithm binding and
-// extractability are printed, with the material redacted. (Deriving `Debug`
-// on these types would print `raw`/`private` bytes.)
-
-impl std::fmt::Debug for MacKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MacKey")
-            .field("variant", &self.variant)
-            .field("extractable", &self.extractable)
-            .field("raw", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for AeadKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AeadKey")
-            .field("algorithm", &self.cipher.name())
-            .field("extractable", &self.extractable)
-            .field("raw", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for InternalNonceKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InternalNonceKey")
-            .field("algorithm", &self.cipher.name())
-            .field("extractable", &self.extractable)
-            .field("sealed", &self.sealed)
-            .field("raw", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for SigningKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SigningKey")
-            .field("algorithm", &self.private.name())
-            .field("extractable", &self.extractable)
-            .field("private", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for VerifyingKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Public material is not secret, but printing it wholesale is
-        // rarely useful; identify the key by algorithm only.
-        f.debug_struct("VerifyingKey")
-            .field("algorithm", &self.public.name())
-            .finish()
-    }
-}
+// `Debug` derives on the key-holding types print through the shared
+// core's material types, whose hand-written `Debug` impls redact all key
+// material — a key reaching a log line cannot leak (asserted by the
+// `debug_redacts_key_material` tests here and in the core).
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate — `types`,
 /// `bytes`, the primitive kinds (`mac`, `aead`, `digest`, `signature`), and

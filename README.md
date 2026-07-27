@@ -62,6 +62,9 @@ needing one must supply its own provider.
 
 ```
 wit/                    # the lann:webcrypto package (defined once, here)
+impl-core/              # shared RustCrypto core of both Rust
+                        #   implementations (crate: webcrypto-impl-core);
+                        #   ECDSA signing is compiled out of wasm builds
 wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto
 jco-impl/               # jco host library: webcrypto.js, browser-compatible
