@@ -368,6 +368,48 @@ mod tests {
         }
     }
 
+    /// RFC 6979 A.2.5 (P-256 + SHA-256, message "sample"): the known
+    /// answers the conformance tests deliberately do not carry — their
+    /// browser targets could only realize private-key import via
+    /// private-only PKCS#8, whose platform behavior is unspecified
+    /// (w3c/webcrypto#356) — pinned here for both Rust implementations
+    /// instead: deterministic signature bytes, scalar export identity,
+    /// and the derived public point.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn ecdsa_rfc6979_known_answers() {
+        fn unhex(hex: &str) -> Vec<u8> {
+            (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect()
+        }
+        let scalar = unhex("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+        let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &scalar, true)
+            .unwrap();
+
+        // Deterministic signature: exact r ‖ s reproduction.
+        let mut expected =
+            unhex("efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716");
+        expected.extend(unhex(
+            "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8",
+        ));
+        assert_eq!(key.sign(b"sample"), expected);
+
+        // Scalar export identity.
+        assert_eq!(key.export().unwrap(), scalar);
+
+        // Derived public point (uncompressed SEC1).
+        let mut point = vec![0x04];
+        point.extend(unhex(
+            "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+        ));
+        point.extend(unhex(
+            "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+        ));
+        assert_eq!(key.public().export(), point);
+    }
+
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_scalar_range_is_validated() {

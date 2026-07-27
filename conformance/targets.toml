@@ -37,14 +37,13 @@ missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]
 # Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
-# unimplemented), and signs ECDSA with a randomized k (RFC 6979
-# deterministic known answers are unobservable). Policy, not bugs: a
-# composition needing either must supply another provider.
-missing-features = ["chacha20-poly1305", "deterministic-ecdsa"]
+# unimplemented). Policy, not a bug: a composition needing it must supply
+# another provider.
+missing-features = ["chacha20-poly1305"]
 
 [targets.jco-browser]
 # The same host module as jco-node, in headless Chromium.
-missing-features = ["chacha20-poly1305", "deterministic-ecdsa"]
+missing-features = ["chacha20-poly1305"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
