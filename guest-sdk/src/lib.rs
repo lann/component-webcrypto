@@ -14,7 +14,8 @@
 //! wit-bindgen's `with:` option — if your own interfaces name these types or
 //! external tooling validates your world's shape. Do **not** bind the same
 //! interfaces with a second `generate!` without that remapping: the two
-//! expansions would produce distinct, unconvertible resource types.
+//! expansions would produce distinct, unconvertible resource types, and the
+//! newtypes here wrap only this crate's generation.
 //!
 //! # Contract notes carried over from the WIT
 //!
@@ -40,7 +41,7 @@
 
 #![deny(missing_docs)]
 
-use wit_bindgen::{StreamReader, StreamWriter};
+use wit_bindgen::StreamWriter;
 
 mod bindings {
     #![allow(missing_docs)]
@@ -73,8 +74,8 @@ pub use raw::types::Error;
 /// The error every byte-buffer helper reports when its stream writer was
 /// closed before the whole buffer was written — a callee violating the
 /// drain rule, which conforming implementations never do.
-fn writer_closed<E: RawError>(leftover: usize) -> E {
-    E::stream_failure(format!(
+fn writer_closed(leftover: usize) -> Error {
+    Error::Other(format!(
         "stream writer closed early with {leftover} bytes unwritten"
     ))
 }
@@ -82,11 +83,11 @@ fn writer_closed<E: RawError>(leftover: usize) -> E {
 /// Run `op` while feeding `data` into `tx`, surfacing the operation's own
 /// error over a feeder failure (per the drain rule, the feeder finishing is
 /// part of the operation's contract even on error).
-async fn call_fed<T, E: RawError>(
-    op: impl std::future::Future<Output = Result<T, E>>,
+async fn call_fed<T>(
+    op: impl std::future::Future<Output = Result<T, Error>>,
     mut tx: StreamWriter<u8>,
     data: &[u8],
-) -> Result<T, E> {
+) -> Result<T, Error> {
     let feeder = async {
         let leftover = tx.write_all(data.to_vec()).await;
         // The operation resolves only once the stream ends: drop the
@@ -102,332 +103,31 @@ async fn call_fed<T, E: RawError>(
     }
 }
 
-// --- raw traits ----------------------------------------------------------------
-
-/// The error type of one bindings generation.
-///
-/// Implemented for this crate's generated [`Error`]; implement it (and the
-/// per-resource raw traits) for your own generation's types to use the
-/// newtype wrappers with them.
-pub trait RawError {
-    /// Construct the implementation-defined operational-failure case
-    /// (`error.other`) carrying `detail`.
-    fn stream_failure(detail: String) -> Self;
-}
-
-impl RawError for Error {
-    fn stream_failure(detail: String) -> Self {
-        Error::Other(detail)
-    }
-}
-
-/// One bindings generation's `mac.mac-key` resource.
-pub trait RawMacKey {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// `mac-key.sign`.
-    fn sign(
-        &self,
-        data: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-    /// `mac-key.verify`.
-    fn verify(
-        &self,
-        data: StreamReader<u8>,
-        tag: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
-    /// `mac-key.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-    /// `mac-key.algorithm-hash`.
-    fn algorithm_hash(&self) -> Option<String>;
-    /// `mac-key.algorithm-length`.
-    fn algorithm_length(&self) -> u32;
-    /// `mac-key.export-key`.
-    fn export_key(&self) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-}
-
-impl RawMacKey for raw::mac::MacKey {
-    type Error = Error;
-    async fn sign(&self, data: StreamReader<u8>) -> Result<Vec<u8>, Error> {
-        self.sign(data).await
-    }
-    async fn verify(&self, data: StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
-        self.verify(data, tag).await
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-    fn algorithm_hash(&self) -> Option<String> {
-        self.algorithm_hash()
-    }
-    fn algorithm_length(&self) -> u32 {
-        self.algorithm_length()
-    }
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.export_key().await
-    }
-}
-
-/// One bindings generation's `aead.aead-key` resource.
-pub trait RawAeadKey {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// `aead-key.seal`.
-    fn seal(
-        &self,
-        nonce: Vec<u8>,
-        aad: Vec<u8>,
-        plaintext: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<StreamReader<u8>, Self::Error>>;
-    /// `aead-key.open`.
-    fn open(
-        &self,
-        nonce: Vec<u8>,
-        aad: Vec<u8>,
-        ciphertext: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<StreamReader<u8>, Self::Error>>;
-    /// `aead-key.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-    /// `aead-key.algorithm-length`.
-    fn algorithm_length(&self) -> u32;
-    /// `aead-key.nonce-size`.
-    fn nonce_size(&self) -> u32;
-    /// `aead-key.tag-size`.
-    fn tag_size(&self) -> u32;
-    /// `aead-key.export-key`.
-    fn export_key(&self) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-}
-
-impl RawAeadKey for raw::aead::AeadKey {
-    type Error = Error;
-    async fn seal(
-        &self,
-        nonce: Vec<u8>,
-        aad: Vec<u8>,
-        plaintext: StreamReader<u8>,
-    ) -> Result<StreamReader<u8>, Error> {
-        self.seal(nonce, aad, plaintext).await
-    }
-    async fn open(
-        &self,
-        nonce: Vec<u8>,
-        aad: Vec<u8>,
-        ciphertext: StreamReader<u8>,
-    ) -> Result<StreamReader<u8>, Error> {
-        self.open(nonce, aad, ciphertext).await
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-    fn algorithm_length(&self) -> u32 {
-        self.algorithm_length()
-    }
-    fn nonce_size(&self) -> u32 {
-        self.nonce_size()
-    }
-    fn tag_size(&self) -> u32 {
-        self.tag_size()
-    }
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.export_key().await
-    }
-}
-
-/// One bindings generation's `aead-internal-nonce.internal-nonce-key`
-/// resource.
-pub trait RawInternalNonceKey {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// `internal-nonce-key.seal`.
-    fn seal(
-        &self,
-        aad: Vec<u8>,
-        plaintext: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<StreamReader<u8>, Self::Error>>;
-    /// `internal-nonce-key.open`.
-    fn open(
-        &self,
-        aad: Vec<u8>,
-        sealed: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<StreamReader<u8>, Self::Error>>;
-    /// `internal-nonce-key.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-    /// `internal-nonce-key.algorithm-length`.
-    fn algorithm_length(&self) -> u32;
-    /// `internal-nonce-key.seals-remaining`.
-    fn seals_remaining(&self) -> Option<u64>;
-    /// `internal-nonce-key.export-key`.
-    fn export_key(&self) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-}
-
-impl RawInternalNonceKey for raw::aead_internal_nonce::InternalNonceKey {
-    type Error = Error;
-    async fn seal(
-        &self,
-        aad: Vec<u8>,
-        plaintext: StreamReader<u8>,
-    ) -> Result<StreamReader<u8>, Error> {
-        self.seal(aad, plaintext).await
-    }
-    async fn open(
-        &self,
-        aad: Vec<u8>,
-        sealed: StreamReader<u8>,
-    ) -> Result<StreamReader<u8>, Error> {
-        self.open(aad, sealed).await
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-    fn algorithm_length(&self) -> u32 {
-        self.algorithm_length()
-    }
-    fn seals_remaining(&self) -> Option<u64> {
-        self.seals_remaining()
-    }
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.export_key().await
-    }
-}
-
-/// One bindings generation's `digest.digest` resource.
-pub trait RawDigest {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// `digest.compute`.
-    fn compute(
-        &self,
-        data: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-    /// `digest.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-}
-
-impl RawDigest for raw::digest::Digest {
-    type Error = Error;
-    async fn compute(&self, data: StreamReader<u8>) -> Result<Vec<u8>, Error> {
-        self.compute(data).await
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-}
-
-/// One bindings generation's `signature.verifying-key` resource.
-pub trait RawVerifyingKey {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// `verifying-key.verify`.
-    fn verify(
-        &self,
-        data: StreamReader<u8>,
-        sig: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
-    /// `verifying-key.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-    /// `verifying-key.algorithm-curve`.
-    fn algorithm_curve(&self) -> Option<String>;
-    /// `verifying-key.algorithm-hash`.
-    fn algorithm_hash(&self) -> Option<String>;
-    /// `verifying-key.export-key`.
-    fn export_key(&self) -> impl std::future::Future<Output = Vec<u8>>;
-}
-
-impl RawVerifyingKey for raw::signature::VerifyingKey {
-    type Error = Error;
-    async fn verify(&self, data: StreamReader<u8>, sig: Vec<u8>) -> Result<(), Error> {
-        self.verify(data, sig).await
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-    fn algorithm_curve(&self) -> Option<String> {
-        self.algorithm_curve()
-    }
-    fn algorithm_hash(&self) -> Option<String> {
-        self.algorithm_hash()
-    }
-    async fn export_key(&self) -> Vec<u8> {
-        self.export_key().await
-    }
-}
-
-/// One bindings generation's `signature.signing-key` resource.
-pub trait RawSigningKey {
-    /// The generation's `types.error`.
-    type Error: RawError;
-    /// The generation's `verifying-key` resource.
-    type VerifyingKey: RawVerifyingKey<Error = Self::Error>;
-    /// `signing-key.sign`.
-    fn sign(
-        &self,
-        data: StreamReader<u8>,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-    /// `signing-key.verifying-key`.
-    fn verifying_key(&self) -> Self::VerifyingKey;
-    /// `signing-key.algorithm-name`.
-    fn algorithm_name(&self) -> String;
-    /// `signing-key.algorithm-curve`.
-    fn algorithm_curve(&self) -> Option<String>;
-    /// `signing-key.algorithm-hash`.
-    fn algorithm_hash(&self) -> Option<String>;
-    /// `signing-key.extractable`.
-    fn extractable(&self) -> bool;
-    /// `signing-key.export-key`.
-    fn export_key(&self) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>>;
-}
-
-impl RawSigningKey for raw::signature::SigningKey {
-    type Error = Error;
-    type VerifyingKey = raw::signature::VerifyingKey;
-    async fn sign(&self, data: StreamReader<u8>) -> Result<Vec<u8>, Error> {
-        self.sign(data).await
-    }
-    fn verifying_key(&self) -> raw::signature::VerifyingKey {
-        self.verifying_key()
-    }
-    fn algorithm_name(&self) -> String {
-        self.algorithm_name()
-    }
-    fn algorithm_curve(&self) -> Option<String> {
-        self.algorithm_curve()
-    }
-    fn algorithm_hash(&self) -> Option<String> {
-        self.algorithm_hash()
-    }
-    fn extractable(&self) -> bool {
-        self.extractable()
-    }
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.export_key().await
-    }
-}
-
 // --- newtypes ------------------------------------------------------------------
 
 /// Generate the shared newtype plumbing: constructors, raw accessors, and
 /// `From` in both directions.
 macro_rules! newtype_common {
-    ($name:ident, $bound:ident, $default:ty, $doc_res:literal) => {
-        impl<R: $bound> $name<R> {
+    ($name:ident, $raw:ty, $doc_res:literal) => {
+        impl $name {
             #[doc = concat!("Wrap a raw `", $doc_res, "` resource.")]
-            pub fn from_raw(raw: R) -> Self {
+            pub fn from_raw(raw: $raw) -> Self {
                 Self(raw)
             }
 
             #[doc = concat!("Borrow the raw `", $doc_res, "` resource.")]
-            pub fn as_raw(&self) -> &R {
+            pub fn as_raw(&self) -> &$raw {
                 &self.0
             }
 
             #[doc = concat!("Unwrap into the raw `", $doc_res, "` resource.")]
-            pub fn into_raw(self) -> R {
+            pub fn into_raw(self) -> $raw {
                 self.0
             }
         }
 
-        impl<R: $bound> From<R> for $name<R> {
-            fn from(raw: R) -> Self {
+        impl From<$raw> for $name {
+            fn from(raw: $raw) -> Self {
                 Self(raw)
             }
         }
@@ -435,22 +135,19 @@ macro_rules! newtype_common {
 }
 
 /// A `mac.mac-key`: sign and verify byte buffers with one `await` each.
-///
-/// Generic over the bindings generation (see [`RawMacKey`]); the default is
-/// this crate's own [`raw`] bindings.
-pub struct MacKey<R: RawMacKey = raw::mac::MacKey>(R);
-newtype_common!(MacKey, RawMacKey, raw::mac::MacKey, "mac-key");
+pub struct MacKey(raw::mac::MacKey);
+newtype_common!(MacKey, raw::mac::MacKey, "mac-key");
 
-impl<R: RawMacKey> MacKey<R> {
+impl MacKey {
     /// Compute the authentication tag over `data`.
-    pub async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, R::Error> {
+    pub async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         call_fed(self.0.sign(rx), tx, data).await
     }
 
     /// Verify `tag` over `data`, failing closed with
     /// `error.authentication-failed`.
-    pub async fn verify(&self, data: &[u8], tag: &[u8]) -> Result<(), R::Error> {
+    pub async fn verify(&self, data: &[u8], tag: &[u8]) -> Result<(), Error> {
         let (tx, rx) = wit_stream::new();
         call_fed(self.0.verify(rx, tag.to_vec()), tx, data).await
     }
@@ -473,7 +170,7 @@ impl<R: RawMacKey> MacKey<R> {
 
     /// The raw key material; fails with `error.not-extractable` unless the
     /// key was minted extractable.
-    pub async fn export_key(&self) -> Result<Vec<u8>, R::Error> {
+    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await
     }
 }
@@ -483,19 +180,14 @@ impl<R: RawMacKey> MacKey<R> {
 /// Prefer [`InternalNonceKey`] unless interop requires an externally
 /// specified nonce layout: nonce reuse under one key is catastrophic, and
 /// this type's `seal` leaves nonce uniqueness entirely to you.
-pub struct AeadKey<R: RawAeadKey = raw::aead::AeadKey>(R);
-newtype_common!(AeadKey, RawAeadKey, raw::aead::AeadKey, "aead-key");
+pub struct AeadKey(raw::aead::AeadKey);
+newtype_common!(AeadKey, raw::aead::AeadKey, "aead-key");
 
-impl<R: RawAeadKey> AeadKey<R> {
+impl AeadKey {
     /// Encrypt and authenticate `plaintext` under `nonce` and `aad`,
     /// returning `ciphertext ‖ tag`. The caller is responsible for nonce
     /// uniqueness per key.
-    pub async fn seal(
-        &self,
-        nonce: &[u8],
-        aad: &[u8],
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, R::Error> {
+    pub async fn seal(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.seal(nonce.to_vec(), aad.to_vec(), rx), tx, plaintext).await?;
         Ok(out.collect().await)
@@ -508,7 +200,7 @@ impl<R: RawAeadKey> AeadKey<R> {
         nonce: &[u8],
         aad: &[u8],
         ciphertext: &[u8],
-    ) -> Result<Vec<u8>, R::Error> {
+    ) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(
             self.0.open(nonce.to_vec(), aad.to_vec(), rx),
@@ -541,7 +233,7 @@ impl<R: RawAeadKey> AeadKey<R> {
 
     /// The raw key material; fails with `error.not-extractable` unless the
     /// key was minted extractable.
-    pub async fn export_key(&self) -> Result<Vec<u8>, R::Error> {
+    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await
     }
 }
@@ -549,19 +241,18 @@ impl<R: RawAeadKey> AeadKey<R> {
 /// An `aead-internal-nonce.internal-nonce-key`: misuse-resistant seal and
 /// open — the nonce is implementation-managed and carried in the sealed
 /// message (wire format per the minting interface).
-pub struct InternalNonceKey<R: RawInternalNonceKey = raw::aead_internal_nonce::InternalNonceKey>(R);
+pub struct InternalNonceKey(raw::aead_internal_nonce::InternalNonceKey);
 newtype_common!(
     InternalNonceKey,
-    RawInternalNonceKey,
     raw::aead_internal_nonce::InternalNonceKey,
     "internal-nonce-key"
 );
 
-impl<R: RawInternalNonceKey> InternalNonceKey<R> {
+impl InternalNonceKey {
     /// Encrypt and authenticate `plaintext` under a fresh
     /// implementation-generated nonce with `aad`, returning the
     /// self-contained sealed message.
-    pub async fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, R::Error> {
+    pub async fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.seal(aad.to_vec(), rx), tx, plaintext).await?;
         Ok(out.collect().await)
@@ -569,7 +260,7 @@ impl<R: RawInternalNonceKey> InternalNonceKey<R> {
 
     /// Decrypt and verify a sealed message under `aad`, failing closed with
     /// `error.authentication-failed`.
-    pub async fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, R::Error> {
+    pub async fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.open(aad.to_vec(), rx), tx, sealed).await?;
         Ok(out.collect().await)
@@ -593,18 +284,18 @@ impl<R: RawInternalNonceKey> InternalNonceKey<R> {
 
     /// The raw key material; fails with `error.not-extractable` unless the
     /// key was minted extractable.
-    pub async fn export_key(&self) -> Result<Vec<u8>, R::Error> {
+    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await
     }
 }
 
 /// A `digest.digest`: a reusable, algorithm-bound hash.
-pub struct Digest<R: RawDigest = raw::digest::Digest>(R);
-newtype_common!(Digest, RawDigest, raw::digest::Digest, "digest");
+pub struct Digest(raw::digest::Digest);
+newtype_common!(Digest, raw::digest::Digest, "digest");
 
-impl<R: RawDigest> Digest<R> {
+impl Digest {
     /// Digest `data`.
-    pub async fn compute(&self, data: &[u8]) -> Result<Vec<u8>, R::Error> {
+    pub async fn compute(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         call_fed(self.0.compute(rx), tx, data).await
     }
@@ -616,19 +307,14 @@ impl<R: RawDigest> Digest<R> {
 }
 
 /// A `signature.verifying-key`: public-key signature verification.
-pub struct VerifyingKey<R: RawVerifyingKey = raw::signature::VerifyingKey>(R);
-newtype_common!(
-    VerifyingKey,
-    RawVerifyingKey,
-    raw::signature::VerifyingKey,
-    "verifying-key"
-);
+pub struct VerifyingKey(raw::signature::VerifyingKey);
+newtype_common!(VerifyingKey, raw::signature::VerifyingKey, "verifying-key");
 
-impl<R: RawVerifyingKey> VerifyingKey<R> {
+impl VerifyingKey {
     /// Verify `sig` over `data`, failing closed with
     /// `error.authentication-failed` (per the minting interface's
     /// verification criterion).
-    pub async fn verify(&self, data: &[u8], sig: &[u8]) -> Result<(), R::Error> {
+    pub async fn verify(&self, data: &[u8], sig: &[u8]) -> Result<(), Error> {
         let (tx, rx) = wit_stream::new();
         call_fed(self.0.verify(rx, sig.to_vec()), tx, data).await
     }
@@ -655,24 +341,19 @@ impl<R: RawVerifyingKey> VerifyingKey<R> {
 }
 
 /// A `signature.signing-key`: private-key signing.
-pub struct SigningKey<R: RawSigningKey = raw::signature::SigningKey>(R);
-newtype_common!(
-    SigningKey,
-    RawSigningKey,
-    raw::signature::SigningKey,
-    "signing-key"
-);
+pub struct SigningKey(raw::signature::SigningKey);
+newtype_common!(SigningKey, raw::signature::SigningKey, "signing-key");
 
-impl<R: RawSigningKey> SigningKey<R> {
+impl SigningKey {
     /// Sign `data`, returning the signature in the minting interface's
     /// documented wire format.
-    pub async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, R::Error> {
+    pub async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
         let (tx, rx) = wit_stream::new();
         call_fed(self.0.sign(rx), tx, data).await
     }
 
     /// Derive the corresponding public key.
-    pub fn verifying_key(&self) -> VerifyingKey<R::VerifyingKey> {
+    pub fn verifying_key(&self) -> VerifyingKey {
         VerifyingKey::from_raw(self.0.verifying_key())
     }
 
@@ -698,7 +379,7 @@ impl<R: RawSigningKey> SigningKey<R> {
 
     /// The private key material; fails with `error.not-extractable` unless
     /// the key was minted extractable.
-    pub async fn export_key(&self) -> Result<Vec<u8>, R::Error> {
+    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await
     }
 }
