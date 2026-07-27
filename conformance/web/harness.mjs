@@ -31,13 +31,22 @@ export const CORPORA = [
  * Run both corpora with the given missing-features declaration, invoking
  * `report` with `{ kind: "start", corpus, total }` before each corpus and
  * `{ kind: "result", corpus, name, features, outcome, detail }` per case.
+ *
+ * `shard` selects a stripe of each corpus (case `i` belongs to shard
+ * `i % count`), letting several workers — each with its own instances of
+ * the guests — run disjoint slices concurrently. Striping balances load
+ * better than contiguous chunks: expensive cases cluster by suite. The
+ * default runs everything.
  * @param {string[]} missing
  * @param {(message: object) => void} report
+ * @param {{ index: number, count: number }} [shard]
  */
-export async function runAll(missing, report) {
+export async function runAll(missing, report, shard = { index: 0, count: 1 }) {
   for (const { corpus, module } of CORPORA) {
     const { tests } = await import(module);
-    const cases = tests.all(missing);
+    const cases = tests
+      .all(missing)
+      .filter((_, i) => i % shard.count === shard.index);
     report({ kind: "start", corpus, total: cases.length });
     for (const testCase of cases) {
       const name = String(testCase.name());

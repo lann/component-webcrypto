@@ -102,8 +102,10 @@ target facts), written alongside `matrix.md` and cleared with the rest of
 
 The page is also itself a live target: **Test this browser** runs both
 transpiled corpora (the same bundles the jco adapters use) against
-`jco-impl/webcrypto.js` in the visiting browser — in a Web Worker, falling
-back to the main thread — streaming results into a "this browser" column
+`jco-impl/webcrypto.js` in the visiting browser — striped across parallel
+Web Workers, each with its own instances of the guests (cases are
+self-contained one-shots, so shards cannot interfere), falling back to a
+sequential main-thread run — streaming results into a "this browser" column
 and cross-checking the run against the static corpus. It needs
 [WebAssembly JSPI](https://caniuse.com/wf-wasm-jspi); without it the page
 still renders the static matrix. A finished run can be downloaded in the
