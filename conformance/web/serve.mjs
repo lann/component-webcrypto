@@ -25,7 +25,14 @@ const MIME = {
 
 const server = createServer(async (req, res) => {
   let path = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
-  if (path === "/") path = "/conformance/web/index.html";
+  // Redirect the root to the viewer's directory (rather than rewriting), so
+  // the page's relative URLs resolve the same way they do on static hosts.
+  if (path === "/") {
+    res.writeHead(302, { location: "/conformance/web/" });
+    res.end();
+    return;
+  }
+  if (path.endsWith("/")) path += "index.html";
   const file = resolve(join(REPO_ROOT, path));
   if (!file.startsWith(REPO_ROOT)) {
     res.writeHead(403);

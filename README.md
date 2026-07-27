@@ -109,6 +109,9 @@ just test-webcrypto-composed # compose guest + in-guest provider + driver (wac p
                              #   and run the whole thing under `wasmtime run`
 just conformance             # the Wycheproof-derived conformance corpus over the
                              #   enabled targets; renders conformance/matrix.md
+just conformance-web         # serve the conformance results viewer locally
+                             #   (published at
+                             #   https://lann.github.io/component-webcrypto/)
 just timing-lab              # dudect-style timing tests of the composed in-guest
                              #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs
