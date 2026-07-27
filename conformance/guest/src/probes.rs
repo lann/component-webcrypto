@@ -8,31 +8,31 @@ use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, unhex, verify,
 };
 use crate::FEATURE_CHACHA;
-use lann_webcrypto_guest::raw::aead::AeadKey;
-use lann_webcrypto_guest::raw::aes_gcm::{generate_key, import_key, AesVariant};
-use lann_webcrypto_guest::raw::aes_gcm_internal_nonce::{
+use lann_webcrypto_guest::bindings::aead::AeadKey;
+use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVariant};
+use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::{
     generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
 };
-use lann_webcrypto_guest::raw::bytes::constant_time_equal;
-use lann_webcrypto_guest::raw::chacha20_poly1305::{
+use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
+use lann_webcrypto_guest::bindings::chacha20_poly1305::{
     generate_key as generate_chacha_key, import_key as import_chacha_key,
 };
-use lann_webcrypto_guest::raw::ecdsa_verify::{
+use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::raw::ed25519_sign::{
+use lann_webcrypto_guest::bindings::ed25519_sign::{
     generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
 };
-use lann_webcrypto_guest::raw::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use lann_webcrypto_guest::raw::hmac_sha2::{
+use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
-use lann_webcrypto_guest::raw::sha2::{make_digest, Sha2Variant};
-use lann_webcrypto_guest::raw::types::Error;
-use lann_webcrypto_guest::raw::xchacha20_poly1305::{
+use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
+use lann_webcrypto_guest::bindings::types::Error;
+use lann_webcrypto_guest::bindings::xchacha20_poly1305::{
     generate_key as generate_xchacha_key, import_key as import_xchacha_key,
 };
-use lann_webcrypto_guest::raw::xchacha20_poly1305_internal_nonce::{
+use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::{
     generate_key as generate_xchacha_internal_nonce_key,
     import_key as import_xchacha_internal_nonce_key,
 };
@@ -192,7 +192,7 @@ async fn chacha_minting_declined() -> Result<String, String> {
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
 async fn generate_key_256(
     extractable: bool,
-) -> Result<lann_webcrypto_guest::raw::aead::AeadKey, String> {
+) -> Result<lann_webcrypto_guest::bindings::aead::AeadKey, String> {
     generate_key(AesVariant::Aes256, extractable)
         .await
         .map_err(|e| describe("generate-key", &e))

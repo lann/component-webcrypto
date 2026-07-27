@@ -30,26 +30,26 @@ wit_bindgen::generate!({
 });
 
 use exports::demo::webcrypto_demo::demo::Guest;
-use lann_webcrypto_guest::raw::aead::AeadKey;
-use lann_webcrypto_guest::raw::aead_internal_nonce::InternalNonceKey;
-use lann_webcrypto_guest::raw::aes_gcm::{generate_key, import_key, AesVariant};
-use lann_webcrypto_guest::raw::aes_gcm_internal_nonce::generate_key as generate_internal_nonce_key;
-use lann_webcrypto_guest::raw::bytes::constant_time_equal;
-use lann_webcrypto_guest::raw::digest::Digest;
-use lann_webcrypto_guest::raw::ecdsa_verify::{
+use lann_webcrypto_guest::bindings::aead::AeadKey;
+use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
+use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVariant};
+use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::generate_key as generate_internal_nonce_key;
+use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
+use lann_webcrypto_guest::bindings::digest::Digest;
+use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::raw::ed25519_sign::{
+use lann_webcrypto_guest::bindings::ed25519_sign::{
     generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
 };
-use lann_webcrypto_guest::raw::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use lann_webcrypto_guest::raw::hmac_sha2::{
+use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
 };
-use lann_webcrypto_guest::raw::mac::MacKey;
-use lann_webcrypto_guest::raw::sha2::{make_digest, Sha2Variant};
-use lann_webcrypto_guest::raw::signature::{SigningKey, VerifyingKey};
-use lann_webcrypto_guest::raw::types::Error;
+use lann_webcrypto_guest::bindings::mac::MacKey;
+use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
+use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
+use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::wit_stream;
 
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
@@ -205,33 +205,45 @@ async fn hmac_generated_key() -> Result<(), String> {
 /// extractable key exports the hash's block size of material (WebCrypto's
 /// `generateKey` default: 64 bytes for SHA-256).
 async fn hmac_key_export() -> Result<(), String> {
-    // Exercises the library's newtype layer (`mint` + `MacKey`) rather than
-    // the raw bindings the rest of the demo drives.
-    use lann_webcrypto_guest::mint::hmac_sha2;
+    // Exercises the library's newtype layer (`hmac_sha2` + `Mac`) rather
+    // than the raw bindings the rest of the demo drives.
+    use lann_webcrypto_guest::hmac_sha2;
     let key = hmac_sha2::import_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| format!("import-key: {e}"))?;
     let exported = key
         .export_key()
         .await
-        .map_err(|e| describe("export of extractable key", &e))?;
+        .map_err(|e| format!("export of extractable key: {e}"))?;
     expect_eq(exported, HMAC_KEY.to_vec(), "exported key material")?;
     let tag = key
         .sign(HMAC_DATA)
         .await
-        .map_err(|e| describe("sign", &e))?;
+        .map_err(|e| format!("sign: {e}"))?;
     expect_eq(hex(&tag), HMAC_TAG.to_string(), "wrapper sign tag")?;
     key.verify(HMAC_DATA, &tag)
         .await
-        .map_err(|e| describe("wrapper verify", &e))?;
+        .map_err(|e| format!("wrapper verify: {e}"))?;
+
+    // A borrowed payload spanning several of the wrapper's feed chunks
+    // round-trips sign→verify (the wrapper feeds borrowed sources
+    // incrementally; the result must be chunking-invariant).
+    let big: Vec<u8> = (0..=255u8).cycle().take(3 * 8192 + 11).collect();
+    let tag = key
+        .sign(&big[..])
+        .await
+        .map_err(|e| format!("wrapper sign (multi-chunk): {e}"))?;
+    key.verify(&big[..], tag)
+        .await
+        .map_err(|e| format!("wrapper verify (multi-chunk): {e}"))?;
 
     let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, true)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .map_err(|e| format!("generate-key: {e}"))?;
     let exported = generated
         .export_key()
         .await
-        .map_err(|e| describe("export of generated key", &e))?;
+        .map_err(|e| format!("export of generated key: {e}"))?;
     expect_eq(exported.len(), 64, "generated key length")
 }
 

@@ -2,11 +2,11 @@
 //! cases and the API-contract probes.
 
 use crate::translate::Schedule;
-use lann_webcrypto_guest::raw::aead::AeadKey;
-use lann_webcrypto_guest::raw::aead_internal_nonce::InternalNonceKey;
-use lann_webcrypto_guest::raw::digest::Digest;
-use lann_webcrypto_guest::raw::mac::MacKey;
-use lann_webcrypto_guest::raw::types::Error;
+use lann_webcrypto_guest::bindings::aead::AeadKey;
+use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
+use lann_webcrypto_guest::bindings::digest::Digest;
+use lann_webcrypto_guest::bindings::mac::MacKey;
+use lann_webcrypto_guest::bindings::types::Error;
 
 /// Render a WIT `error` with a context prefix.
 pub fn describe(context: &str, error: &Error) -> String {
@@ -207,7 +207,7 @@ pub async fn open(
 /// `verifying-key.verify`, feeding `data` per `schedule` concurrently with
 /// the call; same outcome split as [`verify`].
 pub async fn sig_verify(
-    key: &lann_webcrypto_guest::raw::signature::VerifyingKey,
+    key: &lann_webcrypto_guest::bindings::signature::VerifyingKey,
     data: &[u8],
     sig: &[u8],
     schedule: Schedule,
