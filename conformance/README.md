@@ -118,7 +118,8 @@ in targets.toml, so the runner would reject it — it is for inspection, not
 gating).
 
 The viewer is published at
-<https://lann.github.io/component-webcrypto/> by the `pages` workflow: every
+<https://lann.github.io/component-webcrypto/> (the site root links it
+alongside the public crates' API docs) by the `pages` workflow: every
 push to main reruns the conformance suite (including the jco-browser target)
 and deploys the site assembled by `just conformance-web-site` — a pruned
 mirror of the repository layout, which the page's relative URLs and the

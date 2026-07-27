@@ -142,12 +142,20 @@ conformance: _conformance-clean conformance-wasmtime conformance-composed confor
 conformance-web: conformance
     node conformance/web/serve.mjs
 
-# Assemble the results viewer as a self-contained static site in
-# target/conformance-site (used by the pages workflow; assumes a
-# conformance run already produced results/matrix.json and the transpiled
-# guests). The tree mirrors the repository layout, which the page's
-# relative URLs and the transpiled guests' relative imports both rely on.
-conformance-web-site:
+# Build the API docs for the public-facing crates: the Wasmtime host crate
+# and the guest-side SDK. Both document on the host target (the SDK also
+# lint-gates there), giving one rustdoc tree with a shared search index in
+# target/doc.
+rust-docs:
+    cargo doc --no-deps -p wasmtime-webcrypto -p lann-webcrypto-guest
+
+# Assemble the Pages site in target/conformance-site: the results viewer
+# (used by the pages workflow; assumes a conformance run already produced
+# results/matrix.json and the transpiled guests), the public crates' API
+# docs, and the landing page linking them. The viewer's subtree mirrors the
+# repository layout, which the page's relative URLs and the transpiled
+# guests' relative imports both rely on.
+conformance-web-site: rust-docs
     rm -rf target/conformance-site
     mkdir -p target/conformance-site/conformance/results \
         target/conformance-site/conformance/adapters/jco \
@@ -159,8 +167,8 @@ conformance-web-site:
         conformance/adapters/jco/generated-signing \
         target/conformance-site/conformance/adapters/jco/
     cp jco-impl/webcrypto.js target/conformance-site/jco-impl/
-    printf '%s\n' '<!doctype html><link rel="icon" href="data:,"><meta http-equiv="refresh" content="0; url=conformance/web/">' \
-        > target/conformance-site/index.html
+    cp -r target/doc target/conformance-site/doc
+    cp .github/pages/index.html target/conformance-site/index.html
 
 # Clear stale results before a conformance run (a dependency of
 # `conformance`, so month-old files never classify as current).

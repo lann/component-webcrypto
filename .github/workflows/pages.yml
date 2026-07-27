@@ -1,9 +1,10 @@
 name: pages
 
-# Publish the conformance results viewer (conformance/web/) to GitHub Pages:
-# run the full conformance suite (under Actions this includes the
-# jco-browser target, so the published matrix carries every column), then
-# assemble the self-contained static site and deploy it. The page's URLs are
+# Publish the Pages site: the conformance results viewer (conformance/web/)
+# plus the public crates' API docs. Runs the full conformance suite on every
+# push to main (under Actions that includes the jco-browser target, so the
+# published matrix carries every column), builds the rustdoc, then deploys
+# the site assembled by `just conformance-web-site`. The viewer's URLs are
 # all relative, so it serves correctly from the project subpath.
 
 on:
