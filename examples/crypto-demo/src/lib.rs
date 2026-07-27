@@ -225,6 +225,18 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| format!("wrapper verify: {e}"))?;
 
+    // A borrowed payload spanning several of the wrapper's feed chunks
+    // round-trips sign→verify (the wrapper feeds borrowed sources
+    // incrementally; the result must be chunking-invariant).
+    let big: Vec<u8> = (0..=255u8).cycle().take(3 * 8192 + 11).collect();
+    let tag = key
+        .sign(&big[..])
+        .await
+        .map_err(|e| format!("wrapper sign (multi-chunk): {e}"))?;
+    key.verify(&big[..], tag)
+        .await
+        .map_err(|e| format!("wrapper verify (multi-chunk): {e}"))?;
+
     let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, true)
         .await
         .map_err(|e| format!("generate-key: {e}"))?;

@@ -179,9 +179,10 @@ impl std::error::Error for Error {
 /// buffers, and streams received from other components all work directly:
 ///
 /// - `&[u8]`, `&[u8; N]`, `Vec<u8>`, `&Vec<u8>`, [`Cow<'a, [u8]>`](Cow) —
-///   buffered sources. Borrowed data is held borrowed and copied only when
-///   fed (the ABI requires an owned buffer); owned data is moved, never
-///   copied.
+///   buffered sources. Owned data is moved and written whole, never copied;
+///   borrowed data is fed chunk by chunk through one reusable buffer, so a
+///   large input is never duplicated whole (the ABI's per-chunk copy into
+///   an owned buffer is unavoidable).
 /// - [`StreamReader<u8>`] — passed through to the operation as-is, without
 ///   buffering.
 /// - `DataSource::from_buf` (feature `bytes`) — fed chunk by chunk.
@@ -278,25 +279,44 @@ fn writer_closed(leftover: usize) -> Error {
     ))
 }
 
+/// The chunk size the incremental feeders copy through their reusable
+/// scratch buffer, bounding a feed's extra memory to one chunk.
+const FEED_CHUNK: usize = 8192;
+
 impl Inner<'_> {
     /// Feed this source into `tx`, then drop the writer to end the stream.
     async fn feed(self, mut tx: StreamWriter<u8>) -> Result<(), Error> {
         match self {
             // Pass-through sources never reach the feeder.
             Inner::Stream(_) => unreachable!("stream sources are passed through"),
-            Inner::Bytes(data) => {
-                let leftover = tx.write_all(data.into_owned()).await;
+            Inner::Bytes(Cow::Owned(data)) => {
+                let leftover = tx.write_all(data).await;
                 match leftover.len() {
                     0 => Ok(()),
                     n => Err(writer_closed(n)),
                 }
             }
+            // A borrowed buffer is never duplicated whole: it is fed in
+            // chunks through one reusable allocation (`write_all` returns
+            // its argument's allocation, emptied on success), so the feed
+            // costs one chunk of extra memory and the ABI's unavoidable
+            // per-chunk copy.
+            Inner::Bytes(Cow::Borrowed(data)) => {
+                let mut scratch = Vec::new();
+                for chunk in data.chunks(FEED_CHUNK) {
+                    scratch.extend_from_slice(chunk);
+                    scratch = tx.write_all(scratch).await;
+                    if !scratch.is_empty() {
+                        return Err(writer_closed(scratch.len()));
+                    }
+                }
+                Ok(())
+            }
             #[cfg(feature = "bytes")]
             Inner::Buf(mut buf) => {
                 use ::bytes::Buf as _;
-                // `write_all` returns its argument's allocation (emptied on
-                // success), so one scratch buffer serves every chunk: the
-                // per-chunk copy into it is the ABI's unavoidable one.
+                // As for borrowed bytes: one reusable scratch buffer, one
+                // copy per source-native chunk.
                 let mut scratch = Vec::new();
                 while buf.has_remaining() {
                     let chunk = buf.chunk();
@@ -312,9 +332,10 @@ impl Inner<'_> {
             }
             #[cfg(feature = "futures-io")]
             Inner::Reader(mut reader) => {
-                // As for `Buf`: one reusable scratch buffer, one copy per
-                // chunk (out of the read buffer `poll_read` requires).
-                let mut chunk = [0u8; 8192];
+                // As for borrowed bytes: one reusable scratch buffer, one
+                // copy per chunk (out of the read buffer `poll_read`
+                // requires).
+                let mut chunk = [0u8; FEED_CHUNK];
                 let mut scratch = Vec::new();
                 loop {
                     let n = std::future::poll_fn(|cx| reader.as_mut().poll_read(cx, &mut chunk))
