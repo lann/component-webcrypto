@@ -57,6 +57,10 @@ adapters/
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
                    #   with Chrome/Chromium 137+ installed)
 runner/            # aggregation: transport invariants + matrix.md rendering
+                   #   + the results-viewer data (--json-out)
+web/               # the results viewer: a dependency-free static page
+                   #   rendering the cross-target matrix as a collapsing
+                   #   tree, with a live "test this browser" run
 targets.toml       # corpus facts (structurally required features) and
                    #   target facts (missing features and why, optionality)
 ```
@@ -85,6 +89,28 @@ to `whole`). The
 streams-only WIT makes delivery schedule observable to implementations, so
 chunking invariance is part of the conformance claim — a class of test a
 buffer-based API could not even express.
+
+## Results viewer
+
+`just conformance-web` serves [`web/`](web) after a full conformance run: a
+dependency-free static page rendering every case as a collapsing tree (rows
+grouped by the `/` segments of case names, with per-subtree rollups) against
+one column per target. Its data is the runner's `--json-out` aggregate
+(`results/matrix.json` — lockfile case order, per-target outcome columns,
+target facts), written alongside `matrix.md` and cleared with the rest of
+`results/` each run.
+
+The page is also itself a live target: **Test this browser** runs both
+transpiled corpora (the same bundles the jco adapters use) against
+`jco-impl/webcrypto.js` in the visiting browser — in a Web Worker, falling
+back to the main thread — streaming results into a "this browser" column
+and cross-checking the run against the static corpus. It needs
+[WebAssembly JSPI](https://caniuse.com/wf-wasm-jspi); without it the page
+still renders the static matrix. A finished run can be downloaded in the
+results-file shape (the `this-browser` target is deliberately not declared
+in targets.toml, so the runner would reject it — it is for inspection, not
+gating). Publishing the viewer (e.g. GitHub Pages) is a possible follow-up;
+today it is local-only.
 
 ## Why this suite is shaped unlike its WebRTC sibling
 
