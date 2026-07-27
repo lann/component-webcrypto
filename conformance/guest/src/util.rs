@@ -48,17 +48,22 @@ pub fn expect_bytes(got: &[u8], want: &[u8], what: &str) -> Result<(), String> {
     ))
 }
 
-/// Write `chunks` to `tx` in order, then drop the writer to end the stream.
-pub async fn feed(tx: wit_bindgen::StreamWriter<u8>, chunks: Vec<Vec<u8>>) -> Result<(), String> {
-    let leftover = lann_webcrypto_guest::feed_chunks(tx, chunks).await;
-    if leftover.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "stream writer closed early with {} bytes unwritten",
-            leftover.len()
-        ))
+/// Write `chunks` to `tx` in order (one write per chunk — the schedule's
+/// delivery pattern), then drop the writer to end the stream.
+pub async fn feed(
+    mut tx: wit_bindgen::StreamWriter<u8>,
+    chunks: Vec<Vec<u8>>,
+) -> Result<(), String> {
+    for chunk in chunks {
+        let leftover = tx.write_all(chunk).await;
+        if !leftover.is_empty() {
+            return Err(format!(
+                "stream writer closed early with {} bytes unwritten",
+                leftover.len()
+            ));
+        }
     }
+    Ok(())
 }
 
 /// Write `data` to `tx` as one write, then drop the writer to end the
@@ -66,8 +71,6 @@ pub async fn feed(tx: wit_bindgen::StreamWriter<u8>, chunks: Vec<Vec<u8>>) -> Re
 pub async fn feed_whole(tx: wit_bindgen::StreamWriter<u8>, data: &[u8]) -> Result<(), String> {
     feed(tx, vec![data.to_vec()]).await
 }
-
-pub use lann_webcrypto_guest::read_all;
 
 /// `sign`, feeding `data` per `schedule` concurrently with the call. Returns
 /// the tag and the feeder's outcome separately, so feeder failures are
@@ -131,7 +134,7 @@ pub async fn in_seal(
         feed(tx, schedule.chunks(plaintext))
     );
     let sealed = match sealed {
-        Ok(stream) => Ok(read_all(stream).await),
+        Ok(stream) => Ok(stream.collect().await),
         Err(err) => Err(err),
     };
     (sealed, fed)
@@ -151,7 +154,7 @@ pub async fn in_open(
         feed(tx, schedule.chunks(sealed))
     );
     let opened = match opened {
-        Ok(stream) => Ok(read_all(stream).await),
+        Ok(stream) => Ok(stream.collect().await),
         Err(err) => Err(err),
     };
     (opened, fed)
@@ -174,7 +177,7 @@ pub async fn seal(
         feed(tx, schedule.chunks(plaintext))
     );
     let sealed = match sealed {
-        Ok(stream) => Ok(read_all(stream).await),
+        Ok(stream) => Ok(stream.collect().await),
         Err(err) => Err(err),
     };
     (sealed, fed)
@@ -195,7 +198,7 @@ pub async fn open(
         feed(tx, schedule.chunks(ciphertext))
     );
     let opened = match opened {
-        Ok(stream) => Ok(read_all(stream).await),
+        Ok(stream) => Ok(stream.collect().await),
         Err(err) => Err(err),
     };
     (opened, fed)

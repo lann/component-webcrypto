@@ -525,7 +525,7 @@ async fn seal_chunked(
         feed(tx, plaintext, chunk)
     );
     fed.map_err(Error::Other)?;
-    Ok(read_all(sealed?).await)
+    Ok(sealed?.collect().await)
 }
 
 /// `open`, feeding the ciphertext in `chunk`-byte pieces and collecting the
@@ -543,7 +543,7 @@ async fn open_chunked(
         feed(tx, ciphertext, chunk)
     );
     fed.map_err(Error::Other)?;
-    Ok(read_all(opened?).await)
+    Ok(opened?.collect().await)
 }
 
 /// `internal-nonce-key.seal`, feeding the plaintext in `chunk`-byte pieces
@@ -557,7 +557,7 @@ async fn in_seal_chunked(
     let (tx, rx) = wit_stream::new();
     let (sealed, fed) = futures::join!(key.seal(aad.to_vec(), rx), feed(tx, plaintext, chunk));
     fed.map_err(Error::Other)?;
-    Ok(read_all(sealed?).await)
+    Ok(sealed?.collect().await)
 }
 
 /// `internal-nonce-key.open`, feeding the sealed message in `chunk`-byte
@@ -571,7 +571,7 @@ async fn in_open_chunked(
     let (tx, rx) = wit_stream::new();
     let (opened, fed) = futures::join!(key.open(aad.to_vec(), rx), feed(tx, sealed, chunk));
     fed.map_err(Error::Other)?;
-    Ok(read_all(opened?).await)
+    Ok(opened?.collect().await)
 }
 
 /// Write `data` to `tx` in `chunk`-byte pieces, then drop the writer to end
@@ -588,22 +588,6 @@ async fn feed(
         }
     }
     Ok(())
-}
-
-/// Drain a byte stream to its end.
-async fn read_all(mut rx: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let (status, batch) = rx.read(Vec::with_capacity(8 * 1024)).await;
-        out.extend(batch);
-        if matches!(
-            status,
-            wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
-        ) {
-            break;
-        }
-    }
-    out
 }
 
 // --- small utilities ---------------------------------------------------------

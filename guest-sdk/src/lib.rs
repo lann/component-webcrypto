@@ -21,8 +21,10 @@
 //! - **Byte-buffer methods hide streams, not the drain rule.** The wrapped
 //!   operations fully drain their input even when they fail; these helpers
 //!   feed the buffer and await the result concurrently, so that contract is
-//!   invisible here. Streaming callers can use [`feed`] and [`read_all`]
-//!   with the [`raw`] resources directly.
+//!   invisible here. Streaming callers use the [`raw`] resources directly
+//!   with wit-bindgen's own stream primitives ([`wit_stream::new`],
+//!   `StreamWriter::write_all`, `StreamReader::collect`) — this crate adds
+//!   no stream API of its own.
 //! - **Writer drop ends the message.** A stream's producer failing midway
 //!   is indistinguishable from it finishing (the ABI carries no verdict at
 //!   end-of-stream). The byte-buffer helpers own their whole input, so this
@@ -38,7 +40,7 @@
 
 #![deny(missing_docs)]
 
-use wit_bindgen::{StreamReader, StreamResult, StreamWriter};
+use wit_bindgen::{StreamReader, StreamWriter};
 
 mod bindings {
     #![allow(missing_docs)]
@@ -66,43 +68,7 @@ pub mod raw {
 pub use bindings::wit_stream;
 pub use raw::types::Error;
 
-// --- stream helpers ------------------------------------------------------------
-
-/// Write `data` to `tx` as one write, then drop the writer to end the
-/// stream. Returns the bytes left unwritten when the reader stopped early
-/// (always empty for a callee honoring the drain rule).
-pub async fn feed(mut tx: StreamWriter<u8>, data: &[u8]) -> Vec<u8> {
-    tx.write_all(data.to_vec()).await
-}
-
-/// Write `chunks` to `tx` in order, then drop the writer to end the
-/// stream. Returns the bytes left unwritten when the reader stopped early
-/// (always empty for a callee honoring the drain rule).
-pub async fn feed_chunks(
-    mut tx: StreamWriter<u8>,
-    chunks: impl IntoIterator<Item = Vec<u8>>,
-) -> Vec<u8> {
-    for chunk in chunks {
-        let leftover = tx.write_all(chunk).await;
-        if !leftover.is_empty() {
-            return leftover;
-        }
-    }
-    Vec::new()
-}
-
-/// Drain a byte stream to its end.
-pub async fn read_all(mut rx: StreamReader<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let (status, batch) = rx.read(Vec::with_capacity(8 * 1024)).await;
-        out.extend(batch);
-        if matches!(status, StreamResult::Dropped | StreamResult::Cancelled) {
-            break;
-        }
-    }
-    out
-}
+// --- operation plumbing ---------------------------------------------------------
 
 /// The error every byte-buffer helper reports when its stream writer was
 /// closed before the whole buffer was written — a callee violating the
@@ -118,10 +84,17 @@ fn writer_closed<E: RawError>(leftover: usize) -> E {
 /// part of the operation's contract even on error).
 async fn call_fed<T, E: RawError>(
     op: impl std::future::Future<Output = Result<T, E>>,
-    tx: StreamWriter<u8>,
+    mut tx: StreamWriter<u8>,
     data: &[u8],
 ) -> Result<T, E> {
-    let (result, leftover) = futures::join!(op, feed(tx, data));
+    let feeder = async {
+        let leftover = tx.write_all(data.to_vec()).await;
+        // The operation resolves only once the stream ends: drop the
+        // writer as soon as the buffer is written.
+        drop(tx);
+        leftover
+    };
+    let (result, leftover) = futures::join!(op, feeder);
     match (result, leftover.len()) {
         (Err(err), _) => Err(err),
         (Ok(value), 0) => Ok(value),
@@ -525,7 +498,7 @@ impl<R: RawAeadKey> AeadKey<R> {
     ) -> Result<Vec<u8>, R::Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.seal(nonce.to_vec(), aad.to_vec(), rx), tx, plaintext).await?;
-        Ok(read_all(out).await)
+        Ok(out.collect().await)
     }
 
     /// Decrypt and verify `ciphertext ‖ tag` under `nonce` and `aad`,
@@ -543,7 +516,7 @@ impl<R: RawAeadKey> AeadKey<R> {
             ciphertext,
         )
         .await?;
-        Ok(read_all(out).await)
+        Ok(out.collect().await)
     }
 
     /// The registry name of the key's algorithm family, e.g. `"AES-GCM"`.
@@ -591,7 +564,7 @@ impl<R: RawInternalNonceKey> InternalNonceKey<R> {
     pub async fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, R::Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.seal(aad.to_vec(), rx), tx, plaintext).await?;
-        Ok(read_all(out).await)
+        Ok(out.collect().await)
     }
 
     /// Decrypt and verify a sealed message under `aad`, failing closed with
@@ -599,7 +572,7 @@ impl<R: RawInternalNonceKey> InternalNonceKey<R> {
     pub async fn open(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, R::Error> {
         let (tx, rx) = wit_stream::new();
         let out = call_fed(self.0.open(aad.to_vec(), rx), tx, sealed).await?;
-        Ok(read_all(out).await)
+        Ok(out.collect().await)
     }
 
     /// The registry name of the key's algorithm family.
