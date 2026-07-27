@@ -27,6 +27,12 @@ wit/                    # the lann:webcrypto package, one file per layer:
                         #   family files (aes/chacha/sha2/hmac/ed25519/
                         #   ecdsa.wit) hold the minting interfaces and grow
                         #   as algorithms are added
+impl-core/              # the shared RustCrypto core of both Rust
+                        #   implementations: cipher/digest dispatch, key
+                        #   validation and generation, error rendering, the
+                        #   internal-nonce wire format, signature keys (ECDSA
+                        #   signing is compiled out of wasm builds — class D);
+                        #   crate: webcrypto-impl-core
 wasmtime-impl/          # Wasmtime host crate, modeled after
                         #   wasmtime_wasi_http::p3; add_to_linker +
                         #   WasiWebcryptoView; crate: wasmtime-webcrypto

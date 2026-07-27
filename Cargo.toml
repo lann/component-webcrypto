@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "impl-core",
     "wasmtime-impl",
     "guest-impl",
     "examples/crypto-demo",

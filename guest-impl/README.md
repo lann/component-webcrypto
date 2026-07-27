@@ -58,8 +58,11 @@ JIT), weighted by how **forgiving of failure** the construction is
 
 Class D is enforced structurally, not by documentation: this provider simply
 does not export those algorithm interfaces, so a composition that needs them
-**fails at `wac plug` time** rather than running quietly degraded. Choose a
-host-side provider for them.
+**fails at `wac plug` time** rather than running quietly degraded — and one
+level deeper, the shared `webcrypto-impl-core` compiles no ECDSA signing
+code for wasm targets at all (`#[cfg(not(target_family = "wasm"))]`), so the
+class-D code is absent from this component's binary, not merely unexported.
+Choose a host-side provider for them.
 
 The classes describe **keyed operations**. Operations without secrets —
 hashing public data, and notably **signature verification** (e.g. validating

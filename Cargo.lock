@@ -896,18 +896,8 @@ dependencies = [
 name = "guest-webcrypto"
 version = "0.1.0"
 dependencies = [
- "aes",
- "aes-gcm",
- "chacha20poly1305",
- "ed25519-dalek",
- "getrandom 0.3.4",
- "hmac",
- "p256",
- "p384",
- "sha2",
- "subtle",
+ "webcrypto-impl-core",
  "wit-bindgen 0.59.0",
- "zeroize",
 ]
 
 [[package]]
@@ -2265,20 +2255,9 @@ dependencies = [
 name = "wasmtime-webcrypto"
 version = "0.1.0"
 dependencies = [
- "aes",
- "aes-gcm",
- "anyhow",
- "chacha20poly1305",
- "ed25519-dalek",
  "futures",
- "getrandom 0.3.4",
- "hmac",
- "p256",
- "p384",
- "sha2",
- "subtle",
  "wasmtime",
- "zeroize",
+ "webcrypto-impl-core",
 ]
 
 [[package]]
@@ -2311,6 +2290,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7127f7f9b8f127c879991cecd35f494e4628bae1b0874c681414d8d8831e952c"
 dependencies = [
  "wast",
+]
+
+[[package]]
+name = "webcrypto-impl-core"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "chacha20poly1305",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
+ "hmac",
+ "p256",
+ "p384",
+ "sha2",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
