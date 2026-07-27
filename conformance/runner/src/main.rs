@@ -5,7 +5,8 @@
 //! `conformance/matrix.md`.
 //!
 //! Usage: `conformance-runner --targets <toml> --results <dir>
-//!         --lock <corpus>=<lockfile> ... --matrix-out <md>`
+//!         --lock <corpus>=<lockfile> ... --matrix-out <md>
+//!         [--json-out <json>]`
 //!
 //! Transport invariants, each an error (exit nonzero):
 //! - every non-`optional` target produced a results file for each corpus it
@@ -78,9 +79,11 @@ struct CaseResult {
     detail: String,
 }
 
-/// One corpus lockfile: case name -> feature tags.
+/// One corpus lockfile: case name -> feature tags, plus the corpus order
+/// (the canonical case order the results viewer renders).
 struct Lock {
     features: BTreeMap<String, Vec<String>>,
+    order: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -100,12 +103,14 @@ struct LockCase {
 fn parse_lock(text: &str) -> anyhow::Result<Lock> {
     let file: LockFile = toml::from_str(text)?;
     let mut features = BTreeMap::new();
+    let mut order = Vec::new();
     for case in file.cases {
         if features.insert(case.name.clone(), case.features).is_some() {
             anyhow::bail!("duplicate case {:?}", case.name);
         }
+        order.push(case.name);
     }
-    Ok(Lock { features })
+    Ok(Lock { features, order })
 }
 
 /// The suite group a case name belongs to: `probe`, or its first two
@@ -363,10 +368,137 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
     md
 }
 
-fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf, BTreeMap<String, PathBuf>)> {
+/// Parsed command-line arguments.
+struct Args {
+    targets: PathBuf,
+    results: PathBuf,
+    matrix_out: PathBuf,
+    /// Where to write the results-viewer aggregate, if requested.
+    json_out: Option<PathBuf>,
+    locks: BTreeMap<String, PathBuf>,
+}
+
+/// Render the machine-readable aggregate the results viewer
+/// (`conformance/web/`) consumes: the declared targets and corpora, every
+/// lockfile case in corpus order, and per-target outcome columns aligned to
+/// that case order (compact codes: `p`/`f`/`s`; `null` where the (target,
+/// corpus) pair produced no results). Details ride a sparse side map (case
+/// index -> detail) for fail/skip outcomes only, keeping the file small.
+fn render_json(
+    targets: &Targets,
+    locks: &BTreeMap<String, Lock>,
+    files: &[ResultsFile],
+) -> anyhow::Result<String> {
+    #[derive(serde::Serialize)]
+    struct ViewerTarget<'a> {
+        #[serde(rename = "missing-features")]
+        missing_features: &'a [String],
+        optional: bool,
+    }
+    #[derive(serde::Serialize)]
+    struct ViewerCorpus<'a> {
+        requires: &'a [String],
+    }
+    #[derive(serde::Serialize)]
+    struct ViewerCase<'a> {
+        name: &'a str,
+        corpus: &'a str,
+        #[serde(skip_serializing_if = "<[String]>::is_empty")]
+        features: &'a [String],
+    }
+    #[derive(serde::Serialize)]
+    struct ViewerData<'a> {
+        targets: BTreeMap<&'a str, ViewerTarget<'a>>,
+        corpora: BTreeMap<&'a str, ViewerCorpus<'a>>,
+        cases: Vec<ViewerCase<'a>>,
+        outcomes: BTreeMap<&'a str, Vec<Option<&'static str>>>,
+        details: BTreeMap<&'a str, BTreeMap<String, &'a str>>,
+    }
+
+    let mut cases = Vec::new();
+    for (corpus, lock) in locks {
+        for name in &lock.order {
+            cases.push(ViewerCase {
+                name,
+                corpus,
+                features: &lock.features[name],
+            });
+        }
+    }
+
+    let mut outcomes = BTreeMap::new();
+    let mut details = BTreeMap::new();
+    for name in targets.targets.keys() {
+        let mut column = Vec::with_capacity(cases.len());
+        let mut target_details = BTreeMap::new();
+        // Iterate corpora exactly as `cases` was built, so indexes align.
+        for (corpus, lock) in locks {
+            let by_name: Option<BTreeMap<&str, &CaseResult>> = files
+                .iter()
+                .find(|f| &f.target == name && &f.corpus == corpus)
+                .map(|f| f.results.iter().map(|c| (c.name.as_str(), c)).collect());
+            for case_name in &lock.order {
+                let result = by_name
+                    .as_ref()
+                    .and_then(|m| m.get(case_name.as_str()).copied());
+                let code = match result.map(|c| c.outcome.as_str()) {
+                    Some("pass") => Some("p"),
+                    Some("fail") => Some("f"),
+                    Some("skipped") => Some("s"),
+                    // Absent (or unknown-outcome, which validation already
+                    // flags) renders as "no result".
+                    _ => None,
+                };
+                if let Some(c) = result {
+                    if matches!(c.outcome.as_str(), "fail" | "skipped") && !c.detail.is_empty() {
+                        target_details.insert(column.len().to_string(), c.detail.as_str());
+                    }
+                }
+                column.push(code);
+            }
+        }
+        outcomes.insert(name.as_str(), column);
+        details.insert(name.as_str(), target_details);
+    }
+
+    let data = ViewerData {
+        targets: targets
+            .targets
+            .iter()
+            .map(|(name, t)| {
+                (
+                    name.as_str(),
+                    ViewerTarget {
+                        missing_features: &t.missing_features,
+                        optional: t.optional,
+                    },
+                )
+            })
+            .collect(),
+        corpora: targets
+            .corpora
+            .iter()
+            .map(|(name, c)| {
+                (
+                    name.as_str(),
+                    ViewerCorpus {
+                        requires: &c.requires,
+                    },
+                )
+            })
+            .collect(),
+        cases,
+        outcomes,
+        details,
+    };
+    Ok(serde_json::to_string(&data)?)
+}
+
+fn parse_args() -> anyhow::Result<Args> {
     let mut targets = None;
     let mut results = None;
     let mut matrix_out = None;
+    let mut json_out = None;
     let mut locks = BTreeMap::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -386,6 +518,11 @@ fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf, BTreeMap<String, P
                     args.next().context("--matrix-out needs a value")?,
                 ))
             }
+            "--json-out" => {
+                json_out = Some(PathBuf::from(
+                    args.next().context("--json-out needs a value")?,
+                ))
+            }
             "--lock" => {
                 let value = args.next().context("--lock needs <corpus>=<path>")?;
                 let (corpus, path) = value
@@ -396,25 +533,26 @@ fn parse_args() -> anyhow::Result<(PathBuf, PathBuf, PathBuf, BTreeMap<String, P
             other => anyhow::bail!("unknown argument {other:?}"),
         }
     }
-    Ok((
-        targets.context("--targets <toml> is required")?,
-        results.context("--results <dir> is required")?,
-        matrix_out.context("--matrix-out <md> is required")?,
+    Ok(Args {
+        targets: targets.context("--targets <toml> is required")?,
+        results: results.context("--results <dir> is required")?,
+        matrix_out: matrix_out.context("--matrix-out <md> is required")?,
+        json_out,
         locks,
-    ))
+    })
 }
 
 fn main() -> anyhow::Result<()> {
-    let (targets_path, results_dir, matrix_path, lock_paths) = parse_args()?;
+    let args = parse_args()?;
 
     let targets: Targets = toml::from_str(
-        &std::fs::read_to_string(&targets_path)
-            .with_context(|| format!("reading {}", targets_path.display()))?,
+        &std::fs::read_to_string(&args.targets)
+            .with_context(|| format!("reading {}", args.targets.display()))?,
     )
-    .with_context(|| format!("parsing {}", targets_path.display()))?;
+    .with_context(|| format!("parsing {}", args.targets.display()))?;
 
     let mut locks = BTreeMap::new();
-    for (corpus, path) in &lock_paths {
+    for (corpus, path) in &args.locks {
         let lock = parse_lock(
             &std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?,
@@ -425,13 +563,19 @@ fn main() -> anyhow::Result<()> {
 
     // Read every results file in the directory.
     let mut files: Vec<ResultsFile> = Vec::new();
-    let mut entries: Vec<_> = std::fs::read_dir(&results_dir)
-        .with_context(|| format!("reading {}", results_dir.display()))?
+    let mut entries: Vec<_> = std::fs::read_dir(&args.results)
+        .with_context(|| format!("reading {}", args.results.display()))?
         .collect::<Result<_, _>>()?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
         if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        // The viewer aggregate may live in the results directory (the
+        // justfile puts it there so the per-run cleaning covers it); it is
+        // this program's own output, not a results file.
+        if Some(path.as_path()) == args.json_out.as_deref() {
             continue;
         }
         let file: ResultsFile = serde_json::from_str(
@@ -461,11 +605,20 @@ fn main() -> anyhow::Result<()> {
         .count();
 
     let md = render_matrix(&targets, &files);
-    if let Some(parent) = matrix_path.parent() {
+    if let Some(parent) = args.matrix_out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&matrix_path, &md)
-        .with_context(|| format!("writing {}", matrix_path.display()))?;
+    std::fs::write(&args.matrix_out, &md)
+        .with_context(|| format!("writing {}", args.matrix_out.display()))?;
+
+    if let Some(json_path) = &args.json_out {
+        let json = render_json(&targets, &locks, &files)?;
+        if let Some(parent) = json_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(json_path, &json)
+            .with_context(|| format!("writing {}", json_path.display()))?;
+    }
 
     for warning in &warnings {
         eprintln!("warning: {warning}");
@@ -478,7 +631,7 @@ fn main() -> anyhow::Result<()> {
          skipped, {} transport problem(s) -> {}",
         files.len(),
         problems.len(),
-        matrix_path.display()
+        args.matrix_out.display()
     );
 
     if failures > 0 || !problems.is_empty() {
@@ -717,6 +870,73 @@ mod tests {
                 .iter()
                 .any(|p| p.contains("native/signing: no results file")),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn json_out_aligns_outcomes_with_lock_order() {
+        let mut results = full_results();
+        results[1] = case("suite/src/tc2/whole", &["chacha20-poly1305"], "skipped");
+        results[1].detail = "feature declared missing".to_string();
+        results[2] = case("probe/check", &[], "fail");
+        results[2].detail = "boom".to_string();
+        let files = vec![file("native", "shared", results)];
+        let locks = BTreeMap::from([("shared".to_string(), lock())]);
+
+        let json = render_json(&targets(), &locks, &files).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Cases follow the lockfile order and carry corpus + feature tags.
+        let names: Vec<&str> = data["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            ["suite/src/tc1/whole", "suite/src/tc2/whole", "probe/check"]
+        );
+        assert_eq!(data["cases"][0]["corpus"], "shared");
+        assert_eq!(data["cases"][0].get("features"), None);
+        assert_eq!(data["cases"][1]["features"][0], "chacha20-poly1305");
+
+        // Outcome columns align to the case order; targets without results
+        // render null cells.
+        assert_eq!(
+            data["outcomes"]["native"],
+            serde_json::json!(["p", "s", "f"])
+        );
+        assert_eq!(
+            data["outcomes"]["web"],
+            serde_json::json!([null, null, null])
+        );
+
+        // Details are sparse, keyed by case index, fail/skip only.
+        assert_eq!(data["details"]["native"]["1"], "feature declared missing");
+        assert_eq!(data["details"]["native"]["2"], "boom");
+        assert_eq!(data["details"]["native"].get("0"), None);
+
+        // Target facts ride along for the viewer.
+        assert_eq!(
+            data["targets"]["web"]["missing-features"][0],
+            "chacha20-poly1305"
+        );
+        assert_eq!(data["targets"]["web"]["optional"], true);
+        assert_eq!(data["corpora"]["signing"]["requires"][0], "ecdsa-sign");
+    }
+
+    #[test]
+    fn json_out_treats_unknown_outcomes_as_absent() {
+        let mut results = full_results();
+        results[0] = case("suite/src/tc1/whole", &[], "mystery");
+        let files = vec![file("native", "shared", results)];
+        let locks = BTreeMap::from([("shared".to_string(), lock())]);
+        let json = render_json(&targets(), &locks, &files).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            data["outcomes"]["native"],
+            serde_json::json!([null, "p", "p"])
         );
     }
 }

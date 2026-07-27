@@ -118,7 +118,9 @@ conformance-timeout := "600"
 # guests, run the enabled targets over the corpus of self-describing cases,
 # then aggregate — validating every results file against the target facts in
 # conformance/targets.toml and the checked-in corpus lockfiles — and render
-# conformance/matrix.md, exiting nonzero on any failure or transport problem.
+# conformance/matrix.md plus the results-viewer data
+# (conformance/results/matrix.json), exiting nonzero on any failure or
+# transport problem.
 #
 # Enabled targets: wasmtime, composed, and jco-node (Node 24+ with npm
 # required) — plus jco-browser under GitHub Actions (the runner image ships
@@ -131,7 +133,14 @@ conformance: _conformance-clean conformance-wasmtime conformance-composed confor
         --results conformance/results \
         --lock shared=conformance/guest/tests.lock \
         --lock signing=conformance/signing-guest/tests.lock \
-        --matrix-out conformance/matrix.md
+        --matrix-out conformance/matrix.md \
+        --json-out conformance/results/matrix.json
+
+# Serve the conformance results viewer (a collapsing cross-target matrix
+# plus a live "test this browser" run of the corpus) after a full
+# conformance run. PORT overrides the port (default 8787).
+conformance-web: conformance
+    node conformance/web/serve.mjs
 
 # Clear stale results before a conformance run (a dependency of
 # `conformance`, so month-old files never classify as current).

@@ -71,7 +71,10 @@ conformance/            # cross-implementation conformance suite — see
                         #     — jco reads its missing-features from targets.toml
   runner/               #   aggregates results: validates them against
                         #     targets.toml + the corpus lockfiles, renders
-                        #     conformance/matrix.md
+                        #     conformance/matrix.md + the viewer data
+  web/                  #   results viewer: static page (collapsing
+                        #     cross-target tree + a live "test this
+                        #     browser" run); serve with `just conformance-web`
   targets.toml          #   corpus facts (required features) + target facts
                         #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
