@@ -59,7 +59,7 @@ interface tests {
     /// Materialize the corpus for a target missing the named features, in
     /// corpus order. Unknown feature names trap: a misspelled declaration
     /// is a harness bug, not a test outcome.
-    all: func(missing: list<string>) -> list<test-case>;
+    all: func(missing-features: list<string>) -> list<test-case>;
 }
 
 world conformance-guest {

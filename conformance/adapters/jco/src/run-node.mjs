@@ -16,7 +16,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { ADAPTER_DIR, runCases, writeReport } from "./report.mjs";
+import { ADAPTER_DIR, missingFeatures, runCases, writeReport } from "./report.mjs";
 
 async function main() {
   const signing = process.argv.includes("--signing");
@@ -25,11 +25,13 @@ async function main() {
   const generated = signing ? "generated-signing" : "generated";
   const name = signing ? "conformance-signing-guest" : "conformance-guest";
   const url = pathToFileURL(join(ADAPTER_DIR, generated, `${name}.js`));
+  const missing = await missingFeatures("jco-node");
   const { tests } = await import(url.href);
-  const results = await runCases(tests, only);
+  const results = await runCases(tests, missing, only);
   await writeReport(
     "jco-node",
     signing ? "signing" : "shared",
+    missing,
     results,
     signing ? "jco-node-signing" : undefined,
   );

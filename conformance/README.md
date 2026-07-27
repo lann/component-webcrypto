@@ -21,6 +21,13 @@ serves a feature it declares missing, or declines one it doesn't, fails.
 Growing the corpus therefore never silently sheds coverage: a new suite runs
 everywhere until a target consciously opts out.
 
+Corpora work the same way one level up: a corpus may `require` features
+**structurally** (its world imports them — the signing corpus requires
+`ecdsa-sign`, which class D keeps out of the in-guest provider), and which
+corpora a target must produce results for is *derived*: every corpus except
+those requiring a feature the target is missing. There is no per-target
+corpus list to maintain.
+
 The corpus inventory is pinned by lockfiles (`guest/tests.lock`,
 `signing-guest/tests.lock`; TOML, one case per line with its feature tags,
 Cargo.lock-style): the runner rejects any results file whose case names or
@@ -50,19 +57,19 @@ adapters/
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
                    #   with Chrome/Chromium 137+ installed)
 runner/            # aggregation: transport invariants + matrix.md rendering
-targets.toml       # target facts: missing features (and why), required
-                   #   corpora, optionality
+targets.toml       # corpus facts (structurally required features) and
+                   #   target facts (missing features and why, optionality)
 ```
 
 Result files are `results/<target>.json` (or `<target>-<corpus>.json`):
-`{ "target", "corpus", "missing", "results": [{ "name", "features",
-"outcome", "detail" }] }`. Adapters exit nonzero only on harness errors —
-failing *cases* are the runner's business. The runner errors (exit nonzero)
-when a required (target, corpus) pair has no results file, a file's cases
-diverge from its corpus lockfile, a file's `missing` diverges from
-targets.toml, any (target, corpus) pair appears twice, or any case fails;
-`just conformance` clears `results/` first, so stale files never classify
-as current.
+`{ "target", "corpus", "missing-features", "results": [{ "name",
+"features", "outcome", "detail" }] }`. Adapters exit nonzero only on harness
+errors — failing *cases* are the runner's business. The runner errors (exit
+nonzero) when a derived-required (target, corpus) pair has no results file
+or an excluded pair has one, a file's cases diverge from its corpus
+lockfile, a file's `missing-features` diverges from targets.toml, any
+(target, corpus) pair appears twice, or any case fails; `just conformance`
+clears `results/` first, so stale files never classify as current.
 
 ## Test identity
 

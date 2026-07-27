@@ -33,7 +33,12 @@ use lann::webcrypto::types::Error;
 /// guest it runs. `chacha20-poly1305` tags nothing in this corpus.
 const FEATURE_CHACHA: &str = "chacha20-poly1305";
 const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
-const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_DETERMINISTIC_ECDSA];
+const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
+const KNOWN_FEATURES: &[&str] = &[
+    FEATURE_CHACHA,
+    FEATURE_DETERMINISTIC_ECDSA,
+    FEATURE_ECDSA_SIGN,
+];
 
 // --- RFC 6979 A.2.5 (ECDSA P-256 + SHA-256, message "sample") ----------------
 
@@ -141,9 +146,9 @@ impl GuestTestCase for Case {
 impl Guest for Component {
     type TestCase = Case;
 
-    fn all(missing: Vec<String>) -> Vec<TestCase> {
+    fn all(missing_features: Vec<String>) -> Vec<TestCase> {
         let mut set = BTreeSet::new();
-        for feature in &missing {
+        for feature in &missing_features {
             assert!(
                 KNOWN_FEATURES.contains(&feature.as_str()),
                 "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"

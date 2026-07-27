@@ -62,10 +62,12 @@ conformance/            # cross-implementation conformance suite — see
                         #     the composed target), jco (Node gates everywhere;
                         #     the browser target gates in CI, locally opt-in
                         #     via CONFORMANCE_BROWSER=1 with Chrome installed)
+                        #     — jco reads its missing-features from targets.toml
   runner/               #   aggregates results: validates them against
                         #     targets.toml + the corpus lockfiles, renders
                         #     conformance/matrix.md
-  targets.toml          #   target facts: missing features, required corpora
+  targets.toml          #   corpus facts (required features) + target facts
+                        #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)

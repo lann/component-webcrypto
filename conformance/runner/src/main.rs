@@ -8,8 +8,10 @@
 //!         --lock <corpus>=<lockfile> ... --matrix-out <md>`
 //!
 //! Transport invariants, each an error (exit nonzero):
-//! - every non-`optional` target produced a results file for each of its
-//!   declared corpora (an `optional` target's missing file is a warning);
+//! - every non-`optional` target produced a results file for each corpus it
+//!   runs — derived: every corpus except those whose `requires` names a
+//!   feature the target is missing (an `optional` target's missing file is
+//!   a warning, and results for an excluded corpus are an error);
 //! - at most one results file per (target, corpus), with no duplicate case
 //!   names inside it;
 //! - each results file's case names and feature tags exactly match its
@@ -26,22 +28,43 @@ use anyhow::Context as _;
 
 #[derive(serde::Deserialize)]
 struct Targets {
+    corpora: BTreeMap<String, Corpus>,
     targets: BTreeMap<String, Target>,
 }
 
 #[derive(serde::Deserialize)]
+struct Corpus {
+    /// Features the corpus needs structurally (its world imports them): a
+    /// target missing one cannot run this corpus at all.
+    #[serde(default)]
+    requires: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
 struct Target {
-    missing: Vec<String>,
-    corpora: Vec<String>,
+    #[serde(rename = "missing-features")]
+    missing_features: Vec<String>,
     #[serde(default)]
     optional: bool,
+}
+
+impl Target {
+    /// Whether this target runs `corpus`: it does unless the corpus
+    /// requires a feature the target is missing.
+    fn runs(&self, corpus: &Corpus) -> bool {
+        corpus
+            .requires
+            .iter()
+            .all(|feature| !self.missing_features.contains(feature))
+    }
 }
 
 #[derive(serde::Deserialize)]
 struct ResultsFile {
     target: String,
     corpus: String,
-    missing: Vec<String>,
+    #[serde(rename = "missing-features")]
+    missing_features: Vec<String>,
     results: Vec<CaseResult>,
 }
 
@@ -113,17 +136,34 @@ fn validate_file(
     match targets.targets.get(&file.target) {
         None => problems.push(format!("{at}: target not declared in targets.toml")),
         Some(target) => {
-            let declared: BTreeSet<&str> = target.missing.iter().map(String::as_str).collect();
-            let reported: BTreeSet<&str> = file.missing.iter().map(String::as_str).collect();
+            let declared: BTreeSet<&str> =
+                target.missing_features.iter().map(String::as_str).collect();
+            let reported: BTreeSet<&str> =
+                file.missing_features.iter().map(String::as_str).collect();
             if declared != reported {
                 problems.push(format!(
-                    "{at}: adapter declared missing features {reported:?}, but targets.toml \
+                    "{at}: adapter declared missing-features {reported:?}, but targets.toml \
                      declares {declared:?}"
                 ));
+            }
+            if let Some(corpus) = targets.corpora.get(&file.corpus) {
+                if !target.runs(corpus) {
+                    problems.push(format!(
+                        "{at}: results for a corpus this target's missing-features exclude \
+                         (it requires {:?})",
+                        corpus.requires
+                    ));
+                }
             }
         }
     }
 
+    if !targets.corpora.contains_key(&file.corpus) {
+        problems.push(format!(
+            "{at}: corpus {:?} is not declared in targets.toml",
+            file.corpus
+        ));
+    }
     let Some(lock) = locks.get(&file.corpus) else {
         problems.push(format!(
             "{at}: no lockfile for corpus {:?} (pass --lock {}=<path>)",
@@ -191,9 +231,12 @@ fn check_presence(
         }
     }
     for (name, target) in &targets.targets {
-        for corpus in &target.corpora {
-            if !seen.contains_key(&(name.as_str(), corpus.as_str())) {
-                let message = format!("{name}/{corpus}: no results file");
+        for (corpus_name, corpus) in &targets.corpora {
+            if !target.runs(corpus) {
+                continue;
+            }
+            if !seen.contains_key(&(name.as_str(), corpus_name.as_str())) {
+                let message = format!("{name}/{corpus_name}: no results file");
                 if target.optional {
                     warnings.push(format!("{message} (target is optional)"));
                 } else {
@@ -451,13 +494,19 @@ mod tests {
     fn targets() -> Targets {
         toml::from_str(
             r#"
+            [corpora.shared]
+
+            [corpora.signing]
+            requires = ["ecdsa-sign"]
+
             [targets.native]
-            missing = []
-            corpora = ["shared", "signing"]
+            missing-features = []
+
+            [targets.composed-like]
+            missing-features = ["ecdsa-sign"]
 
             [targets.web]
-            missing = ["chacha20-poly1305"]
-            corpora = ["shared"]
+            missing-features = ["chacha20-poly1305"]
             optional = true
             "#,
         )
@@ -479,14 +528,15 @@ mod tests {
     }
 
     fn file(target: &str, corpus: &str, results: Vec<CaseResult>) -> ResultsFile {
-        let missing = match target {
+        let missing_features = match target {
             "web" => vec!["chacha20-poly1305".to_string()],
+            "composed-like" => vec!["ecdsa-sign".to_string()],
             _ => Vec::new(),
         };
         ResultsFile {
             target: target.to_string(),
             corpus: corpus.to_string(),
-            missing,
+            missing_features,
             results,
         }
     }
@@ -575,7 +625,7 @@ mod tests {
     #[test]
     fn missing_declaration_drift_is_a_problem() {
         let mut file = file("web", "shared", full_results());
-        file.missing.clear();
+        file.missing_features.clear();
         let problems = validate(&file);
         assert!(
             problems[0].contains("targets.toml declares"),
@@ -584,10 +634,35 @@ mod tests {
     }
 
     #[test]
+    fn results_for_an_excluded_corpus_are_a_problem() {
+        let problems = validate(&file("composed-like", "signing", full_results()));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("missing-features exclude")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_corpus_is_a_problem() {
+        // "mystery" has no [corpora] entry and no lock.
+        let problems = validate(&file("native", "mystery", full_results()));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("not declared in targets.toml")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
     fn unknown_corpus_is_a_problem() {
         let problems = validate(&file("native", "mystery", full_results()));
         assert!(
-            problems[0].contains("no lockfile for corpus"),
+            problems
+                .iter()
+                .any(|p| p.contains("no lockfile for corpus")),
             "{problems:?}"
         );
     }
@@ -602,18 +677,24 @@ mod tests {
     }
 
     #[test]
-    fn presence_is_enforced_per_corpus_with_optional_warnings() {
-        let files = vec![file("native", "shared", full_results())];
+    fn presence_is_derived_from_corpus_requirements() {
+        let files = vec![
+            file("native", "shared", full_results()),
+            file("composed-like", "shared", full_results()),
+        ];
         let mut problems = Vec::new();
         let mut warnings = Vec::new();
         check_presence(&targets(), &files, &mut problems, &mut warnings);
-        // native/signing is required and absent; web/shared is optional.
+        // native/signing is required and absent; composed-like/signing is
+        // excluded (it is missing ecdsa-sign, which the corpus requires);
+        // web/shared and web/signing are optional.
         assert_eq!(
             problems,
             vec!["native/signing: no results file".to_string()]
         );
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings[0].contains("web/shared"), "{warnings:?}");
+        assert!(warnings[1].contains("web/signing"), "{warnings:?}");
     }
 
     #[test]

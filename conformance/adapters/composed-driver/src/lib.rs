@@ -7,8 +7,10 @@
 //! provider + this driver — runs under a plain `wasmtime run -S cli`.
 //!
 //! The composition fixes the implementation under test, so the target's
-//! `missing` declaration is fixed with it: the in-guest provider serves
-//! every feature the corpus exercises, so nothing is declared missing.
+//! `missing-features` declaration is fixed with it: the in-guest provider
+//! serves every feature the shared corpus exercises, and deliberately does
+//! not export `ecdsa-sign` (class D) — which is why the signing corpus,
+//! whose world imports that interface, never runs composed at all.
 //!
 //! It materializes the corpus, runs every case, and prints the results JSON
 //! (the same shape the other adapters write) on stdout, which must carry
@@ -44,7 +46,8 @@ struct JsonResult {
 struct Output {
     target: &'static str,
     corpus: &'static str,
-    missing: Vec<String>,
+    #[serde(rename = "missing-features")]
+    missing_features: Vec<String>,
     results: Vec<JsonResult>,
 }
 
@@ -52,9 +55,12 @@ struct Component;
 
 impl wasip3::exports::cli::run::Guest for Component {
     async fn run() -> Result<(), ()> {
-        // The in-guest provider serves the whole corpus: nothing missing.
-        let missing: Vec<String> = Vec::new();
-        let cases = all(&missing);
+        // The provider's one gap is class D's ecdsa-sign, which nothing in
+        // the shared corpus is tagged with (the exclusion is structural —
+        // see the module doc); declared for the runner's cross-check
+        // against targets.toml.
+        let missing_features: Vec<String> = vec!["ecdsa-sign".to_string()];
+        let cases = all(&missing_features);
         let mut results = Vec::with_capacity(cases.len());
         for case in &cases {
             let (outcome, detail) = match case.run().await {
@@ -75,7 +81,7 @@ impl wasip3::exports::cli::run::Guest for Component {
         let output = Output {
             target: "composed",
             corpus: "shared",
-            missing,
+            missing_features,
             results,
         };
         match serde_json::to_string_pretty(&output) {

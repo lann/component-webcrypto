@@ -220,11 +220,12 @@ conformance-jco-node: build-conformance-guest build-signing-guest
         timeout {{conformance-timeout}} npm run run:node && \
         timeout {{conformance-timeout}} npm run run:node-signing
 
-# Run the conformance corpus under the jco host in headless Chromium (137+;
-# auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json.
-# Gates in CI; local `just conformance` runs it only with CONFORMANCE_BROWSER=1.
-conformance-jco-browser: build-conformance-guest
-    cd conformance/adapters/jco && npm run transpile && \
+# Run both conformance corpora under the jco host in headless Chromium (137+;
+# auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json
+# and jco-browser-signing.json. Gates in CI; local `just conformance` runs it
+# only with CONFORMANCE_BROWSER=1.
+conformance-jco-browser: build-conformance-guest build-signing-guest
+    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
         timeout {{conformance-timeout}} npm run run:browser
 
 # --- timing lab ---------------------------------------------------------------

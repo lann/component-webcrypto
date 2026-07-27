@@ -1,7 +1,7 @@
-// The jco browser conformance adapter: serves the transpiled guest and the
-// browser-first host module over localhost, runs the corpus in headless
-// Chromium (137+, which ships JSPI), and writes
-// `conformance/results/jco-browser.json`.
+// The jco browser conformance adapter: serves the transpiled guests (shared
+// and signing) and the browser-first host module over localhost, runs both
+// corpora in headless Chromium (137+, which ships JSPI), and writes
+// `conformance/results/jco-browser.json` + `jco-browser-signing.json`.
 //
 // Gates in CI (the Actions runner image ships Chrome); locally it needs a
 // Chrome/Chromium install — run it with CONFORMANCE_BROWSER=1 just
@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
 import { join, extname } from "node:path";
 
-import { MISSING, REPO_ROOT, writeReport } from "./report.mjs";
+import { missingFeatures, REPO_ROOT, writeReport } from "./report.mjs";
 
 const MIME = {
   ".html": "text/html",
@@ -20,41 +20,49 @@ const MIME = {
   ".map": "application/json",
 };
 
-// The in-page harness: mirrors run-node.mjs (the same missing-feature
-// declaration, inlined — the page cannot import the Node-side helper),
-// then reports back.
-const HARNESS = `<!doctype html>
+// The in-page harness: mirrors run-node.mjs, driving both corpora — the
+// shared guest and the host-only signing guest — in one page. The target's
+// missing-features declaration is resolved Node-side from targets.toml and
+// inlined (the page cannot import the Node-side helper).
+const harness = (missing) => `<!doctype html>
 <title>lann:webcrypto conformance</title>
 <script type="module">
 (async () => {
   try {
-    const { tests } = await import("/conformance/adapters/jco/generated/conformance-guest.js");
-    const missing = ${JSON.stringify(MISSING)};
-    const results = [];
-    for (const testCase of tests.all(missing)) {
-      const { tag, val } = await testCase.run();
-      results.push({
-        name: String(testCase.name()),
-        features: Array.from(testCase.features(), String),
-        outcome: String(tag),
-        detail: String(val ?? ""),
-      });
-    }
-    window.__report({ results });
+    const missing = ${JSON.stringify(missing)};
+    const run = async (path) => {
+      const { tests } = await import(path);
+      const results = [];
+      for (const testCase of tests.all(missing)) {
+        const { tag, val } = await testCase.run();
+        results.push({
+          name: String(testCase.name()),
+          features: Array.from(testCase.features(), String),
+          outcome: String(tag),
+          detail: String(val ?? ""),
+        });
+      }
+      return results;
+    };
+    const shared = await run("/conformance/adapters/jco/generated/conformance-guest.js");
+    const signing = await run(
+      "/conformance/adapters/jco/generated-signing/conformance-signing-guest.js",
+    );
+    window.__report({ shared, signing });
   } catch (err) {
     window.__report({ error: String(err?.stack ?? err) });
   }
 })();
 </script>`;
 
-/** Serve the repository root (so the guest's relative import of
- *  jco-impl/webcrypto.js resolves) plus the harness page. */
-function serve() {
+/** Serve the repository root (so the guests' relative imports of
+ *  jco-impl/webcrypto.js resolve) plus the harness page. */
+function serve(page) {
   const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://localhost").pathname;
     if (path === "/") {
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(HARNESS);
+      res.end(page);
       return;
     }
     try {
@@ -113,9 +121,10 @@ async function findChrome() {
 }
 
 async function main() {
+  const missing = await missingFeatures("jco-browser");
   const [{ chromium }, server, executablePath] = await Promise.all([
     import("playwright-core"),
-    serve(),
+    serve(harness(missing)),
     findChrome(),
   ]);
   const { port } = server.address();
@@ -132,7 +141,8 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/`);
     const outcome = await report;
     if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
-    await writeReport("jco-browser", "shared", outcome.results);
+    await writeReport("jco-browser", "shared", missing, outcome.shared);
+    await writeReport("jco-browser", "signing", missing, outcome.signing, "jco-browser-signing");
   } finally {
     await browser.close();
     server.close();

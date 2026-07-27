@@ -8,7 +8,7 @@
 //! Usage:
 //!   conformance-adapter-wasmtime --guest <component> \
 //!       --corpus <shared|signing> --out <json> \
-//!       [--missing <feature,...>] [--only <substring>]
+//!       [--missing-features <feature,...>] [--only <substring>]
 //!   conformance-adapter-wasmtime --guest <component> --lock-out <lock>
 //!
 //! Case failures are data for the runner to gate on, so they never affect
@@ -33,7 +33,8 @@ struct JsonResult {
 struct Output {
     target: &'static str,
     corpus: String,
-    missing: Vec<String>,
+    #[serde(rename = "missing-features")]
+    missing_features: Vec<String>,
     results: Vec<JsonResult>,
 }
 
@@ -199,9 +200,9 @@ fn parse_args() -> anyhow::Result<Args> {
                     args.next().context("--lock-out needs a value")?,
                 ))
             }
-            "--missing" => missing.extend(
+            "--missing-features" => missing.extend(
                 args.next()
-                    .context("--missing needs a value")?
+                    .context("--missing-features needs a value")?
                     .split(',')
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
@@ -281,7 +282,7 @@ async fn main() -> anyhow::Result<()> {
         let output = Output {
             target: "wasmtime",
             corpus: args.corpus.expect("checked in parse_args"),
-            missing: args.missing.clone(),
+            missing_features: args.missing.clone(),
             results,
         };
         let json = serde_json::to_string_pretty(&output)?;

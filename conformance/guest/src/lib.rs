@@ -40,13 +40,24 @@ pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 /// declared here so every guest validates the same feature names).
 pub const FEATURE_DETERMINISTIC_ECDSA: &str = "deterministic-ecdsa";
 
+/// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
+/// Nothing in this corpus is tagged with it — the signing corpus's world
+/// *imports* the interface, so a target missing the feature (the composed
+/// target: class D) is excluded from that corpus structurally rather than
+/// case by case. Declared here so every guest validates the same names.
+pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
+
 /// Every feature name a target may declare missing. `all` traps on names
 /// outside this set, so a misspelled declaration is a harness bug rather
 /// than a silently-inert one.
-pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_DETERMINISTIC_ECDSA];
+pub const KNOWN_FEATURES: &[&str] = &[
+    FEATURE_CHACHA,
+    FEATURE_DETERMINISTIC_ECDSA,
+    FEATURE_ECDSA_SIGN,
+];
 
-/// Validate a `missing` declaration against [`KNOWN_FEATURES`], returning
-/// the set. Panics (traps) on unknown names.
+/// Validate a `missing-features` declaration against [`KNOWN_FEATURES`],
+/// returning the set. Panics (traps) on unknown names.
 pub fn missing_set(missing: &[String]) -> BTreeSet<&str> {
     let mut set = BTreeSet::new();
     for feature in missing {
@@ -148,8 +159,8 @@ impl GuestTestCase for Case {
 impl Guest for Component {
     type TestCase = Case;
 
-    fn all(missing: Vec<String>) -> Vec<TestCase> {
-        let missing = missing_set(&missing);
+    fn all(missing_features: Vec<String>) -> Vec<TestCase> {
+        let missing = missing_set(&missing_features);
         let mut cases = Vec::new();
         for case in translate::hmac_cases() {
             let name = format!(
