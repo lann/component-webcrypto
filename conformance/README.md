@@ -55,7 +55,9 @@ adapters/
   jco/             # Node + headless-Chromium adapters over jco-impl's
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
-                   #   with Chrome/Chromium 137+ installed)
+                   #   with Chrome/Chromium 137+ installed); the browser
+                   #   adapter drives the corpus through web/'s harness
+                   #   (parallel workers), so gate and viewer cannot drift
 runner/            # aggregation: transport invariants + matrix.md rendering
                    #   + the results-viewer data (--json-out)
 web/               # the results viewer: a dependency-free static page
