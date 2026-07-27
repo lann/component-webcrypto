@@ -23,10 +23,10 @@ wit_bindgen::generate!({
 use std::collections::BTreeSet;
 
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
-use lann_webcrypto_guest::raw::ecdsa_sign::{generate_key, import_signing_key};
-use lann_webcrypto_guest::raw::ecdsa_verify::{import_verifying_key, EcdsaVariant};
-use lann_webcrypto_guest::raw::signature::{SigningKey, VerifyingKey};
-use lann_webcrypto_guest::raw::types::Error;
+use lann_webcrypto_guest::bindings::ecdsa_sign::{generate_key, import_signing_key};
+use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
+use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
+use lann_webcrypto_guest::bindings::types::Error;
 
 /// The feature names shared with the conformance guest (`all` traps on
 /// anything else), so a target passes one `missing` declaration to every
