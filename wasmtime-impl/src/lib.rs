@@ -58,7 +58,7 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// [`set_per_call_buffer_limit`]: WasiWebcryptoCtx::set_per_call_buffer_limit
 /// [`set_total_buffer_limit`]: WasiWebcryptoCtx::set_total_buffer_limit
 /// [`Store::set_hostcall_fuel`]: wasmtime::Store::set_hostcall_fuel
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct WasiWebcryptoCtx {
     /// The most one operation may buffer, in bytes; `None` defaults to ¼ of
@@ -69,6 +69,25 @@ pub struct WasiWebcryptoCtx {
     total_buffer_limit: Option<u64>,
     /// The shared admission pool state.
     pool: std::sync::Arc<crate::limits::BufferPool>,
+}
+
+/// Cloning a context gives the clone its **own** admission pool.
+///
+/// The pool bounds aggregate retention against a ceiling that each context
+/// carries separately, so sharing one pool between contexts configured
+/// differently would let the larger ceiling admit against the smaller
+/// context's accounting — exceeding the bound it was asked to enforce.
+/// Independent pools keep each context's limit meaning what it says; a
+/// single bound across several contexts is not something this type can
+/// express.
+impl Clone for WasiWebcryptoCtx {
+    fn clone(&self) -> Self {
+        Self {
+            per_call_buffer_limit: self.per_call_buffer_limit,
+            total_buffer_limit: self.total_buffer_limit,
+            pool: std::sync::Arc::default(),
+        }
+    }
 }
 
 impl WasiWebcryptoCtx {
