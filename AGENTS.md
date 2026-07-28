@@ -218,6 +218,22 @@ Code comments describe **what** something is or does, not the process by which
 it was arrived at. Rationale like "we removed X because Y" belongs in commit
 messages or PR descriptions, not in source files.
 
+A comment defending the *presence* of ordinary code is the same mistake in a
+subtler form. Conventional things — a `Debug` impl, a prefixed error string,
+a derived trait, an attribute the API guidelines call for — need no defence;
+explaining why one is there implies it is unusual and sends the reader
+looking for a catch that is not there. Comment what a reader could not
+predict: an invariant, a hazard, a deliberate departure from the obvious
+choice, a constraint imposed from outside the file.
+
+The giveaway is the shape of the sentence. "Without this, a consumer
+cannot…", "otherwise a caller has no indication…", "this is not merely…" are
+answers to an objection, and the place to answer an objection is where it was
+raised — the pull request. "This holds because…", "X must be Y since…" state
+what is true of the code as it stands, which is what survives once the
+discussion is forgotten. If a comment would read oddly to someone who never
+saw the change that introduced it, it is in the wrong place.
+
 Docs state invariants, not inventories. Never embed values a build or test
 run computes — case counts, check counts, probe indexes. If a number
 matters, a gate asserts it (e.g. the demo harness's expected-summary check);
