@@ -730,11 +730,6 @@ impl SigningKey {
         run_sourced(data.into(), |rx| self.0.sign(rx)).await
     }
 
-    /// Derive the corresponding public key.
-    pub fn verifying_key(&self) -> VerifyingKey {
-        VerifyingKey::from_raw(self.0.verifying_key())
-    }
-
     /// See [`VerifyingKey::algorithm_name`].
     pub fn algorithm_name(&self) -> String {
         self.0.algorithm_name()

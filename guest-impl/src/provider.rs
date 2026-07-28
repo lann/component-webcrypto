@@ -561,12 +561,6 @@ impl GuestSigningKey for SigningKey {
         Ok(self.material.sign(&bytes))
     }
 
-    fn verifying_key(&self) -> signature_iface::VerifyingKey {
-        signature_iface::VerifyingKey::new(VerifyingKey {
-            public: self.material.public(),
-        })
-    }
-
     fn algorithm_name(&self) -> String {
         self.material.name().to_string()
     }
@@ -606,9 +600,15 @@ impl Ed25519SignGuest for Component {
         Ok(signature_iface::SigningKey::new(SigningKey { material }))
     }
 
-    async fn generate_key(extractable: bool) -> Result<signature_iface::SigningKey, Error> {
+    async fn generate_key(
+        extractable: bool,
+    ) -> Result<(signature_iface::SigningKey, signature_iface::VerifyingKey), Error> {
         let material = rng_infallible(SigningKeyMaterial::generate_ed25519(extractable));
-        Ok(signature_iface::SigningKey::new(SigningKey { material }))
+        let public = material.public();
+        Ok((
+            signature_iface::SigningKey::new(SigningKey { material }),
+            signature_iface::VerifyingKey::new(VerifyingKey { public }),
+        ))
     }
 }
 

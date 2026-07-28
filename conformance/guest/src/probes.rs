@@ -785,11 +785,12 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
     Ok(())
 }
 
-/// A generated Ed25519 key signs, its derived public key verifies, a
-/// corrupted signature fails `authentication-failed`, and a *different*
-/// key's public half rejects the signature (keys are not interchangeable).
+/// A generated Ed25519 key signs, the public half returned with it
+/// verifies, a corrupted signature fails `authentication-failed`, and a
+/// *different* key's public half rejects the signature (keys are not
+/// interchangeable).
 async fn ed25519_sign_roundtrip() -> Result<(), String> {
-    let key = generate_ed25519_key(false)
+    let (key, public) = generate_ed25519_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"conformance signature payload";
@@ -804,7 +805,6 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
         ));
     }
 
-    let public = key.verifying_key();
     let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
     fed?;
     verified.map_err(|e| describe("round-trip signature did not verify", &e))?;
@@ -819,10 +819,10 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
         Ok(()) => return Err("corrupted signature verified".into()),
     }
 
-    let other = generate_ed25519_key(false)
+    let (_other, other_public) = generate_ed25519_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    let (verified, fed) = sig_verify(&other.verifying_key(), payload, &sig, Schedule::Whole).await;
+    let (verified, fed) = sig_verify(&other_public, payload, &sig, Schedule::Whole).await;
     fed?;
     match verified {
         Err(Error::AuthenticationFailed) => Ok(()),
@@ -834,7 +834,7 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
 /// The signature getters report the mint binding: Ed25519 keys have no
 /// curve/hash parameters; ECDSA keys report their variant's curve and hash.
 async fn sig_key_metadata() -> Result<(), String> {
-    let signing = generate_ed25519_key(true)
+    let (signing, public) = generate_ed25519_key(true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     if signing.algorithm_name() != "Ed25519" {
@@ -849,12 +849,11 @@ async fn sig_key_metadata() -> Result<(), String> {
     if !signing.extractable() {
         return Err("extractable generated key reports non-extractable".into());
     }
-    let public = signing.verifying_key();
     if public.algorithm_name() != "Ed25519"
         || public.algorithm_curve().is_some()
         || public.algorithm_hash().is_some()
     {
-        return Err("derived Ed25519 verifying-key metadata mismatch".into());
+        return Err("generated Ed25519 verifying-key metadata mismatch".into());
     }
 
     // An ECDSA public key (any valid point works; this is the RFC 6979
@@ -930,7 +929,7 @@ async fn sig_import_invalid() -> Result<(), String> {
 /// Public-key export is an identity round trip (no extractability gate),
 /// and re-importing the export yields a key that still verifies.
 async fn verifying_key_export_roundtrip() -> Result<(), String> {
-    let signing = generate_ed25519_key(false)
+    let (signing, public) = generate_ed25519_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"export roundtrip payload";
@@ -939,7 +938,7 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     fed?;
     let sig = sig.map_err(|e| describe("sign", &e))?;
 
-    let exported = signing.verifying_key().export_key().await;
+    let exported = public.export_key().await;
     if exported.len() != 32 {
         return Err(format!(
             "Ed25519 public keys export as 32 bytes, got {}",
@@ -1217,7 +1216,7 @@ async fn aes128_shape() -> Result<(), String> {
 /// The RFC 8032 §7.1 TEST 2 known answer, in the suite rather than only
 /// the demo guest: `import-signing-key` succeeds, signing is deterministic
 /// and byte-exact, the seed round-trips through `export-key`, and the
-/// derived public key matches the vector's.
+/// vector's public key verifies the signature.
 async fn ed25519_sign_known_answer() -> Result<(), String> {
     let seed = unhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
     let public = unhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
@@ -1235,17 +1234,21 @@ async fn ed25519_sign_known_answer() -> Result<(), String> {
         .await
         .map_err(|e| describe("export-key", &e))?;
     expect_bytes(&exported, &seed, "exported seed")?;
-    expect_bytes(
-        &key.verifying_key().export_key().await,
-        &public,
-        "derived public key",
-    )?;
 
     let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (got, fed) = futures::join!(key.sign(rx), crate::util::feed_whole(tx, &message));
     fed?;
     let got = got.map_err(|e| describe("sign", &e))?;
-    expect_bytes(&got, &sig, "RFC 8032 test-2 signature")
+    expect_bytes(&got, &sig, "RFC 8032 test-2 signature")?;
+
+    // The signature verifies under the vector's public key: the seed and
+    // that key are the same key pair.
+    let verifying = import_ed25519_verifying_key(public)
+        .await
+        .map_err(|e| describe("import-verifying-key", &e))?;
+    let (verified, fed) = sig_verify(&verifying, &message, &got, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("vector public key did not verify the signature", &e))
 }
 
 /// Caller-nonce `open` of inputs shorter than the tag fails

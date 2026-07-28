@@ -957,29 +957,25 @@ export class VerifyingKey {
 }
 
 /**
- * The `signing-key` resource: a private `CryptoKey` (imported
- * platform-extractable so the public half can be derived; the WIT
- * `extractable` gate is enforced by this class — extractability is an API
- * property, per the WIT), its derived public half, the mint-bound hash, and
- * the caller's `extractable` flag.
+ * The `signing-key` resource: a private `CryptoKey` and the mint-bound
+ * hash. The WIT `extractable` flag is carried by the platform key itself
+ * (it is passed through at import/generation), so the platform enforces
+ * non-extractability; the JS check in `exportKey` only lifts the WIT
+ * error shape. There is no stored public half: the WIT surface has no
+ * derive — `generate-key` returns the pair, and importers mint the
+ * verifying key from the public bytes they hold.
  */
 export class SigningKey {
   #privateKey;
-  #publicKey;
   #hash;
-  #extractable;
 
   /**
    * @param {CryptoKey} privateKey
-   * @param {CryptoKey} publicKey
    * @param {string | undefined} hash
-   * @param {boolean} extractable
    */
-  constructor(privateKey, publicKey, hash, extractable) {
+  constructor(privateKey, hash) {
     this.#privateKey = privateKey;
-    this.#publicKey = publicKey;
     this.#hash = hash;
-    this.#extractable = extractable;
   }
 
   /**
@@ -997,11 +993,6 @@ export class SigningKey {
     }
   }
 
-  /** The corresponding public key. */
-  verifyingKey() {
-    return new VerifyingKey(this.#publicKey, this.#hash);
-  }
-
   algorithmName() {
     return this.#privateKey.algorithm.name;
   }
@@ -1015,17 +1006,18 @@ export class SigningKey {
   }
 
   extractable() {
-    return this.#extractable;
+    return this.#privateKey.extractable;
   }
 
   /**
    * The private key material (the 32-byte RFC 8032 seed for Ed25519, the
    * raw big-endian scalar for ECDSA), recovered from the JWK `d` field.
    * Throws `{ tag: 'not-extractable' }` unless minted with `extractable`
-   * true.
+   * true (checked on the `CryptoKey` itself rather than relying on the
+   * `DOMException` from `exportKey`).
    */
   async exportKey() {
-    if (!this.#extractable) throw errNotExtractable();
+    if (!this.#privateKey.extractable) throw errNotExtractable();
     const jwk = await subtle.exportKey("jwk", this.#privateKey);
     return base64UrlDecode(jwk.d);
   }
@@ -1039,44 +1031,6 @@ function base64UrlDecode(text) {
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
   return out;
-}
-
-/**
- * Derive the public `CryptoKey` for `privateKey` by round-tripping its JWK
- * without the private field.
- *
- * This depends on keys imported from *private-only* PKCS#8 (the
- * raw-scalar ECDSA import path), whose platform behavior is unspecified
- * and inconsistent across engines — w3c/webcrypto#356: a 2023 survey had
- * most engines rejecting the import outright; current Chromium accepts
- * and derives the public point; current Firefox accepts and signs but
- * throws `OperationError` from the JWK export here.
- *
- * A failure here is not attributable: under lazy engine validation it can
- * be the first point genuinely invalid material surfaces (`invalid-key`
- * territory — Firefox imports an out-of-range scalar without complaint),
- * or a missing engine capability, or a transient platform fault — and the
- * engine reports them all as the same opaque `OperationError`. Claiming
- * either semantic error would be unfounded, so the failure is lifted to
- * the WIT `other` error, the taxonomy's carrier for operational platform
- * failures, rather than escaping as an uncaught platform error. (Either
- * way a key whose public half cannot be produced cannot be minted:
- * `signing-key.verifying-key` derivation is infallible by contract.)
- * @param {CryptoKey} privateKey
- * @param {object} importParams
- */
-async function derivePublicKey(privateKey, importParams) {
-  try {
-    const jwk = await subtle.exportKey("jwk", privateKey);
-    delete jwk.d;
-    jwk.key_ops = ["verify"];
-    return await subtle.importKey("jwk", jwk, importParams, true, ["verify"]);
-  } catch (err) {
-    throw errOther(
-      "deriving the public key from the imported private material failed: " +
-        `${err?.message ?? err}`,
-    );
-  }
 }
 
 /**
@@ -1196,20 +1150,20 @@ async function importEd25519SigningKey(raw, extractable) {
   pkcs8.set(raw, ED25519_PKCS8_PREFIX.length);
   let privateKey;
   try {
-    // Imported platform-extractable so the public half and the WIT-gated
-    // `export` can be derived; the WIT gate is `extractable` below.
-    privateKey = await subtle.importKey("pkcs8", pkcs8, "Ed25519", true, ["sign"]);
+    privateKey = await subtle.importKey("pkcs8", pkcs8, "Ed25519", extractable, ["sign"]);
   } catch (err) {
     invalidKey(err, "Ed25519 private key");
   }
-  const publicKey = await derivePublicKey(privateKey, "Ed25519");
-  return new SigningKey(privateKey, publicKey, undefined, extractable);
+  return new SigningKey(privateKey, undefined);
 }
 
-/** Generate a fresh Ed25519 signing key. */
+/** Generate a fresh Ed25519 signing key, returning `[signing, verifying]`. */
 async function generateEd25519Key(extractable) {
-  const pair = await subtle.generateKey("Ed25519", true, ["sign", "verify"]);
-  return new SigningKey(pair.privateKey, pair.publicKey, undefined, extractable);
+  const pair = await subtle.generateKey("Ed25519", extractable, ["sign", "verify"]);
+  return [
+    new SigningKey(pair.privateKey, undefined),
+    new VerifyingKey(pair.publicKey, undefined),
+  ];
 }
 
 /** The `lann:webcrypto/ed25519-sign` interface (`--map '…#ed25519Sign'`). */
@@ -1255,8 +1209,11 @@ async function importEcdsaSigningKey(variant, raw, extractable) {
   }
   // WebCrypto imports EC private keys as pkcs8 or jwk only, and a JWK
   // private key requires the public coordinates — which plain JS cannot
-  // compute. Import via a minimal PKCS#8/RFC 5915 wrapping instead (the
-  // platform derives the public point).
+  // compute. Import via a minimal PKCS#8/RFC 5915 wrapping instead.
+  // Private-only PKCS#8 import is a recognized WebCrypto spec gap
+  // (w3c/webcrypto#356) — engines diverge on it — so this import is
+  // best-effort: it works where the platform cooperates and fails
+  // `invalid-key` where it declines, which the WIT permits.
   const pkcs8 = ecdsaScalarToPkcs8(entry.namedCurve, raw);
   let privateKey;
   try {
@@ -1264,17 +1221,13 @@ async function importEcdsaSigningKey(variant, raw, extractable) {
       "pkcs8",
       pkcs8,
       { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
+      extractable,
       ["sign"],
     );
   } catch (err) {
     invalidKey(err, `${variant} private key`);
   }
-  const publicKey = await derivePublicKey(privateKey, {
-    name: "ECDSA",
-    namedCurve: entry.namedCurve,
-  });
-  return new SigningKey(privateKey, publicKey, entry.hash, extractable);
+  return new SigningKey(privateKey, entry.hash);
 }
 
 /**
@@ -1306,15 +1259,21 @@ function ecdsaScalarToPkcs8(namedCurve, scalar) {
   return new Uint8Array([0x30, body.length, ...body]);
 }
 
-/** Generate a fresh ECDSA signing key of the declared variant. */
+/**
+ * Generate a fresh ECDSA signing key of the declared variant, returning
+ * `[signing, verifying]`.
+ */
 async function generateEcdsaKey(variant, extractable) {
   const entry = ecdsaVariant(variant);
   const pair = await subtle.generateKey(
     { name: "ECDSA", namedCurve: entry.namedCurve },
-    true,
+    extractable,
     ["sign", "verify"],
   );
-  return new SigningKey(pair.privateKey, pair.publicKey, entry.hash, extractable);
+  return [
+    new SigningKey(pair.privateKey, entry.hash),
+    new VerifyingKey(pair.publicKey, entry.hash),
+  ];
 }
 
 /** The `lann:webcrypto/ecdsa-sign` interface (`--map '…#ecdsaSign'`). */

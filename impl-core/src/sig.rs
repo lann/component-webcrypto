@@ -236,8 +236,10 @@ impl SigningKeyMaterial {
         }
     }
 
-    /// The corresponding [`SigPublic`] (the `signing-key.verifying-key`
-    /// contract).
+    /// The corresponding [`SigPublic`]. There is no WIT derive contract —
+    /// the package's `generate-key` functions return the pair instead —
+    /// but this core holds the private material, so hosts use this to mint
+    /// the public half at generation.
     pub fn public(&self) -> SigPublic {
         match &self.private {
             SigPrivate::Ed25519(key) => SigPublic::Ed25519(key.verifying_key()),

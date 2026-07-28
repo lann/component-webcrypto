@@ -380,6 +380,15 @@ interface bytes {
 /// may be excluded by the in-guest provider's timing-channel policy (see
 /// guest-impl/README.md, class D) at `wac plug` time.
 ///
+/// There is deliberately no way to derive a `verifying-key` from a
+/// `signing-key`: the public half is available where it is guaranteed to
+/// exist — `generate-key` returns the pair — and importers supply it via
+/// `import-verifying-key`. A provider may hold a private key whose public
+/// half it cannot recompute (browser WebCrypto has no derive operation and
+/// engines diverge on recovering the point from private-only imports;
+/// keystore-resident non-extractable keys can sign but yield nothing
+/// else), so a derive contract here would make such keys unservable.
+///
 /// See `mac-key` for the truncating-producer note, which applies to `sign`
 /// and `verify` here too.
 interface signature {
@@ -432,9 +441,6 @@ interface signature {
         /// external keystore backing this key that cannot complete the
         /// operation) — never for misuse, which is unrepresentable.
         sign: async func(data: stream<u8>) -> result<list<u8>, error>;
-
-        /// Derive the corresponding public key.
-        verifying-key: func() -> verifying-key;
 
         /// See `verifying-key.algorithm-name`.
         algorithm-name: func() -> string;
