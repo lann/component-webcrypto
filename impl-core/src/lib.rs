@@ -40,6 +40,18 @@
 //! across a build, so no target-gated dependency removes it. Its absence
 //! from the final `.wasm` therefore rests on dead-code elimination. The
 //! world is the guarantee; the `cfg` is defence in depth.
+//!
+//! # Exported material
+//!
+//! Key material lives in [`zeroize::Zeroizing`], which scrubs the buffer on
+//! drop. The `export_key` operations are the one place it leaves that
+//! protection, and they return a plain `Vec<u8>`.
+//!
+//! An extractable key's bytes are bound for guest memory, which the runtime
+//! allocates and frees and this crate cannot scrub. Every caller lowers the
+//! buffer across the boundary in the expression that receives it and keeps
+//! nothing, so the material is unprotected from this call onward whatever
+//! the return type says; wrapping it buys a second copy and no protection.
 
 mod aead;
 mod hash;

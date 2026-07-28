@@ -84,6 +84,9 @@ impl MacKeyMaterial {
 
     /// The raw material, or `not-extractable` (the `mac-key.export-key`
     /// contract).
+    ///
+    /// The copy returned is *not* protected: see the note on
+    /// [`crate`](crate#exported-material).
     pub fn export(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
             Ok(self.raw.to_vec())

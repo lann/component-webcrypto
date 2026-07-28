@@ -307,6 +307,9 @@ impl SigningKeyMaterial {
     /// — the 32-byte RFC 8032 seed for Ed25519, the raw big-endian scalar
     /// for ECDSA — or `not-extractable` (the `signing-key.export-key`
     /// contract).
+    ///
+    /// The copy returned is *not* protected: see the note on
+    /// [`crate`](crate#exported-material).
     pub fn export(&self) -> Result<Vec<u8>, Error> {
         if !self.extractable {
             return Err(Error::NotExtractable);
