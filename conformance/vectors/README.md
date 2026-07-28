@@ -1,7 +1,18 @@
 # Conformance test vectors
 
+The suite's authority rests on these files being what upstream published,
+so the provenance below records the exact upstream revision each was taken
+from. Checking a copy against its source is a matter of re-fetching that
+revision and diffing; the digests are deliberately not mirrored into this
+repository, since a checksum stored beside the file it checksums carries no
+more authority than the file does.
+
 Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
-(`testvectors_v1`, schema v1; Apache-2.0 — see [LICENSE](LICENSE)):
+(`testvectors_v1`, schema v1; Apache-2.0 — see [LICENSE](LICENSE)), at
+commit
+[`b61843a9a5115bb758134b6a1f5d5e502d445342`](https://github.com/C2SP/wycheproof/tree/b61843a9a5115bb758134b6a1f5d5e502d445342/testvectors_v1)
+(2026-07-21; the vendored files themselves last changed upstream in
+`e0df04e0c033f2d25c5051dd06230336c7822358`, 2025-10-07):
 
 - `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
   — HMAC MAC vectors for every served SHA-2 parameterization.
@@ -18,7 +29,9 @@ Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 Vendored from
 [novifinancial/ed25519-speccheck](https://github.com/novifinancial/ed25519-speccheck)
 (Apache-2.0), the test set from "Taming the many EdDSAs" (Chalkias,
-Garillot, Nikolaenko):
+Garillot, Nikolaenko), at commit
+[`65519336fda78a3d016e947df6d82848aca0c9da`](https://github.com/novifinancial/ed25519-speccheck/blob/65519336fda78a3d016e947df6d82848aca0c9da/cases.json)
+(the upstream file is `cases.json`; renamed here for clarity):
 
 - `ed25519_speccheck.json` — 12 adversarial Ed25519 vectors (small-order
   and non-canonical `A`/`R`, out-of-range `S`, mixed-order torsion
@@ -34,6 +47,10 @@ subject to copyright):
 - `SHA256ShortMsg.rsp`, `SHA384ShortMsg.rsp`, `SHA512ShortMsg.rsp` —
   SHA-2 digest vectors (message lengths 0 bits to two block lengths, in
   byte steps).
+
+NIST distributes these in a zip rather than from a revision-controlled
+source, so there is no commit to record; the files carry their own
+generation stamps in their headers.
 
 ## Schedule policy
 

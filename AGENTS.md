@@ -73,7 +73,9 @@ conformance/            # cross-implementation conformance tests — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
                         #   from the WebRTC sibling's machinery
-  vectors/              #   vendored Wycheproof JSON + the translation policy
+  vectors/              #   vendored Wycheproof JSON + the translation
+                        #     policy; its README records the upstream
+                        #     revision each file came from
   harness/              #   the world-independent half of both guests:
                         #     probe table, error rendering, feature
                         #     validation (crate: conformance-harness)
