@@ -73,7 +73,16 @@ jobs:
             echo "componentize-js restored from cache"
             exit 0
           fi
-          sudo apt-get update && sudo apt-get install -y libclang-dev
+          # mozjs-sys runs bindgen over WASI-SDK 30's libc++ headers, which
+          # use Clang 19+ builtins (__builtin_ctzg/__builtin_clzg) and say
+          # so: "Libc++ only supports Clang 19 and later". The runner
+          # image's libclang is older, so install a new enough LLVM and
+          # point bindgen at it. LIBCLANG_PATH survives build.rs's
+          # environment scrub, which only strips RUST*/CARGO*.
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/llvm.sh" https://apt.llvm.org/llvm.sh
+          chmod +x "$RUNNER_TEMP/llvm.sh"
+          sudo "$RUNNER_TEMP/llvm.sh" 20
+          export LIBCLANG_PATH=/usr/lib/llvm-20/lib
           curl -fsSLO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-x86_64-linux.tar.gz
           tar -C "$RUNNER_TEMP" -xf wasi-sdk-30.0-x86_64-linux.tar.gz
           export WASI_SDK_PATH="$RUNNER_TEMP/wasi-sdk-30.0-x86_64-linux"
