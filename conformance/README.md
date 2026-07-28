@@ -37,14 +37,17 @@ tags diverge, so case changes land intentionally via
 
 The lockfiles pin the **inventory**, not the assertions. A case that keeps
 its name while weakening what it checks — `Err(_)` where it demanded
-`Err(Error::AuthenticationFailed)` — produces no lockfile diff. Two other
-things stand in for that. Vector *bytes* are pinned by digest
-(`vectors/SHA256SUMS`, checked by `just verify-vectors` as part of `just
-conformance`), because a suite whose authority is "these are Wycheproof's
-vectors" cannot let an edited `result` field pass unnoticed. Assertion
-strength is pinned by review alone: discriminating specific error variants
-rather than any error is the property that makes these cases worth running,
-and nothing mechanical protects it.
+`Err(Error::AuthenticationFailed)` — produces no lockfile diff, and neither
+does an edit to a vector's own `result` or `tag` field. Both are caught the
+same way anything else in a checked-in file is: the change appears in the
+diff and someone reads it. Discriminating a specific error variant rather
+than any error is the property that makes these cases worth running, and
+review is what protects it.
+
+What review cannot establish on its own is whether a vendored vector is
+what upstream published. `vectors/README.md` records the upstream revision
+of every file for that purpose, so a copy can be re-fetched and diffed
+against its source.
 
 ## Architecture
 
