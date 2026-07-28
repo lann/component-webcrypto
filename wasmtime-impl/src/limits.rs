@@ -26,9 +26,20 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-/// Shared admission state: reserved bytes and the FIFO wait queue.
-#[derive(Debug, Default)]
+/// The admission pool: a fixed aggregate budget, the bytes currently
+/// reserved against it, and the FIFO wait queue.
+///
+/// The budget belongs to the pool, not to each acquirer. Passing it per
+/// acquisition would leave the pool enforcing nothing of its own: every
+/// waiter would judge the shared `reserved` counter against its own
+/// ceiling, so two acquirers configured differently could disagree about
+/// how full the pool is, and a release would have to decide whether the
+/// front waiter fits using a ceiling belonging to whoever happened to be
+/// releasing. One budget makes both questions have one answer.
+#[derive(Debug)]
 pub(crate) struct BufferPool {
+    /// The aggregate ceiling, fixed when the pool is created.
+    total: u64,
     state: Mutex<PoolState>,
 }
 
@@ -56,6 +67,8 @@ struct Waiter {
 
 impl PoolState {
     /// Take the front waiter's waker if the pool can now fit *that* waiter.
+    /// `total` is the pool's own budget; the caller passes it because the
+    /// state is guarded separately from it.
     ///
     /// Returns the waker instead of waking it: a `Waker` may poll inline on
     /// the waking thread, and `std::sync::Mutex` is not reentrant, so waking
@@ -83,14 +96,21 @@ fn lock(state: &Mutex<PoolState>) -> std::sync::MutexGuard<'_, PoolState> {
 }
 
 impl BufferPool {
-    /// Reserve `amount` bytes, waiting (FIFO) until the pool can fit it
-    /// under `total`. `amount` must be `<= total` (the caller clamps), so
-    /// an empty pool always admits.
-    pub(crate) fn admit(self: &Arc<Self>, amount: u64, total: u64) -> Admit {
+    /// A pool holding at most `total` bytes across all admitted operations.
+    pub(crate) fn new(total: u64) -> Self {
+        Self {
+            total: total.max(1),
+            state: Mutex::default(),
+        }
+    }
+
+    /// Reserve `amount` bytes, waiting (FIFO) until the pool can fit them.
+    /// `amount` must be `<= total` (the caller clamps), so an empty pool
+    /// always admits.
+    pub(crate) fn admit(self: &Arc<Self>, amount: u64) -> Admit {
         Admit {
             pool: self.clone(),
             amount,
-            total,
             ticket: None,
         }
     }
@@ -100,7 +120,6 @@ impl BufferPool {
 pub(crate) struct Admit {
     pool: Arc<BufferPool>,
     amount: u64,
-    total: u64,
     ticket: Option<u64>,
 }
 
@@ -124,13 +143,13 @@ impl Future for Admit {
             ticket
         });
         let is_front = state.queue.front().is_some_and(|w| w.ticket == ticket);
-        if is_front && state.reserved.saturating_add(this.amount) <= this.total {
+        if is_front && state.reserved.saturating_add(this.amount) <= this.pool.total {
             state.queue.pop_front();
             state.reserved += this.amount;
             // Cascade: the new front may also fit (e.g. after a bulk
             // release, or when reservations shrink). Whether it fits is a
             // question about *its* size, not this one's.
-            let waker = state.take_front_waker(this.total);
+            let waker = state.take_front_waker(this.pool.total);
             drop(state);
             if let Some(waker) = waker {
                 waker.wake();
@@ -139,7 +158,6 @@ impl Future for Admit {
             Poll::Ready(Reservation {
                 pool: this.pool.clone(),
                 amount: this.amount,
-                total: this.total,
             })
         } else {
             let entry = state
@@ -164,7 +182,7 @@ impl Drop for Admit {
         };
         state.queue.remove(index);
         let waker = if index == 0 {
-            state.take_front_waker(self.total)
+            state.take_front_waker(self.pool.total)
         } else {
             None
         };
@@ -184,16 +202,13 @@ impl Drop for Admit {
 pub(crate) struct Reservation {
     pool: Arc<BufferPool>,
     amount: u64,
-    /// The ceiling this reservation was admitted against, so releasing it
-    /// can tell whether the next waiter now fits.
-    total: u64,
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         let mut state = lock(&self.pool.state);
         state.reserved = state.reserved.saturating_sub(self.amount);
-        let waker = state.take_front_waker(self.total);
+        let waker = state.take_front_waker(self.pool.total);
         // Wake outside the lock: see `take_front_waker`.
         drop(state);
         if let Some(waker) = waker {
@@ -217,8 +232,8 @@ mod tests {
     /// the whole pool.
     #[test]
     fn admits_up_to_total() {
-        let pool = Arc::new(BufferPool::default());
-        let mut a = pin!(pool.admit(100, 100));
+        let pool = Arc::new(BufferPool::new(100));
+        let mut a = pin!(pool.admit(100));
         let Poll::Ready(_guard) = poll_once(a.as_mut()) else {
             panic!("first admission should not wait");
         };
@@ -228,14 +243,14 @@ mod tests {
     /// earlier waiting one, and capacity release admits the front waiter.
     #[test]
     fn fifo_admission_and_release() {
-        let pool = Arc::new(BufferPool::default());
-        let mut first = pin!(pool.admit(60, 100));
+        let pool = Arc::new(BufferPool::new(100));
+        let mut first = pin!(pool.admit(60));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
-        let mut second = pin!(pool.admit(60, 100));
+        let mut second = pin!(pool.admit(60));
         assert!(poll_once(second.as_mut()).is_pending(), "pool is full");
-        let mut third = pin!(pool.admit(10, 100));
+        let mut third = pin!(pool.admit(10));
         assert!(
             poll_once(third.as_mut()).is_pending(),
             "smaller later arrival must not barge past the front waiter"
@@ -253,16 +268,16 @@ mod tests {
     /// waiter becomes the front).
     #[test]
     fn cancelled_waiter_unblocks_queue() {
-        let pool = Arc::new(BufferPool::default());
-        let mut first = pin!(pool.admit(100, 100));
+        let pool = Arc::new(BufferPool::new(100));
+        let mut first = pin!(pool.admit(100));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
         // Box so `drop` really drops the future (`pin!` locals live to end
         // of scope).
-        let mut second = Box::pin(pool.admit(100, 100));
+        let mut second = Box::pin(pool.admit(100));
         assert!(poll_once(second.as_mut()).is_pending());
-        let mut third = pin!(pool.admit(100, 100));
+        let mut third = pin!(pool.admit(100));
         assert!(poll_once(third.as_mut()).is_pending());
         drop(second);
         drop(guard1);
@@ -293,14 +308,14 @@ mod tests {
     /// Releasing a reservation must not wake with the pool lock held.
     #[test]
     fn release_wakes_outside_the_lock() {
-        let pool = Arc::new(BufferPool::default());
-        let mut first = pin!(pool.admit(100, 100));
+        let pool = Arc::new(BufferPool::new(100));
+        let mut first = pin!(pool.admit(100));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
         let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let waker = reentrant_waker(&pool, &fired);
-        let mut second = pin!(pool.admit(100, 100));
+        let mut second = pin!(pool.admit(100));
         assert!(second
             .as_mut()
             .poll(&mut Context::from_waker(&waker))
@@ -312,6 +327,36 @@ mod tests {
         );
     }
 
+    /// The budget is the pool's, so every acquirer is judged against the
+    /// same ceiling — including the release path, which decides whether the
+    /// front waiter fits. With a per-acquisition ceiling this is the case
+    /// that misbehaves: a releaser carrying a smaller one would refuse to
+    /// wake a waiter the pool can actually fit, leaving it asleep with
+    /// nothing scheduled to wake it.
+    #[test]
+    fn one_budget_governs_every_acquirer() {
+        let pool = Arc::new(BufferPool::new(100));
+        let mut first = pin!(pool.admit(80));
+        let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
+            panic!("first admission should not wait");
+        };
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = reentrant_waker(&pool, &fired);
+        let mut second = pin!(pool.admit(80));
+        assert!(second
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        drop(guard1);
+        assert!(
+            fired.load(std::sync::atomic::Ordering::SeqCst),
+            "the waiter fits the pool's budget and must be woken"
+        );
+        let Poll::Ready(_guard2) = poll_once(second.as_mut()) else {
+            panic!("the released capacity admits the waiter");
+        };
+    }
+
     /// The cascade after an admission must ask whether the *front waiter*
     /// fits, not whether another operation of the admitting one's size
     /// would. Here a 60-byte admission leaves 40 free: another 60 would not
@@ -319,18 +364,18 @@ mod tests {
     /// amount leaves that waiter parked with nothing scheduled to wake it.
     #[test]
     fn cascade_consults_the_front_waiters_amount() {
-        let pool = Arc::new(BufferPool::default());
-        let mut first = pin!(pool.admit(60, 100));
+        let pool = Arc::new(BufferPool::new(100));
+        let mut first = pin!(pool.admit(60));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
 
         // Queue a same-size waiter, then a small one behind it.
-        let mut second = pin!(pool.admit(60, 100));
+        let mut second = pin!(pool.admit(60));
         assert!(poll_once(second.as_mut()).is_pending(), "pool is full");
         let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let waker = reentrant_waker(&pool, &fired);
-        let mut third = pin!(pool.admit(5, 100));
+        let mut third = pin!(pool.admit(5));
         assert!(third
             .as_mut()
             .poll(&mut Context::from_waker(&waker))
