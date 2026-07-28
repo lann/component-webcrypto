@@ -6229,4 +6229,5 @@ cases = [
     { name = "probe/aes128-shape" },
     { name = "probe/ed25519-sign-known-answer" },
     { name = "probe/open-short-input" },
+    { name = "probe/stream-empty-writes" },
 ]

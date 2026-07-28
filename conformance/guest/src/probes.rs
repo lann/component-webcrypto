@@ -87,6 +87,7 @@ pub const PROBES: &[Probe] = &[
     probe("aes128-shape"),
     probe("ed25519-sign-known-answer"),
     probe("open-short-input"),
+    probe("stream-empty-writes"),
 ];
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
@@ -120,6 +121,7 @@ pub async fn run_one(index: usize) -> Result<(), String> {
         24 => aes128_shape().await,
         25 => ed25519_sign_known_answer().await,
         26 => open_short_input().await,
+        27 => stream_empty_writes().await,
         _ => Err(format!("no probe at index {index}")),
     }
 }
@@ -1271,4 +1273,69 @@ async fn open_short_input() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Zero-length writes are legal on a `stream<u8>`, carry no data, and must
+/// change neither an operation's result nor its liveness. They are the one
+/// stream shape that reaches a host's "no items available, writer not
+/// finishing" path, where a consumer that parks without arming its waker
+/// never resumes: the failure mode is a wedged operation — and, for a host
+/// holding an admission reservation across the call, a wedged instance —
+/// rather than a wrong answer, so this probe hangs instead of failing when
+/// it regresses.
+async fn stream_empty_writes() -> Result<(), String> {
+    let key = import_hmac_key(
+        Sha2Variant::Sha256,
+        b"empty-write probe key".to_vec(),
+        false,
+    )
+    .await
+    .map_err(|e| describe("import-key", &e))?;
+    let payload: Vec<u8> = (0..=255u8).cycle().take(512).collect();
+
+    // The baseline: the same payload as a single write.
+    let (expected, fed) = sign(&key, &payload, Schedule::Whole).await;
+    fed?;
+
+    // Empty writes before, between and after the payload's chunks.
+    let mut chunks = vec![Vec::new()];
+    for chunk in Schedule::Straddle.chunks(&payload) {
+        chunks.push(chunk);
+        chunks.push(Vec::new());
+    }
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tag, fed) = futures::join!(key.sign(rx), crate::util::feed(tx, chunks));
+    fed?;
+    let tag = tag.map_err(|e| describe("sign with interleaved empty writes", &e))?;
+    expect_bytes(&tag, &expected, "tag over a stream with empty writes")?;
+
+    // A stream of nothing but empty writes is an empty input, not a stall.
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (empty_tag, fed) = futures::join!(
+        key.sign(rx),
+        crate::util::feed(tx, vec![Vec::new(), Vec::new(), Vec::new()])
+    );
+    fed?;
+    let empty_tag = empty_tag.map_err(|e| describe("sign over only empty writes", &e))?;
+    let (expected_empty, fed) = sign(&key, b"", Schedule::Whole).await;
+    fed?;
+    expect_bytes(&empty_tag, &expected_empty, "tag over only empty writes")?;
+
+    // The same shape through an AEAD round trip: seal's plaintext stream and
+    // open's ciphertext stream are separate collectors on the host.
+    let aes = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let nonce = [7u8; 12];
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (sealed, fed) = futures::join!(
+        aes.seal(nonce.to_vec(), b"empty-write aad".to_vec(), rx),
+        crate::util::feed(tx, vec![Vec::new(), payload.clone(), Vec::new()])
+    );
+    fed?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?.collect().await;
+    let (opened, fed) = open(&aes, &nonce, b"empty-write aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open", &e))?;
+    expect_bytes(&opened, &payload, "round-tripped plaintext")
 }
