@@ -37,7 +37,15 @@
 //   Host-returned `stream<u8>` values are web `ReadableStream`s of
 //   `Uint8Array`.
 
+// Every platform surface this host uses is captured once, at module load,
+// rather than read from `globalThis` per operation. The nonce source matters
+// most: re-reading it per `seal` would draw the entropy for the whole
+// internal-nonce wire format from a mutable global, after any
+// attacker-influenced code has had the chance to replace it.
 const subtle = globalThis.crypto.subtle;
+const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+const PlatformReadableStream = globalThis.ReadableStream;
+const base64Decode = globalThis.atob;
 
 /**
  * Construct the throwable representation of a WIT `types.error` case: jco's
@@ -79,6 +87,19 @@ function errUnsupported(val) {
 /** `error.key-exhausted`. */
 function errKeyExhausted() {
   return witError("key-exhausted");
+}
+
+/**
+ * Lift a `subtle.decrypt` rejection. A failed tag check surfaces as
+ * `OperationError`, which is `authentication-failed` and deliberately
+ * carries no detail. Anything else — `DataError`, `InvalidAccessError`,
+ * `QuotaExceededError` — is an operational condition: reporting those as
+ * `authentication-failed` would render a local fault as an attack signal
+ * and hide real bugs behind an expected-looking error.
+ */
+function decryptFailure(err) {
+  if (err?.name === "OperationError") return errAuthenticationFailed();
+  return errOther(`open: ${err?.message ?? err}`);
 }
 
 /** `error.other` with a human-readable detail. */
@@ -127,11 +148,11 @@ async function platformCall(what, run) {
  * them, so this implementation declines them (see the WIT `sha2-variant`
  * doc).
  */
-const SHA2_VARIANTS = {
+const SHA2_VARIANTS = Object.assign(Object.create(null), {
   sha256: { hash: "SHA-256", blockBytes: 64 },
   sha384: { hash: "SHA-384", blockBytes: 128 },
   sha512: { hash: "SHA-512", blockBytes: 128 },
-};
+});
 
 /**
  * The served `sha2-variant` entry for `variant`, throwing
@@ -156,10 +177,18 @@ function sha2Variant(variant) {
  */
 export class MacKey {
   #key;
+  /**
+   * The key length in bits, fixed at mint. `mac-key.algorithm-length` is
+   * declared *total* in the WIT — it has no error case — so it must not
+   * depend on `HmacKeyAlgorithm.length`, which an engine may omit for an
+   * imported key: lowering `undefined` into a `u32` is unrepresentable.
+   */
+  #lengthBits;
 
   /** @param {CryptoKey} key */
-  constructor(key) {
+  constructor(key, lengthBits) {
     this.#key = key;
+    this.#lengthBits = lengthBits;
   }
 
   /**
@@ -202,8 +231,9 @@ export class MacKey {
   }
 
   /**
-   * The algorithm getters: direct projections of the `CryptoKey`'s
-   * `HmacKeyAlgorithm` (`name`, `hash.name`, and `length`).
+   * The algorithm getters. `name` and `hash.name` project the `CryptoKey`'s
+   * `HmacKeyAlgorithm`; `length` comes from the mint instead (see
+   * `#lengthBits`).
    */
   algorithmName() {
     return this.#key.algorithm.name;
@@ -214,7 +244,7 @@ export class MacKey {
   }
 
   algorithmLength() {
-    return this.#key.algorithm.length;
+    return this.#lengthBits;
   }
 
   /**
@@ -295,11 +325,8 @@ export class AeadKey {
           this.#key,
           message,
         );
-      } catch {
-        // WebCrypto reports every decrypt failure as an opaque
-        // OperationError; the WIT error deliberately carries no detail
-        // either.
-        throw errAuthenticationFailed();
+      } catch (err) {
+        throw decryptFailure(err);
       }
       handedOff = true;
       return bytesToStream(new Uint8Array(opened), reservation);
@@ -364,7 +391,7 @@ async function importHmacKey(variant, raw, extractable) {
   } catch (err) {
     throw errInvalidKey(String(err));
   }
-  return new MacKey(key);
+  return new MacKey(key, raw.length * 8);
 }
 
 /**
@@ -376,11 +403,13 @@ async function importHmacKey(variant, raw, extractable) {
  * @param {boolean} extractable
  */
 async function generateHmacKey(variant, extractable) {
-  const { hash } = sha2Variant(variant);
+  const { hash, blockBytes } = sha2Variant(variant);
   const key = await platformCall(`HMAC-${hash} key generation`, () =>
     subtle.generateKey({ name: "HMAC", hash }, extractable, ["sign", "verify"]),
   );
-  return new MacKey(key);
+  // WebCrypto's `generateKey` default is the hash's block size, which is the
+  // length this interface documents.
+  return new MacKey(key, blockBytes * 8);
 }
 
 /** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
@@ -463,7 +492,7 @@ export const bytes = { constantTimeEqual };
  * implementation declines it (browsers do not reliably serve it — Chromium
  * implements no AES-192; see the WIT `aes-variant` doc).
  */
-const AES_VARIANT_BYTES = { aes128: 16, aes256: 32 };
+const AES_VARIANT_BYTES = Object.assign(Object.create(null), { aes128: 16, aes256: 32 });
 
 /**
  * The raw key length in bytes declared by `variant`, throwing
@@ -593,7 +622,7 @@ export class InternalNonceKey {
         throw errKeyExhausted();
       }
       this.#sealed += 1n;
-      const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
+      const iv = getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
       const body = new Uint8Array(
         await platformCall("AES-GCM seal", () =>
           subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
@@ -635,8 +664,8 @@ export class InternalNonceKey {
           this.#key,
           body,
         );
-      } catch {
-        throw errAuthenticationFailed();
+      } catch (err) {
+        throw decryptFailure(err);
       }
       handedOff = true;
       return bytesToStream(new Uint8Array(opened), reservation);
@@ -862,7 +891,7 @@ async function collectByteStream(stream, cap = Infinity) {
       total += chunk.length;
     }
   };
-  if (globalThis.ReadableStream && stream instanceof ReadableStream) {
+  if (PlatformReadableStream && stream instanceof PlatformReadableStream) {
     const reader = stream.getReader();
     try {
       for (;;) {
@@ -915,7 +944,7 @@ function concatChunks(chunks, total) {
  * that branch's value, so adding a curve would weaken the checks these
  * quantities drive.
  */
-const ECDSA_VARIANTS = {
+const ECDSA_VARIANTS = Object.assign(Object.create(null), {
   "p256-sha256": {
     name: "ECDSA",
     namedCurve: "P-256",
@@ -934,7 +963,7 @@ const ECDSA_VARIANTS = {
     signatureLength: 96,
     curveOid: [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22],
   },
-};
+});
 
 /**
  * The Ed25519 algorithm record, in the same shape as an `ECDSA_VARIANTS`
@@ -1140,7 +1169,7 @@ export class SigningKey {
 function base64UrlDecode(text) {
   const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-  const binary = atob(padded);
+  const binary = base64Decode(padded);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
   return out;
@@ -1216,7 +1245,14 @@ function ed25519PointStrict(encoded) {
   return !ED25519_SMALL_ORDER_Y.some((torsion) => bytesEqual(y, torsion));
 }
 
-/** Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`. */
+/**
+ * Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`.
+ *
+ * Annotated `never` deliberately: every call site relies on this throwing
+ * and constructs a resource immediately afterwards, so a version that fell
+ * through would mint a key over an `undefined` `CryptoKey`.
+ * @returns {never}
+ */
 function invalidKey(err, what) {
   throw errInvalidKey(`invalid ${what}: ${err.message ?? err}`);
 }
