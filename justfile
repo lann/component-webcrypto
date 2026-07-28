@@ -120,9 +120,9 @@ test-webcrypto-composed: compose-demo
 # The componentize-js CLI (dicej's ComponentizeJS reboot) used to
 # (re)generate the JS guest components. Deliberately not installed by
 # scripts/setup.sh and never needed by CI's gating checks: building it
-# compiles SpiderMonkey to wasm and needs WASI-SDK 30, and it currently
-# needs one runtime patch — see componentize-sdk/README.md for install
-# steps. The pinned revision lives in componentize-sdk/componentize-js.rev.
+# compiles SpiderMonkey to wasm and needs WASI-SDK 30 — see
+# componentize-sdk/README.md for install steps. The pinned revision lives
+# in componentize-sdk/componentize-js.rev.
 componentize-js := env_var_or_default("COMPONENTIZE_JS", "componentize-js")
 
 # Componentize the JS WebCrypto-subset demo guest (componentize-sdk library +

@@ -77,19 +77,17 @@ publishes it when the inputs change) and runs it with just `wasmtime` and
 `wac`, so the gating path never compiles SpiderMonkey.
 
 Regenerating needs componentize-js at the revision pinned in
-[`componentize-js.rev`](componentize-js.rev), with one runtime fix this
-repository carries as
-[`componentize-js-rooting-fix.patch`](componentize-js-rooting-fix.patch)
-until it lands upstream: the async-import completion path unroots GC roots
-out of LIFO order whenever a *suspended* import settles with an `err`
-result — e.g. any failed verification — aborting the guest inside
-SpiderMonkey's rooting assertion. To install:
+[`componentize-js.rev`](componentize-js.rev). (Earlier revisions than the
+pin abort in SpiderMonkey's rooting assertion whenever a *suspended* import
+settles with an `err` result — e.g. any failed verification; the pin
+includes the upstream fix,
+[dicej/componentize-js#5](https://github.com/dicej/componentize-js/pull/5).)
+To install:
 
 ```sh
 git clone https://github.com/dicej/componentize-js
 cd componentize-js
 git checkout "$(cat path/to/componentize-sdk/componentize-js.rev)"
-git apply path/to/componentize-sdk/componentize-js-rooting-fix.patch
 # Needs WASI-SDK 30 on WASI_SDK_PATH; see that repository's README.
 cargo install --path .
 ```

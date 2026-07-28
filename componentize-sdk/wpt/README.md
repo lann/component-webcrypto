@@ -16,7 +16,7 @@ the componentized runner is a **release artifact**, not a checked-in file.
 [`component.sh`](component.sh) owns the mechanism — it computes an input
 lock (the sha256 of everything the runner is generated from: the library,
 the harness and runner, the concatenated suites, the WIT surface, the
-componentize-js revision pin and runtime patch) and the component is
+componentize-js revision pin) and the component is
 published on this repository's rolling [`wpt-components` release] as
 `wpt-runner-<lock-hash>.component.wasm`. The recipe's `ensure` step reuses a
 fresh local build or downloads the published component for the current
@@ -26,7 +26,7 @@ exercised.
 
 When the inputs change, CI's `wpt-component` builder job builds the new
 component (restoring the componentize-js CLI from the Actions cache, so
-SpiderMonkey is only recompiled when the toolchain pin or patch changes) and
+SpiderMonkey is only recompiled when the toolchain pin changes) and
 publishes it on merge to main; pull-request runs hand the built component
 directly to the gating job without publishing. To build and test locally
 before pushing:
