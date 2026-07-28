@@ -77,16 +77,17 @@ jobs:
           curl -fsSLO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-x86_64-linux.tar.gz
           tar -C "$RUNNER_TEMP" -xf wasi-sdk-30.0-x86_64-linux.tar.gz
           export WASI_SDK_PATH="$RUNNER_TEMP/wasi-sdk-30.0-x86_64-linux"
-          rustup target add wasm32-wasip2
-          # componentize-js's build.rs spawns a nested cargo build for
-          # wasm32-wasip2 from its own source directory, where this repo's
-          # rust-toolchain.toml does not apply — so without pinning the
-          # toolchain explicitly it resolves the runner image's default,
-          # which has no wasm32-wasip2 and fails to find `core`.
-          RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | cut -d' ' -f1)"
-          export RUSTUP_TOOLCHAIN
           git clone https://github.com/dicej/componentize-js "$RUNNER_TEMP/componentize-js"
           git -C "$RUNNER_TEMP/componentize-js" checkout "$(cat componentize-sdk/componentize-js.rev)"
+          # componentize-js's build.rs builds its wasm runtime by spawning a
+          # nested `cargo build --target=wasm32-wasip2` after removing every
+          # RUST*/CARGO* variable from the environment, from a clone that
+          # carries no toolchain file. That build therefore cannot be
+          # steered by env or by this repo's rust-toolchain.toml: it
+          # resolves rustup's *default* toolchain, which has no
+          # wasm32-wasip2 and fails to find `core`. Add the target there,
+          # from outside the checkout so no toolchain file applies.
+          (cd "$RUNNER_TEMP" && rustup target add wasm32-wasip2)
           cargo install --path "$RUNNER_TEMP/componentize-js"
 
       - name: Build the WPT runner component
