@@ -118,12 +118,12 @@ test-webcrypto-composed: compose-demo
 # --- componentize-js (JS guest) demo ------------------------------------------
 
 # The componentize-js CLI (dicej's ComponentizeJS reboot) used to
-# (re)generate the JS guest components. Deliberately not installed by
-# scripts/setup.sh and never needed by CI's gating checks: building it
-# compiles SpiderMonkey to wasm and needs WASI-SDK 30 — see
-# componentize-sdk/README.md for install steps. The pinned revision lives
-# in componentize-sdk/componentize-js.rev.
-componentize-js := env_var_or_default("COMPONENTIZE_JS", "componentize-js")
+# (re)generate the JS guest components. Building it compiles SpiderMonkey to
+# wasm and needs WASI-SDK 30, so nobody here builds it: the
+# componentize-js-toolchain workflow publishes one build per pinned revision
+# and platform, and `component.sh toolchain` downloads it into
+# target/toolchains on first use (set COMPONENTIZE_JS to use your own build
+# instead). The pinned revision lives in componentize-sdk/componentize-js.rev.
 
 # Componentize the JS WebCrypto-subset demo guest (componentize-sdk library +
 # examples/componentize-demo app) into examples/componentize-demo/build/.
@@ -131,7 +131,8 @@ componentize-js := env_var_or_default("COMPONENTIZE_JS", "componentize-js")
 # (./componentize-sdk/webcrypto.js) resolve against it.
 build-componentize-demo:
     mkdir -p examples/componentize-demo/build
-    {{componentize-js}} -q -d examples/componentize-demo/wit -w componentize-demo \
+    "$(componentize-sdk/wpt/component.sh toolchain)" \
+        -q -d examples/componentize-demo/wit -w componentize-demo \
         componentize examples/componentize-demo/app.js -p . \
         -o examples/componentize-demo/build/componentize-demo.component.wasm
 
@@ -149,31 +150,21 @@ compose-componentize-demo: build-componentize-demo build-guest-provider
 
 # JS-guest integration test: run the composed JS demo under `wasmtime` — the
 # WebCrypto-subset library's checks execute against RustCrypto running
-# entirely inside wasm. Needs the componentize-js CLI (see above), plus
-# `wasmtime` (v47+) and `wac` on PATH.
+# entirely inside wasm. Needs `wasmtime` (v47+) and `wac` on PATH; the
+# componentize-js toolchain is downloaded (see above).
 test-webcrypto-componentize: compose-componentize-demo
     timeout 120 wasmtime run -W component-model-async=y -S cli \
         target/componentize-demo-composed.wasm
 
-# Rebuild the componentized WPT runner locally (needs the componentize-js
-# CLI, see above): run this when test-webcrypto-componentize-wpt reports no
-# published component for the current inputs and you want to test before
-# pushing — CI's wpt-component job builds and publishes the component for
-# new inputs on merge to main.
-update-wpt-component:
-    COMPONENTIZE_JS={{componentize-js}} componentize-sdk/wpt/component.sh build
-
 # Run the vendored web-platform-tests WebCryptoAPI suites against the
 # componentize-sdk library: every in-subset test must pass; out-of-subset
 # tests are reported by count (componentize-sdk/wpt/README.md has the
-# vendoring and subset policy). The componentized runner is a release
-# artifact keyed by an input lock (componentize-sdk/wpt/component.sh):
-# `ensure` reuses a fresh local build or downloads the published component,
-# which is then composed with a freshly built in-guest provider and driver —
-# so no componentize-js toolchain is needed: only `wasmtime` (v47+) and
-# `wac`, like test-webcrypto-composed.
+# vendoring and subset policy). The runner is componentized from the working
+# tree with the pinned componentize-js (downloaded on first use), then
+# composed with a freshly built in-guest provider and driver and run under
+# `wasmtime` (v47+) and `wac`, like test-webcrypto-composed.
 test-webcrypto-componentize-wpt: build-guest-provider
-    componentize-sdk/wpt/component.sh ensure
+    componentize-sdk/wpt/component.sh build
     cargo build --release -p crypto-demo-driver --target wasm32-wasip2
     wac plug componentize-sdk/wpt/build/runner.component.wasm \
         --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \

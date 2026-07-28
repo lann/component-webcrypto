@@ -1,0 +1,114 @@
+name: componentize-js toolchain
+
+# Build and publish the pinned componentize-js, the one expensive artifact
+# in this repository: it embeds a SpiderMonkey build compiled to wasm, which
+# takes ~20 minutes, while everything made *with* it takes seconds. It is a
+# function of nothing but the pinned revision and the host platform, so it
+# is built once per (revision, platform) and published on the rolling
+# `toolchains` release; CI's gating jobs and contributors download it
+# (componentize-sdk/wpt/component.sh).
+#
+# Pushing a change to the pin runs this automatically. Until it finishes,
+# checks that need the toolchain fail with instructions rather than silently
+# compiling SpiderMonkey on someone's pull request.
+
+on:
+  push:
+    paths:
+      - componentize-sdk/componentize-js.rev
+      - .github/workflows/componentize-js-toolchain.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # publish assets on the toolchains release
+      id-token: write # sign the build provenance attestation
+      attestations: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Identify the build
+        id: id
+        run: |
+          {
+            echo "rev=$(cat componentize-sdk/componentize-js.rev)"
+            echo "platform=linux-x86_64"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this build is already published
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="componentize-js-${{ steps.id.outputs.rev }}-${{ steps.id.outputs.platform }}.gz"
+          if gh release view toolchains --json assets \
+              --jq '.assets[].name' 2>/dev/null | grep -qx "$asset"; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "$asset is already published"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.published.outputs.found == 'false'
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Build componentize-js
+        if: steps.published.outputs.found == 'false'
+        run: |
+          # mozjs-sys runs bindgen over WASI-SDK 30's libc++ headers, which
+          # use Clang 19+ builtins (__builtin_ctzg/__builtin_clzg) and say
+          # so: "Libc++ only supports Clang 19 and later". The runner
+          # image's libclang is older, so install a new enough LLVM and
+          # point bindgen at it. LIBCLANG_PATH survives build.rs's scrub of
+          # RUST*/CARGO* into its nested build, so it reaches bindgen there.
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/llvm.sh" https://apt.llvm.org/llvm.sh
+          chmod +x "$RUNNER_TEMP/llvm.sh"
+          sudo "$RUNNER_TEMP/llvm.sh" 20
+          export LIBCLANG_PATH=/usr/lib/llvm-20/lib
+          curl -fsSLO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-x86_64-linux.tar.gz
+          tar -C "$RUNNER_TEMP" -xf wasi-sdk-30.0-x86_64-linux.tar.gz
+          export WASI_SDK_PATH="$RUNNER_TEMP/wasi-sdk-30.0-x86_64-linux"
+          git clone https://github.com/dicej/componentize-js "$RUNNER_TEMP/componentize-js"
+          git -C "$RUNNER_TEMP/componentize-js" checkout "${{ steps.id.outputs.rev }}"
+          # componentize-js's build.rs builds its wasm runtime by spawning a
+          # nested `cargo build --target=wasm32-wasip2` after removing every
+          # RUST*/CARGO* variable from the environment, from a clone that
+          # carries no toolchain file. That build therefore cannot be
+          # steered by env or by this repo's rust-toolchain.toml: it
+          # resolves rustup's *default* toolchain, which has no
+          # wasm32-wasip2 and fails to find `core`. Add the target there,
+          # from outside the checkout so no toolchain file applies.
+          (cd "$RUNNER_TEMP" && rustup target add wasm32-wasip2)
+          cargo install --path "$RUNNER_TEMP/componentize-js" --root "$RUNNER_TEMP/out"
+
+      - name: Package the asset
+        if: steps.published.outputs.found == 'false'
+        run: |
+          asset="componentize-js-${{ steps.id.outputs.rev }}-${{ steps.id.outputs.platform }}.gz"
+          gzip -c "$RUNNER_TEMP/out/bin/componentize-js" > "$asset"
+          echo "asset=$asset" >> "$GITHUB_ENV"
+
+      - name: Publish on the toolchains release
+        if: steps.published.outputs.found == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view toolchains >/dev/null 2>&1 || \
+            gh release create toolchains --latest=false \
+              --title "Toolchains (CI artifacts)" \
+              --notes "componentize-js builds, one asset per pinned revision and platform. See componentize-sdk/wpt/component.sh."
+          gh release upload toolchains "$asset" --clobber
+
+      - name: Attest the build provenance
+        if: steps.published.outputs.found == 'false'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ env.asset }}

@@ -44,8 +44,8 @@ against this library (`just test-webcrypto-componentize-wpt`, a gating CI
 check); every in-subset test must pass, and the out-of-subset remainder of
 WPT's parameter sweep is reported failing closed. See
 [`wpt/README.md`](wpt/README.md) for the vendoring and subset policy, and
-for how the check runs a lock-keyed release-artifact component so neither CI
-nor contributors need the componentize-js toolchain.
+for how the check builds its runner from the tree with a downloaded
+toolchain, so neither CI nor contributors compile SpiderMonkey.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
@@ -69,20 +69,24 @@ feed always completes, even when the operation fails).
 
 ## Toolchain
 
-The componentize-js CLI is needed only to *(re)generate* JS guest components
-(`just build-componentize-demo`, `just update-wpt-component`) — never to run
-them: CI's gating WPT check downloads the runner component published on the
-repository's `wpt-components` release (CI's `wpt-component` job builds and
-publishes it when the inputs change) and runs it with just `wasmtime` and
-`wac`, so the gating path never compiles SpiderMonkey.
+The componentize-js CLI turns a JS guest into a component
+(`just build-componentize-demo`, and the WPT check's runner); it is not
+needed to *run* one. Nobody here builds it: building compiles SpiderMonkey
+to wasm and needs WASI-SDK 30 and Clang 19+, so the
+[`componentize-js-toolchain`](../.github/workflows/componentize-js-toolchain.yml)
+workflow builds one per (revision, platform) and publishes it on the rolling
+`toolchains` release, and `componentize-sdk/wpt/component.sh toolchain`
+downloads it into `target/toolchains/` on first use. Changing the revision
+pinned in [`componentize-js.rev`](componentize-js.rev) triggers a new build;
+checks that need it fail with instructions until it is published.
 
-Regenerating needs componentize-js at the revision pinned in
-[`componentize-js.rev`](componentize-js.rev). (Earlier revisions than the
-pin abort in SpiderMonkey's rooting assertion whenever a *suspended* import
-settles with an `err` result — e.g. any failed verification; the pin
-includes the upstream fix,
+(Revisions earlier than the pin abort in SpiderMonkey's rooting assertion
+whenever a *suspended* import settles with an `err` result — e.g. any failed
+verification; the pin includes the upstream fix,
 [dicej/componentize-js#5](https://github.com/dicej/componentize-js/pull/5).)
-To install:
+
+To use a build of your own instead — a platform with no published asset, or
+a revision you are evaluating — put it on `COMPONENTIZE_JS`:
 
 ```sh
 git clone https://github.com/dicej/componentize-js
@@ -90,6 +94,7 @@ cd componentize-js
 git checkout "$(cat path/to/componentize-sdk/componentize-js.rev)"
 # Needs WASI-SDK 30 on WASI_SDK_PATH; see that repository's README.
 cargo install --path .
+export COMPONENTIZE_JS="$(command -v componentize-js)"
 ```
 
 One further upstream quirk needs no action: an async import that completes
