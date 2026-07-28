@@ -3,11 +3,27 @@
 #
 # Expectation policy lives in the cases themselves — each case declares the
 # `features` it exercises, and a case whose feature a target declares in
-# `missing-features` reports `skipped` (with the feature-tagged probes
-# asserting the correct decline both ways). This file carries only what has
+# `missing-features` reports `skipped`. This file carries only what has
 # no other home: which suites and targets exist, which features each
 # target is missing (and why), and whether a target's missing results file
 # is an error.
+#
+# A declarable feature is *behavioral* or *structural*, and what polices a
+# `missing-features` entry differs:
+#
+# - Behavioral (`chacha20-poly1305`): the guest imports the interface, so a
+#   target that lacks it must still answer. The feature-tagged probes assert
+#   the correct decline both ways — a target declaring it missing has to
+#   prove every minting path returns `unsupported`, and `run_declined`
+#   refuses any tagged probe that has no decline assertion.
+# - Structural (`ecdsa-sign`): the interface is not imported at all, so
+#   there is nothing to observe at runtime — a guest carrying such a probe
+#   could not instantiate on a target that lacks the feature, which is why
+#   the signing suite is a separate component. A target declaring it
+#   missing drops the suite by declaration, and no probe can contradict
+#   that. What polices it is the negative-composition gate
+#   (`just class-d-composition`), which asserts the in-guest provider does
+#   not export `ecdsa-sign`.
 #
 # Which suites a target must produce results for is *derived*: every
 # target runs every suite except those whose `requires` names a feature
@@ -32,7 +48,8 @@ missing-features = []
 [targets.composed]
 # The in-guest RustCrypto provider deliberately does not export
 # `ecdsa-sign` (class D — see guest-impl/README.md), which excludes the
-# signing suite structurally.
+# signing suite structurally. `just class-d-composition` asserts the
+# absent export, so this line cannot outlive the fact it records.
 missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]

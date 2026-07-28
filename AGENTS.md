@@ -168,6 +168,15 @@ time. Secret-free operations (hashing public data, signature *verification*)
 are exempt from the classes. Keep the classification table in sync when
 adding algorithms, and keep class D out of the provider's world.
 
+`just class-d-composition` (a dependency of `just conformance`) gates that
+last sentence: it asserts the conformance signing guest, whose world imports
+`ecdsa-sign`, does not compose with the provider. Adding a class-D export
+turns that composition green and fails the gate. The failure mode it guards
+against is subtle — see guest-impl/README.md, "What the failure looks like":
+`wac plug` tolerates imports it cannot satisfy, so the composition breaks
+only because the provider exports the *generic* interface owning the key
+resource that the withheld minting interface mints.
+
 ### The jco host must stay browser-compatible
 
 `jco-impl/webcrypto.js` uses only `globalThis.crypto.subtle` and

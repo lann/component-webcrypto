@@ -39,7 +39,11 @@ pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 /// Nothing in this suite is tagged with it — the signing suite's world
 /// *imports* the interface, so a target missing the feature (the composed
 /// target: class D) is excluded from that suite structurally rather than
-/// case by case. Declared here so every guest validates the same names.
+/// case by case. No case *can* be tagged with it: a guest asking whether
+/// the interface declines must import it, and a target missing it cannot
+/// instantiate that guest. The declaration is held to the truth by
+/// `just class-d-composition` instead. Declared here so every guest
+/// validates the same names.
 pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 
 /// Every feature name a target may declare missing. `all` traps on names
