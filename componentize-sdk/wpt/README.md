@@ -10,42 +10,31 @@ with:
 just test-webcrypto-componentize-wpt
 ```
 
-This check gates in CI, and neither CI's gating job nor contributors need
-the componentize-js toolchain (building it compiles SpiderMonkey to wasm):
-the componentized runner is a **release artifact**, not a checked-in file.
-[`component.sh`](component.sh) owns the mechanism — it computes an input
-lock (the sha256 of everything the runner is generated from: the library,
-the harness and runner, the concatenated suites, the resolved WIT world, the
-componentize-js revision pin) and the component is
-published on this repository's rolling [`wpt-components` release] as
-`wpt-runner-<lock-hash>.component.wasm`. The recipe's `ensure` step reuses a
-fresh local build or downloads the published component for the current
-inputs; the in-guest provider and the driver it is composed with are built
-fresh every run, so changes to `impl-core`/`guest-impl` are always
-exercised.
+This check gates in CI, and nobody — CI or contributor — builds the
+componentize-js toolchain, which compiles SpiderMonkey to wasm. The two
+artifacts involved have very different costs, and are handled accordingly:
 
-The WIT input is the `componentize-demo` world *resolved and encoded*
-(`wasm-tools component embed --dummy`), not the package's source files. The
-runner can only be affected by that world's import closure — `mac`, `aead`,
-`digest`, `sha2`, `hmac-sha2`, `aes`, `aes-gcm` — so an interface outside it
-must not invalidate a published component. Source-file hashing cannot draw
-that line, since `signature` shares `webcrypto.wit` with `mac` and `aead`.
-The encoding also drops doc comments, which likewise cannot change the
-component. Every job that computes the lock must therefore use the same
-wasm-tools, pinned in [`scripts/wasm-tools.version`](../../scripts/wasm-tools.version).
+- The **runner component** takes about five seconds to componentize, so
+  [`component.sh build`](component.sh) builds it from the working tree on
+  every run. There is no published runner and no input lock: the check
+  always exercises the tree under test, and a stale artifact is not
+  representable. The in-guest provider and driver it is composed with are
+  likewise built fresh, so `impl-core`/`guest-impl` changes are always
+  exercised.
+- The **toolchain** takes about twenty minutes, and depends on nothing but
+  the revision in [`../componentize-js.rev`](../componentize-js.rev). The
+  [`componentize-js-toolchain`](../../.github/workflows/componentize-js-toolchain.yml)
+  workflow builds one per (revision, platform), publishes it on the rolling
+  [`toolchains` release] with a build-provenance attestation, and
+  `component.sh` downloads it into `target/toolchains/` on first use.
 
-When the inputs change, CI's `wpt-component` builder job builds the new
-component (restoring the componentize-js CLI from the Actions cache, so
-SpiderMonkey is only recompiled when the toolchain pin changes) and
-publishes it on merge to main; pull-request runs hand the built component
-directly to the gating job without publishing. To build and test locally
-before pushing:
+Pushing a change to the pin triggers that workflow. Until it publishes, this
+check fails with instructions rather than compiling SpiderMonkey on a pull
+request; re-run it once the toolchain is available. To test against a
+componentize-js you built yourself, point `COMPONENTIZE_JS` at it (see
+[../README.md](../README.md)).
 
-```sh
-just update-wpt-component   # needs the componentize-js CLI — see ../README.md
-```
-
-[`wpt-components` release]: https://github.com/lann/component-webcrypto/releases/tag/wpt-components
+[`toolchains` release]: https://github.com/lann/component-webcrypto/releases/tag/toolchains
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 

@@ -19,8 +19,7 @@
 # exposes behind --experimental-wasm-jspi from 24 on).
 #
 # Environment overrides:
-#   WASM_TOOLS_VERSION   version of wasm-tools to install (default: the pin
-#                        in scripts/wasm-tools.version)
+#   WASM_TOOLS_VERSION   version of wasm-tools to install (default below)
 #   JUST_VERSION         version of just to install (default below)
 #   SKIP_NODE=1          skip installing the npm dependencies (jco demo
 #                        driver and conformance jco adapter)
@@ -29,12 +28,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# wasm-tools is pinned in its own file because CI's wpt-component job needs
-# the same version without running this script: the WPT runner's input lock
-# contains a wasm-tools-encoded WIT world, so a job that encoded it with a
-# different version would compute a different lock (see
-# componentize-sdk/wpt/component.sh).
-WASM_TOOLS_VERSION="${WASM_TOOLS_VERSION:-$(cat "$REPO_ROOT/scripts/wasm-tools.version")}"
+WASM_TOOLS_VERSION="${WASM_TOOLS_VERSION:-1.247.0}"
 JUST_VERSION="${JUST_VERSION:-1.40.0}"
 WAC_VERSION="${WAC_VERSION:-0.10.1}"
 WASMTIME_VERSION="${WASMTIME_VERSION:-47.0.1}"
