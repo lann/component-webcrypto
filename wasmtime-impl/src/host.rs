@@ -891,11 +891,6 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
 }
 
 impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
-    fn verifying_key(&mut self, self_: Resource<SigningKey>) -> Result<Resource<VerifyingKey>> {
-        let public = self.table.get(&self_)?.material.public();
-        Ok(self.table.push(VerifyingKey { public })?)
-    }
-
     fn algorithm_name(&mut self, self_: Resource<SigningKey>) -> Result<String> {
         Ok(self.table.get(&self_)?.material.name().to_string())
     }
@@ -984,10 +979,16 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         extractable: bool,
-    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+    ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
         let material = SigningKeyMaterial::generate_ed25519(extractable)
             .map_err(rng_trap("random key generation"))?;
-        accessor.with(|mut access| Ok(Ok(access.get().table.push(SigningKey { material })?)))
+        let public = material.public();
+        accessor.with(|mut access| {
+            let table = access.get().table;
+            let signing = table.push(SigningKey { material })?;
+            let verifying = table.push(VerifyingKey { public })?;
+            Ok(Ok((signing, verifying)))
+        })
     }
 }
 
@@ -1032,10 +1033,16 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: ecdsa_verify_iface::EcdsaVariant,
         extractable: bool,
-    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+    ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
         let material = SigningKeyMaterial::generate_ecdsa(core_ecdsa_variant(variant), extractable)
             .map_err(rng_trap("random key generation"))?;
-        accessor.with(|mut access| Ok(Ok(access.get().table.push(SigningKey { material })?)))
+        let public = material.public();
+        accessor.with(|mut access| {
+            let table = access.get().table;
+            let signing = table.push(SigningKey { material })?;
+            let verifying = table.push(VerifyingKey { public })?;
+            Ok(Ok((signing, verifying)))
+        })
     }
 }
 

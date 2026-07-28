@@ -117,6 +117,14 @@ The layering is a design invariant, not a convention:
   `verify`, `seal`/`open`) — no stateful computation objects — so misuse is
   unrepresentable and the `error` variant carries no misuse cases. Keep it
   that way.
+- A key resource must not promise material the provider may not hold. A
+  `signing-key` therefore cannot yield its public half: `generate-key`
+  returns the pair, importers use `import-verifying-key`. Browser WebCrypto
+  has no derive operation (recovering the point from a private-only import
+  is an unspecified spec gap, w3c/webcrypto#356) and keystore-resident keys
+  sign without yielding anything else, so an infallible derive would make
+  those keys unservable. A *fallible* per-algorithm derive remains possible
+  additively (semver-minor) if a seed-only-import need ever materializes.
 
 Two evolution rules govern the package surface. Adding a **resource method**
 is a semver-minor package bump: new methods are subtyping-compatible for

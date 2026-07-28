@@ -665,7 +665,7 @@ async fn sig_verify(
 
 /// The RFC 8032 known answer: importing the seed reproduces the vector's
 /// signature (Ed25519 is deterministic), the getters report the algorithm,
-/// and the derived public key matches the vector and verifies.
+/// and the vector's public key verifies the result.
 async fn ed25519_known_answer() -> Result<(), String> {
     let key = import_ed25519_signing_key(unhex(ED25519_SEED), false)
         .await
@@ -685,12 +685,9 @@ async fn ed25519_known_answer() -> Result<(), String> {
         "signature",
     )?;
 
-    let public = key.verifying_key();
-    expect_eq(
-        hex(&public.export_key().await),
-        ED25519_PUBLIC.to_string(),
-        "derived public key",
-    )?;
+    let public = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
+        .await
+        .map_err(|e| describe("import-verifying-key", &e))?;
     sig_verify(&public, ED25519_MESSAGE, sig)
         .await?
         .map_err(|e| describe("known-answer signature did not verify", &e))
@@ -721,17 +718,17 @@ async fn ed25519_verify_check() -> Result<(), String> {
     }
 }
 
-/// A generated key round-trips sign→verify, and its non-extractable
-/// material stays that way.
+/// A generated key pair round-trips sign→verify, and the private half's
+/// non-extractable material stays that way.
 async fn ed25519_generated_key() -> Result<(), String> {
-    let key = generate_ed25519_key(false)
+    let (key, public) = generate_ed25519_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     expect_eq(key.extractable(), false, "signing-key.extractable")?;
 
     let sig = sig_sign(&key, b"payload").await?;
     expect_eq(sig.len(), 64, "signature length")?;
-    sig_verify(&key.verifying_key(), b"payload", sig)
+    sig_verify(&public, b"payload", sig)
         .await?
         .map_err(|e| describe("round-trip signature did not verify", &e))?;
 

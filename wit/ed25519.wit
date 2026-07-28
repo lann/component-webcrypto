@@ -38,13 +38,19 @@ interface ed25519-verify {
 /// construction (no per-signature secret nonce, complete addition laws).
 interface ed25519-sign {
     use types.{error};
-    use signature.{signing-key};
+    use signature.{signing-key, verifying-key};
 
     /// Import a 32-byte raw private key (the RFC 8032 seed). Anything else
     /// fails with `error.invalid-key`. `signing-key.export-key` returns this
     /// same 32-byte seed form.
+    ///
+    /// Import yields only the private half; callers holding the public key
+    /// mint it via `ed25519-verify.import-verifying-key` (see the
+    /// `signature` interface for why there is no derive).
     import-signing-key: async func(raw: list<u8>, extractable: bool) -> result<signing-key, error>;
 
-    /// Generate a fresh random signing key.
-    generate-key: async func(extractable: bool) -> result<signing-key, error>;
+    /// Generate a fresh random signing key, returning both halves — the
+    /// only point at which every provider is guaranteed to have the public
+    /// key on hand.
+    generate-key: async func(extractable: bool) -> result<tuple<signing-key, verifying-key>, error>;
 }

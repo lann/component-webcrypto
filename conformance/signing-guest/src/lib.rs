@@ -177,11 +177,11 @@ async fn verify(key: &VerifyingKey, data: &[u8], sig: &[u8]) -> Result<(), Error
 // --- probes --------------------------------------------------------------------
 
 /// A generated P-256 key reports its variant through the getters, its
-/// signatures verify — both under the derived public key and under the
-/// same point exported and re-imported through `ecdsa-verify` — and a
-/// corrupted signature fails `authentication-failed`.
+/// signatures verify — both under the public half returned with it and
+/// under the same point exported and re-imported through `ecdsa-verify` —
+/// and a corrupted signature fails `authentication-failed`.
 async fn p256_sign_roundtrip() -> Result<(), String> {
-    let key = generate_key(EcdsaVariant::P256Sha256, false)
+    let (key, public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     if key.algorithm_name() != "ECDSA"
@@ -197,18 +197,17 @@ async fn p256_sign_roundtrip() -> Result<(), String> {
     }
 
     let payload = b"host-only signing payload";
-    let derived = key.verifying_key();
     let sig = sign(&key, payload).await?;
     if sig.len() != 64 {
         return Err(format!("P-256 signatures are 64 bytes, got {}", sig.len()));
     }
-    verify(&derived, payload, &sig)
+    verify(&public, payload, &sig)
         .await
-        .map_err(|e| describe("derived key did not verify", &e))?;
+        .map_err(|e| describe("generated public half did not verify", &e))?;
 
-    // The derived point survives an export → ecdsa-verify import round
+    // The generated point survives an export → ecdsa-verify import round
     // trip (65-byte uncompressed SEC1), and the re-imported key verifies.
-    let point = derived.export_key().await;
+    let point = public.export_key().await;
     if point.len() != 65 || point[0] != 0x04 {
         return Err(format!(
             "exported public key is not a 65-byte uncompressed SEC1 point ({} bytes)",
@@ -234,7 +233,7 @@ async fn p256_sign_roundtrip() -> Result<(), String> {
 /// A generated P-384 key round-trips sign→verify, and a *different* key's
 /// public half rejects the signature.
 async fn p384_generate_roundtrip() -> Result<(), String> {
-    let key = generate_key(EcdsaVariant::P384Sha384, false)
+    let (key, public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     if key.algorithm_curve().as_deref() != Some("P-384")
@@ -252,14 +251,14 @@ async fn p384_generate_roundtrip() -> Result<(), String> {
     if sig.len() != 96 {
         return Err(format!("P-384 signatures are 96 bytes, got {}", sig.len()));
     }
-    verify(&key.verifying_key(), payload, &sig)
+    verify(&public, payload, &sig)
         .await
         .map_err(|e| describe("round-trip signature did not verify", &e))?;
 
-    let other = generate_key(EcdsaVariant::P384Sha384, false)
+    let (_other, other_public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    match verify(&other.verifying_key(), payload, &sig).await {
+    match verify(&other_public, payload, &sig).await {
         Err(Error::AuthenticationFailed) => Ok(()),
         Err(other) => Err(describe("expected authentication-failed, got", &other)),
         Ok(()) => Err("signature verified under a different key".into()),
@@ -272,7 +271,7 @@ async fn p384_generate_roundtrip() -> Result<(), String> {
 /// this suite — impl-core's unit tests pin it for the Rust
 /// implementations.)
 async fn sign_key_export() -> Result<(), String> {
-    let key = generate_key(EcdsaVariant::P256Sha256, true)
+    let (key, _public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     if !key.extractable() {
@@ -293,7 +292,7 @@ async fn sign_key_export() -> Result<(), String> {
         return Err("two exports of the same key differ".into());
     }
 
-    let key = generate_key(EcdsaVariant::P256Sha256, false)
+    let (key, _public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     match key.export_key().await {

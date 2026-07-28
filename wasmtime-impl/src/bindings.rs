@@ -46,7 +46,6 @@ mod generated {
             "lann:webcrypto/signature@0.1.0.[method]signing-key.algorithm-curve": trappable,
             "lann:webcrypto/signature@0.1.0.[method]signing-key.algorithm-hash": trappable,
             "lann:webcrypto/signature@0.1.0.[method]signing-key.extractable": trappable,
-            "lann:webcrypto/signature@0.1.0.[method]signing-key.verifying-key": trappable,
         },
         with: {
             "lann:webcrypto/mac.mac-key": crate::MacKey,

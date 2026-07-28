@@ -21,11 +21,15 @@ kind*, not by algorithm:
   resource, so a key can never be used with the wrong algorithm. Signature
   minting splits the public and private halves into separate interfaces, so
   a provider can serve verification for an algorithm whose signing it
-  declines to host.
+  declines to host. A signing key cannot yield its public half — the public
+  key comes from `generate-key`, which returns the pair, or from
+  `import-verifying-key` — so keys a provider can only *use* (an unspecified
+  platform import path, a keystore-resident non-extractable key) remain
+  representable.
 - **Keys are resources — capabilities.** A world importing only `mac` can use
   key handles it is granted but cannot mint keys; only a world importing
-  `hmac` can. `extractable: false` keys refuse `export-key` (on the jco host the
-  platform `CryptoKey` itself enforces this).
+  `hmac` can. `extractable: false` keys refuse `export-key`; on the jco host
+  that flag is the platform `CryptoKey`'s own, so the platform enforces it.
 - **Byte `stream`s are the only bulk data path** (no buffer-taking `update`
   functions), so implementations have exactly one ingestion path and results
   are chunking-invariant. On Wasmtime the host consumes bytes directly from
