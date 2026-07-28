@@ -29,6 +29,16 @@ and which suites a target must produce results for is *derived*: every
 suite except those requiring a feature the target is missing. There is no
 per-target suite list to maintain.
 
+A structural requirement cannot be policed the way a behavioral one is.
+The decline a feature-tagged probe asserts is a runtime answer, and a
+target missing a structurally required feature cannot instantiate the
+guest that would ask — a target declaring `ecdsa-sign` missing drops the
+signing suite by declaration, and no case can contradict it. What holds
+the composed target's declaration to the truth is the negative-composition
+gate, `just class-d-composition`: it asserts that the signing guest does
+not compose with the in-guest provider, so the provider cannot start
+exporting `ecdsa-sign` while this manifest still says it does not.
+
 Each suite's case inventory is pinned by a lockfile (`guest/tests.lock`,
 `signing-guest/tests.lock`; TOML, one case per line with its feature tags,
 Cargo.lock-style): the runner rejects any results file whose case names or
