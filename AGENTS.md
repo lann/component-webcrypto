@@ -76,6 +76,9 @@ conformance/            # cross-implementation conformance tests — see
   vectors/              #   vendored Wycheproof JSON + the translation
                         #     policy; its README records the upstream
                         #     revision each file came from
+  harness/              #   the world-independent half of both guests:
+                        #     probe table, error rendering, feature
+                        #     validation (crate: conformance-harness)
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
                         #     pinned by its tests.lock)

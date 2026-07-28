@@ -12,6 +12,9 @@ crate-type = ["cdylib"]
 # The lann:webcrypto bindings and stream helpers; carries the imports, so
 # this component's own world declares only its export.
 lann-webcrypto-guest = { path = "../../guest-sdk" }
+# The world-independent half of the guest: probe table, error rendering,
+# missing-feature validation — shared with the signing guest.
+conformance-harness = { path = "../harness" }
 wit-bindgen = { version = "0.59", features = ["async"] }
 futures = { version = "0.3", default-features = false, features = ["async-await"] }
 # Parsing the vendored Wycheproof JSON compiled into the guest.

@@ -7,6 +7,7 @@ members = [
     "examples/crypto-demo",
     "examples/demo-driver",
     "examples/wasmtime-demo",
+    "conformance/harness",
     "conformance/guest",
     "conformance/signing-guest",
     "conformance/adapters/wasmtime",

@@ -1,26 +1,14 @@
 //! Stream, error-rendering, and comparison helpers shared by the vector
 //! cases and the API-contract probes.
 
+pub use conformance_harness::describe;
+
 use crate::translate::Schedule;
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
 use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::mac::MacKey;
 use lann_webcrypto_guest::bindings::types::Error;
-
-/// Render a WIT `error` with a context prefix.
-pub fn describe(context: &str, error: &Error) -> String {
-    let rendered = match error {
-        Error::InvalidKey(detail) => format!("invalid-key: {detail}"),
-        Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
-        Error::AuthenticationFailed => "authentication-failed".to_string(),
-        Error::NotExtractable => "not-extractable".to_string(),
-        Error::Unsupported(detail) => format!("unsupported: {detail}"),
-        Error::KeyExhausted => "key-exhausted".to_string(),
-        Error::Other(detail) => format!("other: {detail}"),
-    };
-    format!("{context}: {rendered}")
-}
 
 /// Compare byte strings, reporting lengths and the first differing offset
 /// rather than the full contents.

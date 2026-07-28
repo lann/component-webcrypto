@@ -50,15 +50,7 @@ pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
 /// Validate a `missing-features` declaration against [`KNOWN_FEATURES`],
 /// returning the set. Panics (traps) on unknown names.
 pub fn missing_set(missing: &[String]) -> BTreeSet<&str> {
-    let mut set = BTreeSet::new();
-    for feature in missing {
-        assert!(
-            KNOWN_FEATURES.contains(&feature.as_str()),
-            "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"
-        );
-        set.insert(feature.as_str());
-    }
-    set
+    conformance_harness::missing_features(missing, KNOWN_FEATURES)
 }
 
 struct Component;
@@ -230,7 +222,7 @@ impl Guest for Component {
         }
         for (index, probe) in probes::PROBES.iter().enumerate() {
             cases.push(materialize(
-                format!("probe/{}", probe.name),
+                probe.case_id(),
                 probe.features,
                 &missing,
                 CaseKind::Probe(index),

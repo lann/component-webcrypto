@@ -23,8 +23,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use std::collections::BTreeSet;
-
+use conformance_harness::{describe, probes};
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
@@ -40,41 +39,27 @@ const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
 
 struct Component;
 
-/// One probe: its name (`probe/<name>` case ids) and the features it
-/// exercises beyond the baseline surface.
-struct Probe {
-    name: &'static str,
-    features: &'static [&'static str],
+/// The features a bare tag in the `probes!` table stands for. No probe in
+/// this suite is tagged today; the arm exists so adding one is a one-line
+/// change rather than a structural one.
+macro_rules! feature_tags {
+    () => {
+        &[]
+    };
 }
 
-/// The probes, in suite order. `run_one(i)` runs `PROBES[i]`.
-const PROBES: &[Probe] = &[
-    Probe {
-        name: "ecdsa-p256-sign-roundtrip",
-        features: &[],
-    },
-    Probe {
-        name: "ecdsa-p384-generate-roundtrip",
-        features: &[],
-    },
-    Probe {
-        name: "ecdsa-sign-key-export",
-        features: &[],
-    },
-    Probe {
-        name: "ecdsa-sign-invalid-scalar",
-        features: &[],
-    },
-];
+probes! {
+    ecdsa_p256_sign_roundtrip,
+    ecdsa_p384_generate_roundtrip,
+    ecdsa_sign_key_export,
+    ecdsa_sign_invalid_scalar,
+}
 
 /// Run the probe at `index` on a target providing its features.
 async fn run_one(index: usize) -> Result<(), String> {
-    match index {
-        0 => p256_sign_roundtrip().await,
-        1 => p384_generate_roundtrip().await,
-        2 => sign_key_export().await,
-        3 => sign_invalid_scalar().await,
-        _ => Err(format!("no probe at index {index}")),
+    match PROBES.get(index) {
+        Some(probe) => (probe.run)().await,
+        None => Err(format!("no probe at index {index}")),
     }
 }
 
@@ -86,15 +71,11 @@ struct Case {
 
 impl GuestTestCase for Case {
     fn name(&self) -> String {
-        format!("probe/{}", PROBES[self.index].name)
+        PROBES[self.index].case_id()
     }
 
     fn features(&self) -> Vec<String> {
-        PROBES[self.index]
-            .features
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        PROBES[self.index].feature_names()
     }
 
     async fn run(&self) -> Outcome {
@@ -116,21 +97,14 @@ impl Guest for Component {
     type TestCase = Case;
 
     fn all(missing_features: Vec<String>) -> Vec<TestCase> {
-        let mut set = BTreeSet::new();
-        for feature in &missing_features {
-            assert!(
-                KNOWN_FEATURES.contains(&feature.as_str()),
-                "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"
-            );
-            set.insert(feature.as_str());
-        }
+        let missing = conformance_harness::missing_features(&missing_features, KNOWN_FEATURES);
         PROBES
             .iter()
             .enumerate()
             .map(|(index, probe)| {
                 TestCase::new(Case {
                     index,
-                    provided: probe.features.iter().all(|f| !set.contains(f)),
+                    provided: probe.provided_by(&missing),
                 })
             })
             .collect()
@@ -138,19 +112,6 @@ impl Guest for Component {
 }
 
 // --- helpers -------------------------------------------------------------------
-
-fn describe(context: &str, error: &Error) -> String {
-    let rendered = match error {
-        Error::InvalidKey(detail) => format!("invalid-key: {detail}"),
-        Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
-        Error::AuthenticationFailed => "authentication-failed".to_string(),
-        Error::NotExtractable => "not-extractable".to_string(),
-        Error::Unsupported(detail) => format!("unsupported: {detail}"),
-        Error::KeyExhausted => "key-exhausted".to_string(),
-        Error::Other(detail) => format!("other: {detail}"),
-    };
-    format!("{context}: {rendered}")
-}
 
 /// Sign an entire byte stream (whole-write).
 async fn sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
@@ -180,7 +141,7 @@ async fn verify(key: &VerifyingKey, data: &[u8], sig: &[u8]) -> Result<(), Error
 /// signatures verify — both under the public half returned with it and
 /// under the same point exported and re-imported through `ecdsa-verify` —
 /// and a corrupted signature fails `authentication-failed`.
-async fn p256_sign_roundtrip() -> Result<(), String> {
+async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -232,7 +193,7 @@ async fn p256_sign_roundtrip() -> Result<(), String> {
 
 /// A generated P-384 key round-trips sign→verify, and a *different* key's
 /// public half rejects the signature.
-async fn p384_generate_roundtrip() -> Result<(), String> {
+async fn ecdsa_p384_generate_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -270,7 +231,7 @@ async fn p384_generate_roundtrip() -> Result<(), String> {
 /// a known scalar needs private-key import, which is deliberately out of
 /// this suite — impl-core's unit tests pin it for the Rust
 /// implementations.)
-async fn sign_key_export() -> Result<(), String> {
+async fn ecdsa_sign_key_export() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -295,6 +256,11 @@ async fn sign_key_export() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
+    // Read the getter in its `false` direction: asserting only `true`
+    // elsewhere leaves a hardcoded `true` passing the suite.
+    if key.extractable() {
+        return Err("non-extractable generated key reports extractable".into());
+    }
     match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
@@ -307,7 +273,7 @@ async fn sign_key_export() -> Result<(), String> {
 /// a platform — while *range* validation (zero, ≥ the group order) rides
 /// the unspecified private-only PKCS#8 import path on browser hosts
 /// (w3c/webcrypto#356) and is pinned by impl-core's unit tests instead.
-async fn sign_invalid_scalar() -> Result<(), String> {
+async fn ecdsa_sign_invalid_scalar() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::ecdsa_sign::import_signing_key;
 
     async fn expect_invalid(what: &str, variant: EcdsaVariant, raw: Vec<u8>) -> Result<(), String> {
