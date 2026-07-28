@@ -330,6 +330,10 @@ impl HostMacKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_length(&mut self, self_: Resource<MacKey>) -> Result<u32> {
         Ok(self.table.get(&self_)?.material.length_bits())
     }
+
+    fn extractable(&mut self, self_: Resource<MacKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.extractable())
+    }
 }
 
 impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
@@ -408,6 +412,10 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
 
     fn tag_size(&mut self, self_: Resource<AeadKey>) -> Result<u32> {
         Ok(self.table.get(&self_)?.material.tag_len() as u32)
+    }
+
+    fn extractable(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.extractable())
     }
 }
 
@@ -681,6 +689,10 @@ impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
             .nonce_budget()
             .map(|budget| budget.saturating_sub(key.sealed)))
     }
+
+    fn extractable(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.extractable())
+    }
 }
 
 impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
@@ -889,10 +901,13 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
     async fn export_key(
         accessor: &Accessor<T, Self>,
         self_: Resource<VerifyingKey>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        // The WIT `err` case exists for providers holding the key as an
+        // unreadable handle; this implementation holds the encoding
+        // in-process, so it never errs.
         accessor.with(|mut access| {
             let key = access.get().table.get(&self_)?;
-            Ok(key.public.export())
+            Ok(Ok(key.public.export()))
         })
     }
 

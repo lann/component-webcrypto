@@ -324,6 +324,12 @@ impl AeadKeyMaterial {
             .map_err(|_| Error::AuthenticationFailed)
     }
 
+    /// Whether the key material may be exported (the `extractable` getter
+    /// on either key resource).
+    pub fn extractable(&self) -> bool {
+        self.extractable
+    }
+
     /// The raw material, or `not-extractable` (the `export-key` contract on
     /// either key resource).
     ///

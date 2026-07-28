@@ -308,6 +308,21 @@ closed numbers remain stable references.
   policy (the in-guest provider exports `ecdsa-verify` but not `ecdsa-sign`).
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'
   fine-grained leaks (its README documents the current detection limits).
+- Platform-backed key storage, so a guest can keep a *non-extractable* key
+  across instantiations instead of exporting and re-importing material (see
+  the design issue). Browser WebCrypto already supports it: `CryptoKey` has
+  structured-clone steps that carry `[[extractable]]` and `[[handle]]` into
+  IndexedDB without exposing material. Two consequences already reach the
+  stable surface. A retrieved key is a *handle*, so it may be usable and
+  unreadable at once — every WebCrypto export operation can fail with
+  "key material cannot be accessed" where sign and verify cannot, which is
+  why `verifying-key.export-key` is fallible. And loading is a minting path
+  whose caller supplied no `extractable` argument, which is why every gated
+  key resource exposes an `extractable` getter. Storage is also the first
+  place where the implementations may differ in *capability* rather than in
+  algorithm coverage — jco has IndexedDB, the in-guest provider has no store
+  at all and would decline the interface at `wac plug` time — so expect an
+  optional target capability in `conformance/targets.toml`.
 - A FIPS 140-3 profile, kept *possible* (not implemented): everything needed
   is additive — the `aead-internal-nonce` primitive kind carries the
   approved-mode seal (SP 800-38D forbids externally supplied GCM encryption

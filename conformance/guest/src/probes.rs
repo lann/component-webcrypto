@@ -79,6 +79,7 @@ probes! {
     ed25519_sign_known_answer,
     open_short_input,
     stream_empty_writes,
+    extractable_getter,
 }
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
@@ -945,7 +946,10 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     fed?;
     let sig = sig.map_err(|e| describe("sign", &e))?;
 
-    let exported = public.export_key().await;
+    let exported = public
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key (public)", &e))?;
     if exported.len() != 32 {
         return Err(format!(
             "Ed25519 public keys export as 32 bytes, got {}",
@@ -977,7 +981,10 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
         let key = import_ecdsa_verifying_key(variant, public.clone())
             .await
             .map_err(|e| describe("import-verifying-key (ecdsa)", &e))?;
-        let exported = key.export_key().await;
+        let exported = key
+            .export_key()
+            .await
+            .map_err(|e| describe("export-key (public)", &e))?;
         expect_bytes(&exported, &public, "exported ECDSA public key")?;
     }
     Ok(())
@@ -1344,4 +1351,63 @@ async fn stream_empty_writes() -> Result<(), String> {
     fed.map_err(|e| format!("open feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open", &e))?;
     expect_bytes(&opened, &payload, "round-tripped plaintext")
+}
+
+/// The `extractable` getter reports the flag each key was minted with, on
+/// every key resource carrying an extractability gate, and agrees with what
+/// `export-key` then does.
+///
+/// The getter is the only way to ask the question without taking the
+/// answer: a caller that interrogated extractability through `export-key`
+/// alone would receive the material whenever the answer is yes.
+async fn extractable_getter() -> Result<(), String> {
+    for extractable in [true, false] {
+        let mac = import_hmac_key(
+            Sha2Variant::Sha256,
+            b"extractable-getter".to_vec(),
+            extractable,
+        )
+        .await
+        .map_err(|e| describe("import-key (hmac)", &e))?;
+        let aead = import_key(AesVariant::Aes256, vec![0x24u8; 32], extractable)
+            .await
+            .map_err(|e| describe("import-key (aes-gcm)", &e))?;
+        let internal = import_internal_nonce_key(AesVariant::Aes256, vec![0x42u8; 32], extractable)
+            .await
+            .map_err(|e| describe("import-key (aes-gcm-internal-nonce)", &e))?;
+
+        let reported = [
+            ("mac-key", mac.extractable(), mac.export_key().await),
+            ("aead-key", aead.extractable(), aead.export_key().await),
+            (
+                "internal-nonce-key",
+                internal.extractable(),
+                internal.export_key().await,
+            ),
+        ];
+        for (resource, getter, exported) in reported {
+            if getter != extractable {
+                return Err(format!(
+                    "{resource}.extractable reports {getter} for a key minted {extractable}"
+                ));
+            }
+            match (extractable, exported) {
+                (true, Ok(_)) | (false, Err(Error::NotExtractable)) => {}
+                (true, Err(err)) => {
+                    return Err(describe(
+                        &format!("{resource}: extractable key failed to export"),
+                        &err,
+                    ))
+                }
+                (false, Ok(_)) => return Err(format!("{resource}: non-extractable key exported")),
+                (false, Err(err)) => {
+                    return Err(describe(
+                        &format!("{resource}: expected not-extractable, got"),
+                        &err,
+                    ))
+                }
+            }
+        }
+    }
+    Ok(())
 }

@@ -162,6 +162,10 @@ impl GuestMacKey for MacKey {
         self.material.length_bits()
     }
 
+    fn extractable(&self) -> bool {
+        self.material.extractable()
+    }
+
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -219,6 +223,10 @@ impl GuestAeadKey for AeadKey {
 
     fn algorithm_length(&self) -> u32 {
         self.material.length_bits()
+    }
+
+    fn extractable(&self) -> bool {
+        self.material.extractable()
     }
 
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
@@ -440,6 +448,10 @@ impl GuestInternalNonceKey for InternalNonceKey {
         self.material.length_bits()
     }
 
+    fn extractable(&self) -> bool {
+        self.material.extractable()
+    }
+
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -539,8 +551,11 @@ impl GuestVerifyingKey for VerifyingKey {
         self.public.hash().map(str::to_string)
     }
 
-    async fn export_key(&self) -> Vec<u8> {
-        self.public.export()
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+        // The WIT `err` case exists for providers holding the key as an
+        // unreadable handle; this implementation holds the encoding
+        // in-process, so it never errs.
+        Ok(self.public.export())
     }
 }
 

@@ -168,7 +168,10 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
 
     // The generated point survives an export → ecdsa-verify import round
     // trip (65-byte uncompressed SEC1), and the re-imported key verifies.
-    let point = public.export_key().await;
+    let point = public
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key (public)", &e))?;
     if point.len() != 65 || point[0] != 0x04 {
         return Err(format!(
             "exported public key is not a 65-byte uncompressed SEC1 point ({} bytes)",

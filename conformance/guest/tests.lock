@@ -6230,4 +6230,5 @@ cases = [
     { name = "probe/ed25519-sign-known-answer" },
     { name = "probe/open-short-input" },
     { name = "probe/stream-empty-writes" },
+    { name = "probe/extractable-getter" },
 ]
