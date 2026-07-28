@@ -326,6 +326,9 @@ impl AeadKeyMaterial {
 
     /// The raw material, or `not-extractable` (the `export-key` contract on
     /// either key resource).
+    ///
+    /// The copy returned is *not* protected: see the note on
+    /// [`crate`](crate#exported-material).
     pub fn export(&self) -> Result<Vec<u8>, Error> {
         if self.extractable {
             Ok(self.raw.to_vec())

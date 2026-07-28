@@ -28,11 +28,30 @@
 //!
 //! ECDSA signing handles a per-signature secret nonce whose timing leakage
 //! is key-recovering — class D in guest-impl's timing-channel
-//! classification, which the in-guest provider enforces by never exporting
-//! `ecdsa-sign`. This crate enforces the same policy one level deeper: the
-//! ECDSA arms of the private-key type exist only on non-wasm targets
-//! (`#[cfg(not(target_family = "wasm"))]`), so class-D signing code is
-//! structurally absent from every wasm build rather than merely unexported.
+//! classification. The load-bearing enforcement is the in-guest provider's
+//! world, which never exports `ecdsa-sign`: a composition that needs it
+//! fails at `wac plug` time. This crate adds a second layer — the ECDSA
+//! arms of the private-key type exist only on non-wasm targets
+//! (`#[cfg(not(target_family = "wasm"))]`), so nothing in a wasm build
+//! *calls* a signing implementation.
+//!
+//! The signing code is nonetheless *compiled* for wasm: verification needs
+//! `p256`/`p384` with `features = ["ecdsa"]`, and cargo unifies features
+//! across a build, so no target-gated dependency removes it. Its absence
+//! from the final `.wasm` therefore rests on dead-code elimination. The
+//! world is the guarantee; the `cfg` is defence in depth.
+//!
+//! # Exported material
+//!
+//! Key material lives in [`zeroize::Zeroizing`], which scrubs the buffer on
+//! drop. The `export_key` operations are the one place it leaves that
+//! protection, and they return a plain `Vec<u8>`.
+//!
+//! An extractable key's bytes are bound for guest memory, which the runtime
+//! allocates and frees and this crate cannot scrub. Every caller lowers the
+//! buffer across the boundary in the expression that receives it and keeps
+//! nothing, so the material is unprotected from this call onward whatever
+//! the return type says; wrapping it buys a second copy and no protection.
 
 mod aead;
 mod hash;
@@ -134,7 +153,7 @@ pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// `len` bytes of fresh randomness. Callers wrap the buffer in its
-/// key-material type (which zeroizes on drop) promptly.
+/// key-material type promptly.
 pub(crate) fn random_bytes(len: usize) -> Result<Vec<u8>, RngError> {
     let mut raw = vec![0u8; len];
     getrandom::fill(&mut raw)?;
