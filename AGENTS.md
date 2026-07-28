@@ -43,6 +43,12 @@ guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
                         #   crate: guest-webcrypto — see its README for the
                         #   timing-channel classification and export policy
+guest-sdk/              # guest-side Rust library over the lann:webcrypto
+                        #   imports: typed wrappers with a byte-source
+                        #   abstraction, so consumers do not re-implement
+                        #   the feed-a-stream-and-await plumbing; the Rust
+                        #   counterpart of componentize-sdk;
+                        #   crate: lann-webcrypto-guest
 componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   ComponentizeJS reboot): webcrypto.js exposes a
                         #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,

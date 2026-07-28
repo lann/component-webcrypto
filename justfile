@@ -56,6 +56,11 @@ clippy:
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
     cargo clippy -p conformance-composed-driver --target wasm32-wasip2 -- -D warnings
+    # guest-sdk's optional source adaptors are only compiled with their
+    # features on, and one of them holds the only code path that can produce
+    # `Error::Read` — the crate's subtlest behaviour. Nothing in the
+    # workspace enables them, so without this they are never checked.
+    cargo clippy -p lann-webcrypto-guest --all-features --target wasm32-wasip2 -- -D warnings
 
 # Validate WIT packages.
 validate-wit:

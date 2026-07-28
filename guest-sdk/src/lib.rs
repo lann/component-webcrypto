@@ -78,8 +78,14 @@ mod generated {
 /// for callers driving the streams themselves and for passing resources
 /// through a consumer's own interfaces (via [`Mac::into_raw`] and friends).
 pub mod bindings {
+    // `aes` and `sha2` are re-exported for their *types*, not their
+    // functions: they define `aes-variant` and `sha2-variant`, which the
+    // minting interfaces only alias. Without the defining interface in this
+    // list an alias renders in rustdoc as an empty enum with no docs — no
+    // discoverable variants, and none of the WIT's warnings (that `aes192`
+    // is not widely served, for one).
     pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
+        aead, aead_internal_nonce, aes, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
         digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hmac_sha2, mac, sha2,
         signature, types, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
@@ -96,6 +102,15 @@ pub use generated::wit_stream;
 /// failures of a caller-supplied [`DataSource`] producer. Misuse of the API
 /// is unrepresentable by construction — operations are one-shot calls on
 /// immutable key resources — and so has no variant here.
+///
+/// `#[non_exhaustive]` deliberately: adding a `types.error` case is a
+/// semver-major change to the *package* (the variant sits in return
+/// position, so a new case flows toward consumers whose bindings cannot
+/// represent it), but this crate adds [`Error::Read`] of its own and should
+/// not force a major bump on its dependents for a variant they must already
+/// handle via a catch-all. The upstream half stays strict: the `From`
+/// conversion below matches the WIT variant exhaustively, so a new case is a
+/// compile error here rather than a silent fallthrough.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -155,7 +170,9 @@ impl fmt::Display for Error {
             Error::NotExtractable => write!(f, "key is not extractable"),
             Error::Unsupported(detail) => write!(f, "unsupported: {detail}"),
             Error::KeyExhausted => write!(f, "key exhausted: its nonce budget is spent"),
-            Error::Other(detail) => write!(f, "{detail}"),
+            // Prefixed like every other arm: an unadorned host string gives
+            // a caller no indication which layer produced it.
+            Error::Other(detail) => write!(f, "operation failed: {detail}"),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
         }
     }
@@ -409,6 +426,15 @@ macro_rules! newtype_common {
         impl From<$raw> for $name {
             fn from(raw: $raw) -> Self {
                 Self(raw)
+            }
+        }
+
+        // C-COMMON-TRAITS: without this a consumer cannot derive `Debug` on
+        // anything holding one of these. The resource handle carries no key
+        // material, so this reveals nothing the handle itself does not.
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.0).finish()
             }
         }
     };

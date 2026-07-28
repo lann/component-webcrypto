@@ -310,7 +310,7 @@ async fn timed_seal(key: &AeadKey, nonce: &[u8], plaintext: &[u8]) -> Result<u64
 
 /// Read a byte stream to its end, collecting the contents.
 ///
-/// Deliberately not `lann_webcrypto_guest::read_all`: this crate shares
+/// Deliberately not the `lann-webcrypto-guest` wrappers: this crate shares
 /// wit-bindgen runtime types with `wasip3` (pinned to an older wit-bindgen;
 /// see Cargo.toml), and mixing two runtime versions in one component does
 /// not work — and a measurement harness wants its stream plumbing inline
