@@ -52,13 +52,24 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// wasi:http body backpressure). Do not withhold an admitted operation's
 /// input while awaiting a queued one.
 ///
-/// Cloning the context shares the pool (a clone is a view, not a second
-/// budget).
+/// The pool's budget is resolved **once**, at the first operation that
+/// buffers, and belongs to the pool from then on. Changing
+/// [`Store::set_hostcall_fuel`] afterwards therefore retunes the per-call
+/// limit but not the pool. The alternative — re-reading the ceiling per
+/// acquisition — leaves the pool enforcing nothing of its own: every
+/// waiter judges one shared counter against its own ceiling, so acquirers
+/// configured differently disagree about how full the pool is, and a
+/// release cannot tell whether the next waiter fits without borrowing a
+/// ceiling from whoever happened to be releasing. Configure the limits
+/// before the first crypto call.
+///
+/// Cloning the context gives the clone its own pool, since the pool is
+/// parameterized by the budget the context carries.
 ///
 /// [`set_per_call_buffer_limit`]: WasiWebcryptoCtx::set_per_call_buffer_limit
 /// [`set_total_buffer_limit`]: WasiWebcryptoCtx::set_total_buffer_limit
 /// [`Store::set_hostcall_fuel`]: wasmtime::Store::set_hostcall_fuel
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct WasiWebcryptoCtx {
     /// The most one operation may buffer, in bytes; `None` defaults to ¼ of
@@ -67,8 +78,28 @@ pub struct WasiWebcryptoCtx {
     /// The admission pool, in bytes; `None` defaults to the store's
     /// hostcall fuel.
     total_buffer_limit: Option<u64>,
-    /// The shared admission pool state.
-    pool: std::sync::Arc<crate::limits::BufferPool>,
+    /// The admission pool, created on first use with the budget resolved
+    /// from this context and the store's hostcall fuel.
+    pool: std::sync::OnceLock<std::sync::Arc<crate::limits::BufferPool>>,
+}
+
+/// Cloning a context gives the clone its **own** admission pool.
+///
+/// The pool bounds aggregate retention against a ceiling that each context
+/// carries separately, so sharing one pool between contexts configured
+/// differently would let the larger ceiling admit against the smaller
+/// context's accounting — exceeding the bound it was asked to enforce.
+/// Independent pools keep each context's limit meaning what it says; a
+/// single bound across several contexts is not something this type can
+/// express.
+impl Clone for WasiWebcryptoCtx {
+    fn clone(&self) -> Self {
+        Self {
+            per_call_buffer_limit: self.per_call_buffer_limit,
+            total_buffer_limit: self.total_buffer_limit,
+            pool: std::sync::OnceLock::new(),
+        }
+    }
 }
 
 impl WasiWebcryptoCtx {
@@ -101,9 +132,11 @@ impl WasiWebcryptoCtx {
         (per_call, total)
     }
 
-    /// The shared admission pool.
-    pub(crate) fn pool(&self) -> &std::sync::Arc<crate::limits::BufferPool> {
-        &self.pool
+    /// The admission pool, created on first use with `total` as its budget.
+    /// Later calls reuse the pool that exists: the budget is the pool's, not
+    /// each acquisition's.
+    pub(crate) fn pool(&self, total: u64) -> &std::sync::Arc<crate::limits::BufferPool> {
+        self.pool.get_or_init(|| crate::limits::pool(total))
     }
 }
 

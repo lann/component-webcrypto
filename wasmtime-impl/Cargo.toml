@@ -11,6 +11,11 @@ description = "Wasmtime host implementation of the lann:webcrypto interfaces, ba
 # API used here.
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "runtime"] }
 futures = "0.3"
+# Runtime-agnostic async primitives. Used for the input-admission semaphore:
+# waking a parked waiter outside the lock its waker may re-enter, deciding
+# after a release whether the front waiter fits, and unwinding a cancelled
+# waiter are the parts a hand-written queue here got wrong.
+mea = "0.6"
 # The cryptography itself, shared verbatim with the in-guest provider.
 webcrypto-impl-core = { path = "../impl-core" }
 

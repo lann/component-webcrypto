@@ -258,13 +258,13 @@ async fn drain_stream<T: Send>(
 async fn admit_input<T: Send>(
     accessor: &Accessor<T, WasiWebcrypto>,
 ) -> Result<(Reservation, usize)> {
-    let (pool, per_call, total) = accessor.as_accessor().with(|mut access| {
+    let (pool, per_call) = accessor.as_accessor().with(|mut access| {
         let fuel = wasmtime::AsContextMut::as_context_mut(&mut access).hostcall_fuel() as u64;
         let view = access.get();
         let (per_call, total) = view.ctx.buffer_limits(fuel);
-        Ok::<_, wasmtime::Error>((view.ctx.pool().clone(), per_call, total))
+        Ok::<_, wasmtime::Error>((view.ctx.pool(total).clone(), per_call))
     })?;
-    let reservation = pool.admit(per_call, total).await;
+    let reservation = crate::limits::admit(&pool, per_call).await;
     Ok((reservation, usize::try_from(per_call).unwrap_or(usize::MAX)))
 }
 
