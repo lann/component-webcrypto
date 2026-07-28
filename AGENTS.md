@@ -43,6 +43,12 @@ guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
                         #   crate: guest-webcrypto — see its README for the
                         #   timing-channel classification and export policy
+guest-sdk/              # guest-side Rust library over the lann:webcrypto
+                        #   imports: typed wrappers with a byte-source
+                        #   abstraction, so consumers do not re-implement
+                        #   the feed-a-stream-and-await plumbing; the Rust
+                        #   counterpart of componentize-sdk;
+                        #   crate: lann-webcrypto-guest
 componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   ComponentizeJS reboot): webcrypto.js exposes a
                         #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,
@@ -211,11 +217,52 @@ conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
 its vector cases exist (see conformance/README.md, "Growing the suites").
 
+## Check the rationale before implementing it
+
+Requests arrive with a reason attached — this is inefficient, this leaks, this
+type would make the mistake unrepresentable. The reason is a claim about the
+code, and it can be false while the request still points at something real.
+Establish that it holds before writing the change, and if it does not, say so
+first.
+
+What this guards against is silent repair: noticing the premise is wrong,
+quietly designing around it, and shipping something that works. Working code
+then reads as confirmation of reasoning that was never tested, and the next
+decision builds on it. A contradiction turned up while researching is a result
+to report, not an obstacle to route around.
+
+Two claims usually need separating, because a request tends to fuse them: what
+is wrong with the code now, and what the proposed remedy fixes. They are often
+both true of *different* problems. A wrapper type that makes an unsafe read
+impossible does not thereby remove a redundant copy — and adopting it can
+preserve the copy untouched while appearing to answer the complaint. Name which
+property the change actually buys.
+
 ## Code comments and docs
 
 Code comments describe **what** something is or does, not the process by which
 it was arrived at. Rationale like "we removed X because Y" belongs in commit
 messages or PR descriptions, not in source files.
+
+A comment defending the *presence* of ordinary code is the same mistake in a
+subtler form. Conventional things — a `Debug` impl, a prefixed error string,
+a derived trait, an attribute the API guidelines call for — need no defence;
+explaining why one is there implies it is unusual and sends the reader
+looking for a catch that is not there. Comment what a reader could not
+predict: an invariant, a hazard, a deliberate departure from the obvious
+choice, a constraint imposed from outside the file.
+
+The giveaway is the shape of the sentence. "Without this, a consumer
+cannot…", "otherwise a caller has no indication…", "this is not merely…" are
+answers to an objection, and the place to answer an objection is where it was
+raised — the pull request. "This holds because…", "X must be Y since…" state
+what is true of the code as it stands, which is what survives once the
+discussion is forgotten. If a comment would read oddly to someone who never
+saw the change that introduced it, it is in the wrong place.
+
+Guards are the exception that proves it. A test, a lockfile, an assertion
+exists *because* of the failure it prevents, so saying what it catches
+describes what it is — and reads the same to someone who never saw it added.
 
 Docs state invariants, not inventories. Never embed values a build or test
 run computes — case counts, check counts, probe indexes. If a number

@@ -78,8 +78,12 @@ mod generated {
 /// for callers driving the streams themselves and for passing resources
 /// through a consumer's own interfaces (via [`Mac::into_raw`] and friends).
 pub mod bindings {
+    // `aes` and `sha2` are here for their *types*: they define
+    // `aes-variant` and `sha2-variant`, which the minting interfaces only
+    // alias, and rustdoc renders an alias into a private module as an empty
+    // enum.
     pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
+        aead, aead_internal_nonce, aes, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
         digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hmac_sha2, mac, sha2,
         signature, types, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
@@ -96,6 +100,12 @@ pub use generated::wit_stream;
 /// failures of a caller-supplied [`DataSource`] producer. Misuse of the API
 /// is unrepresentable by construction — operations are one-shot calls on
 /// immutable key resources — and so has no variant here.
+///
+/// `#[non_exhaustive]`: this enum carries [`Error::Read`] in addition to the
+/// WIT cases, so it grows independently of the package's own rule that a new
+/// `types.error` case is semver-major. The `From` conversion below is
+/// exhaustive over the WIT variant, so a case added there is a compile error
+/// here rather than a silent fallthrough.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -155,7 +165,7 @@ impl fmt::Display for Error {
             Error::NotExtractable => write!(f, "key is not extractable"),
             Error::Unsupported(detail) => write!(f, "unsupported: {detail}"),
             Error::KeyExhausted => write!(f, "key exhausted: its nonce budget is spent"),
-            Error::Other(detail) => write!(f, "{detail}"),
+            Error::Other(detail) => write!(f, "operation failed: {detail}"),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
         }
     }
@@ -409,6 +419,12 @@ macro_rules! newtype_common {
         impl From<$raw> for $name {
             fn from(raw: $raw) -> Self {
                 Self(raw)
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_tuple(stringify!($name)).field(&self.0).finish()
             }
         }
     };
