@@ -49,7 +49,6 @@ pub fn welch_t(a: &Accumulator, b: &Accumulator) -> f64 {
 }
 
 /// The verdict for one measured surface.
-#[derive(PartialEq)]
 pub enum Verdict {
     /// max |t| stayed under the threshold.
     Quiet,
