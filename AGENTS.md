@@ -234,6 +234,10 @@ what is true of the code as it stands, which is what survives once the
 discussion is forgotten. If a comment would read oddly to someone who never
 saw the change that introduced it, it is in the wrong place.
 
+Guards are the exception that proves it. A test, a lockfile, an assertion
+exists *because* of the failure it prevents, so saying what it catches
+describes what it is — and reads the same to someone who never saw it added.
+
 Docs state invariants, not inventories. Never embed values a build or test
 run computes — case counts, check counts, probe indexes. If a number
 matters, a gate asserts it (e.g. the demo harness's expected-summary check);
