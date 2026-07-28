@@ -23,6 +23,7 @@
 // which the justfile recipe sets to the repository root.
 
 import { crypto, CryptoKey } from "./componentize-sdk/webcrypto.js";
+import { EXPECTED } from "./componentize-sdk/wpt/expected.js";
 import { drain, takeResults } from "./componentize-sdk/wpt/harness.js";
 import { run_test as runHmac } from "./componentize-sdk/wpt/build/group-hmac.js";
 import { run_test as runAesGcm } from "./componentize-sdk/wpt/build/group-aes-gcm.js";
@@ -122,6 +123,7 @@ export const demoWebcryptoDemoDemo010 = {
   run: async function () {
     const lines = [];
     const failures = [];
+    const census = {};
     let totalIn = 0;
     let totalInPassed = 0;
 
@@ -148,6 +150,7 @@ export const demoWebcryptoDemoDemo010 = {
           outFailed += 1;
         }
       }
+      census[groupName] = { inPassed, inFailed, outPassed, outFailed };
       totalIn += inPassed + inFailed;
       totalInPassed += inPassed;
       lines.push(
@@ -156,14 +159,65 @@ export const demoWebcryptoDemoDemo010 = {
       );
     }
 
+    // Emitted on every run, pass or fail, so `just update-wpt-expectations`
+    // can record it mechanically.
+    const censusLine = `WPT-CENSUS ${JSON.stringify(census)}`;
+
     if (failures.length > 0) {
       throw new ComponentError(
-        `${failures.length} in-subset WPT failures:\n` + failures.join("\n"),
+        `${failures.length} in-subset WPT failures:\n` +
+          failures.join("\n") +
+          `\n${censusLine}`,
       );
     }
+
+    // Counting the results is not the same as asserting them. Membership of
+    // the subset is decided by matching WPT test *names*, so an upstream
+    // rename can move a test from "must pass" to "expected to fail" with no
+    // signal, and a suite that registers nothing at all yields 0/0 — which
+    // passes every check above. Pin the whole census: any test appearing,
+    // vanishing, or crossing the boundary in either direction is then a
+    // failure with a reviewable diff, including an out-of-subset test that
+    // starts passing (the sign the subset definition has drifted from what
+    // the library actually serves).
+    const drift = censusDrift(EXPECTED, census);
+    if (drift.length > 0) {
+      throw new ComponentError(
+        `WPT census does not match componentize-sdk/wpt/expected.js:\n` +
+          drift.join("\n") +
+          `\nRe-record with \`just update-wpt-expectations\` once the change is understood.` +
+          `\n${censusLine}`,
+      );
+    }
+
     return (
       `WPT WebCryptoAPI subset: ${totalInPassed}/${totalIn} in-subset tests passed\n` +
-      lines.join("\n")
+      lines.join("\n") +
+      `\n${censusLine}`
     );
   },
 };
+
+/** Human-readable differences between the recorded and observed censuses. */
+function censusDrift(expected, observed) {
+  const drift = [];
+  const groups = new Set([...Object.keys(expected), ...Object.keys(observed)]);
+  for (const group of [...groups].sort()) {
+    const want = expected[group];
+    const got = observed[group];
+    if (!want) {
+      drift.push(`  + ${group}: not recorded (observed ${JSON.stringify(got)})`);
+      continue;
+    }
+    if (!got) {
+      drift.push(`  - ${group}: recorded but never ran (expected ${JSON.stringify(want)})`);
+      continue;
+    }
+    for (const key of ["inPassed", "inFailed", "outPassed", "outFailed"]) {
+      if (want[key] !== got[key]) {
+        drift.push(`  ~ ${group}.${key}: expected ${want[key]}, observed ${got[key]}`);
+      }
+    }
+  }
+  return drift;
+}

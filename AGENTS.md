@@ -51,7 +51,9 @@ componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   componentize-js.rev; wpt/ vendors the
                         #   WebCryptoAPI web-platform-tests and gates in CI,
                         #   componentizing its runner from the tree with a
-                        #   published componentize-js build (wpt/component.sh)
+                        #   digest-pinned componentize-js build
+                        #   (wpt/component.sh, componentize-js.sha256); the
+                        #   run's census is pinned by wpt/expected.js
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
     wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package
@@ -188,7 +190,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just test-webcrypto-componentize-wpt` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded (`componentize-sdk/wpt/component.sh`), never compiled here. Changing `componentize-sdk/componentize-js.rev` triggers the `componentize-js-toolchain` workflow, and this check fails with instructions until that publishes. |
+| `just test-webcrypto-componentize-wpt` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`componentize-sdk/wpt/component.sh`), never compiled here. Changing `componentize-sdk/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
 | `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |

@@ -47,20 +47,31 @@ platform() {
 # Set TOOLCHAIN to the pinned componentize-js, downloading it on first use.
 # Downloads land under target/, so a clean checkout fetches once and every
 # later run is local.
+#
+# The binary is verified against the digests pinned in
+# componentize-js.sha256 before it is ever executed — on download and again
+# on every use of the cached copy. This toolchain compiles the component the
+# WPT gate tests, so an unverified one could emit a backdoored component and
+# a green run; the filename alone ties nothing to the pinned revision.
 ensure_toolchain() {
     if [ -n "${COMPONENTIZE_JS:-}" ]; then
+        # An explicitly supplied build: the caller owns its provenance.
         TOOLCHAIN="$COMPONENTIZE_JS"
         return
     fi
     TOOLCHAIN="$TOOLCHAIN_DIR/componentize-js-$REV"
+    read_pinned_digests
     if [ -x "$TOOLCHAIN" ]; then
+        verify_digest "$TOOLCHAIN" "$BINARY_SHA256" "cached toolchain"
         return
     fi
     local asset="componentize-js-${REV}-$(platform).gz"
     echo "fetching ${asset} from ${COMPONENTIZE_JS_RELEASE}" >&2
     mkdir -p "$TOOLCHAIN_DIR"
     if curl -fsSL --retry 3 -o "$TOOLCHAIN.gz.tmp" "${COMPONENTIZE_JS_RELEASE}/${asset}"; then
+        verify_digest "$TOOLCHAIN.gz.tmp" "$ASSET_SHA256" "downloaded ${asset}"
         gzip -dc "$TOOLCHAIN.gz.tmp" > "$TOOLCHAIN.tmp"
+        verify_digest "$TOOLCHAIN.tmp" "$BINARY_SHA256" "decompressed toolchain"
         chmod +x "$TOOLCHAIN.tmp"
         mv "$TOOLCHAIN.tmp" "$TOOLCHAIN"
         rm -f "$TOOLCHAIN.gz.tmp"
@@ -80,6 +91,47 @@ componentize-sdk/componentize-js.rev changes. Either:
     componentize-sdk/README.md.
 EOF
     exit 1
+}
+
+# Load this platform's pinned digests into ASSET_SHA256 / BINARY_SHA256.
+read_pinned_digests() {
+    local line
+    line="$(grep -v '^#' componentize-sdk/componentize-js.sha256 | awk -v p="$(platform)" '$1 == p { print }')"
+    if [ -z "$line" ]; then
+        cat >&2 <<EOF
+error: componentize-sdk/componentize-js.sha256 pins no digest for
+$(platform) at revision ${REV}.
+
+A toolchain is only trusted once its digests are recorded. Run
+\`just update-toolchain-digest\` (it verifies the build-provenance
+attestation before recording), or supply your own build on
+COMPONENTIZE_JS.
+EOF
+        exit 1
+    fi
+    ASSET_SHA256="$(echo "$line" | awk '{ print $2 }')"
+    BINARY_SHA256="$(echo "$line" | awk '{ print $3 }')"
+}
+
+# Fail unless `file` hashes to `want`. A mismatch deletes the file: a
+# toolchain that fails verification must not survive to be picked up as a
+# cache hit by the next run.
+verify_digest() {
+    local file="$1" want="$2" what="$3" got
+    got="$(sha256sum "$file" | cut -d' ' -f1)"
+    if [ "$got" != "$want" ]; then
+        rm -f "$file"
+        cat >&2 <<EOF
+error: ${what} does not match the digest pinned for revision ${REV}.
+  expected ${want}
+  actual   ${got}
+
+The file has been removed. Either the published asset was replaced, the
+pin is stale, or the download was tampered with. Re-record deliberately
+with \`just update-toolchain-digest\` after establishing why it changed.
+EOF
+        exit 1
+    fi
 }
 
 # Concatenate each vendored WPT suite into an importable module: the

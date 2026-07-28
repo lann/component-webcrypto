@@ -156,6 +156,15 @@ test-webcrypto-componentize: compose-componentize-demo
     timeout 120 wasmtime run -W component-model-async=y -S cli \
         target/componentize-demo-composed.wasm
 
+# Record the digests of the published componentize-js build for the pinned
+# revision, after verifying its build-provenance attestation (needs `gh`).
+# Run this when componentize-js.rev changes and the toolchain workflow has
+# published the new build: until its digests are recorded, every consumer
+# refuses to execute it. Pass a platform to record one you are not running
+# on, e.g. `just update-toolchain-digest linux-x86_64`.
+update-toolchain-digest platform="":
+    componentize-sdk/wpt/update-toolchain-digest.sh {{platform}}
+
 # Run the vendored web-platform-tests WebCryptoAPI suites against the
 # componentize-sdk library: every in-subset test must pass; out-of-subset
 # tests are reported by count (componentize-sdk/wpt/README.md has the
@@ -163,7 +172,13 @@ test-webcrypto-componentize: compose-componentize-demo
 # tree with the pinned componentize-js (downloaded on first use), then
 # composed with a freshly built in-guest provider and driver and run under
 # `wasmtime` (v47+) and `wac`, like test-webcrypto-composed.
-test-webcrypto-componentize-wpt: build-guest-provider
+test-webcrypto-componentize-wpt: compose-wpt-runner
+    timeout 600 wasmtime run -W component-model-async=y -S cli \
+        target/wpt-runner-composed.wasm
+
+# Componentize the WPT runner from the working tree and compose it with a
+# freshly built in-guest provider and driver.
+compose-wpt-runner: build-guest-provider
     componentize-sdk/wpt/component.sh build
     cargo build --release -p crypto-demo-driver --target wasm32-wasip2
     wac plug componentize-sdk/wpt/build/runner.component.wasm \
@@ -172,8 +187,13 @@ test-webcrypto-componentize-wpt: build-guest-provider
     wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
         --plug target/wpt-runner-with-crypto.wasm \
         -o target/wpt-runner-composed.wasm
-    timeout 600 wasmtime run -W component-model-async=y -S cli \
-        target/wpt-runner-composed.wasm
+
+# Re-record componentize-sdk/wpt/expected.js from an actual run: run this
+# when a change legitimately moves a count, and review the diff — each moved
+# number is a test that appeared, vanished, or crossed the in-subset
+# boundary.
+update-wpt-expectations: compose-wpt-runner
+    componentize-sdk/wpt/update-expectations.sh target/wpt-runner-composed.wasm
 
 # --- conformance -------------------------------------------------------------
 

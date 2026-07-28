@@ -28,13 +28,44 @@ artifacts involved have very different costs, and are handled accordingly:
   [`toolchains` release] with a build-provenance attestation, and
   `component.sh` downloads it into `target/toolchains/` on first use.
 
-Pushing a change to the pin triggers that workflow. Until it publishes, this
-check fails with instructions rather than compiling SpiderMonkey on a pull
-request; re-run it once the toolchain is available. To test against a
+  That binary is the compiler for the component under test, so it is pinned
+  by digest, not by filename: `component.sh` verifies the download and every
+  later use of the cached copy against
+  [`../componentize-js.sha256`](../componentize-js.sha256) and refuses to
+  execute anything else. Recording a digest is a separate, manual step
+  (`just update-toolchain-digest`), which verifies the attestation — subject
+  digest, repository, and workflow — before writing it. So trusting a new
+  toolchain is a reviewable diff, and published assets are immutable (the
+  workflow uploads without `--clobber`) so a recorded digest cannot be
+  invalidated underneath you.
+
+Pushing a change to the pin triggers that workflow. Until it publishes — and
+until its digests are recorded — this check fails with instructions rather
+than compiling SpiderMonkey or executing an unverified binary; re-run it once
+the toolchain is available and pinned. To test against a
 componentize-js you built yourself, point `COMPONENTIZE_JS` at it (see
 [../README.md](../README.md)).
 
 [`toolchains` release]: https://github.com/lann/component-webcrypto/releases/tag/toolchains
+
+## What the gate asserts
+
+Every in-subset test must pass. Beyond that, the observed census — per group,
+how many tests land in each of the four buckets — must match
+[`expected.js`](expected.js) exactly.
+
+Counting is not asserting. Subset membership is decided by matching WPT test
+*names*, so without the census an upstream rename in a re-vendored file could
+move a test from "must pass" to "expected to fail" with no signal, and a
+suite that registered nothing at all would report `0/0 in-subset tests
+passed` and gate green having tested nothing. Pinning all four buckets turns
+each of those into a failure with a diff — including an out-of-subset test
+that starts *passing*, which is the sign the subset definition has drifted
+from what the library actually serves.
+
+This is the WPT path's equivalent of `conformance/*/tests.lock`. Regenerate
+it with `just update-wpt-expectations` when a change legitimately moves a
+number, and review the diff.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 

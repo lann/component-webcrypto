@@ -76,9 +76,14 @@ to wasm and needs WASI-SDK 30 and Clang 19+, so the
 [`componentize-js-toolchain`](../.github/workflows/componentize-js-toolchain.yml)
 workflow builds one per (revision, platform) and publishes it on the rolling
 `toolchains` release, and `componentize-sdk/wpt/component.sh toolchain`
-downloads it into `target/toolchains/` on first use. Changing the revision
+downloads it into `target/toolchains/` on first use — verified against the
+digests in [`componentize-js.sha256`](componentize-js.sha256), since this
+binary compiles the component the WPT gate tests. Changing the revision
 pinned in [`componentize-js.rev`](componentize-js.rev) triggers a new build;
-checks that need it fail with instructions until it is published.
+checks that need it fail with instructions until it is published *and*
+`just update-toolchain-digest` has recorded its digests (that step verifies
+the build-provenance attestation, so trusting a new binary is a reviewable
+diff).
 
 (Revisions earlier than the pin abort in SpiderMonkey's rooting assertion
 whenever a *suspended* import settles with an `err` result — e.g. any failed
