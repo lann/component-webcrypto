@@ -29,8 +29,10 @@
 // - **Stream ingestion** (`collectByteStream`): guest-provided `stream<u8>`
 //   values arrive as jco's async-iterable `Stream` objects (a web
 //   `ReadableStream` is also tolerated), with chunk batching left to the
-//   runtime. Host-returned `stream<u8>` values are web `ReadableStream`s
-//   of `Uint8Array`.
+//   runtime. Chunk *ownership* is not part of that contract, so ingested
+//   chunks are copied (`toByteChunk`) rather than retained by reference.
+//   Host-returned `stream<u8>` values are web `ReadableStream`s of
+//   `Uint8Array`.
 
 const subtle = globalThis.crypto.subtle;
 
@@ -771,11 +773,18 @@ function bytesToStream(bytes, reservation = undefined) {
 /**
  * Coerce one chunk of a WIT byte stream (a number, an array of numbers, or a
  * typed array, depending on how the runtime batched the read) to a
- * `Uint8Array`.
+ * `Uint8Array` the collector owns.
+ *
+ * A typed-array chunk is *copied*, never retained by reference: nothing in
+ * the runtime's stream contract promises the chunk is not a view over a
+ * buffer the next read reuses, and `collectByteStream` holds every chunk
+ * until the stream ends. Aliasing there would silently corrupt plaintext or
+ * ciphertext — the copy costs one pass over bytes already copied at
+ * concatenation.
  */
 function toByteChunk(value) {
   if (typeof value === "number") return Uint8Array.of(value);
-  if (value instanceof Uint8Array) return value;
+  if (value instanceof Uint8Array) return value.slice();
   return Uint8Array.from(value);
 }
 
