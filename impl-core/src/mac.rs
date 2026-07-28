@@ -74,8 +74,12 @@ impl MacKeyMaterial {
     }
 
     /// The key length in bits (`mac-key.algorithm-length`).
+    ///
+    /// `import-key` accepts any non-empty length, so the bit count can
+    /// exceed `u32`. The getter is total in the WIT, so it saturates rather
+    /// than trapping.
     pub fn length_bits(&self) -> u32 {
-        self.raw.len() as u32 * 8
+        length_bits(self.raw.len())
     }
 
     /// The raw material, or `not-extractable` (the `mac-key.export-key`
@@ -87,6 +91,11 @@ impl MacKeyMaterial {
             Err(Error::NotExtractable)
         }
     }
+}
+
+/// The bit count of `len` bytes, saturating at `u32::MAX`.
+fn length_bits(len: usize) -> u32 {
+    u32::try_from(len.saturating_mul(8)).unwrap_or(u32::MAX)
 }
 
 // Debug is implemented by hand so key material can never reach logs: only
@@ -131,6 +140,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(key.export().unwrap().len(), 128);
+    }
+
+    #[test]
+    fn length_saturates_instead_of_wrapping() {
+        assert_eq!(length_bits(0), 0);
+        assert_eq!(length_bits(20), 160);
+        // A key of 512 MiB is the first length whose bit count leaves u32.
+        assert_eq!(length_bits(1 << 29), u32::MAX);
+        assert_eq!(length_bits(usize::MAX), u32::MAX);
     }
 
     #[test]
