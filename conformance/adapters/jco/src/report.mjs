@@ -10,6 +10,10 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "smol-toml";
 
+// The per-case guard is shared with the in-browser harness (that module is
+// browser-safe, so it is the lower layer of the two drivers).
+import { runCase } from "../../../web/harness.mjs";
+
 export const ADAPTER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
 export const RESULTS_DIR = join(REPO_ROOT, "conformance", "results");
@@ -41,8 +45,7 @@ export async function runCases(tests, missing, only) {
     const name = String(testCase.name());
     if (only !== undefined && !name.includes(only)) continue;
     const features = Array.from(testCase.features(), String);
-    const { tag, val } = await testCase.run();
-    results.push({ name, features, outcome: String(tag), detail: String(val ?? "") });
+    results.push({ name, features, ...(await runCase(testCase)) });
   }
   return results;
 }
