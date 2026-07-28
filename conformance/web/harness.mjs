@@ -54,16 +54,28 @@ export async function runAll(missing, report, shard = { index: 0, count: 1 }) {
     for (const [index, testCase] of mine) {
       const name = String(testCase.name());
       const features = Array.from(testCase.features(), String);
-      const { tag, val } = await testCase.run();
-      report({
-        kind: "result",
-        suite,
-        index,
-        name,
-        features,
-        outcome: String(tag),
-        detail: String(val ?? ""),
-      });
+      report({ kind: "result", suite, index, name, features, ...(await runCase(testCase)) });
     }
+  }
+}
+
+/**
+ * Run one case to its `{ outcome, detail }` row. `run` never traps by
+ * construction (the conformance WIT: a mismatch is a `fail` outcome), so a
+ * throw here is the guest being aborted — a host error the implementation
+ * failed to lift into the WIT taxonomy. Record it as this case's failure:
+ * one unliftable host error must not end the run and discard every
+ * remaining case's verdict.
+ *
+ * Exported so the Node adapter's loop (adapters/jco/src/report.mjs) shares
+ * this rule; this module stays browser-safe, so it is the lower layer.
+ * @param {{ run: () => Promise<{ tag: string, val?: unknown }> }} testCase
+ */
+export async function runCase(testCase) {
+  try {
+    const { tag, val } = await testCase.run();
+    return { outcome: String(tag), detail: String(val ?? "") };
+  } catch (err) {
+    return { outcome: "fail", detail: `the guest trapped: ${err}` };
   }
 }
