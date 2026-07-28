@@ -213,7 +213,7 @@ conformance-timeout := "600"
 # Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
 # Chrome/Chromium 137+; targets.toml marks it optional, so the runner warns
 # on its missing results rather than failing).
-conformance: _conformance-clean conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
+conformance: verify-vectors _conformance-clean conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
     cargo run --release -p conformance-runner -- \
         --targets conformance/targets.toml \
         --results conformance/results \
@@ -261,6 +261,21 @@ conformance-web-site: rust-docs
 _conformance-clean:
     mkdir -p conformance/results
     rm -f conformance/results/*.json
+
+# Check the vendored test vectors against their recorded digests. The case
+# lockfiles pin names and feature tags, so an edit *inside* a vector — a
+# flipped `result`, an adjusted `tag` — is invisible to them and produces a
+# green run. This is what stands between the suite and that edit.
+verify-vectors:
+    cd conformance/vectors && sha256sum -c --quiet SHA256SUMS
+
+# Re-record the vendored vectors' digests. Run this only after establishing
+# that the new bytes are upstream's; the diff is the record of that decision.
+update-vector-digests:
+    cd conformance/vectors && \
+        sed -n '/^#/p' SHA256SUMS > SHA256SUMS.tmp && \
+        sha256sum *.json *.rsp LICENSE >> SHA256SUMS.tmp && \
+        mv SHA256SUMS.tmp SHA256SUMS
 
 # Regenerate the suite lockfiles (case names + feature tags) from the built
 # guests. Run after any intentional case change — the runner rejects

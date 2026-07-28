@@ -73,7 +73,9 @@ conformance/            # cross-implementation conformance tests — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
                         #   from the WebRTC sibling's machinery
-  vectors/              #   vendored Wycheproof JSON + the translation policy
+  vectors/              #   vendored Wycheproof JSON + the translation
+                        #     policy; pinned by digest (SHA256SUMS,
+                        #     checked by `just verify-vectors`)
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
                         #     pinned by its tests.lock)

@@ -35,6 +35,17 @@ Cargo.lock-style): the runner rejects any results file whose case names or
 tags diverge, so case changes land intentionally via
 `just update-conformance-lock` with a reviewable diff.
 
+The lockfiles pin the **inventory**, not the assertions. A case that keeps
+its name while weakening what it checks — `Err(_)` where it demanded
+`Err(Error::AuthenticationFailed)` — produces no lockfile diff. Two other
+things stand in for that. Vector *bytes* are pinned by digest
+(`vectors/SHA256SUMS`, checked by `just verify-vectors` as part of `just
+conformance`), because a suite whose authority is "these are Wycheproof's
+vectors" cannot let an edited `result` field pass unnoticed. Assertion
+strength is pinned by review alone: discriminating specific error variants
+rather than any error is the property that makes these cases worth running,
+and nothing mechanical protects it.
+
 ## Architecture
 
 ```

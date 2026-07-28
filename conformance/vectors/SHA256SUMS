@@ -1,0 +1,29 @@
+# Digests of the vendored test vectors.
+#
+# The suite's authority comes entirely from these files being what upstream
+# published. Nothing else pins them: the case lockfiles record names and
+# feature tags, so editing a `result` or a `tag` inside a vector to match a
+# buggy implementation produces no lockfile diff and a green run. That is
+# the one edit this suite cannot otherwise detect, and it is the one an
+# implementer under deadline pressure is most tempted by.
+#
+# `just verify-vectors` (part of `just conformance`) checks these. Changing
+# a vector therefore has to change this file too, which makes it a
+# reviewable line in a diff rather than an invisible one.
+#
+# Regenerate deliberately, after establishing that the new bytes are
+# upstream's: `just update-vector-digests`.
+985e5ecc172e181eaf49e89508b9470dcf478002eb7e8559c707eb42dc97dfe7  aes_gcm_test.json
+fe61d25f90e1bde4461d00eafe61049e5f29bd999f36b766df9cda90906ad53d  chacha20_poly1305_test.json
+c60de693930e386c3a5472d08081623ef8504decc54b38ac01ec6b2a2575c986  ecdsa_secp256r1_sha256_p1363_test.json
+e27344bf6daae75fa19663620883809f91c79fc4b4420eff9eae8036b34476be  ecdsa_secp384r1_sha384_p1363_test.json
+08e47a36d9aead288664930505584f353fff113ab854f2800db1e4f5b3540450  ed25519_speccheck.json
+70471c053c711731f2195ef4875b60ea7f5d6793939d99058ac12da810cb8e00  ed25519_test.json
+2d201cfa61d1bf95e6f5d07d96634b4a348b31e8eaa277ad7c8d09677b7a743f  hmac_sha256_test.json
+28b9776e979dd755d852ca471043ea6cedce8b15f7a28abdf6ea9efd982b43c0  hmac_sha384_test.json
+b6c90477bdb4a6fc8ee3d1f7b2c0b69a8dfffab34718abaa6cabd71cc2ba1207  hmac_sha512_test.json
+a79de072571b90eb40c3a63ce0c7f75dcb4b62323c8870228e1f61dcc61d63a9  xchacha20_poly1305_test.json
+75e1cb83994638481808e225b9eb0c1ebd0c232d952ac42b61abce6363be283c  SHA256ShortMsg.rsp
+7ea7bcf00fadc20949fae63703e40681ddf288fea808471cb3cbc95f3ec16811  SHA384ShortMsg.rsp
+e53a36c03609e5a3e3cc4b6e117a499db7864c23ec825c6cec99503a45f40764  SHA512ShortMsg.rsp
+58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd  LICENSE

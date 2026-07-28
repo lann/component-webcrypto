@@ -1,5 +1,11 @@
 # Conformance test vectors
 
+Every file here is pinned by digest in [`SHA256SUMS`](SHA256SUMS), verified
+by `just verify-vectors` as part of `just conformance`. The suite's
+authority rests on these bytes being what upstream published, and the case
+lockfiles cannot detect an edit *inside* a vector — so this is the check
+that makes one a reviewable diff.
+
 Vendored from [C2SP/wycheproof](https://github.com/C2SP/wycheproof)
 (`testvectors_v1`, schema v1; Apache-2.0 — see [LICENSE](LICENSE)):
 
