@@ -123,6 +123,39 @@ pub const ED25519_NAME: &str = "Ed25519";
 /// `KeyAlgorithm.name`).
 pub const ECDSA_NAME: &str = "ECDSA";
 
+/// What a stream-draining loop should do with one read's status.
+///
+/// The two Rust implementations consume `stream<u8>` through different
+/// runtimes — the Wasmtime host through `StreamConsumer`, the in-guest
+/// provider through `wit_bindgen::StreamReader` — but the *policy* is one
+/// contract, and they disagreed about it: the guest treated a cancelled read
+/// as end-of-input, ending the operation over a prefix while the host kept
+/// collecting. Deciding it here, once, is the point of this crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrainStep {
+    /// Keep the bytes just read and read again: the stream is still open.
+    Continue,
+    /// The writer dropped its end. The input is complete.
+    Complete,
+}
+
+/// The action for a read that ended with the writer's handle dropped
+/// (`dropped`) and/or with the read itself cancelled (`cancelled`).
+///
+/// Cancellation is not end-of-input. It reports that *this read* transferred
+/// nothing, not that the stream ended, so treating it as the end yields a
+/// tag, signature or ciphertext over a prefix the caller never finished
+/// sending — and leaves the stream undrained, which the WIT's drain rule
+/// forbids. Only a dropped writer ends a stream.
+pub fn drain_step(dropped: bool, cancelled: bool) -> DrainStep {
+    let _ = cancelled;
+    if dropped {
+        DrainStep::Complete
+    } else {
+        DrainStep::Continue
+    }
+}
+
 /// Whether `a` and `b` are equal, in time independent of their *contents*
 /// (necessarily dependent on their lengths) — the `bytes.constant-time-equal`
 /// contract.
@@ -139,6 +172,32 @@ pub(crate) fn random_bytes(len: usize) -> Result<Vec<u8>, RngError> {
     let mut raw = vec![0u8; len];
     getrandom::fill(&mut raw)?;
     Ok(raw)
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::{drain_step, DrainStep};
+
+    /// A dropped writer is the only end-of-input.
+    #[test]
+    fn only_a_dropped_writer_completes() {
+        assert_eq!(drain_step(true, false), DrainStep::Complete);
+        assert_eq!(drain_step(true, true), DrainStep::Complete);
+    }
+
+    /// A cancelled read transferred nothing; the stream is still open, so
+    /// the loop must read again rather than deliver the prefix collected so
+    /// far as if it were the whole input.
+    #[test]
+    fn a_cancelled_read_is_not_end_of_input() {
+        assert_eq!(drain_step(false, true), DrainStep::Continue);
+    }
+
+    /// An ordinary completed read continues.
+    #[test]
+    fn a_completed_read_continues() {
+        assert_eq!(drain_step(false, false), DrainStep::Continue);
+    }
 }
 
 #[cfg(test)]

@@ -179,9 +179,15 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
         }
 
         // No bytes available. When `finish` is set the writer cancelled its
-        // pending write; the stream itself remains open, so keep the buffer
-        // and keep collecting — `Drop` is the completion point.
+        // pending write. Cancellation is not end-of-input — the shared
+        // policy in `webcrypto_impl_core::drain_step` says so, and both
+        // implementations follow it — so keep the buffer and keep
+        // collecting; `Drop` is the completion point.
         if finish {
+            debug_assert_eq!(
+                webcrypto_impl_core::drain_step(false, true),
+                webcrypto_impl_core::DrainStep::Continue,
+            );
             return Poll::Ready(Ok(StreamResult::Cancelled));
         }
 

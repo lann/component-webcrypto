@@ -102,10 +102,14 @@ async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
     loop {
         let (status, batch) = data.read(Vec::with_capacity(8 * 1024)).await;
         out.extend(batch);
-        if matches!(
-            status,
-            wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
-        ) {
+        // What each status means is decided once, in the shared core: the
+        // host consumes streams through a different runtime but implements
+        // the same contract, and this is where the two drifted apart.
+        let step = webcrypto_impl_core::drain_step(
+            matches!(status, wit_bindgen::StreamResult::Dropped),
+            matches!(status, wit_bindgen::StreamResult::Cancelled),
+        );
+        if step == webcrypto_impl_core::DrainStep::Complete {
             break;
         }
     }
