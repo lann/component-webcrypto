@@ -3,218 +3,66 @@
 //! Every stream-taking operation buffers its whole input in host memory (the
 //! single-message contract), so a guest with many concurrent calls could
 //! otherwise make the host retain `calls × per-call-bound` bytes — unbounded.
-//! The [`BufferPool`] bounds *aggregate* retention: each operation reserves
-//! its per-call buffering bound from the pool before draining, waiting
-//! (FIFO) for capacity when the pool is full, and releases the reservation
-//! when its buffers are gone — including the returned output stream, whose
-//! producer carries the [`Reservation`].
+//! A counting semaphore bounds *aggregate* retention: bytes are permits, each
+//! operation acquires its per-call bound before draining, waits (fairly, in
+//! request order) when the budget is spent, and releases when its buffers are
+//! gone — including the returned output stream, whose producer carries the
+//! [`Reservation`].
 //!
 //! Reservations are pessimistic (the full per-call bound, since a stream's
-//! length is unknowable up front): an admitted operation never waits for
-//! more capacity mid-flight, so admission cannot deadlock on partial
-//! allocations. When the per-call bound exceeds the pool, one operation is
-//! always admitted, capped to the pool size, so admission cannot livelock
-//! either.
+//! length is unknowable up front): an admitted operation never waits for more
+//! capacity mid-flight, so admission cannot deadlock on partial allocations.
+//! The caller clamps the per-call bound to the budget, so one operation is
+//! always admittable and admission cannot livelock either.
 //!
-//! The pool is shared behind an [`Arc`] so reservation guards can release
-//! without store access (host futures may be dropped at any point, e.g. on
-//! task cancellation).
+//! The permit is owned and `'static`, so it can be released without store
+//! access — host futures may be dropped at any point, e.g. on task
+//! cancellation.
+//!
+//! The primitive itself is [`mea::semaphore`] rather than a hand-written
+//! queue. What that buys is not lines of code but the parts that are easy to
+//! get wrong and hard to test: waking a parked waiter without holding the
+//! lock the waker may re-enter, deciding after a release whether the *front*
+//! waiter fits, and unwinding a cancelled waiter out of the queue. An earlier
+//! implementation here got each of those wrong.
 
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
+use std::sync::Arc;
 
-/// The admission pool: a fixed aggregate budget, the bytes currently
-/// reserved against it, and the FIFO wait queue.
+use mea::semaphore::Semaphore;
+
+/// The admission pool: a fixed aggregate budget in bytes, held as permits.
 ///
 /// The budget belongs to the pool, not to each acquirer. Passing it per
 /// acquisition would leave the pool enforcing nothing of its own: every
-/// waiter would judge the shared `reserved` counter against its own
-/// ceiling, so two acquirers configured differently could disagree about
-/// how full the pool is, and a release would have to decide whether the
-/// front waiter fits using a ceiling belonging to whoever happened to be
-/// releasing. One budget makes both questions have one answer.
-#[derive(Debug)]
-pub(crate) struct BufferPool {
-    /// The aggregate ceiling, fixed when the pool is created.
-    total: u64,
-    state: Mutex<PoolState>,
-}
-
-#[derive(Debug, Default)]
-struct PoolState {
-    /// Bytes currently reserved by admitted operations.
-    reserved: u64,
-    /// Waiting admissions, front first. Tickets keep FIFO order stable
-    /// across spurious wakes and cancelled waiters.
-    queue: VecDeque<Waiter>,
-    /// The next ticket to hand out.
-    next_ticket: u64,
-}
-
-/// A queued admission: its ticket, how much it asked for, and its waker
-/// once it has parked. The amount is recorded so a releasing or admitting
-/// operation can ask whether *this* waiter fits, rather than guessing from
-/// its own size.
-#[derive(Debug)]
-struct Waiter {
-    ticket: u64,
-    amount: u64,
-    waker: Option<Waker>,
-}
-
-impl PoolState {
-    /// Take the front waiter's waker if the pool can now fit *that* waiter.
-    /// `total` is the pool's own budget; the caller passes it because the
-    /// state is guarded separately from it.
-    ///
-    /// Returns the waker instead of waking it: a `Waker` may poll inline on
-    /// the waking thread, and `std::sync::Mutex` is not reentrant, so waking
-    /// under the pool lock risks deadlock. Every caller drops the guard
-    /// first.
-    #[must_use]
-    fn take_front_waker(&mut self, total: u64) -> Option<Waker> {
-        let front = self.queue.front_mut()?;
-        if self.reserved.saturating_add(front.amount) > total {
-            return None;
-        }
-        front.waker.take()
-    }
-}
-
-/// Lock the pool, recovering from poisoning rather than panicking.
-///
-/// A panic elsewhere must not turn every later admission — including ones
-/// in `Drop` — into an abort. The invariant this guards is a byte counter
-/// and a queue; a poisoned lock leaves both readable and consistent.
-fn lock(state: &Mutex<PoolState>) -> std::sync::MutexGuard<'_, PoolState> {
-    state
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-impl BufferPool {
-    /// A pool holding at most `total` bytes across all admitted operations.
-    pub(crate) fn new(total: u64) -> Self {
-        Self {
-            total: total.max(1),
-            state: Mutex::default(),
-        }
-    }
-
-    /// Reserve `amount` bytes, waiting (FIFO) until the pool can fit them.
-    /// `amount` must be `<= total` (the caller clamps), so an empty pool
-    /// always admits.
-    pub(crate) fn admit(self: &Arc<Self>, amount: u64) -> Admit {
-        Admit {
-            pool: self.clone(),
-            amount,
-            ticket: None,
-        }
-    }
-}
-
-/// A pending admission; resolves to a [`Reservation`].
-pub(crate) struct Admit {
-    pool: Arc<BufferPool>,
-    amount: u64,
-    ticket: Option<u64>,
-}
-
-impl Future for Admit {
-    type Output = Reservation;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        let mut state = lock(&this.pool.state);
-        // Join the queue on first poll; admission is strictly in ticket
-        // order, so later arrivals cannot barge past earlier ones.
-        let amount = this.amount;
-        let ticket = *this.ticket.get_or_insert_with(|| {
-            let ticket = state.next_ticket;
-            state.next_ticket += 1;
-            state.queue.push_back(Waiter {
-                ticket,
-                amount,
-                waker: None,
-            });
-            ticket
-        });
-        let is_front = state.queue.front().is_some_and(|w| w.ticket == ticket);
-        if is_front && state.reserved.saturating_add(this.amount) <= this.pool.total {
-            state.queue.pop_front();
-            state.reserved += this.amount;
-            // Cascade: the new front may also fit (e.g. after a bulk
-            // release, or when reservations shrink). Whether it fits is a
-            // question about *its* size, not this one's.
-            let waker = state.take_front_waker(this.pool.total);
-            drop(state);
-            if let Some(waker) = waker {
-                waker.wake();
-            }
-            this.ticket = None;
-            Poll::Ready(Reservation {
-                pool: this.pool.clone(),
-                amount: this.amount,
-            })
-        } else {
-            let entry = state
-                .queue
-                .iter_mut()
-                .find(|w| w.ticket == ticket)
-                .expect("queued ticket present until admitted or dropped");
-            entry.waker = Some(cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-impl Drop for Admit {
-    fn drop(&mut self) {
-        // A cancelled waiter leaves the queue; if it was the front, the
-        // next waiter gets its turn.
-        let Some(ticket) = self.ticket else { return };
-        let mut state = lock(&self.pool.state);
-        let Some(index) = state.queue.iter().position(|w| w.ticket == ticket) else {
-            return;
-        };
-        state.queue.remove(index);
-        let waker = if index == 0 {
-            state.take_front_waker(self.pool.total)
-        } else {
-            None
-        };
-        drop(state);
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
+/// waiter would judge one shared counter against its own ceiling, so
+/// acquirers configured differently could disagree about how full the pool
+/// is, and a release could not tell whether the next waiter fits without
+/// borrowing a ceiling from whoever happened to be releasing.
+pub(crate) type BufferPool = Semaphore;
 
 /// An admitted reservation of pool capacity; released on drop.
 ///
 /// The guard travels with the operation's buffers: held across the input
 /// drain and moved into the output stream's producer where one exists, so
 /// capacity frees only when the retained bytes actually do.
-#[derive(Debug)]
-pub(crate) struct Reservation {
-    pool: Arc<BufferPool>,
-    amount: u64,
+pub(crate) type Reservation = mea::semaphore::OwnedSemaphorePermit;
+
+/// A pool holding at most `total` bytes across all admitted operations.
+pub(crate) fn pool(total: u64) -> Arc<BufferPool> {
+    Arc::new(Semaphore::new(permits(total)))
 }
 
-impl Drop for Reservation {
-    fn drop(&mut self) {
-        let mut state = lock(&self.pool.state);
-        state.reserved = state.reserved.saturating_sub(self.amount);
-        let waker = state.take_front_waker(self.pool.total);
-        // Wake outside the lock: see `take_front_waker`.
-        drop(state);
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
+/// Reserve `amount` bytes, waiting until the pool can fit them. `amount`
+/// must be `<= total` (the caller clamps), so an empty pool always admits.
+pub(crate) async fn admit(pool: &Arc<BufferPool>, amount: u64) -> Reservation {
+    pool.clone().acquire_owned(permits(amount)).await
+}
+
+/// Bytes as permits, saturating rather than truncating: a budget beyond
+/// `usize` is unreachable on any host that could allocate it, and wrapping a
+/// large limit into a small one would silently tighten it.
+fn permits(bytes: u64) -> usize {
+    usize::try_from(bytes).unwrap_or(usize::MAX).max(1)
 }
 
 #[cfg(test)]
@@ -224,172 +72,88 @@ mod tests {
     use std::pin::pin;
     use std::task::{Context, Poll, Waker};
 
-    fn poll_once<F: Future>(fut: Pin<&mut F>) -> Poll<F::Output> {
+    fn poll_once<F: Future>(fut: std::pin::Pin<&mut F>) -> Poll<F::Output> {
         fut.poll(&mut Context::from_waker(Waker::noop()))
     }
 
-    /// An empty pool admits immediately, even for a reservation equal to
-    /// the whole pool.
+    /// An empty pool admits immediately, even for a reservation equal to the
+    /// whole budget — the case that makes `per_call == total` workable
+    /// rather than a deadlock.
     #[test]
-    fn admits_up_to_total() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut a = pin!(pool.admit(100));
+    fn admits_up_to_the_whole_budget() {
+        let pool = pool(100);
+        let mut a = pin!(admit(&pool, 100));
         let Poll::Ready(_guard) = poll_once(a.as_mut()) else {
             panic!("first admission should not wait");
         };
     }
 
-    /// Admissions are FIFO: a later small reservation cannot barge past an
-    /// earlier waiting one, and capacity release admits the front waiter.
+    /// Admission is in request order: a later, smaller reservation cannot
+    /// barge past an earlier waiting one. Without this a stream of small
+    /// operations could starve a large one indefinitely.
     #[test]
-    fn fifo_admission_and_release() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut first = pin!(pool.admit(60));
+    fn admission_is_fifo_and_release_admits_the_waiter() {
+        let pool = pool(100);
+        let mut first = pin!(admit(&pool, 60));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
-        let mut second = pin!(pool.admit(60));
-        assert!(poll_once(second.as_mut()).is_pending(), "pool is full");
-        let mut third = pin!(pool.admit(10));
+        let mut second = pin!(admit(&pool, 60));
+        assert!(poll_once(second.as_mut()).is_pending(), "budget is spent");
+        let mut third = pin!(admit(&pool, 10));
         assert!(
             poll_once(third.as_mut()).is_pending(),
-            "smaller later arrival must not barge past the front waiter"
+            "a smaller later arrival must not barge past the front waiter"
         );
         drop(guard1);
         let Poll::Ready(_guard2) = poll_once(second.as_mut()) else {
             panic!("released capacity admits the front waiter");
         };
-        let Poll::Ready(_guard3) = poll_once(third.as_mut()) else {
-            panic!("cascade admits the next waiter that fits");
-        };
     }
 
-    /// Dropping a waiting admission leaves the queue usable (the next
-    /// waiter becomes the front).
+    /// A reservation releases its bytes when dropped, whoever drops it and
+    /// wherever — the guard travels into the output stream's producer, which
+    /// is dropped without store access.
     #[test]
-    fn cancelled_waiter_unblocks_queue() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut first = pin!(pool.admit(100));
+    fn dropping_a_reservation_returns_its_bytes() {
+        let pool = pool(100);
+        let mut first = pin!(admit(&pool, 100));
+        let Poll::Ready(guard) = poll_once(first.as_mut()) else {
+            panic!("first admission should not wait");
+        };
+        assert_eq!(pool.available_permits(), 0);
+        drop(guard);
+        assert_eq!(pool.available_permits(), 100);
+    }
+
+    /// A cancelled waiter leaves the queue rather than blocking it: dropping
+    /// a pending admission (a host future cancelled mid-flight) must not
+    /// wedge the operations behind it.
+    #[test]
+    fn a_cancelled_waiter_does_not_block_the_queue() {
+        let pool = pool(100);
+        let mut first = pin!(admit(&pool, 100));
         let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
             panic!("first admission should not wait");
         };
-        // Box so `drop` really drops the future (`pin!` locals live to end
+        // Boxed so `drop` really drops the future (`pin!` locals live to end
         // of scope).
-        let mut second = Box::pin(pool.admit(100));
+        let mut second = Box::pin(admit(&pool, 100));
         assert!(poll_once(second.as_mut()).is_pending());
-        let mut third = pin!(pool.admit(100));
+        let mut third = pin!(admit(&pool, 100));
         assert!(poll_once(third.as_mut()).is_pending());
         drop(second);
         drop(guard1);
         let Poll::Ready(_guard3) = poll_once(third.as_mut()) else {
-            panic!("queue must advance past a cancelled waiter");
+            panic!("the queue must advance past a cancelled waiter");
         };
     }
 
-    /// A waker that records whether it fired, and re-enters the pool lock
-    /// when it does — the shape of an executor that polls inline on the
-    /// waking thread. Waking under the pool's non-reentrant `Mutex` would
-    /// deadlock here rather than merely being impolite.
-    fn reentrant_waker(
-        pool: &Arc<BufferPool>,
-        fired: &Arc<std::sync::atomic::AtomicBool>,
-    ) -> Waker {
-        struct Reentrant(Arc<BufferPool>, Arc<std::sync::atomic::AtomicBool>);
-        impl std::task::Wake for Reentrant {
-            fn wake(self: Arc<Self>) {
-                self.1.store(true, std::sync::atomic::Ordering::SeqCst);
-                // Would deadlock if the caller still held the lock.
-                let _ = lock(&self.0.state).reserved;
-            }
-        }
-        Waker::from(Arc::new(Reentrant(pool.clone(), fired.clone())))
-    }
-
-    /// Releasing a reservation must not wake with the pool lock held.
+    /// Byte budgets convert to permits without wrapping.
     #[test]
-    fn release_wakes_outside_the_lock() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut first = pin!(pool.admit(100));
-        let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
-            panic!("first admission should not wait");
-        };
-        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let waker = reentrant_waker(&pool, &fired);
-        let mut second = pin!(pool.admit(100));
-        assert!(second
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending());
-        drop(guard1);
-        assert!(
-            fired.load(std::sync::atomic::Ordering::SeqCst),
-            "the front waiter should have been woken"
-        );
-    }
-
-    /// The budget is the pool's, so every acquirer is judged against the
-    /// same ceiling — including the release path, which decides whether the
-    /// front waiter fits. With a per-acquisition ceiling this is the case
-    /// that misbehaves: a releaser carrying a smaller one would refuse to
-    /// wake a waiter the pool can actually fit, leaving it asleep with
-    /// nothing scheduled to wake it.
-    #[test]
-    fn one_budget_governs_every_acquirer() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut first = pin!(pool.admit(80));
-        let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
-            panic!("first admission should not wait");
-        };
-        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let waker = reentrant_waker(&pool, &fired);
-        let mut second = pin!(pool.admit(80));
-        assert!(second
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending());
-        drop(guard1);
-        assert!(
-            fired.load(std::sync::atomic::Ordering::SeqCst),
-            "the waiter fits the pool's budget and must be woken"
-        );
-        let Poll::Ready(_guard2) = poll_once(second.as_mut()) else {
-            panic!("the released capacity admits the waiter");
-        };
-    }
-
-    /// The cascade after an admission must ask whether the *front waiter*
-    /// fits, not whether another operation of the admitting one's size
-    /// would. Here a 60-byte admission leaves 40 free: another 60 would not
-    /// fit, but the 5-byte waiter behind it does. Consulting the wrong
-    /// amount leaves that waiter parked with nothing scheduled to wake it.
-    #[test]
-    fn cascade_consults_the_front_waiters_amount() {
-        let pool = Arc::new(BufferPool::new(100));
-        let mut first = pin!(pool.admit(60));
-        let Poll::Ready(guard1) = poll_once(first.as_mut()) else {
-            panic!("first admission should not wait");
-        };
-
-        // Queue a same-size waiter, then a small one behind it.
-        let mut second = pin!(pool.admit(60));
-        assert!(poll_once(second.as_mut()).is_pending(), "pool is full");
-        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let waker = reentrant_waker(&pool, &fired);
-        let mut third = pin!(pool.admit(5));
-        assert!(third
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending());
-
-        // Releasing admits `second` (60 of 100). The cascade must then see
-        // that `third` (5) fits in the remaining 40 and wake it.
-        drop(guard1);
-        let Poll::Ready(_guard2) = poll_once(second.as_mut()) else {
-            panic!("released capacity admits the front waiter");
-        };
-        assert!(
-            fired.load(std::sync::atomic::Ordering::SeqCst),
-            "the waiter that fits must be woken by the cascade"
-        );
+    fn a_budget_beyond_usize_saturates() {
+        assert_eq!(permits(0), 1, "a zero budget would admit nothing");
+        assert_eq!(permits(100), 100);
+        assert_eq!(permits(u64::MAX), usize::MAX);
     }
 }

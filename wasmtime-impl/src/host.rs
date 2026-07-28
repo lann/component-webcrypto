@@ -264,7 +264,7 @@ async fn admit_input<T: Send>(
         let (per_call, total) = view.ctx.buffer_limits(fuel);
         Ok::<_, wasmtime::Error>((view.ctx.pool(total).clone(), per_call))
     })?;
-    let reservation = pool.admit(per_call).await;
+    let reservation = crate::limits::admit(&pool, per_call).await;
     Ok((reservation, usize::try_from(per_call).unwrap_or(usize::MAX)))
 }
 

@@ -1106,6 +1106,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mea"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2640d335e7273dacdcf51044026139b2e269c3bb0dfc3f8cb3496b85e3f6a42c"
+dependencies = [
+ "slab",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2275,6 +2284,7 @@ name = "wasmtime-webcrypto"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "mea",
  "wasmtime",
  "webcrypto-impl-core",
 ]

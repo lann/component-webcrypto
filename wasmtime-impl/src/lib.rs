@@ -136,8 +136,7 @@ impl WasiWebcryptoCtx {
     /// Later calls reuse the pool that exists: the budget is the pool's, not
     /// each acquisition's.
     pub(crate) fn pool(&self, total: u64) -> &std::sync::Arc<crate::limits::BufferPool> {
-        self.pool
-            .get_or_init(|| std::sync::Arc::new(crate::limits::BufferPool::new(total)))
+        self.pool.get_or_init(|| crate::limits::pool(total))
     }
 }
 
