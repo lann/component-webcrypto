@@ -2,6 +2,8 @@
 //! and private signing keys — Ed25519 on every target, ECDSA only on
 //! non-wasm targets (class D; see the crate doc).
 
+use zeroize::Zeroizing;
+
 use crate::{EcdsaVariant, Error, RngError, ECDSA_NAME, ED25519_NAME};
 
 /// The public key behind a `signature.verifying-key` resource, bound to its
@@ -163,7 +165,7 @@ impl SigningKeyMaterial {
 
     /// Generate a fresh random Ed25519 signing key.
     pub fn generate_ed25519(extractable: bool) -> Result<Self, RngError> {
-        let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+        let mut seed = Zeroizing::new([0u8; 32]);
         getrandom::fill(seed.as_mut())?;
         Ok(Self {
             private: SigPrivate::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)),
@@ -203,13 +205,27 @@ impl SigningKeyMaterial {
             EcdsaVariant::P256Sha256 => 32,
             EcdsaVariant::P384Sha384 => 48,
         };
-        loop {
-            let mut raw = zeroize::Zeroizing::new(vec![0u8; scalar_len]);
+        // Bound the retries. Both rejections `import_ecdsa_scalar` can
+        // report — an out-of-range scalar and a length mismatch — arrive as
+        // `InvalidKey`, so the loop cannot tell "draw again" from "this can
+        // never succeed" by matching. Unbounded retrying therefore couples
+        // it to the invariant that `scalar_len` matches the variant: true
+        // today, and an infinite loop inside a host call if a future variant
+        // breaks it. A draw is rejected with probability under 2^-32 for
+        // these curves, so exhausting eight attempts is not sampling luck —
+        // it is that invariant failing, and saying so beats hanging.
+        const ATTEMPTS: usize = 8;
+        for _ in 0..ATTEMPTS {
+            let mut raw = Zeroizing::new(vec![0u8; scalar_len]);
             getrandom::fill(&mut raw)?;
             if let Ok(key) = Self::import_ecdsa_scalar(variant, &raw, extractable) {
                 return Ok(key);
             }
         }
+        unreachable!(
+            "{ATTEMPTS} rejection-sampled {scalar_len}-byte {variant:?} scalars were all \
+             rejected; the sampled length no longer matches the curve"
+        )
     }
 
     /// One-shot signature over `data` (the `signing-key.sign` contract):
@@ -341,7 +357,7 @@ mod tests {
             public.verify(b"tampered", &sig),
             Err(Error::AuthenticationFailed)
         );
-        assert_eq!(key.export().unwrap(), seed);
+        assert_eq!(key.export().unwrap(), seed.to_vec());
     }
 
     #[test]
