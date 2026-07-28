@@ -15,7 +15,7 @@ the componentize-js toolchain (building it compiles SpiderMonkey to wasm):
 the componentized runner is a **release artifact**, not a checked-in file.
 [`component.sh`](component.sh) owns the mechanism — it computes an input
 lock (the sha256 of everything the runner is generated from: the library,
-the harness and runner, the concatenated suites, the WIT surface, the
+the harness and runner, the concatenated suites, the resolved WIT world, the
 componentize-js revision pin) and the component is
 published on this repository's rolling [`wpt-components` release] as
 `wpt-runner-<lock-hash>.component.wasm`. The recipe's `ensure` step reuses a
@@ -23,6 +23,16 @@ fresh local build or downloads the published component for the current
 inputs; the in-guest provider and the driver it is composed with are built
 fresh every run, so changes to `impl-core`/`guest-impl` are always
 exercised.
+
+The WIT input is the `componentize-demo` world *resolved and encoded*
+(`wasm-tools component embed --dummy`), not the package's source files. The
+runner can only be affected by that world's import closure — `mac`, `aead`,
+`digest`, `sha2`, `hmac-sha2`, `aes`, `aes-gcm` — so an interface outside it
+must not invalidate a published component. Source-file hashing cannot draw
+that line, since `signature` shares `webcrypto.wit` with `mac` and `aead`.
+The encoding also drops doc comments, which likewise cannot change the
+component. Every job that computes the lock must therefore use the same
+wasm-tools, pinned in [`scripts/wasm-tools.version`](../../scripts/wasm-tools.version).
 
 When the inputs change, CI's `wpt-component` builder job builds the new
 component (restoring the componentize-js CLI from the Actions cache, so

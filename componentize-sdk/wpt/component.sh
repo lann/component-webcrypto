@@ -4,10 +4,10 @@
 # artifact — never checked in: it is published as an asset on this
 # repository's rolling `wpt-components` GitHub release, keyed by the hash of
 # an input lock over everything it is generated from (the library, the
-# harness and runner, the concatenated suites, the WIT surface, and the
-# componentize-js revision pin). CI's builder job and the justfile recipes
-# both drive this script, so the lock and build logic live in exactly one
-# place.
+# harness and runner, the concatenated suites, the resolved WIT world, and
+# the componentize-js revision pin). CI's builder job and the justfile
+# recipes both drive this script, so the lock and build logic live in
+# exactly one place.
 #
 # Subcommands:
 #   lock     regenerate the suite modules under build/ and the input lock
@@ -42,6 +42,17 @@ gen_lock() {
     echo 'export { runTests };' >> "$B"/group-import-key.js
     cat "$V"/helpers.js "$V"/successes.js > "$B"/group-generate-key.js
     echo 'export { run_test };' >> "$B"/group-generate-key.js
+    # The WIT input is the *resolved* `componentize-demo` world, not the
+    # source files: the runner is componentized against that world's import
+    # closure (mac, aead, digest, sha2, hmac-sha2, aes, aes-gcm), so an
+    # interface outside it cannot change the component and must not
+    # invalidate a published one. Source-file hashing could not express
+    # this — `signature` shares webcrypto.wit with `mac` and `aead`. The
+    # encoding also omits doc comments, which likewise cannot change the
+    # component. wasm-tools is pinned (scripts/wasm-tools.version) so every
+    # job encoding this world computes the same lock.
+    wasm-tools component embed --dummy examples/componentize-demo/wit \
+        --world componentize-demo -o "$B"/world.wasm
     {
         echo "componentize-js-rev $(cat componentize-sdk/componentize-js.rev)"
         sha256sum \
@@ -52,9 +63,7 @@ gen_lock() {
             "$B"/group-aes-gcm.js \
             "$B"/group-import-key.js \
             "$B"/group-generate-key.js \
-            examples/componentize-demo/wit/world.wit \
-            examples/crypto-demo/wit/world.wit \
-            wit/*.wit
+            "$B"/world.wasm
     } > "$B"/runner.lock.computed
     LOCK_HASH="$(sha256sum "$B"/runner.lock.computed | cut -c1-16)"
 }

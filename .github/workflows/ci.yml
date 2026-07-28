@@ -27,6 +27,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Install wasm-tools
+        # Only for the lock: its WIT input is the componentize-demo world
+        # as encoded by wasm-tools, so this job must encode it with the
+        # same version every other lock-computing job uses (the pin in
+        # scripts/wasm-tools.version, which scripts/setup.sh also reads).
+        run: |
+          version="$(cat scripts/wasm-tools.version)"
+          dir="wasm-tools-${version}-x86_64-linux"
+          curl -fsSL --retry 3 \
+            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${version}/${dir}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/${dir}" >> "$GITHUB_PATH"
+
       - name: Compute the runner's input lock
         id: lock
         run: echo "hash=$(componentize-sdk/wpt/component.sh lock)" >> "$GITHUB_OUTPUT"
@@ -65,6 +78,13 @@ jobs:
           tar -C "$RUNNER_TEMP" -xf wasi-sdk-30.0-x86_64-linux.tar.gz
           export WASI_SDK_PATH="$RUNNER_TEMP/wasi-sdk-30.0-x86_64-linux"
           rustup target add wasm32-wasip2
+          # componentize-js's build.rs spawns a nested cargo build for
+          # wasm32-wasip2 from its own source directory, where this repo's
+          # rust-toolchain.toml does not apply — so without pinning the
+          # toolchain explicitly it resolves the runner image's default,
+          # which has no wasm32-wasip2 and fails to find `core`.
+          RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | cut -d' ' -f1)"
+          export RUSTUP_TOOLCHAIN
           git clone https://github.com/dicej/componentize-js "$RUNNER_TEMP/componentize-js"
           git -C "$RUNNER_TEMP/componentize-js" checkout "$(cat componentize-sdk/componentize-js.rev)"
           cargo install --path "$RUNNER_TEMP/componentize-js"
