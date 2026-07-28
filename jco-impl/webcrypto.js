@@ -37,27 +37,7 @@
 //   Host-returned `stream<u8>` values are web `ReadableStream`s of
 //   `Uint8Array`.
 
-// Every platform surface this host uses is captured once, at module load,
-// rather than read from `globalThis` per operation — matching what `subtle`
-// already did, so the module has one policy rather than two.
-//
-// What this buys is determinism: the host keeps using the implementations
-// that were installed when it loaded, so an operation cannot change its RNG
-// or its stream type midway because something else in the realm swapped a
-// global. It cuts both ways, and deliberately: a *legitimate* later
-// replacement — a polyfill, a test double, a hardened RNG installed after
-// startup — is ignored too.
-//
-// It is not a security property, and should not be cited as one. Anything
-// able to replace `globalThis.crypto` is running arbitrary code in this
-// realm, where it can equally patch this module's exports, the prototypes
-// these functions rely on, or the bindings that call them. There is no
-// meaningful mitigation available from that position, and early binding is
-// not one.
 const subtle = globalThis.crypto.subtle;
-const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
-const PlatformReadableStream = globalThis.ReadableStream;
-const base64Decode = globalThis.atob;
 
 /**
  * Construct the throwable representation of a WIT `types.error` case: jco's
@@ -634,7 +614,7 @@ export class InternalNonceKey {
         throw errKeyExhausted();
       }
       this.#sealed += 1n;
-      const iv = getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
+      const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
       const body = new Uint8Array(
         await platformCall("AES-GCM seal", () =>
           subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
@@ -903,7 +883,7 @@ async function collectByteStream(stream, cap = Infinity) {
       total += chunk.length;
     }
   };
-  if (PlatformReadableStream && stream instanceof PlatformReadableStream) {
+  if (globalThis.ReadableStream && stream instanceof ReadableStream) {
     const reader = stream.getReader();
     try {
       for (;;) {
@@ -1181,7 +1161,7 @@ export class SigningKey {
 function base64UrlDecode(text) {
   const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-  const binary = base64Decode(padded);
+  const binary = atob(padded);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
   return out;
