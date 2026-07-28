@@ -1,0 +1,18 @@
+# Digests of the published componentize-js builds for the revision pinned in
+# componentize-js.rev. The pin covers bytes, not just a filename: nothing
+# else ties a downloaded toolchain to that revision, and the toolchain is the
+# compiler that produces the wasm component the WPT gate tests — a tampered
+# one can emit a backdoored component and a green run.
+#
+# One line per platform:
+#
+#     <platform>  <sha256 of the published .gz asset>  <sha256 of the binary>
+#
+# The asset digest is what the build-provenance attestation signs, and is
+# checked on download. The binary digest is what actually gets executed, and
+# is checked on every use, including from the local cache.
+#
+# Regenerate with `just update-toolchain-digest` when the revision changes:
+# it verifies the attestation before recording, so adding a line here is the
+# deliberate, reviewable act of trusting a new binary.
+linux-x86_64  9954f2a66d5165ca86c425c297d6b7b98f8760c5e97cf910b9e0fc3afd23121d  bbf7be7397518def75f030821d759f15765bd13cdb20416e009c1e68bef64dc7

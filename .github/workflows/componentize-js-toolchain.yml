@@ -95,6 +95,19 @@ jobs:
           asset="componentize-js-${{ steps.id.outputs.rev }}-${{ steps.id.outputs.platform }}.gz"
           gzip -c "$RUNNER_TEMP/out/bin/componentize-js" > "$asset"
           echo "asset=$asset" >> "$GITHUB_ENV"
+          # Consumers pin these (componentize-sdk/componentize-js.sha256) and
+          # refuse to execute anything else, so surface them here rather than
+          # making someone re-download to find out what was built.
+          {
+            echo "### componentize-js ${{ steps.id.outputs.rev }} (${{ steps.id.outputs.platform }})"
+            echo
+            echo '```'
+            echo "asset  $(sha256sum "$asset" | cut -d" " -f1)"
+            echo "binary $(sha256sum "$RUNNER_TEMP/out/bin/componentize-js" | cut -d" " -f1)"
+            echo '```'
+            echo
+            echo "Record with \`just update-toolchain-digest\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish on the toolchains release
         if: steps.published.outputs.found == 'false'
@@ -105,7 +118,12 @@ jobs:
             gh release create toolchains --latest=false \
               --title "Toolchains (CI artifacts)" \
               --notes "componentize-js builds, one asset per pinned revision and platform. See componentize-sdk/wpt/component.sh."
-          gh release upload toolchains "$asset" --clobber
+          # No --clobber: a published (revision, platform) is immutable, so
+          # that a recorded digest cannot be invalidated by replacing the
+          # asset underneath it. Re-publishing is a deliberate act — delete
+          # the asset first, and expect every consumer's pinned digest to
+          # stop matching.
+          gh release upload toolchains "$asset"
 
       - name: Attest the build provenance
         if: steps.published.outputs.found == 'false'
