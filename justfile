@@ -359,3 +359,43 @@ timing-lab: compose-timing-lab
     wasmtime run -W component-model-async=y -S cli \
         --env TIMING_LAB_SAMPLES \
         target/timing-lab-composed.wasm
+
+# Run the timing lab as the scheduled job does: a run whose verdicts diverge
+# is retried once at 4x samples, and only a second divergence is a failure.
+# A dudect verdict is a statistical test, and the lab's own advice on a
+# surprising one is to rerun with more samples before drawing conclusions —
+# shared runners make that advice mandatory rather than optional. Under
+# GitHub Actions the report also lands in the job summary.
+timing-lab-scheduled:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    samples="${TIMING_LAB_SAMPLES:-2000}"
+    run() { TIMING_LAB_SAMPLES="$1" just timing-lab 2>&1; }
+
+    report=$(run "$samples"); status=$?
+    printf '%s\n' "$report"
+    if [ $status -ne 0 ]; then
+        samples=$(( samples * 4 ))
+        echo
+        echo "timing lab: verdicts diverged; retrying at ${samples} samples/class before reporting failure."
+        report=$(run "$samples"); status=$?
+        printf '%s\n' "$report"
+    fi
+
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo "### timing lab — ${samples} samples/class"
+            echo
+            # The lab prints its report as a markdown table; lift it verbatim.
+            printf '%s\n' "$report" | sed -n '/^| surface/,/^$/p'
+            if [ $status -eq 0 ]; then
+                echo "All surfaces matched expectations."
+            else
+                echo "**Surfaces diverged from expectation, and again on a retry at ${samples} samples/class.**"
+                echo "A quiet positive control means the harness cannot detect leaks at this"
+                echo "measurement distance; a LEAK on a real surface warrants investigation."
+            fi
+        } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    exit $status
+
