@@ -218,7 +218,7 @@ conformance-timeout := "600"
 # Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
 # Chrome/Chromium 137+; targets.toml marks it optional, so the runner warns
 # on its missing results rather than failing).
-conformance: _conformance-clean conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
+conformance: _conformance-clean class-d-composition conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
     cargo run --release -p conformance-runner -- \
         --targets conformance/targets.toml \
         --results conformance/results \
@@ -226,6 +226,46 @@ conformance: _conformance-clean conformance-wasmtime conformance-composed confor
         --lock signing=conformance/signing-guest/tests.lock \
         --matrix-out conformance/matrix.md \
         --json-out conformance/results/matrix.json
+
+# The class-D negative-composition gate: composing a consumer whose world
+# imports `ecdsa-sign` (the signing guest) with the in-guest provider must
+# fail. This is what makes "class D is enforced structurally" a fact rather
+# than a claim — without it, the provider could start exporting `ecdsa-sign`
+# and every other check would still report green, because targets.toml
+# excludes the composed target from the signing suite by declaration.
+#
+# The composition fails on a resource-type mismatch, not on an unsatisfied
+# import: `wac plug` leaves imports it cannot satisfy in place (that is how
+# the composed demo keeps its `wasi:cli` imports). `ecdsa-sign` does
+# `use signature.{signing-key}`, and the provider *does* export `signature`,
+# so plugging rebinds `signing-key` to the provider's own resource and
+# orphans the `ecdsa-sign` import that still names the imported one. The
+# enforcement therefore holds only while the provider exports the generic
+# interface whose resource the withheld minting interface mints — true of
+# every minting interface in the package today.
+#
+# Matching the message on that interface name is load-bearing: a gate that
+# accepted any nonzero exit would also pass on a missing artifact or a
+# changed `wac` CLI.
+class-d-composition: build-signing-guest build-guest-provider
+    #!/usr/bin/env bash
+    set -uo pipefail
+    output=$(wac plug \
+        conformance/signing-guest/build/conformance-signing-guest.component.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        -o target/class-d-composition.wasm 2>&1)
+    status=$?
+    if [ $status -eq 0 ]; then
+        echo "class-D gate: composing the signing guest with the in-guest provider SUCCEEDED." >&2
+        echo "The provider must not export lann:webcrypto/ecdsa-sign (guest-impl/wit/world.wit)." >&2
+        exit 1
+    fi
+    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/ecdsa-sign'; then
+        echo "class-D gate: the composition failed, but not on ecdsa-sign:" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    echo "class-D gate: the signing guest does not compose with the in-guest provider (ecdsa-sign is not exported)."
 
 # Serve the conformance results viewer (a collapsing cross-target matrix
 # plus a live "test this browser" run of the suites) after a full
