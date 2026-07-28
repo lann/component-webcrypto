@@ -38,10 +38,22 @@
 //   `Uint8Array`.
 
 // Every platform surface this host uses is captured once, at module load,
-// rather than read from `globalThis` per operation. The nonce source matters
-// most: re-reading it per `seal` would draw the entropy for the whole
-// internal-nonce wire format from a mutable global, after any
-// attacker-influenced code has had the chance to replace it.
+// rather than read from `globalThis` per operation — matching what `subtle`
+// already did, so the module has one policy rather than two.
+//
+// What this buys is determinism: the host keeps using the implementations
+// that were installed when it loaded, so an operation cannot change its RNG
+// or its stream type midway because something else in the realm swapped a
+// global. It cuts both ways, and deliberately: a *legitimate* later
+// replacement — a polyfill, a test double, a hardened RNG installed after
+// startup — is ignored too.
+//
+// It is not a security property, and should not be cited as one. Anything
+// able to replace `globalThis.crypto` is running arbitrary code in this
+// realm, where it can equally patch this module's exports, the prototypes
+// these functions rely on, or the bindings that call them. There is no
+// meaningful mitigation available from that position, and early binding is
+// not one.
 const subtle = globalThis.crypto.subtle;
 const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
 const PlatformReadableStream = globalThis.ReadableStream;
