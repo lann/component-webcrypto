@@ -64,6 +64,38 @@ code for wasm targets at all (`#[cfg(not(target_family = "wasm"))]`), so the
 class-D code is absent from this component's binary, not merely unexported.
 Choose a host-side provider for them.
 
+`just class-d-composition` is that enforcement's gate: it asserts that the
+conformance signing guest, whose world imports `ecdsa-sign`, does not
+compose with this provider.
+
+### What the failure looks like
+
+`wac plug` reports a resource-type mismatch, not an unsatisfied import:
+
+```
+error: encoding produced a component that failed validation
+Caused by:
+    type mismatch for import `lann:webcrypto/ecdsa-sign@0.1.0`
+    type mismatch in instance export `signing-key`
+    resource types are not the same (...)
+```
+
+`wac plug` leaves imports it cannot satisfy in place — that is how the
+composed demo keeps its `wasi:cli` imports — so an unexported interface is
+not by itself a composition error. What makes it one here is that
+`ecdsa-sign` does `use signature.{signing-key}` and this provider *does*
+export `signature`: plugging rebinds `signing-key` to the provider's own
+resource and orphans the `ecdsa-sign` import, which still names the
+imported one.
+
+The enforcement therefore rests on the provider exporting the generic
+interface whose key resource the withheld minting interface mints. Every
+minting interface in the package `use`s a generic key resource, and this
+provider exports every generic kind, so the property holds across the
+surface — but a future class-D interface minting a resource from a kind
+this provider does not export would compose silently. The gate is what
+catches that.
+
 The classes describe **keyed operations**. Operations without secrets —
 hashing public data, and notably **signature verification** (e.g. validating
 JWTs) — are exempt regardless of the signing algorithm's class: the
