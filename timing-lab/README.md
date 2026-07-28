@@ -7,7 +7,29 @@ measured entirely in-guest under `wasmtime`.
 ```
 just timing-lab                          # compose + run
 TIMING_LAB_SAMPLES=20000 just timing-lab # trade runtime for sensitivity
+just timing-lab-scheduled                # as the scheduled job runs it
 ```
+
+## Automation
+
+`just timing-lab` is deliberately absent from `just ci`: a statistical
+experiment on a shared runner cannot gate pull requests without flaking
+them. But an unautomated lab rots — its runtime behavior (the positive
+controls' sensitivity to clock granularity, say) decays invisibly while only
+its *compilation* is checked.
+
+So it runs on its own cadence instead, weekly, from
+`.github/workflows/timing-lab.yml`, and there a failure **fails the job**
+rather than being swallowed by `continue-on-error`: a scheduled failure
+notifies, and a job nobody is told about is the state this replaces. To
+absorb the flakes that motivated keeping it out of CI, `just
+timing-lab-scheduled` retries a diverging run once at 4× samples and reports
+failure only if the divergence survives — the lab's own advice on a
+surprising verdict, applied automatically. The report lands in the run's job
+summary either way.
+
+`workflow_dispatch` takes a `samples` input for an on-demand run at a
+different sensitivity.
 
 ## Methodology
 
@@ -93,8 +115,8 @@ not how small a leak it would catch.
   investigation, starting with a rerun at higher `TIMING_LAB_SAMPLES` — not
   an immediate conclusion. This is why `just timing-lab` is deliberately not
   part of `just ci`: shared CI runners add scheduling noise that produces
-  both false quiets (noise floor) and false leaks (correlated drift).
-
+  both false quiets (noise floor) and false leaks (correlated drift). The
+  scheduled job automates exactly that rerun (see Automation).
 
 ## Relation to the timing-channel classes
 
