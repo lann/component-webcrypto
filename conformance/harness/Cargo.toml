@@ -1,0 +1,11 @@
+[package]
+name = "conformance-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The parts of the conformance guests that are not specific to a world: the probe table, error rendering, and missing-feature validation."
+
+[dependencies]
+# Only for the WIT `error` type that `describe` renders. Both guests obtain
+# it from here, so they render failures identically.
+lann-webcrypto-guest = { path = "../../guest-sdk" }

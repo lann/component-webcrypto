@@ -74,6 +74,9 @@ conformance/            # cross-implementation conformance tests — see
                         #   the rationale for how it deliberately diverges
                         #   from the WebRTC sibling's machinery
   vectors/              #   vendored Wycheproof JSON + the translation policy
+  harness/              #   the world-independent half of both guests:
+                        #     probe table, error rendering, feature
+                        #     validation (crate: conformance-harness)
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
                         #     pinned by its tests.lock)

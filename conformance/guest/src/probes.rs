@@ -3,8 +3,7 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
-use core::future::Future;
-use core::pin::Pin;
+use conformance_harness::probes;
 
 use crate::translate::Schedule;
 use crate::util::{
@@ -40,47 +39,15 @@ use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::{
     import_key as import_xchacha_internal_nonce_key,
 };
 
-/// One probe: the function that runs it, the features it exercises beyond
-/// the baseline surface, and that function's name.
-///
-/// The case id is *derived* from the function's own name rather than
-/// written beside it — `probe/hmac-import-empty-key` comes from
-/// `hmac_import_empty_key` — so a case cannot name one thing and run
-/// another. Held as parallel lists, that was a live hazard: inserting or
-/// reordering one alone re-points a name at a different body, which then
-/// asserts the wrong thing and reports *pass*, and a lockfile can show a
-/// reordering but not a mis-pairing.
-pub struct Probe {
-    ident: &'static str,
-    pub features: &'static [&'static str],
-    pub run: ProbeFn,
-}
-
-/// A probe body. Boxed because each `async fn` has its own opaque type.
-type ProbeFn = fn() -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
-
-impl Probe {
-    /// The case id: `probe/` plus the function's name in kebab case.
-    pub fn case_id(&self) -> String {
-        format!("probe/{}", self.ident.replace('_', "-"))
-    }
-}
-
-/// Declare the probe table: one function per line, in execution order,
-/// prefixed `chacha` for those exercising ChaCha20-Poly1305, which a
-/// target missing that feature must be able to decline.
-macro_rules! probes {
-    ($($name:ident $(($feature:ident))?),* $(,)?) => {
-        pub const PROBES: &[Probe] = &[
-            $(Probe {
-                ident: stringify!($name),
-                features: probes!(@features $($feature)?),
-                run: || Box::pin($name()),
-            }),*
-        ];
+/// The features a bare tag in the `probes!` table stands for. Which
+/// features exist is this suite's business, not the harness's.
+macro_rules! feature_tags {
+    () => {
+        &[]
     };
-    (@features) => { &[] };
-    (@features chacha) => { &[FEATURE_CHACHA] };
+    (chacha) => {
+        &[FEATURE_CHACHA]
+    };
 }
 
 probes! {

@@ -212,12 +212,20 @@ dependencies = [
 name = "conformance-guest"
 version = "0.1.0"
 dependencies = [
+ "conformance-harness",
  "futures",
  "hex",
  "lann-webcrypto-guest",
  "serde",
  "serde_json",
  "wit-bindgen 0.59.0",
+]
+
+[[package]]
+name = "conformance-harness"
+version = "0.1.0"
+dependencies = [
+ "lann-webcrypto-guest",
 ]
 
 [[package]]
@@ -234,6 +242,7 @@ dependencies = [
 name = "conformance-signing-guest"
 version = "0.1.0"
 dependencies = [
+ "conformance-harness",
  "futures",
  "hex",
  "lann-webcrypto-guest",

@@ -23,8 +23,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use std::collections::BTreeSet;
-
+use conformance_harness::{describe, probes};
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
@@ -40,38 +39,12 @@ const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
 
 struct Component;
 
-/// One probe: the function that runs it, the features it exercises beyond
-/// the baseline surface, and that function's name.
-///
-/// The case id is derived from the function's own name — `ecdsa_sign_key_export`
-/// becomes `probe/ecdsa-sign-key-export` — so a case cannot name one thing
-/// and run another, which parallel name and dispatch lists allowed.
-struct Probe {
-    ident: &'static str,
-    features: &'static [&'static str],
-    run: ProbeFn,
-}
-
-/// A probe body. Boxed because each `async fn` has its own opaque type.
-type ProbeFn = fn() -> core::pin::Pin<Box<dyn core::future::Future<Output = Result<(), String>>>>;
-
-impl Probe {
-    /// The case id: `probe/` plus the function's name in kebab case.
-    fn case_id(&self) -> String {
-        format!("probe/{}", self.ident.replace('_', "-"))
-    }
-}
-
-/// Declare the probe table: one function per line, in suite order.
-macro_rules! probes {
-    ($($name:ident),* $(,)?) => {
-        const PROBES: &[Probe] = &[
-            $(Probe {
-                ident: stringify!($name),
-                features: &[],
-                run: || Box::pin($name()),
-            }),*
-        ];
+/// The features a bare tag in the `probes!` table stands for. No probe in
+/// this suite is tagged today; the arm exists so adding one is a one-line
+/// change rather than a structural one.
+macro_rules! feature_tags {
+    () => {
+        &[]
     };
 }
 
@@ -102,11 +75,7 @@ impl GuestTestCase for Case {
     }
 
     fn features(&self) -> Vec<String> {
-        PROBES[self.index]
-            .features
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        PROBES[self.index].feature_names()
     }
 
     async fn run(&self) -> Outcome {
@@ -128,21 +97,14 @@ impl Guest for Component {
     type TestCase = Case;
 
     fn all(missing_features: Vec<String>) -> Vec<TestCase> {
-        let mut set = BTreeSet::new();
-        for feature in &missing_features {
-            assert!(
-                KNOWN_FEATURES.contains(&feature.as_str()),
-                "unknown feature {feature:?} in the missing declaration (known: {KNOWN_FEATURES:?})"
-            );
-            set.insert(feature.as_str());
-        }
+        let missing = conformance_harness::missing_features(&missing_features, KNOWN_FEATURES);
         PROBES
             .iter()
             .enumerate()
             .map(|(index, probe)| {
                 TestCase::new(Case {
                     index,
-                    provided: probe.features.iter().all(|f| !set.contains(f)),
+                    provided: probe.provided_by(&missing),
                 })
             })
             .collect()
@@ -150,19 +112,6 @@ impl Guest for Component {
 }
 
 // --- helpers -------------------------------------------------------------------
-
-fn describe(context: &str, error: &Error) -> String {
-    let rendered = match error {
-        Error::InvalidKey(detail) => format!("invalid-key: {detail}"),
-        Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
-        Error::AuthenticationFailed => "authentication-failed".to_string(),
-        Error::NotExtractable => "not-extractable".to_string(),
-        Error::Unsupported(detail) => format!("unsupported: {detail}"),
-        Error::KeyExhausted => "key-exhausted".to_string(),
-        Error::Other(detail) => format!("other: {detail}"),
-    };
-    format!("{context}: {rendered}")
-}
 
 /// Sign an entire byte stream (whole-write).
 async fn sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
