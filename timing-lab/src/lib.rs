@@ -11,10 +11,17 @@
 //! (the reference dudect's moderate threshold; the crops make max |t| an
 //! inflated statistic, so the single-test 4.5 would over-report).
 //!
-//! Two in-guest controls bracket the harness's sensitivity: a deliberately
-//! leaky early-exit compare that MUST read as a leak (otherwise the harness
-//! cannot see anything and every other verdict is meaningless — the run
-//! fails), and `subtle::ConstantTimeEq`, expected quiet.
+//! Class order is a balanced shuffled schedule and every trial performs the
+//! same preparation work regardless of class, so neither the run's own drift
+//! nor the harness's input generation can masquerade as a class difference.
+//!
+//! In-guest controls bracket the harness's detectability, one per class
+//! shape — a positive control validates only the shape it uses. A
+//! deliberately leaky early-exit compare covers the corrupted-first-vs-last
+//! shape and a data-dependent loop covers fixed-vs-random; both MUST read as
+//! leaks (otherwise the harness cannot see anything and every other verdict
+//! is meaningless — the run fails). `subtle::ConstantTimeEq` is the negative
+//! control, expected quiet.
 //!
 //! See timing-lab/README.md for the design, the detection limits, and why
 //! this is a non-gating lab rather than a CI check.
@@ -39,17 +46,34 @@ use bindings::wit_stream;
 
 use std::time::Instant;
 
-use stats::{max_cropped_t, Verdict, THRESHOLD};
+use stats::{max_cropped_t, Accumulator, Verdict, THRESHOLD};
 
 /// Samples per class per surface (override with TIMING_LAB_SAMPLES).
 const DEFAULT_SAMPLES: usize = 2000;
+
+/// Trials per class run and discarded before sampling begins: populate code
+/// paths, caches, and lazy allocations so their one-off costs land outside
+/// the measured data.
+const WARMUP: usize = 32;
 
 /// Buffer length for the byte-comparison surfaces. Large enough that an
 /// early-exit compare's first-vs-last-byte difference clears the clock and
 /// call-overhead noise floor.
 const COMPARE_LEN: usize = 4096;
 
-/// Plaintext length for the fixed-vs-random seal surfaces.
+/// Message length for the tag-comparison surfaces (`verify`, `open`).
+///
+/// Deliberately short. An early-exit tag compare's signal is a fixed
+/// ~15-byte difference no matter how long the message is, while the noise
+/// it competes with — the stream transfer plus the full MAC/GHASH
+/// recomputation, all inside the timed window — grows with the message. A
+/// short message therefore maximizes the signal-to-noise ratio of exactly
+/// the difference these surfaces exist to detect.
+const TAG_PROBE_LEN: usize = 64;
+
+/// Plaintext length for the fixed-vs-random seal surfaces. Long, for the
+/// opposite reason: data-dependent cipher effects accumulate per block, so
+/// the signal grows with the plaintext.
 const SEAL_LEN: usize = 16 * 1024;
 
 /// xorshift64* — deterministic, seedable, good enough for class selection
@@ -77,8 +101,13 @@ impl Rng {
         }
     }
 
-    fn bit(&mut self) -> bool {
-        self.next_u64() & 1 == 1
+    /// Fisher-Yates shuffle. The modulo's bias is irrelevant here: this
+    /// orders a class schedule, it does not generate secrets.
+    fn shuffle<T>(&mut self, items: &mut [T]) {
+        for i in (1..items.len()).rev() {
+            let j = (self.next_u64() % (i as u64 + 1)) as usize;
+            items.swap(i, j);
+        }
     }
 }
 
@@ -97,6 +126,26 @@ fn leaky_equal(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
+/// The deliberately data-dependent positive control, for the *fixed-vs-random*
+/// class shape the seal surfaces use.
+///
+/// Each byte drives a loop whose trip count is its low nibble: the all-zero
+/// fixed class does no inner work, a random one averages 7.5 iterations per
+/// byte. A variable trip count cannot be flattened into branchless code, so
+/// this leaks by construction — which is the point. Without it, a quiet
+/// verdict on the seal surfaces cannot distinguish "the cipher has no data
+/// dependence" from "the harness cannot see data dependence here".
+#[inline(never)]
+fn data_dependent_work(data: &[u8]) -> u32 {
+    let mut acc = 1u32;
+    for &b in data {
+        for _ in 0..(b & 0x0f) {
+            acc = acc.wrapping_mul(31).wrapping_add(b as u32);
+        }
+    }
+    acc
+}
+
 /// One measured surface: `sample(class)` runs the operation once for the
 /// given class and returns its duration in nanoseconds.
 struct Report {
@@ -105,10 +154,18 @@ struct Report {
     samples_per_class: usize,
     max_t: f64,
     verdict: Verdict,
+    /// Pooled mean sample time, ns — the measurement distance: how much
+    /// unrelated work each sample carries alongside the operation under
+    /// test.
+    mean_ns: f64,
+    /// Pooled standard deviation, ns. Together with the sample count this
+    /// is what a quiet verdict actually bounds: a per-class difference much
+    /// below `sigma_ns / sqrt(samples)` is invisible here.
+    sigma_ns: f64,
 }
 
-/// Interleaved two-class sampling loop: class order is drawn per trial from
-/// the deterministic PRNG so environmental drift decorrelates from class.
+/// Interleaved two-class sampling loop over a balanced, shuffled schedule,
+/// so environmental drift decorrelates from class.
 async fn measure<F, Fut>(
     name: &'static str,
     expect_leak: bool,
@@ -123,17 +180,19 @@ where
     let mut class0 = Vec::with_capacity(samples);
     let mut class1 = Vec::with_capacity(samples);
     // Warm-up: populate code paths, caches, and lazy allocations untimed.
-    for class in [false, true] {
-        sample(class).await.map_err(|e| format!("{name}: {e}"))?;
+    for i in 0..WARMUP * 2 {
+        sample(i % 2 == 1)
+            .await
+            .map_err(|e| format!("{name}: {e}"))?;
     }
-    while class0.len() < samples || class1.len() < samples {
-        let class = if class0.len() >= samples {
-            true
-        } else if class1.len() >= samples {
-            false
-        } else {
-            rng.bit()
-        };
+    // A balanced shuffled schedule, not a per-trial coin flip: a coin
+    // flip's random walk exhausts one class ~sqrt(n) trials before the
+    // other, so the run's final samples are all one class — recorrelating
+    // class with time exactly where end-of-run drift lives.
+    let mut schedule = vec![false; samples];
+    schedule.resize(samples * 2, true);
+    rng.shuffle(&mut schedule);
+    for class in schedule {
         let ns = sample(class).await.map_err(|e| format!("{name}: {e}"))?;
         if class {
             class1.push(ns as f64);
@@ -149,12 +208,18 @@ where
     } else {
         Verdict::Quiet
     };
+    let mut pooled = Accumulator::default();
+    for &x in class0.iter().chain(&class1) {
+        pooled.push(x);
+    }
     Ok(Report {
         name,
         expect_leak,
         samples_per_class: samples,
         max_t,
         verdict,
+        mean_ns: pooled.mean(),
+        sigma_ns: pooled.variance().sqrt(),
     })
 }
 
@@ -301,7 +366,7 @@ async fn measure_open(
     samples: usize,
     rng: &mut Rng,
 ) -> Result<Report, String> {
-    let mut plaintext = vec![0u8; SEAL_LEN];
+    let mut plaintext = vec![0u8; TAG_PROBE_LEN];
     rng.fill(&mut plaintext);
     let sealed = seal_bytes(key, nonce, &plaintext)
         .await
@@ -321,6 +386,9 @@ async fn measure_open(
 /// Fixed-vs-random plaintext surface over an AEAD algorithm's `seal`: a
 /// secret-independent cipher shows no class difference; a data-dependent
 /// one (e.g. a table-based AES) can.
+///
+/// `control/data-dependent-work` brackets this class shape's detectability;
+/// read a quiet verdict here only against that control's verdict.
 async fn measure_seal(
     name: &'static str,
     key: &AeadKey,
@@ -330,15 +398,18 @@ async fn measure_seal(
 ) -> Result<Report, String> {
     let fixed = vec![0u8; SEAL_LEN];
     let mut random = vec![0u8; SEAL_LEN];
+    // A second generator: `measure` holds `rng` mutably for the whole run,
+    // and the class schedule and the input material are independent draws.
+    let mut inputs = Rng::new(rng.next_u64());
     measure(name, false, samples, rng, |class| {
-        let plaintext = if class {
-            // Fresh random plaintext per trial, from a per-call cheap fill.
-            random.rotate_left(1);
-            random[0] ^= 0x5a;
-            random.clone()
-        } else {
-            fixed.clone()
-        };
+        // Both classes draw a fresh fill and one clone, so the work
+        // preceding the timed window is identical whichever class is
+        // selected. Filling only for the random class would put 16 KiB of
+        // extra work and cache pressure in front of one class's
+        // measurements — a class-correlated difference manufactured by the
+        // harness itself.
+        inputs.fill(&mut random);
+        let plaintext = if class { random.clone() } else { fixed.clone() };
         async move { timed_seal(key, nonce, &plaintext).await }
     })
     .await
@@ -407,6 +478,35 @@ async fn run_lab() -> Result<(), String> {
         );
     }
 
+    // Positive control for the fixed-vs-random class shape, bracketing the
+    // seal surfaces the way leaky-equal brackets the compare surfaces.
+    {
+        let fixed = vec![0u8; SEAL_LEN];
+        let mut random = vec![0u8; SEAL_LEN];
+        let mut inputs = Rng::new(rng.next_u64());
+        reports.push(
+            measure(
+                "control/data-dependent-work (in-guest)",
+                true,
+                samples,
+                &mut rng,
+                |class| {
+                    // Symmetric per-trial work, as in `measure_seal`.
+                    inputs.fill(&mut random);
+                    let data = if class { random.clone() } else { fixed.clone() };
+                    async move {
+                        let (ns, acc) = timed(|| data_dependent_work(&data));
+                        // The accumulator is dead otherwise, and the
+                        // optimizer is entitled to delete the whole loop.
+                        std::hint::black_box(acc);
+                        Ok(ns)
+                    }
+                },
+            )
+            .await?,
+        );
+    }
+
     // bytes.constant-time-equal across the component boundary.
     {
         let expected = expected.clone();
@@ -437,7 +537,7 @@ async fn run_lab() -> Result<(), String> {
         let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, false)
             .await
             .map_err(|e| format!("hmac generate-key: {e:?}"))?;
-        let mut message = vec![0u8; SEAL_LEN];
+        let mut message = vec![0u8; TAG_PROBE_LEN];
         rng.fill(&mut message);
         let tag = sign(&key, &message).await?;
         reports.push(
@@ -464,12 +564,14 @@ async fn run_lab() -> Result<(), String> {
     let chacha_key = chacha::generate_key(false)
         .await
         .map_err(|e| format!("chacha generate-key: {e:?}"))?;
-    let gcm_nonce = [0x24u8; 12];
+    // AES-GCM and the IETF ChaCha20-Poly1305 construction both take a
+    // 12-byte nonce, so one value serves both surfaces.
+    let nonce12 = [0x24u8; 12];
     reports.push(
         measure_open(
             "aes-256-gcm/open tag compare",
             &gcm_key,
-            &gcm_nonce,
+            &nonce12,
             samples,
             &mut rng,
         )
@@ -479,7 +581,7 @@ async fn run_lab() -> Result<(), String> {
         measure_open(
             "chacha20-poly1305/open tag compare",
             &chacha_key,
-            &gcm_nonce,
+            &nonce12,
             samples,
             &mut rng,
         )
@@ -489,7 +591,7 @@ async fn run_lab() -> Result<(), String> {
         measure_seal(
             "aes-256-gcm/seal fixed-vs-random",
             &gcm_key,
-            &gcm_nonce,
+            &nonce12,
             samples,
             &mut rng,
         )
@@ -499,7 +601,7 @@ async fn run_lab() -> Result<(), String> {
         measure_seal(
             "chacha20-poly1305/seal fixed-vs-random",
             &chacha_key,
-            &gcm_nonce,
+            &nonce12,
             samples,
             &mut rng,
         )
@@ -510,8 +612,8 @@ async fn run_lab() -> Result<(), String> {
     let mut failures = 0;
     println!("timing lab: {samples} samples/class, threshold max |t| > {THRESHOLD}");
     println!();
-    println!("| surface | samples/class | max \\|t\\| | verdict | expected |");
-    println!("| --- | --- | --- | --- | --- |");
+    println!("| surface | samples/class | mean ns | sigma ns | max \\|t\\| | verdict | expected |");
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
     for r in &reports {
         let verdict = match r.verdict {
             Verdict::Quiet => "quiet",
@@ -527,9 +629,11 @@ async fn run_lab() -> Result<(), String> {
             failures += 1;
         }
         println!(
-            "| {} | {} | {:.1} | {}{} | {} |",
+            "| {} | {} | {:.0} | {:.0} | {:.1} | {}{} | {} |",
             r.name,
             r.samples_per_class,
+            r.mean_ns,
+            r.sigma_ns,
             r.max_t,
             verdict,
             if ok { "" } else { " ***" },
