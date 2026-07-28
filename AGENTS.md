@@ -212,6 +212,27 @@ conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
 its vector cases exist (see conformance/README.md, "Growing the suites").
 
+## Check the rationale before implementing it
+
+Requests arrive with a reason attached — this is inefficient, this leaks, this
+type would make the mistake unrepresentable. The reason is a claim about the
+code, and it can be false while the request still points at something real.
+Establish that it holds before writing the change, and if it does not, say so
+first.
+
+What this guards against is silent repair: noticing the premise is wrong,
+quietly designing around it, and shipping something that works. Working code
+then reads as confirmation of reasoning that was never tested, and the next
+decision builds on it. A contradiction turned up while researching is a result
+to report, not an obstacle to route around.
+
+Two claims usually need separating, because a request tends to fuse them: what
+is wrong with the code now, and what the proposed remedy fixes. They are often
+both true of *different* problems. A wrapper type that makes an unsafe read
+impossible does not thereby remove a redundant copy — and adopting it can
+preserve the copy untouched while appearing to answer the complaint. Name which
+property the change actually buys.
+
 ## Code comments and docs
 
 Code comments describe **what** something is or does, not the process by which
