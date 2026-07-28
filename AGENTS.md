@@ -51,7 +51,9 @@ componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   componentize-js.rev; wpt/ vendors the
                         #   WebCryptoAPI web-platform-tests and gates in CI
                         #   via a release-artifact runner component keyed by
-                        #   an input lock (wpt/component.sh)
+                        #   an input lock over its real inputs — the
+                        #   resolved componentize-demo world, not the WIT
+                        #   sources (wpt/component.sh)
 examples/
   crypto-demo/          # guest component exercising mac + aead end to end
     wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package
