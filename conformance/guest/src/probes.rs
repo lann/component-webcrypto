@@ -3,6 +3,9 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
+use core::future::Future;
+use core::pin::Pin;
+
 use crate::translate::Schedule;
 use crate::util::{
     compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, unhex, verify,
@@ -37,92 +40,100 @@ use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::{
     import_key as import_xchacha_internal_nonce_key,
 };
 
-/// One probe: its name (`probe/<name>` case ids) and the features it
-/// exercises beyond the baseline surface.
+/// One probe: its name (`probe/<name>` case ids), the features it exercises
+/// beyond the baseline surface, and the body that runs it.
+///
+/// The body lives here rather than in a parallel `match index` because the
+/// two drift silently: inserting or reordering one list alone re-points a
+/// name at another probe's body, which then asserts the wrong thing and
+/// reports *pass*. The lockfile can show a reordering; it cannot show a
+/// mis-pairing.
 pub struct Probe {
     pub name: &'static str,
     pub features: &'static [&'static str],
+    pub run: ProbeFn,
 }
 
-const fn probe(name: &'static str) -> Probe {
+/// A probe body. Boxed because each `async fn` has its own opaque type.
+type ProbeFn = fn() -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
+
+const fn probe(name: &'static str, run: ProbeFn) -> Probe {
     Probe {
         name,
         features: &[],
+        run,
     }
 }
 
-const fn chacha_probe(name: &'static str) -> Probe {
+const fn chacha_probe(name: &'static str, run: ProbeFn) -> Probe {
     Probe {
         name,
         features: &[FEATURE_CHACHA],
+        run,
     }
 }
 
 /// The probes, in execution order. `run_one(i)` runs `PROBES[i]`.
 pub const PROBES: &[Probe] = &[
-    probe("hmac-import-empty-key"),
-    probe("hmac-sha384-sha512"),
-    probe("sha2-truncated-unsupported"),
-    probe("aes-import-wrong-length"),
-    probe("aes192-unsupported"),
-    probe("seal-drains-on-invalid-nonce"),
-    probe("open-drains-on-invalid-nonce"),
-    probe("sealed-length"),
-    probe("key-export-roundtrip"),
-    probe("not-extractable"),
-    probe("generated-key-shape"),
-    probe("algorithm-names"),
-    probe("mac-verify-rejects-truncated"),
-    probe("sign-prefix-drop"),
-    probe("digest-reuse"),
-    probe("constant-time-equal"),
-    chacha_probe("chacha-key-metadata"),
-    chacha_probe("chacha-nonce-lengths"),
-    probe("ed25519-sign-roundtrip"),
-    probe("sig-key-metadata"),
-    probe("sig-import-invalid"),
-    probe("verifying-key-export-roundtrip"),
-    probe("internal-nonce-shape"),
-    chacha_probe("chacha-internal-nonce-roundtrip"),
-    probe("aes128-shape"),
-    probe("ed25519-sign-known-answer"),
-    probe("open-short-input"),
-    probe("stream-empty-writes"),
+    probe(
+        "hmac-import-empty-key",
+        || Box::pin(hmac_import_empty_key()),
+    ),
+    probe("hmac-sha384-sha512", || Box::pin(hmac_sha384_sha512())),
+    probe("sha2-truncated-unsupported", || {
+        Box::pin(sha2_truncated_unsupported())
+    }),
+    probe("aes-import-wrong-length", || {
+        Box::pin(aes_import_wrong_length())
+    }),
+    probe("aes192-unsupported", || Box::pin(aes192_unsupported())),
+    probe("seal-drains-on-invalid-nonce", || {
+        Box::pin(seal_drains_on_invalid_nonce())
+    }),
+    probe("open-drains-on-invalid-nonce", || {
+        Box::pin(open_drains_on_invalid_nonce())
+    }),
+    probe("sealed-length", || Box::pin(sealed_length())),
+    probe("key-export-roundtrip", || Box::pin(key_export_roundtrip())),
+    probe("not-extractable", || Box::pin(not_extractable())),
+    probe("generated-key-shape", || Box::pin(generated_key_shape())),
+    probe("algorithm-names", || Box::pin(algorithm_names())),
+    probe("mac-verify-rejects-truncated", || {
+        Box::pin(mac_verify_rejects_truncated())
+    }),
+    probe("sign-prefix-drop", || Box::pin(sign_prefix_drop())),
+    probe("digest-reuse", || Box::pin(digest_reuse())),
+    probe("constant-time-equal", || {
+        Box::pin(constant_time_equal_probe())
+    }),
+    chacha_probe("chacha-key-metadata", || Box::pin(chacha_key_metadata())),
+    chacha_probe("chacha-nonce-lengths", || Box::pin(chacha_nonce_lengths())),
+    probe("ed25519-sign-roundtrip", || {
+        Box::pin(ed25519_sign_roundtrip())
+    }),
+    probe("sig-key-metadata", || Box::pin(sig_key_metadata())),
+    probe("sig-import-invalid", || Box::pin(sig_import_invalid())),
+    probe("verifying-key-export-roundtrip", || {
+        Box::pin(verifying_key_export_roundtrip())
+    }),
+    probe("internal-nonce-shape", || Box::pin(internal_nonce_shape())),
+    chacha_probe("chacha-internal-nonce-roundtrip", || {
+        Box::pin(chacha_internal_nonce_roundtrip())
+    }),
+    probe("aes128-shape", || Box::pin(aes128_shape())),
+    probe("ed25519-sign-known-answer", || {
+        Box::pin(ed25519_sign_known_answer())
+    }),
+    probe("open-short-input", || Box::pin(open_short_input())),
+    probe("stream-empty-writes", || Box::pin(stream_empty_writes())),
 ];
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
 /// features.
 pub async fn run_one(index: usize) -> Result<(), String> {
-    match index {
-        0 => hmac_import_empty_key().await,
-        1 => hmac_sha384_sha512().await,
-        2 => sha2_truncated_unsupported().await,
-        3 => aes_import_wrong_length().await,
-        4 => aes192_unsupported().await,
-        5 => seal_drains_on_invalid_nonce().await,
-        6 => open_drains_on_invalid_nonce().await,
-        7 => sealed_length().await,
-        8 => key_export_roundtrip().await,
-        9 => not_extractable().await,
-        10 => generated_key_shape().await,
-        11 => algorithm_names().await,
-        12 => mac_verify_rejects_truncated().await,
-        13 => sign_prefix_drop().await,
-        14 => digest_reuse().await,
-        15 => constant_time_equal_probe().await,
-        16 => chacha_key_metadata().await,
-        17 => chacha_nonce_lengths().await,
-        18 => ed25519_sign_roundtrip().await,
-        19 => sig_key_metadata().await,
-        20 => sig_import_invalid().await,
-        21 => verifying_key_export_roundtrip().await,
-        22 => internal_nonce_shape().await,
-        23 => chacha_internal_nonce_roundtrip().await,
-        24 => aes128_shape().await,
-        25 => ed25519_sign_known_answer().await,
-        26 => open_short_input().await,
-        27 => stream_empty_writes().await,
-        _ => Err(format!("no probe at index {index}")),
+    match PROBES.get(index) {
+        Some(probe) => (probe.run)().await,
+        None => Err(format!("no probe at index {index}")),
     }
 }
 
@@ -184,6 +195,22 @@ async fn chacha_minting_declined() -> Result<String, String> {
             return Err(
                 "xchacha internal-nonce generate-key minted a key for a feature \
                  declared missing"
+                    .into(),
+            )
+        }
+    }
+    // The internal-nonce *import* is a minting path too. Omitting it left a
+    // target free to decline five of the six entry points and still serve
+    // this one, which is the hole this assertion exists to close.
+    match import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await {
+        Err(Error::Unsupported(_)) => {}
+        Err(other) => return Err(describe(
+            "xchacha internal-nonce import-key: expected unsupported from a missing feature, got",
+            &other,
+        )),
+        Ok(_) => {
+            return Err(
+                "xchacha internal-nonce import-key minted a key for a feature declared missing"
                     .into(),
             )
         }
@@ -704,6 +731,21 @@ async fn chacha_key_metadata() -> Result<(), String> {
                 key.algorithm_length()
             ));
         }
+        // The size getters exist so a component holding only the key handle
+        // can frame nonces and ciphertext without matching on
+        // `algorithm-name` (see the WIT). XChaCha is the one family where
+        // the nonce size differs from the AES default, so asserting them
+        // only on AES-GCM left the getters' whole purpose untested.
+        let want_nonce = if name == "XChaCha20-Poly1305" { 24 } else { 12 };
+        if key.nonce_size() != want_nonce {
+            return Err(format!(
+                "{name} nonce-size: got {}, want {want_nonce}",
+                key.nonce_size()
+            ));
+        }
+        if key.tag_size() != 16 {
+            return Err(format!("{name} tag-size: got {}, want 16", key.tag_size()));
+        }
         match import(vec![0x42u8; 16], false).await {
             Err(Error::InvalidKey(_)) => {}
             Err(other) => {
@@ -850,6 +892,16 @@ async fn sig_key_metadata() -> Result<(), String> {
     }
     if !signing.extractable() {
         return Err("extractable generated key reports non-extractable".into());
+    }
+    // The getter was only ever asserted in the `true` direction, so a
+    // hardcoded `true` passed the whole suite. Mint the other kind and read
+    // it back: `export-key` failing is a separate contract, checked
+    // elsewhere.
+    let (non_extractable, _) = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    if non_extractable.extractable() {
+        return Err("non-extractable generated key reports extractable".into());
     }
     if public.algorithm_name() != "Ed25519"
         || public.algorithm_curve().is_some()
@@ -1094,9 +1146,10 @@ async fn internal_nonce_shape() -> Result<(), String> {
     Ok(())
 }
 
-/// Both ChaCha internal-nonce variants round-trip with their variant's
-/// nonce length prefixed (12 bytes for the IETF construction, 24 for
-/// XChaCha).
+/// The XChaCha internal-nonce construction round-trips with its 24-byte
+/// nonce prefixed. There is no IETF-ChaCha internal-nonce interface to
+/// pair this with — the package deliberately offers only XChaCha here (see
+/// wit/chacha.wit) — so this probe covers the whole kind for the family.
 async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
     let key = generate_xchacha_internal_nonce_key(false)
         .await

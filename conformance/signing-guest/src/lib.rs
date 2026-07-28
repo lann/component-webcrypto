@@ -45,36 +45,43 @@ struct Component;
 struct Probe {
     name: &'static str,
     features: &'static [&'static str],
+    run: ProbeFn,
 }
 
-/// The probes, in suite order. `run_one(i)` runs `PROBES[i]`.
+/// A probe body. Boxed because each `async fn` has its own opaque type.
+type ProbeFn = fn() -> core::pin::Pin<Box<dyn core::future::Future<Output = Result<(), String>>>>;
+
+/// The probes, in suite order. Name, features and body are one row: kept as
+/// parallel lists, inserting or reordering one alone re-points a name at
+/// another probe's body, which then asserts the wrong thing and passes.
 const PROBES: &[Probe] = &[
     Probe {
         name: "ecdsa-p256-sign-roundtrip",
         features: &[],
+        run: || Box::pin(p256_sign_roundtrip()),
     },
     Probe {
         name: "ecdsa-p384-generate-roundtrip",
         features: &[],
+        run: || Box::pin(p384_generate_roundtrip()),
     },
     Probe {
         name: "ecdsa-sign-key-export",
         features: &[],
+        run: || Box::pin(sign_key_export()),
     },
     Probe {
         name: "ecdsa-sign-invalid-scalar",
         features: &[],
+        run: || Box::pin(sign_invalid_scalar()),
     },
 ];
 
 /// Run the probe at `index` on a target providing its features.
 async fn run_one(index: usize) -> Result<(), String> {
-    match index {
-        0 => p256_sign_roundtrip().await,
-        1 => p384_generate_roundtrip().await,
-        2 => sign_key_export().await,
-        3 => sign_invalid_scalar().await,
-        _ => Err(format!("no probe at index {index}")),
+    match PROBES.get(index) {
+        Some(probe) => (probe.run)().await,
+        None => Err(format!("no probe at index {index}")),
     }
 }
 
@@ -295,6 +302,11 @@ async fn sign_key_export() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
+    // Read the getter in its `false` direction: asserting only `true`
+    // elsewhere leaves a hardcoded `true` passing the suite.
+    if key.extractable() {
+        return Err("non-extractable generated key reports extractable".into());
+    }
     match key.export_key().await {
         Err(Error::NotExtractable) => Ok(()),
         Err(other) => Err(describe("expected not-extractable, got", &other)),
