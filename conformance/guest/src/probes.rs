@@ -16,7 +16,7 @@ use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVaria
 use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::{
     generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
 };
-use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
+use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
 use lann_webcrypto_guest::bindings::chacha20_poly1305::{
     generate_key as generate_chacha_key, import_key as import_chacha_key,
 };
@@ -40,16 +40,18 @@ use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::{
     import_key as import_xchacha_internal_nonce_key,
 };
 
-/// One probe: its name (`probe/<name>` case ids), the features it exercises
-/// beyond the baseline surface, and the body that runs it.
+/// One probe: the function that runs it, the features it exercises beyond
+/// the baseline surface, and that function's name.
 ///
-/// The body lives here rather than in a parallel `match index` because the
-/// two drift silently: inserting or reordering one list alone re-points a
-/// name at another probe's body, which then asserts the wrong thing and
-/// reports *pass*. The lockfile can show a reordering; it cannot show a
-/// mis-pairing.
+/// The case id is *derived* from the function's own name rather than
+/// written beside it — `probe/hmac-import-empty-key` comes from
+/// `hmac_import_empty_key` — so a case cannot name one thing and run
+/// another. Held as parallel lists, that was a live hazard: inserting or
+/// reordering one alone re-points a name at a different body, which then
+/// asserts the wrong thing and reports *pass*, and a lockfile can show a
+/// reordering but not a mis-pairing.
 pub struct Probe {
-    pub name: &'static str,
+    ident: &'static str,
     pub features: &'static [&'static str],
     pub run: ProbeFn,
 }
@@ -57,76 +59,60 @@ pub struct Probe {
 /// A probe body. Boxed because each `async fn` has its own opaque type.
 type ProbeFn = fn() -> Pin<Box<dyn Future<Output = Result<(), String>>>>;
 
-const fn probe(name: &'static str, run: ProbeFn) -> Probe {
-    Probe {
-        name,
-        features: &[],
-        run,
+impl Probe {
+    /// The case id: `probe/` plus the function's name in kebab case.
+    pub fn case_id(&self) -> String {
+        format!("probe/{}", self.ident.replace('_', "-"))
     }
 }
 
-const fn chacha_probe(name: &'static str, run: ProbeFn) -> Probe {
-    Probe {
-        name,
-        features: &[FEATURE_CHACHA],
-        run,
-    }
+/// Declare the probe table: one function per line, in execution order,
+/// prefixed `chacha` for those exercising ChaCha20-Poly1305, which a
+/// target missing that feature must be able to decline.
+macro_rules! probes {
+    ($($name:ident $(($feature:ident))?),* $(,)?) => {
+        pub const PROBES: &[Probe] = &[
+            $(Probe {
+                ident: stringify!($name),
+                features: probes!(@features $($feature)?),
+                run: || Box::pin($name()),
+            }),*
+        ];
+    };
+    (@features) => { &[] };
+    (@features chacha) => { &[FEATURE_CHACHA] };
 }
 
-/// The probes, in execution order. `run_one(i)` runs `PROBES[i]`.
-pub const PROBES: &[Probe] = &[
-    probe(
-        "hmac-import-empty-key",
-        || Box::pin(hmac_import_empty_key()),
-    ),
-    probe("hmac-sha384-sha512", || Box::pin(hmac_sha384_sha512())),
-    probe("sha2-truncated-unsupported", || {
-        Box::pin(sha2_truncated_unsupported())
-    }),
-    probe("aes-import-wrong-length", || {
-        Box::pin(aes_import_wrong_length())
-    }),
-    probe("aes192-unsupported", || Box::pin(aes192_unsupported())),
-    probe("seal-drains-on-invalid-nonce", || {
-        Box::pin(seal_drains_on_invalid_nonce())
-    }),
-    probe("open-drains-on-invalid-nonce", || {
-        Box::pin(open_drains_on_invalid_nonce())
-    }),
-    probe("sealed-length", || Box::pin(sealed_length())),
-    probe("key-export-roundtrip", || Box::pin(key_export_roundtrip())),
-    probe("not-extractable", || Box::pin(not_extractable())),
-    probe("generated-key-shape", || Box::pin(generated_key_shape())),
-    probe("algorithm-names", || Box::pin(algorithm_names())),
-    probe("mac-verify-rejects-truncated", || {
-        Box::pin(mac_verify_rejects_truncated())
-    }),
-    probe("sign-prefix-drop", || Box::pin(sign_prefix_drop())),
-    probe("digest-reuse", || Box::pin(digest_reuse())),
-    probe("constant-time-equal", || {
-        Box::pin(constant_time_equal_probe())
-    }),
-    chacha_probe("chacha-key-metadata", || Box::pin(chacha_key_metadata())),
-    chacha_probe("chacha-nonce-lengths", || Box::pin(chacha_nonce_lengths())),
-    probe("ed25519-sign-roundtrip", || {
-        Box::pin(ed25519_sign_roundtrip())
-    }),
-    probe("sig-key-metadata", || Box::pin(sig_key_metadata())),
-    probe("sig-import-invalid", || Box::pin(sig_import_invalid())),
-    probe("verifying-key-export-roundtrip", || {
-        Box::pin(verifying_key_export_roundtrip())
-    }),
-    probe("internal-nonce-shape", || Box::pin(internal_nonce_shape())),
-    chacha_probe("chacha-internal-nonce-roundtrip", || {
-        Box::pin(chacha_internal_nonce_roundtrip())
-    }),
-    probe("aes128-shape", || Box::pin(aes128_shape())),
-    probe("ed25519-sign-known-answer", || {
-        Box::pin(ed25519_sign_known_answer())
-    }),
-    probe("open-short-input", || Box::pin(open_short_input())),
-    probe("stream-empty-writes", || Box::pin(stream_empty_writes())),
-];
+probes! {
+    hmac_import_empty_key,
+    hmac_sha384_sha512,
+    sha2_truncated_unsupported,
+    aes_import_wrong_length,
+    aes192_unsupported,
+    seal_drains_on_invalid_nonce,
+    open_drains_on_invalid_nonce,
+    sealed_length,
+    key_export_roundtrip,
+    not_extractable,
+    generated_key_shape,
+    algorithm_names,
+    mac_verify_rejects_truncated,
+    sign_prefix_drop,
+    digest_reuse,
+    constant_time_equal,
+    chacha_key_metadata(chacha),
+    chacha_nonce_lengths(chacha),
+    ed25519_sign_roundtrip,
+    sig_key_metadata,
+    sig_import_invalid,
+    verifying_key_export_roundtrip,
+    internal_nonce_shape,
+    chacha_internal_nonce_roundtrip(chacha),
+    aes128_shape,
+    ed25519_sign_known_answer,
+    open_short_input,
+    stream_empty_writes,
+}
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
 /// features.
@@ -692,7 +678,7 @@ async fn digest_reuse() -> Result<(), String> {
 
 /// `constant-time-equal` agrees with plain equality across equal, differing,
 /// different-length, and empty inputs.
-async fn constant_time_equal_probe() -> Result<(), String> {
+async fn constant_time_equal() -> Result<(), String> {
     let a = [0xa5u8; 32];
     let mut b = a;
     b[31] ^= 0x01;
@@ -704,7 +690,7 @@ async fn constant_time_equal_probe() -> Result<(), String> {
         (&[], &a, false, "empty versus non-empty"),
     ];
     for (x, y, want, what) in checks {
-        if constant_time_equal(x, y) != want {
+        if bytes_constant_time_equal(x, y) != want {
             return Err(format!("{what}: got {}, want {want}", !want));
         }
     }

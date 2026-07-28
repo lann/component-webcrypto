@@ -230,7 +230,7 @@ impl Guest for Component {
         }
         for (index, probe) in probes::PROBES.iter().enumerate() {
             cases.push(materialize(
-                format!("probe/{}", probe.name),
+                probe.case_id(),
                 probe.features,
                 &missing,
                 CaseKind::Probe(index),

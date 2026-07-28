@@ -40,10 +40,14 @@ const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
 
 struct Component;
 
-/// One probe: its name (`probe/<name>` case ids) and the features it
-/// exercises beyond the baseline surface.
+/// One probe: the function that runs it, the features it exercises beyond
+/// the baseline surface, and that function's name.
+///
+/// The case id is derived from the function's own name — `ecdsa_sign_key_export`
+/// becomes `probe/ecdsa-sign-key-export` — so a case cannot name one thing
+/// and run another, which parallel name and dispatch lists allowed.
 struct Probe {
-    name: &'static str,
+    ident: &'static str,
     features: &'static [&'static str],
     run: ProbeFn,
 }
@@ -51,31 +55,32 @@ struct Probe {
 /// A probe body. Boxed because each `async fn` has its own opaque type.
 type ProbeFn = fn() -> core::pin::Pin<Box<dyn core::future::Future<Output = Result<(), String>>>>;
 
-/// The probes, in suite order. Name, features and body are one row: kept as
-/// parallel lists, inserting or reordering one alone re-points a name at
-/// another probe's body, which then asserts the wrong thing and passes.
-const PROBES: &[Probe] = &[
-    Probe {
-        name: "ecdsa-p256-sign-roundtrip",
-        features: &[],
-        run: || Box::pin(p256_sign_roundtrip()),
-    },
-    Probe {
-        name: "ecdsa-p384-generate-roundtrip",
-        features: &[],
-        run: || Box::pin(p384_generate_roundtrip()),
-    },
-    Probe {
-        name: "ecdsa-sign-key-export",
-        features: &[],
-        run: || Box::pin(sign_key_export()),
-    },
-    Probe {
-        name: "ecdsa-sign-invalid-scalar",
-        features: &[],
-        run: || Box::pin(sign_invalid_scalar()),
-    },
-];
+impl Probe {
+    /// The case id: `probe/` plus the function's name in kebab case.
+    fn case_id(&self) -> String {
+        format!("probe/{}", self.ident.replace('_', "-"))
+    }
+}
+
+/// Declare the probe table: one function per line, in suite order.
+macro_rules! probes {
+    ($($name:ident),* $(,)?) => {
+        const PROBES: &[Probe] = &[
+            $(Probe {
+                ident: stringify!($name),
+                features: &[],
+                run: || Box::pin($name()),
+            }),*
+        ];
+    };
+}
+
+probes! {
+    ecdsa_p256_sign_roundtrip,
+    ecdsa_p384_generate_roundtrip,
+    ecdsa_sign_key_export,
+    ecdsa_sign_invalid_scalar,
+}
 
 /// Run the probe at `index` on a target providing its features.
 async fn run_one(index: usize) -> Result<(), String> {
@@ -93,7 +98,7 @@ struct Case {
 
 impl GuestTestCase for Case {
     fn name(&self) -> String {
-        format!("probe/{}", PROBES[self.index].name)
+        PROBES[self.index].case_id()
     }
 
     fn features(&self) -> Vec<String> {
@@ -187,7 +192,7 @@ async fn verify(key: &VerifyingKey, data: &[u8], sig: &[u8]) -> Result<(), Error
 /// signatures verify — both under the public half returned with it and
 /// under the same point exported and re-imported through `ecdsa-verify` —
 /// and a corrupted signature fails `authentication-failed`.
-async fn p256_sign_roundtrip() -> Result<(), String> {
+async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -239,7 +244,7 @@ async fn p256_sign_roundtrip() -> Result<(), String> {
 
 /// A generated P-384 key round-trips sign→verify, and a *different* key's
 /// public half rejects the signature.
-async fn p384_generate_roundtrip() -> Result<(), String> {
+async fn ecdsa_p384_generate_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -277,7 +282,7 @@ async fn p384_generate_roundtrip() -> Result<(), String> {
 /// a known scalar needs private-key import, which is deliberately out of
 /// this suite — impl-core's unit tests pin it for the Rust
 /// implementations.)
-async fn sign_key_export() -> Result<(), String> {
+async fn ecdsa_sign_key_export() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -319,7 +324,7 @@ async fn sign_key_export() -> Result<(), String> {
 /// a platform — while *range* validation (zero, ≥ the group order) rides
 /// the unspecified private-only PKCS#8 import path on browser hosts
 /// (w3c/webcrypto#356) and is pinned by impl-core's unit tests instead.
-async fn sign_invalid_scalar() -> Result<(), String> {
+async fn ecdsa_sign_invalid_scalar() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::ecdsa_sign::import_signing_key;
 
     async fn expect_invalid(what: &str, variant: EcdsaVariant, raw: Vec<u8>) -> Result<(), String> {
