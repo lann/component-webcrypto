@@ -31,3 +31,7 @@ p384 = { version = "0.13", features = ["ecdsa"] }
 getrandom = "0.3"
 # Scrub raw key material on drop.
 zeroize = "1"
+
+[dev-dependencies]
+# Hex constants in the known-answer tests.
+hex-literal = "1"

@@ -14,9 +14,12 @@ use webcrypto_impl_core::{
     served_sha2, AeadKeyMaterial, MacKeyMaterial, SigPublic, SigningKeyMaterial, HMAC_NAME,
 };
 
-use crate::exports::lann::webcrypto::aead::{Guest as AeadGuest, GuestAeadKey};
+use crate::exports::lann::webcrypto::aead::{
+    AeadKey as ExportedAeadKey, Guest as AeadGuest, GuestAeadKey,
+};
 use crate::exports::lann::webcrypto::aead_internal_nonce::{
     Guest as AeadInternalNonceGuest, GuestInternalNonceKey,
+    InternalNonceKey as ExportedInternalNonceKey,
 };
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
@@ -40,51 +43,11 @@ pub struct Component;
 
 // --- bindings glue -------------------------------------------------------------
 
-impl From<webcrypto_impl_core::Error> for Error {
-    fn from(err: webcrypto_impl_core::Error) -> Self {
-        use webcrypto_impl_core::Error as CoreError;
-        match err {
-            CoreError::InvalidKey(msg) => Self::InvalidKey(msg),
-            CoreError::InvalidNonce(msg) => Self::InvalidNonce(msg),
-            CoreError::AuthenticationFailed => Self::AuthenticationFailed,
-            CoreError::NotExtractable => Self::NotExtractable,
-            CoreError::Unsupported(msg) => Self::Unsupported(msg),
-            CoreError::KeyExhausted => Self::KeyExhausted,
-            CoreError::Other(msg) => Self::Other(msg),
-        }
-    }
-}
-
-/// The core's variant for a generated `sha2-variant`.
-fn core_sha2_variant(variant: Sha2Variant) -> webcrypto_impl_core::Sha2Variant {
-    use webcrypto_impl_core::Sha2Variant as Core;
-    match variant {
-        Sha2Variant::Sha224 => Core::Sha224,
-        Sha2Variant::Sha256 => Core::Sha256,
-        Sha2Variant::Sha384 => Core::Sha384,
-        Sha2Variant::Sha512 => Core::Sha512,
-        Sha2Variant::Sha512224 => Core::Sha512224,
-        Sha2Variant::Sha512256 => Core::Sha512256,
-    }
-}
-
-/// The core's variant for a generated `aes-variant`.
-fn core_aes_variant(variant: AesVariant) -> webcrypto_impl_core::AesVariant {
-    use webcrypto_impl_core::AesVariant as Core;
-    match variant {
-        AesVariant::Aes128 => Core::Aes128,
-        AesVariant::Aes192 => Core::Aes192,
-        AesVariant::Aes256 => Core::Aes256,
-    }
-}
-
-/// The core's variant for a generated `ecdsa-variant`.
-fn core_ecdsa_variant(variant: EcdsaVariant) -> webcrypto_impl_core::EcdsaVariant {
-    use webcrypto_impl_core::EcdsaVariant as Core;
-    match variant {
-        EcdsaVariant::P256Sha256 => Core::P256Sha256,
-        EcdsaVariant::P384Sha384 => Core::P384Sha384,
-    }
+webcrypto_impl_core::impl_conversions! {
+    error: Error,
+    sha2: Sha2Variant,
+    aes: AesVariant,
+    ecdsa: EcdsaVariant,
 }
 
 /// Unwrap an entropy result: the WASI random source backing the guest's
@@ -276,7 +239,7 @@ impl BytesGuest for Component {
 
 impl Sha2Guest for Component {
     fn make_digest(variant: Sha2Variant) -> Result<digest::Digest, Error> {
-        let variant = served_sha2(core_sha2_variant(variant))?;
+        let variant = served_sha2(variant.into())?;
         Ok(digest::Digest::new(Digest { variant }))
     }
 }
@@ -289,15 +252,12 @@ impl HmacSha2Guest for Component {
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<mac::MacKey, Error> {
-        let material = MacKeyMaterial::import(core_sha2_variant(variant), raw, extractable)?;
+        let material = MacKeyMaterial::import(variant.into(), raw, extractable)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
     async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<mac::MacKey, Error> {
-        let material = rng_infallible(MacKeyMaterial::generate(
-            core_sha2_variant(variant),
-            extractable,
-        ))?;
+        let material = rng_infallible(MacKeyMaterial::generate(variant.into(), extractable))?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 }
@@ -309,69 +269,46 @@ impl AesGcmGuest for Component {
         variant: AesVariant,
         raw: Vec<u8>,
         extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
-        let material =
-            AeadKeyMaterial::import_aes_gcm(core_aes_variant(variant), raw, extractable)?;
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+    ) -> Result<ExportedAeadKey, Error> {
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable)?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
     async fn generate_key(
         variant: AesVariant,
         extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+    ) -> Result<ExportedAeadKey, Error> {
         let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(
-            core_aes_variant(variant),
+            variant.into(),
             extractable,
         ))?;
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
 
 // --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 
 impl ChaChaPoly1305Guest for Component {
-    async fn import_key(
-        raw: Vec<u8>,
-        extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+    async fn import_key(raw: Vec<u8>, extractable: bool) -> Result<ExportedAeadKey, Error> {
         let material = AeadKeyMaterial::import_chacha20_poly1305(raw, extractable)?;
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
-    async fn generate_key(
-        extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+    async fn generate_key(extractable: bool) -> Result<ExportedAeadKey, Error> {
         let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(extractable));
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
 
 impl XChaChaPoly1305Guest for Component {
-    async fn import_key(
-        raw: Vec<u8>,
-        extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+    async fn import_key(raw: Vec<u8>, extractable: bool) -> Result<ExportedAeadKey, Error> {
         let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable)?;
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
-    async fn generate_key(
-        extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead::AeadKey, Error> {
+    async fn generate_key(extractable: bool) -> Result<ExportedAeadKey, Error> {
         let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(extractable));
-        Ok(crate::exports::lann::webcrypto::aead::AeadKey::new(
-            AeadKey { material },
-        ))
+        Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
 
@@ -402,9 +339,7 @@ impl InternalNonceKey {
 
 impl GuestInternalNonceKey for InternalNonceKey {
     fn seals_remaining(&self) -> Option<u64> {
-        self.material
-            .nonce_budget()
-            .map(|budget| budget.saturating_sub(self.sealed.get()))
+        self.material.seals_remaining(self.sealed.get())
     }
 
     async fn seal(
@@ -418,11 +353,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         let msg = drain_stream(plaintext).await;
         // Count this invocation against the algorithm's nonce budget, per
         // the minting interfaces' SHOULD-enforce contract.
-        if let Some(budget) = self.material.nonce_budget() {
-            if self.sealed.get() >= budget {
-                return Err(Error::KeyExhausted);
-            }
-        }
+        self.material.check_budget(self.sealed.get())?;
         self.sealed.set(self.sealed.get() + 1);
         let sealed = rng_infallible(self.material.seal_internal(&aad, &msg))?;
         Ok(stream_of(sealed))
@@ -464,29 +395,24 @@ impl AesGcmInternalNonceGuest for Component {
         variant: AesVariant,
         raw: Vec<u8>,
         extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
-        let material =
-            AeadKeyMaterial::import_aes_gcm(core_aes_variant(variant), raw, extractable)?;
-        Ok(
-            crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(
-                InternalNonceKey::new(material),
-            ),
-        )
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable)?;
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
     }
 
     async fn generate_key(
         variant: AesVariant,
         extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+    ) -> Result<ExportedInternalNonceKey, Error> {
         let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(
-            core_aes_variant(variant),
+            variant.into(),
             extractable,
         ))?;
-        Ok(
-            crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(
-                InternalNonceKey::new(material),
-            ),
-        )
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
     }
 }
 
@@ -496,24 +422,18 @@ impl XChachaInternalNonceGuest for Component {
     async fn import_key(
         raw: Vec<u8>,
         extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+    ) -> Result<ExportedInternalNonceKey, Error> {
         let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable)?;
-        Ok(
-            crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(
-                InternalNonceKey::new(material),
-            ),
-        )
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
     }
 
-    async fn generate_key(
-        extractable: bool,
-    ) -> Result<crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey, Error> {
+    async fn generate_key(extractable: bool) -> Result<ExportedInternalNonceKey, Error> {
         let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(extractable));
-        Ok(
-            crate::exports::lann::webcrypto::aead_internal_nonce::InternalNonceKey::new(
-                InternalNonceKey::new(material),
-            ),
-        )
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
     }
 }
 
@@ -634,7 +554,7 @@ impl EcdsaVerifyGuest for Component {
         variant: EcdsaVariant,
         raw: Vec<u8>,
     ) -> Result<signature_iface::VerifyingKey, Error> {
-        let public = SigPublic::import_ecdsa(core_ecdsa_variant(variant), &raw)?;
+        let public = SigPublic::import_ecdsa(variant.into(), &raw)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
 }

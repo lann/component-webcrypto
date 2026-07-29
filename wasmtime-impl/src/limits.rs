@@ -29,6 +29,9 @@
 use std::sync::Arc;
 
 use mea::semaphore::Semaphore;
+use wasmtime::component::{Accessor, AsAccessor as _};
+
+use crate::WasiWebcrypto;
 
 /// The admission pool: a fixed aggregate budget in bytes, held as permits.
 ///
@@ -56,6 +59,22 @@ pub(crate) fn pool(total: u64) -> Arc<BufferPool> {
 /// must be `<= total` (the caller clamps), so an empty pool always admits.
 pub(crate) async fn admit(pool: &Arc<BufferPool>, amount: u64) -> Reservation {
     pool.clone().acquire_owned(permits(amount)).await
+}
+
+/// Admit one stream-draining operation against the context's buffer limits
+/// (waiting FIFO for pool capacity), returning the reservation guard and
+/// the operation's buffering cap.
+pub(crate) async fn admit_input<T: Send>(
+    accessor: &Accessor<T, WasiWebcrypto>,
+) -> wasmtime::Result<(Reservation, usize)> {
+    let (pool, per_call) = accessor.as_accessor().with(|mut access| {
+        let fuel = wasmtime::AsContextMut::as_context_mut(&mut access).hostcall_fuel() as u64;
+        let view = access.get();
+        let (per_call, total) = view.ctx.buffer_limits(fuel);
+        Ok::<_, wasmtime::Error>((view.ctx.pool(total).clone(), per_call))
+    })?;
+    let reservation = admit(&pool, per_call).await;
+    Ok((reservation, usize::try_from(per_call).unwrap_or(usize::MAX)))
 }
 
 /// Bytes as permits, saturating rather than truncating: a budget beyond

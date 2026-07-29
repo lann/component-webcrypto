@@ -2,7 +2,7 @@
 //! plus raw key bytes, with the caller-nonce and internal-nonce seal/open
 //! operations, validation, and the extractability gate.
 
-use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
+use aes_gcm::aead::{Aead as _, KeyInit, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use zeroize::Zeroizing;
@@ -63,9 +63,11 @@ impl AeadCipher {
 /// cipher bound to its algorithm at minting, the raw key bytes (zeroized on
 /// drop), and the key's extractability.
 ///
-/// The internal-nonce seal *bookkeeping* (the invocation count against
-/// [`nonce_budget`](Self::nonce_budget)) deliberately lives in each
-/// implementation, whose interior-mutability needs differ.
+/// The internal-nonce seal *count* deliberately lives in each
+/// implementation, whose interior-mutability needs differ; the budget
+/// *decisions* over that count ([`check_budget`](Self::check_budget),
+/// [`seals_remaining`](Self::seals_remaining)) live here so the two
+/// implementations cannot diverge on them.
 #[derive(Clone)]
 pub struct AeadKeyMaterial {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
@@ -90,6 +92,28 @@ fn check_chacha_key(name: &str, raw: &[u8]) -> Result<(), Error> {
     }
 }
 
+/// The AES-192 decline every AES minting path renders (see the WIT
+/// `aes-variant` doc).
+fn aes192_unsupported() -> Error {
+    Error::Unsupported("AES-192 is not served by this implementation".into())
+}
+
+/// Import 32 bytes of key material for either ChaCha construction.
+fn import_chacha_like<C: KeyInit>(
+    name: &'static str,
+    wrap: fn(C) -> AeadCipher,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<AeadKeyMaterial, Error> {
+    check_chacha_key(name, &raw)?;
+    let cipher = wrap(C::new_from_slice(&raw).expect("length checked"));
+    Ok(AeadKeyMaterial {
+        cipher,
+        raw: Zeroizing::new(raw),
+        extractable,
+    })
+}
+
 impl AeadKeyMaterial {
     /// Import raw key material as the declared AES-GCM variant, per the
     /// `aes-gcm.import-key` contract: material whose length disagrees with
@@ -99,14 +123,15 @@ impl AeadKeyMaterial {
         raw: Vec<u8>,
         extractable: bool,
     ) -> Result<Self, Error> {
-        let expected = match variant {
-            AesVariant::Aes128 => 16,
-            AesVariant::Aes192 => {
-                return Err(Error::Unsupported(
-                    "AES-192 is not served by this implementation".into(),
-                ))
-            }
-            AesVariant::Aes256 => 32,
+        type Make = fn(&[u8]) -> AeadCipher;
+        let (expected, make): (usize, Make) = match variant {
+            AesVariant::Aes128 => (16, |raw| {
+                AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(raw).expect("length checked"))
+            }),
+            AesVariant::Aes192 => return Err(aes192_unsupported()),
+            AesVariant::Aes256 => (32, |raw| {
+                AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(raw).expect("length checked"))
+            }),
         };
         if raw.len() != expected {
             return Err(Error::InvalidKey(format!(
@@ -114,17 +139,8 @@ impl AeadKeyMaterial {
                 raw.len()
             )));
         }
-        let cipher = match variant {
-            AesVariant::Aes128 => {
-                AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
-            }
-            AesVariant::Aes192 => unreachable!("rejected above"),
-            AesVariant::Aes256 => {
-                AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
-            }
-        };
         Ok(Self {
-            cipher,
+            cipher: make(&raw),
             raw: Zeroizing::new(raw),
             extractable,
         })
@@ -139,11 +155,7 @@ impl AeadKeyMaterial {
     ) -> Result<Result<Self, Error>, RngError> {
         let len = match variant {
             AesVariant::Aes128 => 16,
-            AesVariant::Aes192 => {
-                return Ok(Err(Error::Unsupported(
-                    "AES-192 is not served by this implementation".into(),
-                )))
-            }
+            AesVariant::Aes192 => return Ok(Err(aes192_unsupported())),
             AesVariant::Aes256 => 32,
         };
         Ok(Ok(Self::import_aes_gcm(
@@ -157,15 +169,12 @@ impl AeadKeyMaterial {
     /// Import raw key material as an IETF ChaCha20-Poly1305 key (exactly 32
     /// bytes; anything else is `invalid-key`).
     pub fn import_chacha20_poly1305(raw: Vec<u8>, extractable: bool) -> Result<Self, Error> {
-        check_chacha_key(CHACHA20_POLY1305_NAME, &raw)?;
-        let cipher = AeadCipher::ChaCha20Poly1305(
-            ChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        );
-        Ok(Self {
-            cipher,
-            raw: Zeroizing::new(raw),
+        import_chacha_like(
+            CHACHA20_POLY1305_NAME,
+            AeadCipher::ChaCha20Poly1305,
+            raw,
             extractable,
-        })
+        )
     }
 
     /// Generate a fresh random IETF ChaCha20-Poly1305 key.
@@ -179,15 +188,12 @@ impl AeadKeyMaterial {
     /// Import raw key material as an XChaCha20-Poly1305 key (exactly 32
     /// bytes; anything else is `invalid-key`).
     pub fn import_xchacha20_poly1305(raw: Vec<u8>, extractable: bool) -> Result<Self, Error> {
-        check_chacha_key(XCHACHA20_POLY1305_NAME, &raw)?;
-        let cipher = AeadCipher::XChaCha20Poly1305(
-            XChaCha20Poly1305::new_from_slice(&raw).expect("length checked"),
-        );
-        Ok(Self {
-            cipher,
-            raw: Zeroizing::new(raw),
+        import_chacha_like(
+            XCHACHA20_POLY1305_NAME,
+            AeadCipher::XChaCha20Poly1305,
+            raw,
             extractable,
-        })
+        )
     }
 
     /// Generate a fresh random XChaCha20-Poly1305 key.
@@ -242,6 +248,23 @@ impl AeadKeyMaterial {
             12 => Some(1 << 32),
             _ => None,
         }
+    }
+
+    /// Whether a key that has already sealed `sealed` times may seal again,
+    /// per the minting interfaces' SHOULD-enforce contract:
+    /// `key-exhausted` once the algorithm's nonce budget is spent.
+    pub fn check_budget(&self, sealed: u64) -> Result<(), Error> {
+        match self.nonce_budget() {
+            Some(budget) if sealed >= budget => Err(Error::KeyExhausted),
+            _ => Ok(()),
+        }
+    }
+
+    /// The remaining nonce budget after `sealed` seals (the
+    /// `seals-remaining` getter); `none` when no budget is enforced.
+    pub fn seals_remaining(&self, sealed: u64) -> Option<u64> {
+        self.nonce_budget()
+            .map(|budget| budget.saturating_sub(sealed))
     }
 
     /// Validate a nonce's length, rendering the WIT `invalid-nonce` error
@@ -420,5 +443,22 @@ mod tests {
             .unwrap();
         assert_eq!(key.nonce_budget(), Some(1 << 32));
         assert_eq!(key.length_bits(), 128);
+    }
+
+    /// The budget decision both implementations delegate here: counting
+    /// stays with them, exhaustion and the remaining-budget arithmetic do
+    /// not.
+    #[test]
+    fn budget_decisions_follow_the_seal_count() {
+        let budgeted = AeadKeyMaterial::generate_chacha20_poly1305(true).unwrap();
+        assert_eq!(budgeted.check_budget(0), Ok(()));
+        assert_eq!(budgeted.check_budget((1 << 32) - 1), Ok(()));
+        assert_eq!(budgeted.check_budget(1 << 32), Err(Error::KeyExhausted));
+        assert_eq!(budgeted.seals_remaining(1), Some((1 << 32) - 1));
+        assert_eq!(budgeted.seals_remaining(u64::MAX), Some(0));
+
+        let unbudgeted = AeadKeyMaterial::generate_xchacha20_poly1305(true).unwrap();
+        assert_eq!(unbudgeted.check_budget(u64::MAX), Ok(()));
+        assert_eq!(unbudgeted.seals_remaining(u64::MAX), None);
     }
 }
