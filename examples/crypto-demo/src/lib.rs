@@ -115,6 +115,7 @@ impl Guest for Component {
         check("gcm-invalid-nonce", gcm_invalid_nonce().await).await?;
         check("gcm-key-export", gcm_key_export().await).await?;
         check("gcm-internal-nonce", gcm_internal_nonce().await).await?;
+        check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
         check("ed25519-known-answer", ed25519_known_answer().await).await?;
         check("ed25519-verify", ed25519_verify_check().await).await?;
         check("ed25519-generated-key", ed25519_generated_key().await).await?;
@@ -245,6 +246,67 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| format!("export of generated key: {e}"))?;
     expect_eq(exported.len(), 64, "generated key length")
+}
+
+/// The library's `Aead`/`AeadInternalNonce` wrappers: `seal` is the one
+/// operation whose result may arrive before its input is consumed, so its
+/// `Seal` collects concurrently with feeding rather than awaiting the
+/// operation and reading afterwards.
+///
+/// Two `Seal`s under one `join!` is the shape the package's making-progress
+/// rule asks for, and the reason `Seal` is a `Future` rather than an
+/// `async fn`'s anonymous one.
+async fn aead_wrapper_seal() -> Result<(), String> {
+    use lann_webcrypto_guest::{aes_gcm, aes_gcm_internal_nonce};
+
+    let key = aes_gcm::import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
+        .await
+        .map_err(|e| format!("import-key: {e}"))?;
+    let nonce = unhex(GCM_IV);
+    let plaintext = unhex(GCM_PLAINTEXT);
+    let aad = unhex(GCM_AAD);
+
+    let sealed = key
+        .seal(&nonce[..], &aad[..], &plaintext[..])
+        .await
+        .map_err(|e| format!("wrapper seal: {e}"))?;
+    expect_eq(
+        hex(&sealed),
+        format!("{GCM_CIPHERTEXT}{GCM_TAG}"),
+        "wrapper sealed message",
+    )?;
+
+    // A payload spanning several of the wrapper's feed chunks: the collect
+    // runs alongside the feed, so this must not depend on the whole input
+    // being taken before any output is produced.
+    let big: Vec<u8> = (0..=255u8).cycle().take(3 * 8192 + 11).collect();
+    let (first, second) = futures::join!(
+        key.seal(&nonce[..], &aad[..], &big[..]),
+        key.seal(&nonce[..], &aad[..], &big[..]),
+    );
+    let first = first.map_err(|e| format!("wrapper seal (multi-chunk): {e}"))?;
+    let second = second.map_err(|e| format!("wrapper seal (concurrent): {e}"))?;
+    expect_eq(hex(&first), hex(&second), "concurrent seals of one payload")?;
+    expect_eq(
+        first.len(),
+        big.len() + 16,
+        "sealed length is plaintext plus tag",
+    )?;
+
+    // The internal-nonce wrapper seals over the same shape; its wire format
+    // carries the nonce, so the sealed message is longer still.
+    let internal = aes_gcm_internal_nonce::generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| format!("generate-key (internal nonce): {e}"))?;
+    let sealed = internal
+        .seal(&aad[..], &plaintext[..])
+        .await
+        .map_err(|e| format!("internal-nonce wrapper seal: {e}"))?;
+    expect_eq(
+        sealed.len(),
+        plaintext.len() + 12 + 16,
+        "internal-nonce sealed length",
+    )
 }
 
 // --- digest & bytes checks -----------------------------------------------------

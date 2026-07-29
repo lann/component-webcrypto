@@ -310,7 +310,10 @@ interface aead-internal-nonce {
         /// The returned stream is a self-contained sealed message:
         /// everything `open` needs besides the key and `aad` is carried
         /// in-band. The wire format is documented by the key's minting
-        /// interface.
+        /// interface. As with `aead-key.seal`, implementations may produce
+        /// it incrementally or buffer and emit it whole, so a caller must
+        /// drain the returned stream concurrently with feeding `plaintext`
+        /// (see `mac-key`'s making-progress note).
         ///
         /// Fails with `error.key-exhausted` once the implementation can no
         /// longer guarantee nonce uniqueness for this key.
