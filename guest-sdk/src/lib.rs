@@ -93,6 +93,26 @@ pub use generated::wit_stream;
 
 // --- error ---------------------------------------------------------------------
 
+/// Render a raw WIT `error` case-name-first — `invalid-key: <detail>` — so
+/// a failure reads the same wherever it is reported.
+///
+/// This is the human-oriented spelling [`Error`]'s `Display` uses for the
+/// WIT cases (a unit test pins their agreement); the *generated* `Display`
+/// on the raw type is unavailable for it, since wit-bindgen emits one that
+/// forwards to `Debug`.
+pub fn render_error(error: &bindings::types::Error) -> String {
+    use bindings::types::Error as Raw;
+    match error {
+        Raw::InvalidKey(detail) => format!("invalid-key: {detail}"),
+        Raw::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
+        Raw::AuthenticationFailed => "authentication-failed".to_string(),
+        Raw::NotExtractable => "not-extractable".to_string(),
+        Raw::Unsupported(detail) => format!("unsupported: {detail}"),
+        Raw::KeyExhausted => "key-exhausted".to_string(),
+        Raw::Other(detail) => format!("other: {detail}"),
+    }
+}
+
 /// Errors surfaced by key creation and cryptographic operations.
 ///
 /// Mirrors the WIT `types.error` variant (see the doc comments in
@@ -156,16 +176,19 @@ impl From<bindings::types::Error> for Error {
     }
 }
 
+/// Renders the WIT cases exactly as [`render_error`] does (one spelling
+/// per failure, whoever reports it — a unit test pins the agreement), plus
+/// the [`Error::Read`] case this type adds.
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidKey(detail) => write!(f, "invalid key: {detail}"),
-            Error::InvalidNonce(detail) => write!(f, "invalid nonce: {detail}"),
-            Error::AuthenticationFailed => write!(f, "authentication failed"),
-            Error::NotExtractable => write!(f, "key is not extractable"),
+            Error::InvalidKey(detail) => write!(f, "invalid-key: {detail}"),
+            Error::InvalidNonce(detail) => write!(f, "invalid-nonce: {detail}"),
+            Error::AuthenticationFailed => write!(f, "authentication-failed"),
+            Error::NotExtractable => write!(f, "not-extractable"),
             Error::Unsupported(detail) => write!(f, "unsupported: {detail}"),
-            Error::KeyExhausted => write!(f, "key exhausted: its nonce budget is spent"),
-            Error::Other(detail) => write!(f, "operation failed: {detail}"),
+            Error::KeyExhausted => write!(f, "key-exhausted"),
+            Error::Other(detail) => write!(f, "other: {detail}"),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
         }
     }
@@ -938,4 +961,30 @@ pub mod xchacha20_poly1305_internal_nonce;
 /// through the engine's own compilation.
 pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
     bindings::bytes::constant_time_equal(a, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`render_error`] and [`Error`]'s `Display` spell every WIT case
+    /// identically: the same failure must read the same way whether it is
+    /// reported through the raw bindings or through the wrapper types.
+    #[test]
+    fn render_error_and_display_agree_on_every_wit_case() {
+        use bindings::types::Error as Raw;
+        let cases = [
+            Raw::InvalidKey("detail".into()),
+            Raw::InvalidNonce("detail".into()),
+            Raw::AuthenticationFailed,
+            Raw::NotExtractable,
+            Raw::Unsupported("detail".into()),
+            Raw::KeyExhausted,
+            Raw::Other("detail".into()),
+        ];
+        for raw in cases {
+            let rendered = render_error(&raw);
+            assert_eq!(Error::from(raw).to_string(), rendered, "{rendered}");
+        }
+    }
 }
