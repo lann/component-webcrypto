@@ -1,0 +1,32 @@
+// The set of `lann:webcrypto` interfaces `webcrypto.js` serves.
+//
+// This world is not built into a component: `jco types` derives the
+// TypeScript definitions of these interfaces from it, and `interface-check.js`
+// asserts the host's exports against them (see `just typecheck-jco`). Adding
+// an interface to the host means adding it here.
+//
+// The package itself lives once at the repository root `wit/` and is pulled in
+// through the `deps/lann-webcrypto` symlink, exactly like the demo components
+// do.
+package jco:webcrypto-host;
+
+/// The set of `lann:webcrypto` imports satisfied by this host.
+world imports {
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/aead-internal-nonce@0.1.0;
+    import lann:webcrypto/digest@0.1.0;
+    import lann:webcrypto/bytes@0.1.0;
+    import lann:webcrypto/sha2@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/chacha20-poly1305@0.1.0;
+    import lann:webcrypto/xchacha20-poly1305@0.1.0;
+    import lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
+    import lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
+    import lann:webcrypto/signature@0.1.0;
+    import lann:webcrypto/ed25519-verify@0.1.0;
+    import lann:webcrypto/ed25519-sign@0.1.0;
+    import lann:webcrypto/ecdsa-verify@0.1.0;
+    import lann:webcrypto/ecdsa-sign@0.1.0;
+}

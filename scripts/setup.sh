@@ -70,6 +70,8 @@ if ! have wasmtime; then
 fi
 
 if [ "${SKIP_NODE:-}" != "1" ]; then
+    log "Installing the jco host's npm dependencies (jco-impl)"
+    (cd "$REPO_ROOT/jco-impl" && npm install)
     log "Installing the jco demo driver's npm dependencies (examples/jco-demo)"
     (cd "$REPO_ROOT/examples/jco-demo" && npm install)
     log "Installing the conformance jco adapter's npm dependencies (conformance/adapters/jco)"

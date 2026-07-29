@@ -4,5 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Browser-compatible host for lann:webcrypto over the Web Crypto API. No dependencies; map the lann:webcrypto imports to webcrypto.js when transpiling with jco.",
-  "exports": "./webcrypto.js"
+  "exports": "./webcrypto.js",
+  "scripts": {
+    "types": "jco types wit --world-name imports --async-mode jspi --quiet -o generated",
+    "typecheck": "npm run types && tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.26.0",
+    "typescript": "^5.9.3"
+  }
 }

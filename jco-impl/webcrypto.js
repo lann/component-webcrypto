@@ -1,3 +1,4 @@
+// @ts-check
 // Host implementation of the `lann:webcrypto` imports (`mac`, `aead`,
 // `digest`, `bytes`, `hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, `sha2`)
 // for jco-transpiled components.
@@ -40,6 +41,52 @@
 const subtle = globalThis.crypto.subtle;
 
 /**
+ * A guest-provided `stream<u8>`. The `read`-batching shape is jco's own
+ * `Stream` object: this restates the convention documented above so the
+ * collector's branches can be checked against *something*, and does not
+ * verify it — only running against jco does that.
+ * @typedef {{ read(options: { count: number }): Promise<{ value: unknown, done: boolean }> }} JcoStream
+ * @typedef {AsyncIterable<unknown> | ReadableStream<unknown> | JcoStream} ByteStream
+ */
+
+/**
+ * One operation's admitted share of the input-buffering pool. `release` is
+ * idempotent.
+ * @typedef {{ cap: number, release: () => void }} Reservation
+ */
+
+/**
+ * The algorithm record bound to a signature key at mint. One shape for both
+ * families: Ed25519 has no curve and no mint-bound hash (RFC 8032 fixes
+ * SHA-512 internally).
+ * @typedef {object} SignatureAlgorithm
+ * @property {string} name
+ * @property {string | undefined} namedCurve
+ * @property {string | undefined} hash
+ * @property {number} publicLength
+ * @property {number} scalarLength
+ * @property {number} signatureLength
+ */
+
+/**
+ * An `ECDSA_VARIANTS` entry: a `SignatureAlgorithm` whose curve is fixed,
+ * carrying the curve OID the PKCS#8 wrapping needs.
+ * @typedef {SignatureAlgorithm & { namedCurve: string, hash: string, curveOid: readonly number[] }} EcdsaAlgorithm
+ */
+
+/**
+ * Narrow a WIT-lifted byte list to the `ArrayBuffer`-backed view WebCrypto
+ * takes. `BufferSource` excludes `SharedArrayBuffer`-backed views, which
+ * cannot occur here: jco lifts a `list<u8>` by copying out of the
+ * component's memory into a fresh array.
+ * @param {Uint8Array} bytes
+ * @returns {Uint8Array<ArrayBuffer>}
+ */
+function asBufferSource(bytes) {
+  return /** @type {Uint8Array<ArrayBuffer>} */ (bytes);
+}
+
+/**
  * Construct the throwable representation of a WIT `types.error` case: jco's
  * convention lifts a thrown `{ tag, val? }` into the declared
  * `result<_, error>` (see the header note; the sole place that convention
@@ -51,12 +98,18 @@ function witError(tag, val) {
   return val === undefined ? { tag } : { tag, val };
 }
 
-/** `error.invalid-key` with a human-readable detail. */
+/**
+ * `error.invalid-key` with a human-readable detail.
+ * @param {string} val
+ */
 function errInvalidKey(val) {
   return witError("invalid-key", val);
 }
 
-/** `error.invalid-nonce` with a human-readable detail. */
+/**
+ * `error.invalid-nonce` with a human-readable detail.
+ * @param {string} val
+ */
 function errInvalidNonce(val) {
   return witError("invalid-nonce", val);
 }
@@ -71,7 +124,10 @@ function errNotExtractable() {
   return witError("not-extractable");
 }
 
-/** `error.unsupported` with a human-readable detail. */
+/**
+ * `error.unsupported` with a human-readable detail.
+ * @param {string} val
+ */
 function errUnsupported(val) {
   return witError("unsupported", val);
 }
@@ -88,20 +144,48 @@ function errKeyExhausted() {
  * `QuotaExceededError` — is an operational condition: reporting those as
  * `authentication-failed` would render a local fault as an attack signal
  * and hide real bugs behind an expected-looking error.
+ * @param {unknown} err
  */
 function decryptFailure(err) {
-  if (err?.name === "OperationError") return errAuthenticationFailed();
-  return errOther(`open: ${err?.message ?? err}`);
+  const failure = asPlatformError(err);
+  if (failure.name === "OperationError") return errAuthenticationFailed();
+  return errOther(`open: ${failure.detail}`);
 }
 
-/** `error.other` with a human-readable detail. */
+/**
+ * `error.other` with a human-readable detail.
+ * @param {string} val
+ */
 function errOther(val) {
   return witError("other", val);
 }
 
-/** Whether `value` is already a WIT error payload (`{ tag, val? }`). */
+/**
+ * Whether `value` is already a WIT error payload (`{ tag, val? }`).
+ * @param {unknown} value
+ * @returns {value is { tag: string, val?: string }}
+ */
 function isWitError(value) {
-  return typeof value === "object" && value !== null && typeof value.tag === "string";
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (/** @type {{ tag?: unknown }} */ (value).tag) === "string"
+  );
+}
+
+/**
+ * The `name` and human-readable detail of a caught platform rejection.
+ * `catch` binds `unknown`, and a `DOMException`'s discriminating `name` is
+ * the whole basis of the taxonomy mapping, so the read is done once here
+ * rather than at each site.
+ * @param {unknown} err
+ * @returns {{ name: string | undefined, detail: string }}
+ */
+function asPlatformError(err) {
+  const shape = /** @type {{ name?: unknown, message?: unknown } | null | undefined} */ (err);
+  const name = typeof shape?.name === "string" ? shape.name : undefined;
+  const message = typeof shape?.message === "string" ? shape.message : undefined;
+  return { name, detail: message ?? String(err) };
 }
 
 /**
@@ -126,10 +210,11 @@ async function platformCall(what, run) {
     return await run();
   } catch (err) {
     if (isWitError(err)) throw err;
-    if (err?.name === "NotSupportedError") {
-      throw errUnsupported(`${what} is not served by this platform: ${err.message ?? err}`);
+    const failure = asPlatformError(err);
+    if (failure.name === "NotSupportedError") {
+      throw errUnsupported(`${what} is not served by this platform: ${failure.detail}`);
     }
-    throw errOther(`${what} failed: ${err?.message ?? err}`);
+    throw errOther(`${what} failed: ${failure.detail}`);
   }
 }
 
@@ -140,6 +225,7 @@ async function platformCall(what, run) {
  * them, so this implementation declines them (see the WIT `sha2-variant`
  * doc).
  */
+/** @type {Readonly<Record<string, { hash: string, blockBytes: number } | undefined>>} */
 const SHA2_VARIANTS = Object.assign(Object.create(null), {
   sha256: { hash: "SHA-256", blockBytes: 64 },
   sha384: { hash: "SHA-384", blockBytes: 128 },
@@ -149,6 +235,7 @@ const SHA2_VARIANTS = Object.assign(Object.create(null), {
 /**
  * The served `sha2-variant` entry for `variant`, throwing
  * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ * @param {string} variant
  */
 function sha2Variant(variant) {
   const entry = SHA2_VARIANTS[variant];
@@ -170,17 +257,25 @@ function sha2Variant(variant) {
 export class MacKey {
   #key;
   /**
-   * The key length in bits, fixed at mint. `mac-key.algorithm-length` is
-   * declared *total* in the WIT — it has no error case — so it must not
-   * depend on `HmacKeyAlgorithm.length`, which an engine may omit for an
-   * imported key: lowering `undefined` into a `u32` is unrepresentable.
+   * The algorithm parameters, fixed at mint. The getters are declared
+   * *total* in the WIT — they have no error case — so they must not depend
+   * on `HmacKeyAlgorithm`'s `length` and `hash`, which an engine may omit
+   * for an imported key: lowering `undefined` into a `u32` is
+   * unrepresentable, and a missing hash would report the key as bound to no
+   * digest.
    */
   #lengthBits;
+  #hashName;
 
-  /** @param {CryptoKey} key */
-  constructor(key, lengthBits) {
+  /**
+   * @param {CryptoKey} key
+   * @param {number} lengthBits
+   * @param {string} hashName
+   */
+  constructor(key, lengthBits, hashName) {
     this.#key = key;
     this.#lengthBits = lengthBits;
+    this.#hashName = hashName;
   }
 
   /**
@@ -212,7 +307,7 @@ export class MacKey {
     try {
       const message = await collectByteStream(data, reservation.cap);
       const ok = await platformCall("HMAC verify", () =>
-        subtle.verify("HMAC", this.#key, tag, message),
+        subtle.verify("HMAC", this.#key, asBufferSource(tag), message),
       );
       if (!ok) {
         throw errAuthenticationFailed();
@@ -223,16 +318,15 @@ export class MacKey {
   }
 
   /**
-   * The algorithm getters. `name` and `hash.name` project the `CryptoKey`'s
-   * `HmacKeyAlgorithm`; `length` comes from the mint instead (see
-   * `#lengthBits`).
+   * The algorithm getters. `name` projects the `CryptoKey`; `hash` and
+   * `length` come from the mint instead (see `#lengthBits`).
    */
   algorithmName() {
     return this.#key.algorithm.name;
   }
 
   algorithmHash() {
-    return this.#key.algorithm.hash?.name;
+    return this.#hashName;
   }
 
   algorithmLength() {
@@ -264,10 +358,21 @@ export class MacKey {
  */
 export class AeadKey {
   #key;
+  /**
+   * The key length in bits, fixed at mint. `aead-key.algorithm-length` is
+   * declared *total* in the WIT, so it must not depend on
+   * `AesKeyAlgorithm.length`, which an engine may omit for an imported key:
+   * lowering `undefined` into a `u32` is unrepresentable.
+   */
+  #lengthBits;
 
-  /** @param {CryptoKey} key */
-  constructor(key) {
+  /**
+   * @param {CryptoKey} key
+   * @param {number} lengthBits
+   */
+  constructor(key, lengthBits) {
     this.#key = key;
+    this.#lengthBits = lengthBits;
   }
 
   /**
@@ -290,7 +395,11 @@ export class AeadKey {
       const message = await collectByteStream(plaintext, reservation.cap);
       requireGcmNonce(nonce);
       const sealed = await platformCall("AES-GCM seal", () =>
-        subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: aad }, this.#key, message),
+        subtle.encrypt(
+          { name: "AES-GCM", iv: asBufferSource(nonce), additionalData: asBufferSource(aad) },
+          this.#key,
+          message,
+        ),
       );
       handedOff = true;
       return bytesToStream(new Uint8Array(sealed), reservation);
@@ -318,7 +427,7 @@ export class AeadKey {
       let opened;
       try {
         opened = await subtle.decrypt(
-          { name: "AES-GCM", iv: nonce, additionalData: aad },
+          { name: "AES-GCM", iv: asBufferSource(nonce), additionalData: asBufferSource(aad) },
           this.#key,
           message,
         );
@@ -333,17 +442,17 @@ export class AeadKey {
   }
 
   /**
-   * The algorithm getters: direct projections of the `CryptoKey`'s
-   * `AesKeyAlgorithm` (`name` and `length`), plus the operation-contract
-   * sizes (every AEAD this host serves is AES-GCM: 12-byte nonces, 16-byte
-   * tags).
+   * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
+   * from the mint (see `#lengthBits`), and the operation-contract sizes are
+   * fixed — every AEAD this host serves is AES-GCM: 12-byte nonces, 16-byte
+   * tags.
    */
   algorithmName() {
     return this.#key.algorithm.name;
   }
 
   algorithmLength() {
-    return this.#key.algorithm.length;
+    return this.#lengthBits;
   }
 
   nonceSize() {
@@ -386,14 +495,14 @@ async function importHmacKey(variant, raw, extractable) {
   if (raw.length === 0) throw errInvalidKey("empty key");
   let key;
   try {
-    key = await subtle.importKey("raw", raw, { name: "HMAC", hash }, extractable, [
+    key = await subtle.importKey("raw", asBufferSource(raw), { name: "HMAC", hash }, extractable, [
       "sign",
       "verify",
     ]);
   } catch (err) {
     throw errInvalidKey(String(err));
   }
-  return new MacKey(key, raw.length * 8);
+  return new MacKey(key, raw.length * 8, hash);
 }
 
 /**
@@ -411,7 +520,7 @@ async function generateHmacKey(variant, extractable) {
   );
   // WebCrypto's `generateKey` default is the hash's block size, which is the
   // length this interface documents.
-  return new MacKey(key, blockBytes * 8);
+  return new MacKey(key, blockBytes * 8, hash);
 }
 
 /** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
@@ -494,11 +603,13 @@ export const bytes = { constantTimeEqual };
  * implementation declines it (browsers do not reliably serve it — Chromium
  * implements no AES-192; see the WIT `aes-variant` doc).
  */
+/** @type {Readonly<Record<string, number | undefined>>} */
 const AES_VARIANT_BYTES = Object.assign(Object.create(null), { aes128: 16, aes256: 32 });
 
 /**
  * The raw key length in bytes declared by `variant`, throwing
  * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ * @param {string} variant
  */
 function aesVariantByteLength(variant) {
   const expected = AES_VARIANT_BYTES[variant];
@@ -525,14 +636,14 @@ async function importAesKey(variant, raw, extractable) {
   }
   let key;
   try {
-    key = await subtle.importKey("raw", raw, { name: "AES-GCM" }, extractable, [
+    key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
       "encrypt",
       "decrypt",
     ]);
   } catch (err) {
     throw errInvalidKey(String(err));
   }
-  return new AeadKey(key);
+  return new AeadKey(key, expected * 8);
 }
 
 /**
@@ -546,7 +657,7 @@ async function generateAesKey(variant, extractable) {
   const key = await platformCall(`${variant} key generation`, () =>
     subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
   );
-  return new AeadKey(key);
+  return new AeadKey(key, length);
 }
 
 /** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
@@ -558,7 +669,12 @@ export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
  * unimplemented), so this host declines these interfaces whole and a
  * composition needing them must supply another provider (the in-guest
  * provider serves both constructions).
+ *
+ * Annotated `never` for the same reason as `invalidKey`: the minting stubs
+ * below delegate to it in place of returning a key, so a version that fell
+ * through would resolve them with `undefined`.
  * @param {string} name
+ * @returns {never}
  */
 function unsupportedChacha(name) {
   throw errUnsupported(`${name} is not served by this implementation`);
@@ -595,6 +711,8 @@ export const xchachaInternalNonce = {
  */
 export class InternalNonceKey {
   #key;
+  /** The key length in bits, fixed at mint. See `AeadKey`. */
+  #lengthBits;
   #sealed = 0n;
 
   /** The 12-byte AES-GCM IV length. */
@@ -603,9 +721,13 @@ export class InternalNonceKey {
   /** The WIT nonce budget for 12-byte nonces: 2^32 seal invocations. */
   static #NONCE_BUDGET = 1n << 32n;
 
-  /** @param {CryptoKey} key */
-  constructor(key) {
+  /**
+   * @param {CryptoKey} key
+   * @param {number} lengthBits
+   */
+  constructor(key, lengthBits) {
     this.#key = key;
+    this.#lengthBits = lengthBits;
   }
 
   /**
@@ -627,7 +749,11 @@ export class InternalNonceKey {
       const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
       const body = new Uint8Array(
         await platformCall("AES-GCM seal", () =>
-          subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, this.#key, message),
+          subtle.encrypt(
+            { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
+            this.#key,
+            message,
+          ),
         ),
       );
       const sealed = new Uint8Array(iv.length + body.length);
@@ -662,7 +788,7 @@ export class InternalNonceKey {
       let opened;
       try {
         opened = await subtle.decrypt(
-          { name: "AES-GCM", iv, additionalData: aad },
+          { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
           this.#key,
           body,
         );
@@ -676,13 +802,16 @@ export class InternalNonceKey {
     }
   }
 
-  /** The algorithm getters: direct `AesKeyAlgorithm` projections. */
+  /**
+   * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
+   * from the mint (see `#lengthBits`).
+   */
   algorithmName() {
     return this.#key.algorithm.name;
   }
 
   algorithmLength() {
-    return this.#key.algorithm.length;
+    return this.#lengthBits;
   }
 
   /**
@@ -727,14 +856,14 @@ async function importAesInternalNonceKey(variant, raw, extractable) {
   }
   let key;
   try {
-    key = await subtle.importKey("raw", raw, { name: "AES-GCM" }, extractable, [
+    key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
       "encrypt",
       "decrypt",
     ]);
   } catch (err) {
     throw errInvalidKey(String(err));
   }
-  return new InternalNonceKey(key);
+  return new InternalNonceKey(key, expected * 8);
 }
 
 /**
@@ -748,7 +877,7 @@ async function generateAesInternalNonceKey(variant, extractable) {
   const key = await platformCall(`${variant} key generation`, () =>
     subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
   );
-  return new InternalNonceKey(key);
+  return new InternalNonceKey(key, length);
 }
 
 /** The `lann:webcrypto/aes-gcm-internal-nonce` interface (`--map '…#aesGcmInternalNonce'`). */
@@ -781,6 +910,7 @@ function requireGcmNonce(nonce) {
  */
 const DEFAULT_TOTAL_BUFFER_LIMIT = 128 * 1024 * 1024;
 
+/** @type {{ perCall: number | undefined, total: number | undefined }} */
 const bufferLimits = { perCall: undefined, total: undefined };
 
 /**
@@ -806,25 +936,29 @@ const admitQueue = [];
 
 /** Admit queued reservations from the front while they fit (FIFO). */
 function admitFromFront() {
-  while (admitQueue.length > 0 && reservedBytes + admitQueue[0].amount <= admitQueue[0].total) {
-    const entry = admitQueue.shift();
-    reservedBytes += entry.amount;
-    entry.resolve();
+  for (;;) {
+    const head = admitQueue[0];
+    if (head === undefined || reservedBytes + head.amount > head.total) return;
+    admitQueue.shift();
+    reservedBytes += head.amount;
+    head.resolve();
   }
 }
 
 /**
  * Reserve one operation's buffering capacity, waiting FIFO for the pool.
  * The returned reservation's `release` is idempotent.
- * @returns {Promise<{ cap: number, release: () => void }>}
+ * @returns {Promise<Reservation>}
  */
 async function admitInput() {
   const { perCall, total } = effectiveBufferLimits();
   const amount = Math.min(perCall, total);
-  await new Promise((resolve) => {
-    admitQueue.push({ amount, total, resolve });
-    admitFromFront();
-  });
+  await /** @type {Promise<void>} */ (
+    new Promise((resolve) => {
+      admitQueue.push({ amount, total, resolve });
+      admitFromFront();
+    })
+  );
   let released = false;
   return {
     cap: amount,
@@ -842,6 +976,8 @@ async function admitInput() {
  * A single-chunk byte `ReadableStream` over `bytes`, releasing
  * `reservation` (when given) once the bytes are handed off or the stream
  * is cancelled.
+ * @param {Uint8Array} bytes
+ * @param {Reservation} [reservation]
  */
 function bytesToStream(bytes, reservation = undefined) {
   return new ReadableStream({
@@ -867,11 +1003,13 @@ function bytesToStream(bytes, reservation = undefined) {
  * until the stream ends. Aliasing there would silently corrupt plaintext or
  * ciphertext — the copy costs one pass over bytes already copied at
  * concatenation.
+ * @param {unknown} value
+ * @returns {Uint8Array}
  */
 function toByteChunk(value) {
   if (typeof value === "number") return Uint8Array.of(value);
   if (value instanceof Uint8Array) return value.slice();
-  return Uint8Array.from(value);
+  return Uint8Array.from(/** @type {ArrayLike<number>} */ (value));
 }
 
 /**
@@ -879,11 +1017,15 @@ function toByteChunk(value) {
  * at most `cap` bytes: past the cap the stream is still drained (the WIT
  * drain rule) but discarded, and a recoverable `{ tag: 'other' }` is thrown
  * once the stream ends.
+ * @param {ByteStream} stream
+ * @param {number} [cap]
  */
 async function collectByteStream(stream, cap = Infinity) {
+  /** @type {Uint8Array[]} */
   let chunks = [];
   let total = 0;
   let overflowed = false;
+  /** @param {unknown} value */
   const push = (value) => {
     if (value === undefined || value === null) return;
     const chunk = toByteChunk(value);
@@ -909,15 +1051,15 @@ async function collectByteStream(stream, cap = Infinity) {
     } finally {
       reader.releaseLock();
     }
-  } else if (typeof stream.read === "function") {
+  } else if (typeof (/** @type {JcoStream} */ (stream).read) === "function") {
     // jco's own Stream object: read in batches rather than per element.
     for (;;) {
-      const { value, done } = await stream.read({ count: 65536 });
+      const { value, done } = await /** @type {JcoStream} */ (stream).read({ count: 65536 });
       push(value);
       if (done) break;
     }
   } else {
-    for await (const value of stream) {
+    for await (const value of /** @type {AsyncIterable<unknown>} */ (stream)) {
       push(value);
     }
   }
@@ -929,7 +1071,11 @@ async function collectByteStream(stream, cap = Infinity) {
   return concatChunks(chunks, total);
 }
 
-/** Concatenate `chunks` (totalling `total` bytes) into one `Uint8Array`. */
+/**
+ * Concatenate `chunks` (totalling `total` bytes) into one `Uint8Array`.
+ * @param {readonly Uint8Array[]} chunks
+ * @param {number} total
+ */
 function concatChunks(chunks, total) {
   const out = new Uint8Array(total);
   let offset = 0;
@@ -951,6 +1097,7 @@ function concatChunks(chunks, total) {
  * that branch's value, so adding a curve would weaken the checks these
  * quantities drive.
  */
+/** @type {Readonly<Record<string, EcdsaAlgorithm | undefined>>} */
 const ECDSA_VARIANTS = Object.assign(Object.create(null), {
   "p256-sha256": {
     name: "ECDSA",
@@ -976,6 +1123,7 @@ const ECDSA_VARIANTS = Object.assign(Object.create(null), {
  * The Ed25519 algorithm record, in the same shape as an `ECDSA_VARIANTS`
  * entry: no curve, no mint-bound hash (RFC 8032 fixes SHA-512 internally),
  * a 32-byte public key and a 64-byte `R ‖ S` signature.
+ * @type {SignatureAlgorithm}
  */
 const ED25519_ALGORITHM = {
   name: "Ed25519",
@@ -989,6 +1137,8 @@ const ED25519_ALGORITHM = {
 /**
  * The served `ecdsa-variant` entry for `variant`, throwing
  * `{ tag: 'unsupported', val }` for anything unknown.
+ * @param {string} variant
+ * @returns {EcdsaAlgorithm}
  */
 function ecdsaVariant(variant) {
   const entry = ECDSA_VARIANTS[variant];
@@ -998,7 +1148,11 @@ function ecdsaVariant(variant) {
   return entry;
 }
 
-/** The WebCrypto sign/verify algorithm parameter for a key's mint binding. */
+/**
+ * The WebCrypto sign/verify algorithm parameter for a key's mint binding.
+ * @param {SignatureAlgorithm} algorithm
+ * @returns {AlgorithmIdentifier | EcdsaParams}
+ */
 function signParams(algorithm) {
   return algorithm.name === "ECDSA" ? { name: "ECDSA", hash: algorithm.hash } : algorithm.name;
 }
@@ -1064,7 +1218,7 @@ export class VerifyingKey {
       }
       const params = signParams(this.#algorithm);
       const ok = await platformCall(`${this.#algorithm.name} verify`, () =>
-        subtle.verify(params, this.#key, sig, message),
+        subtle.verify(params, this.#key, asBufferSource(sig), message),
       );
       if (!ok) {
         throw errAuthenticationFailed();
@@ -1175,11 +1329,18 @@ export class SigningKey {
     const jwk = await platformCall("private key export", () =>
       subtle.exportKey("jwk", this.#privateKey),
     );
-    return base64UrlDecode(jwk.d);
+    const scalar = /** @type {JsonWebKey} */ (jwk).d;
+    if (scalar === undefined) {
+      throw errOther("private key export returned a JWK without a `d` field");
+    }
+    return base64UrlDecode(scalar);
   }
 }
 
-/** Decode a base64url string (JWK field encoding) to bytes. */
+/**
+ * Decode a base64url string (JWK field encoding) to bytes.
+ * @param {string} text
+ */
 function base64UrlDecode(text) {
   const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
@@ -1227,9 +1388,27 @@ const ED25519_SMALL_ORDER_Y = [
   "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
   "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
   "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
-].map((hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16)));
+].map(unhexFixed);
 
-/** Whether little-endian `a` < `b` (equal-length). */
+/**
+ * Decode an even-length hex literal from this file. A malformed literal is
+ * a source defect, not input: it must not silently yield a short array that
+ * a byte compare would then never match.
+ * @param {string} hex
+ */
+function unhexFixed(hex) {
+  const pairs = hex.match(/../g);
+  if (pairs === null || pairs.length * 2 !== hex.length) {
+    throw new Error(`malformed hex literal: ${hex}`);
+  }
+  return Uint8Array.from(pairs, (byte) => parseInt(byte, 16));
+}
+
+/**
+ * Whether little-endian `a` < `b` (equal-length).
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ */
 function ltLittleEndian(a, b) {
   for (let i = a.length - 1; i >= 0; i--) {
     if (a[i] !== b[i]) return a[i] < b[i];
@@ -1237,7 +1416,11 @@ function ltLittleEndian(a, b) {
   return false;
 }
 
-/** Whether `a` and `b` are byte-equal (public data; early exit is fine). */
+/**
+ * Whether `a` and `b` are byte-equal (public data; early exit is fine).
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ */
 function bytesEqual(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -1265,16 +1448,19 @@ function ed25519PointStrict(encoded) {
  * Annotated `never` deliberately: every call site relies on this throwing
  * and constructs a resource immediately afterwards, so a version that fell
  * through would mint a key over an `undefined` `CryptoKey`.
+ * @param {unknown} err
+ * @param {string} what
  * @returns {never}
  */
 function invalidKey(err, what) {
-  throw errInvalidKey(`invalid ${what}: ${err.message ?? err}`);
+  throw errInvalidKey(`invalid ${what}: ${asPlatformError(err).detail}`);
 }
 
 /**
  * Import a 32-byte raw Ed25519 public key. Non-canonical and small-order
  * encodings are rejected here (the WIT strict criterion; the platform's
  * import performs little validation of its own).
+ * @param {Uint8Array} raw
  */
 async function importEd25519VerifyingKey(raw) {
   if (raw.length !== ED25519_ALGORITHM.publicLength) {
@@ -1287,7 +1473,7 @@ async function importEd25519VerifyingKey(raw) {
   }
   let key;
   try {
-    key = await subtle.importKey("raw", raw, "Ed25519", true, ["verify"]);
+    key = await subtle.importKey("raw", asBufferSource(raw), "Ed25519", true, ["verify"]);
   } catch (err) {
     invalidKey(err, "Ed25519 public key");
   }
@@ -1305,7 +1491,11 @@ const ED25519_PKCS8_PREFIX = new Uint8Array([
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ]);
 
-/** Import a 32-byte raw Ed25519 private seed. */
+/**
+ * Import a 32-byte raw Ed25519 private seed.
+ * @param {Uint8Array} raw
+ * @param {boolean} extractable
+ */
 async function importEd25519SigningKey(raw, extractable) {
   if (raw.length !== ED25519_ALGORITHM.scalarLength) {
     throw errInvalidKey(
@@ -1324,10 +1514,16 @@ async function importEd25519SigningKey(raw, extractable) {
   return new SigningKey(privateKey, ED25519_ALGORITHM);
 }
 
-/** Generate a fresh Ed25519 signing key, returning `[signing, verifying]`. */
+/**
+ * Generate a fresh Ed25519 signing key, returning `[signing, verifying]`.
+ * @param {boolean} extractable
+ * @returns {Promise<[SigningKey, VerifyingKey]>}
+ */
 async function generateEd25519Key(extractable) {
-  const pair = await platformCall("Ed25519 key generation", () =>
-    subtle.generateKey("Ed25519", extractable, ["sign", "verify"]),
+  const pair = /** @type {CryptoKeyPair} */ (
+    await platformCall("Ed25519 key generation", () =>
+      subtle.generateKey("Ed25519", extractable, ["sign", "verify"]),
+    )
   );
   return [
     new SigningKey(pair.privateKey, ED25519_ALGORITHM),
@@ -1341,7 +1537,11 @@ export const ed25519Sign = {
   generateKey: generateEd25519Key,
 };
 
-/** Import an uncompressed-SEC1 ECDSA public key of the declared variant. */
+/**
+ * Import an uncompressed-SEC1 ECDSA public key of the declared variant.
+ * @param {string} variant
+ * @param {Uint8Array} raw
+ */
 async function importEcdsaVerifyingKey(variant, raw) {
   const entry = ecdsaVariant(variant);
   if (raw.length !== entry.publicLength || raw[0] !== 0x04) {
@@ -1353,7 +1553,7 @@ async function importEcdsaVerifyingKey(variant, raw) {
   try {
     key = await subtle.importKey(
       "raw",
-      raw,
+      asBufferSource(raw),
       { name: "ECDSA", namedCurve: entry.namedCurve },
       true,
       ["verify"],
@@ -1367,7 +1567,12 @@ async function importEcdsaVerifyingKey(variant, raw) {
 /** The `lann:webcrypto/ecdsa-verify` interface (`--map '…#ecdsaVerify'`). */
 export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
 
-/** Import a raw big-endian ECDSA scalar of the declared variant, via JWK. */
+/**
+ * Import a raw big-endian ECDSA scalar of the declared variant.
+ * @param {string} variant
+ * @param {Uint8Array} raw
+ * @param {boolean} extractable
+ */
 async function importEcdsaSigningKey(variant, raw, extractable) {
   const entry = ecdsaVariant(variant);
   if (raw.length !== entry.scalarLength) {
@@ -1401,7 +1606,7 @@ async function importEcdsaSigningKey(variant, raw, extractable) {
 /**
  * Wrap a raw EC scalar in a minimal PKCS#8 `PrivateKeyInfo` (RFC 5208)
  * containing an RFC 5915 `ECPrivateKey` without the optional public key.
- * @param {number[]} curveOid the curve's encoded OID, from `ECDSA_VARIANTS`
+ * @param {readonly number[]} curveOid the curve's encoded OID, from `ECDSA_VARIANTS`
  * @param {Uint8Array} scalar
  */
 function ecdsaScalarToPkcs8(curveOid, scalar) {
@@ -1426,6 +1631,9 @@ function ecdsaScalarToPkcs8(curveOid, scalar) {
 /**
  * Generate a fresh ECDSA signing key of the declared variant, returning
  * `[signing, verifying]`.
+ * @param {string} variant
+ * @param {boolean} extractable
+ * @returns {Promise<[SigningKey, VerifyingKey]>}
  */
 async function generateEcdsaKey(variant, extractable) {
   const entry = ecdsaVariant(variant);
