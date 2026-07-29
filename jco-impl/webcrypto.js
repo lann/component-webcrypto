@@ -914,13 +914,21 @@ const DEFAULT_TOTAL_BUFFER_LIMIT = 128 * 1024 * 1024;
 const bufferLimits = { perCall: undefined, total: undefined };
 
 /**
- * Configure the input-buffering limits (bytes). `undefined` restores a
- * value's default.
+ * Configure the input-buffering limits (bytes).
+ *
+ * A partial update: an absent member leaves that limit as it was. Passing an
+ * explicit `undefined` restores that limit's default, which is why the
+ * members are tested for presence rather than for being defined.
+ *
+ * Raising the pool admits whatever now fits: waiters are judged against the
+ * ceiling in force, so without this the new capacity would go unused until
+ * some unrelated operation happened to release.
  * @param {{ perCallBufferLimit?: number, totalBufferLimit?: number }} options
  */
-export function configure({ perCallBufferLimit, totalBufferLimit } = {}) {
-  bufferLimits.perCall = perCallBufferLimit;
-  bufferLimits.total = totalBufferLimit;
+export function configure(options = {}) {
+  if ("perCallBufferLimit" in options) bufferLimits.perCall = options.perCallBufferLimit;
+  if ("totalBufferLimit" in options) bufferLimits.total = options.totalBufferLimit;
+  admitFromFront();
 }
 
 /** The effective `(perCall, total)` limits, clamped like the wasmtime host. */
@@ -931,14 +939,22 @@ function effectiveBufferLimits() {
 }
 
 let reservedBytes = 0;
-/** @type {{ amount: number, total: number, resolve: () => void }[]} */
+/**
+ * Waiters, in arrival order. An entry carries only what it reserves: the
+ * ceiling it is judged against is read at admission time, so a `configure`
+ * between queueing and admission governs the whole queue rather than
+ * splitting it into entries judged against different totals.
+ * @type {{ amount: number, resolve: () => void }[]}
+ */
 const admitQueue = [];
 
 /** Admit queued reservations from the front while they fit (FIFO). */
 function admitFromFront() {
   for (;;) {
     const head = admitQueue[0];
-    if (head === undefined || reservedBytes + head.amount > head.total) return;
+    if (head === undefined) return;
+    const { total } = effectiveBufferLimits();
+    if (reservedBytes + head.amount > total) return;
     admitQueue.shift();
     reservedBytes += head.amount;
     head.resolve();
@@ -955,7 +971,7 @@ async function admitInput() {
   const amount = Math.min(perCall, total);
   await /** @type {Promise<void>} */ (
     new Promise((resolve) => {
-      admitQueue.push({ amount, total, resolve });
+      admitQueue.push({ amount, resolve });
       admitFromFront();
     })
   );

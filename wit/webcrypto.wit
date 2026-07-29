@@ -93,6 +93,33 @@ interface mac {
     /// completeness in-band (e.g. length framing) or discard the result on
     /// producer failure.
     ///
+    /// Making progress (applies to every stream-taking operation in this
+    /// package): an implementation holds each in-flight operation's bytes,
+    /// so it necessarily bounds how many it will service at once — by
+    /// leaving a call waiting to start, which the component model already
+    /// defines and which needs nothing from this interface. A caller with
+    /// several operations in flight must therefore *make progress on all of
+    /// them concurrently*, in both directions:
+    ///
+    /// - feed each operation's input stream without waiting on any other
+    ///   operation, and
+    /// - drain each operation's returned stream as it becomes available,
+    ///   rather than deferring every read until the last call has returned.
+    ///
+    /// A caller that withholds one in-flight operation's input or output
+    /// while awaiting another can deadlock against the implementation's
+    /// bound, and no implementation can rescue it: the bytes it is waiting
+    /// to reclaim are the ones the caller is holding. The natural shape is
+    /// safe — await an operation and drain its stream in the same task,
+    /// then run those tasks concurrently. Deferring all draining until
+    /// every call has returned is the shape that is not.
+    ///
+    /// A returned stream must be read to completion or dropped; an
+    /// implementation may hold resources until one of the two happens.
+    /// Dropping it is always available and always sufficient — a caller that
+    /// no longer wants the result never has to drain it to release the
+    /// implementation.
+    ///
     /// Note on extractability: `extractable` is an API property, not a
     /// physical one — the *implementation* of this interface necessarily
     /// holds the key material. The guarantee is that components holding only
@@ -178,8 +205,9 @@ interface aead {
     use types.{error};
 
     /// An AEAD key: an unforgeable capability, bound to one algorithm at
-    /// creation. See `mac-key` for the capability, extractability, and
-    /// truncating-producer notes, which apply identically here.
+    /// creation. See `mac-key` for the capability, extractability,
+    /// truncating-producer and making-progress notes, which apply
+    /// identically here.
     resource aead-key {
         /// Encrypt and authenticate `plaintext` under `nonce` with the
         /// associated data `aad`.
@@ -188,7 +216,10 @@ interface aead {
         /// authentication tag (the `crypto.subtle.encrypt` wire format).
         /// Implementations may produce it incrementally (tag last) or buffer
         /// and emit it whole; `async` here only *allows* blocking before the
-        /// stream is returned.
+        /// stream is returned. A caller must therefore drain the returned
+        /// stream concurrently with feeding `plaintext` (see `mac-key`'s
+        /// making-progress note): an incremental producer may block on the
+        /// unread output before it has taken the whole input.
         ///
         /// The caller is responsible for nonce uniqueness per key; nonce
         /// misuse defeats the algorithm's guarantees.
@@ -265,8 +296,8 @@ interface aead {
 /// Like `aead`, this is a single-message primitive: `open` buffers and
 /// verifies before releasing any plaintext, and both operations fully drain
 /// their input streams even when the result is an error. See `mac-key` for
-/// the capability, extractability, and truncating-producer notes, which
-/// apply identically here.
+/// the capability, extractability, truncating-producer and making-progress
+/// notes, which apply identically here.
 interface aead-internal-nonce {
     use types.{error};
 
@@ -405,8 +436,8 @@ interface bytes {
 /// keystore-resident non-extractable keys can sign but yield nothing
 /// else), so a derive contract here would make such keys unservable.
 ///
-/// See `mac-key` for the truncating-producer note, which applies to `sign`
-/// and `verify` here too.
+/// See `mac-key` for the truncating-producer and making-progress notes,
+/// which apply to `sign` and `verify` here too.
 interface signature {
     use types.{error};
 
