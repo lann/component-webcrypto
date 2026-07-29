@@ -1,0 +1,16 @@
+// The module specifiers componentize-js resolves against the component's
+// world, declared untyped on purpose.
+//
+// There is no definition of these to check against. `jco types` emits some,
+// but they describe *jco's* JS lowering, and the two toolchains differ where
+// it matters most here: jco lowers `stream<u8>` to a web
+// `ReadableStream<number>`, while componentize-js hands the guest the paired
+// handles `wit-world`'s `u8Stream()` mints. Pointing this file at jco's
+// output would assert that difference away — a confident type where the
+// truth is that nothing here is verified except by componentizing and
+// running (`just test-webcrypto-componentize-wpt`).
+declare module "lann:webcrypto/hmac-sha2@0.1.0";
+declare module "lann:webcrypto/aes-gcm@0.1.0";
+declare module "lann:webcrypto/mac@0.1.0";
+declare module "lann:webcrypto/aead@0.1.0";
+declare module "wit-world";

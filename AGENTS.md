@@ -58,7 +58,10 @@ componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,
                         #   raw keys) over the lann:webcrypto imports; the
                         #   toolchain revision is pinned in
-                        #   componentize-js.rev; wpt/ vendors the
+                        #   componentize-js.rev; interface-check.js asserts
+                        #   the exported subset against the SubtleCrypto and
+                        #   CryptoKey definitions TypeScript ships
+                        #   (`just typecheck-componentize-sdk`); wpt/ vendors the
                         #   WebCryptoAPI web-platform-tests and gates in CI,
                         #   componentizing its runner from the tree with a
                         #   digest-pinned componentize-js build
@@ -246,6 +249,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
 | `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just typecheck-componentize-sdk` | the `componentize-sdk` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
 | `just test-webcrypto-componentize-wpt` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`componentize-sdk/wpt/component.sh`), never compiled here. Changing `componentize-sdk/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
 | `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |

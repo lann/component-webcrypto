@@ -22,6 +22,7 @@ jco-checks:
 # Everything the componentize CI job runs: the WPT WebCryptoAPI suites
 # against the componentize-sdk JS guest library.
 componentize-checks:
+    @just _step typecheck-componentize-sdk
     @just _step test-webcrypto-componentize-wpt
 
 # Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
@@ -96,6 +97,12 @@ test-node: transpile
 # copy to go stale.
 typecheck-jco:
     cd jco-impl && npm run typecheck
+
+# Type-check the componentize-js guest library against the Web Cryptography
+# API definitions TypeScript ships. Nothing is generated, so nothing can go
+# stale; no component build.
+typecheck-componentize-sdk:
+    cd componentize-sdk && npm run typecheck
 
 # Run the Wasmtime (native, RustCrypto) host demo.
 demo-wasmtime: build-component
