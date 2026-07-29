@@ -3,7 +3,7 @@
 // test cases grouped by the `/` segments of their names, columns are
 // targets — and drives a live run of the same cases against *this*
 // browser's WebCrypto via the transpiled guests (see harness.mjs).
-import { runAll } from "./harness.mjs";
+import { runAll, runInWorkers } from "./harness.mjs";
 
 // Resolved relative to this module, so the viewer works from any base path
 // (the local server's repo root, or a GitHub Pages project subpath).
@@ -49,6 +49,34 @@ function makeNode(label, parent) {
   };
 }
 
+/**
+ * Walk `name`'s `/`-separated segments down from `root`, creating missing
+ * children with `makeChild(segment, parent)` and calling `visit` on every
+ * node along the path (root included); returns the leaf. Shared by the
+ * matrix tree and the failure-summary tree, so the two segment the same
+ * way.
+ */
+function insertPath(root, name, makeChild, visit) {
+  let node = root;
+  visit?.(node);
+  for (const segment of name.split("/")) {
+    let child = node.children.get(segment);
+    if (!child) {
+      child = makeChild(segment, node);
+      node.children.set(segment, child);
+    }
+    node = child;
+    visit?.(node);
+  }
+  return node;
+}
+
+/** Every node of a tree, root first, depth-first. */
+function* iterateNodes(node) {
+  yield node;
+  for (const child of node.children.values()) yield* iterateNodes(child);
+}
+
 function buildModel(data) {
   const targets = Object.keys(data.targets);
   const columns = targets.length + 1; // + "this browser"
@@ -60,16 +88,11 @@ function buildModel(data) {
   const indexByName = new Map();
   data.cases.forEach((c, i) => {
     indexByName.set(c.name, i);
-    let node = root;
-    for (const segment of c.name.split("/")) {
-      let child = node.children.get(segment);
-      if (!child) {
-        child = makeNode(segment, node);
-        child.counts = Array.from({ length: columns }, zero);
-        node.children.set(segment, child);
-      }
-      node = child;
-    }
+    const node = insertPath(root, c.name, (segment, parent) => {
+      const child = makeNode(segment, parent);
+      child.counts = Array.from({ length: columns }, zero);
+      return child;
+    });
     node.caseIndex = i;
     leaves.push(node);
   });
@@ -268,17 +291,14 @@ function autoExpandFailures(model) {
 function failureTree(model, failing) {
   const root = { children: new Map(), count: 0, detail: undefined };
   failing.forEach((index, position) => {
-    let node = root;
-    node.count += 1;
-    for (const segment of model.data.cases[index].name.split("/")) {
-      let child = node.children.get(segment);
-      if (!child) {
-        child = { children: new Map(), count: 0, detail: undefined };
-        node.children.set(segment, child);
-      }
-      child.count += 1;
-      node = child;
-    }
+    const node = insertPath(
+      root,
+      model.data.cases[index].name,
+      () => ({ children: new Map(), count: 0, detail: undefined }),
+      (visited) => {
+        visited.count += 1;
+      },
+    );
     if (position < FAILURE_DETAIL_LIMIT) {
       node.detail = model.liveDetails[index] || "(no detail)";
     }
@@ -418,11 +438,6 @@ function makeRun(model) {
     flush();
   }
 
-  function* iterateNodes(node) {
-    yield node;
-    for (const child of node.children.values()) yield* iterateNodes(child);
-  }
-
   function apply(result) {
     (collected[result.suite] ?? (collected[result.suite] = [])).push({
       name: result.name,
@@ -518,52 +533,9 @@ function makeRun(model) {
   }
 
   /**
-   * Run every suite across `count` parallel workers, each with its own
-   * instances of the guests, running the `i % count` stripe of the cases.
-   * Resolves to null when every worker finished, or to the first failure
-   * (any worker failing aborts them all).
+   * Run every suite across parallel workers, each with its own instances
+   * of the guests, running one stripe of the cases.
    */
-  function runInWorkers(count) {
-    return new Promise((resolve) => {
-      const workers = [];
-      let done = 0;
-      let settled = false;
-      const settle = (failure) => {
-        if (settled) return;
-        settled = true;
-        for (const worker of workers) worker.terminate();
-        resolve(failure);
-      };
-      for (let index = 0; index < count; index += 1) {
-        let worker;
-        try {
-          worker = new Worker(new URL("./worker.mjs", import.meta.url), {
-            type: "module",
-          });
-        } catch (err) {
-          settle(String(err));
-          return;
-        }
-        worker.onmessage = ({ data }) => {
-          if (settled) return;
-          if (data.kind === "error") {
-            settle(data.error);
-          } else if (data.kind === "done") {
-            done += 1;
-            if (done === count) settle(null);
-          } else {
-            handle(data);
-          }
-        };
-        worker.onerror = (event) => {
-          settle(String(event.message ?? "worker failed to start"));
-        };
-        worker.postMessage({ missing, shard: { index, count } });
-        workers.push(worker);
-      }
-    });
-  }
-
   async function start() {
     runButton.disabled = true;
     downloadButton.hidden = true;
@@ -582,9 +554,7 @@ function makeRun(model) {
     // worker path fails (e.g. no JSPI in workers) — partial worker results
     // are discarded by reset(). The run is fully async either way, so the
     // page stays responsive.
-    const failure = await runInWorkers(
-      Math.min(navigator.hardwareConcurrency || 2, 8),
-    );
+    const failure = await runInWorkers(missing, handle);
     if (failure === null) {
       finish();
       return;
