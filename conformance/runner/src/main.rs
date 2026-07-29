@@ -2,11 +2,7 @@
 //! results. Expectation policy lives in the cases (self-describing)
 //! and target facts in `conformance/targets.toml`; this program only checks
 //! that the mail arrived intact, gates on failures, and renders
-//! `conformance/matrix.md`.
-//!
-//! Usage: `conformance-runner --targets <toml> --results <dir>
-//!         --lock <suite>=<lockfile> ... --matrix-out <md>
-//!         [--json-out <json>]`
+//! `conformance/matrix.md`. See `--help` for the flags.
 //!
 //! Transport invariants, each an error (exit nonzero):
 //! - every non-`optional` target produced a results file for each suite it
@@ -26,6 +22,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use anyhow::Context as _;
+use clap::Parser;
+use conformance_report::{CaseResult, Outcome, ResultsFile};
+use indexmap::IndexMap;
 
 #[derive(serde::Deserialize)]
 struct Targets {
@@ -60,57 +59,23 @@ impl Target {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct ResultsFile {
-    target: String,
-    suite: String,
-    #[serde(rename = "missing-features")]
-    missing_features: Vec<String>,
-    results: Vec<CaseResult>,
-}
-
-#[derive(serde::Deserialize)]
-struct CaseResult {
-    name: String,
-    #[serde(default)]
-    features: Vec<String>,
-    outcome: String,
-    #[serde(default)]
-    detail: String,
-}
-
-/// One suite lockfile: case name -> feature tags, plus the suite order
-/// (the canonical case order the results viewer renders).
+/// One suite lockfile: case name -> feature tags, in suite order (the
+/// canonical case order the results viewer renders).
+#[derive(Debug)]
 struct Lock {
-    features: BTreeMap<String, Vec<String>>,
-    order: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct LockFile {
-    cases: Vec<LockCase>,
-}
-
-#[derive(serde::Deserialize)]
-struct LockCase {
-    name: String,
-    #[serde(default)]
-    features: Vec<String>,
+    cases: IndexMap<String, Vec<String>>,
 }
 
 /// Parse a lockfile (TOML: a `cases` array of `{ name, features? }` inline
 /// tables, as written by `just update-conformance-lock`).
 fn parse_lock(text: &str) -> anyhow::Result<Lock> {
-    let file: LockFile = toml::from_str(text)?;
-    let mut features = BTreeMap::new();
-    let mut order = Vec::new();
-    for case in file.cases {
-        if features.insert(case.name.clone(), case.features).is_some() {
+    let mut cases = IndexMap::new();
+    for case in conformance_report::parse_lock(text)? {
+        if cases.insert(case.name.clone(), case.features).is_some() {
             anyhow::bail!("duplicate case {:?}", case.name);
         }
-        order.push(case.name);
     }
-    Ok(Lock { features, order })
+    Ok(Lock { cases })
 }
 
 /// The group a case name belongs to: `probe`, or its first two path
@@ -183,7 +148,7 @@ fn validate_file(
             problems.push(format!("{at}: duplicate case {:?}", case.name));
             continue;
         }
-        match lock.features.get(&case.name) {
+        match lock.cases.get(&case.name) {
             None => problems.push(format!(
                 "{at}: case {:?} is not in the suite lockfile (run `just \
                  update-conformance-lock` if the suite changed intentionally)",
@@ -196,14 +161,14 @@ fn validate_file(
             )),
             Some(_) => {}
         }
-        if !matches!(case.outcome.as_str(), "pass" | "fail" | "skipped") {
+        if case.outcome == Outcome::Unknown {
             problems.push(format!(
-                "{at}: case {:?} reports unknown outcome {:?}",
-                case.name, case.outcome
+                "{at}: case {:?} reports an outcome that is not pass/fail/skipped",
+                case.name
             ));
         }
     }
-    for name in lock.features.keys() {
+    for name in lock.cases.keys() {
         if !seen.contains(name.as_str()) {
             problems.push(format!(
                 "{at}: case {name:?} is in the suite lockfile but produced no result (run \
@@ -298,8 +263,14 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
                 continue;
             }
             let total = in_cell.len();
-            let passed = in_cell.iter().filter(|c| c.outcome == "pass").count();
-            let skipped = in_cell.iter().filter(|c| c.outcome == "skipped").count();
+            let passed = in_cell
+                .iter()
+                .filter(|c| c.outcome == Outcome::Pass)
+                .count();
+            let skipped = in_cell
+                .iter()
+                .filter(|c| c.outcome == Outcome::Skipped)
+                .count();
             let mut cell = format!("{passed}/{total}");
             if skipped > 0 {
                 cell.push_str(&format!(" -{skipped} skipped"));
@@ -314,7 +285,7 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
     let mut any_failures = false;
     for file in files {
         for case in &file.results {
-            if case.outcome == "fail" {
+            if case.outcome == Outcome::Fail {
                 any_failures = true;
                 let mut detail = case.detail.replace('\n', "; ");
                 const MAX: usize = 200;
@@ -347,7 +318,7 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
     for file in files {
         let mut by_group: BTreeMap<String, (usize, &str)> = BTreeMap::new();
         for case in &file.results {
-            if case.outcome == "skipped" {
+            if case.outcome == Outcome::Skipped {
                 let entry = by_group
                     .entry(group_of(&case.name))
                     .or_insert((0, case.detail.as_str()));
@@ -366,16 +337,6 @@ fn render_matrix(targets: &Targets, files: &[ResultsFile]) -> String {
         md.push_str("None.\n");
     }
     md
-}
-
-/// Parsed command-line arguments.
-struct Args {
-    targets: PathBuf,
-    results: PathBuf,
-    matrix_out: PathBuf,
-    /// Where to write the results-viewer aggregate, if requested.
-    json_out: Option<PathBuf>,
-    locks: BTreeMap<String, PathBuf>,
 }
 
 /// Render the machine-readable aggregate the results viewer
@@ -417,11 +378,11 @@ fn render_json(
 
     let mut cases = Vec::new();
     for (suite, lock) in locks {
-        for name in &lock.order {
+        for (name, features) in &lock.cases {
             cases.push(ViewerCase {
                 name,
                 suite,
-                features: &lock.features[name],
+                features,
             });
         }
     }
@@ -429,34 +390,37 @@ fn render_json(
     let mut outcomes = BTreeMap::new();
     let mut details = BTreeMap::new();
     for name in targets.targets.keys() {
+        let by_suite: BTreeMap<&str, BTreeMap<&str, &CaseResult>> = files
+            .iter()
+            .filter(|f| &f.target == name)
+            .map(|f| {
+                let by_name = f.results.iter().map(|c| (c.name.as_str(), c)).collect();
+                (f.suite.as_str(), by_name)
+            })
+            .collect();
         let mut column = Vec::with_capacity(cases.len());
         let mut target_details = BTreeMap::new();
-        // Iterate the suites exactly as `cases` was built, so indexes
-        // align.
-        for (suite, lock) in locks {
-            let by_name: Option<BTreeMap<&str, &CaseResult>> = files
-                .iter()
-                .find(|f| &f.target == name && &f.suite == suite)
-                .map(|f| f.results.iter().map(|c| (c.name.as_str(), c)).collect());
-            for case_name in &lock.order {
-                let result = by_name
-                    .as_ref()
-                    .and_then(|m| m.get(case_name.as_str()).copied());
-                let code = match result.map(|c| c.outcome.as_str()) {
-                    Some("pass") => Some("p"),
-                    Some("fail") => Some("f"),
-                    Some("skipped") => Some("s"),
-                    // Absent (or unknown-outcome, which validation already
-                    // flags) renders as "no result".
-                    _ => None,
-                };
-                if let Some(c) = result {
-                    if matches!(c.outcome.as_str(), "fail" | "skipped") && !c.detail.is_empty() {
-                        target_details.insert(column.len().to_string(), c.detail.as_str());
-                    }
+        // The column is driven by the same `cases` list the viewer renders,
+        // so outcome indexes cannot misalign with it.
+        for case in &cases {
+            let result = by_suite
+                .get(case.suite)
+                .and_then(|m| m.get(case.name))
+                .copied();
+            let code = match result.map(|c| c.outcome) {
+                Some(Outcome::Pass) => Some("p"),
+                Some(Outcome::Fail) => Some("f"),
+                Some(Outcome::Skipped) => Some("s"),
+                // Absent (or unknown-outcome, which validation already
+                // flags) renders as "no result".
+                _ => None,
+            };
+            if let Some(c) = result {
+                if matches!(c.outcome, Outcome::Fail | Outcome::Skipped) && !c.detail.is_empty() {
+                    target_details.insert(column.len().to_string(), c.detail.as_str());
                 }
-                column.push(code);
             }
+            column.push(code);
         }
         outcomes.insert(name.as_str(), column);
         details.insert(name.as_str(), target_details);
@@ -495,56 +459,39 @@ fn render_json(
     Ok(serde_json::to_string(&data)?)
 }
 
-fn parse_args() -> anyhow::Result<Args> {
-    let mut targets = None;
-    let mut results = None;
-    let mut matrix_out = None;
-    let mut json_out = None;
-    let mut locks = BTreeMap::new();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--targets" => {
-                targets = Some(PathBuf::from(
-                    args.next().context("--targets needs a value")?,
-                ))
-            }
-            "--results" => {
-                results = Some(PathBuf::from(
-                    args.next().context("--results needs a value")?,
-                ))
-            }
-            "--matrix-out" => {
-                matrix_out = Some(PathBuf::from(
-                    args.next().context("--matrix-out needs a value")?,
-                ))
-            }
-            "--json-out" => {
-                json_out = Some(PathBuf::from(
-                    args.next().context("--json-out needs a value")?,
-                ))
-            }
-            "--lock" => {
-                let value = args.next().context("--lock needs <suite>=<path>")?;
-                let (suite, path) = value
-                    .split_once('=')
-                    .context("--lock needs <suite>=<path>")?;
-                locks.insert(suite.to_string(), PathBuf::from(path));
-            }
-            other => anyhow::bail!("unknown argument {other:?}"),
-        }
-    }
-    Ok(Args {
-        targets: targets.context("--targets <toml> is required")?,
-        results: results.context("--results <dir> is required")?,
-        matrix_out: matrix_out.context("--matrix-out <md> is required")?,
-        json_out,
-        locks,
-    })
+#[derive(Parser)]
+#[command(
+    about = "Aggregates per-target conformance results against targets.toml and the suite \
+             lockfiles; renders the matrix and the results-viewer data."
+)]
+struct Args {
+    /// The target- and suite-facts manifest (targets.toml).
+    #[arg(long)]
+    targets: PathBuf,
+    /// The directory holding the per-target results files.
+    #[arg(long)]
+    results: PathBuf,
+    /// Where to write the rendered matrix.
+    #[arg(long)]
+    matrix_out: PathBuf,
+    /// Where to write the results-viewer aggregate, if requested.
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+    /// A suite lockfile to validate against, as <suite>=<path>; repeatable.
+    #[arg(long = "lock", value_name = "SUITE=PATH", value_parser = parse_lock_flag)]
+    locks: Vec<(String, PathBuf)>,
+}
+
+/// Split a `--lock` value into its suite name and lockfile path.
+fn parse_lock_flag(value: &str) -> Result<(String, PathBuf), String> {
+    let (suite, path) = value
+        .split_once('=')
+        .ok_or_else(|| "expected <suite>=<path>".to_string())?;
+    Ok((suite.to_string(), PathBuf::from(path)))
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = parse_args()?;
+    let args = Args::parse();
 
     let targets: Targets = toml::from_str(
         &std::fs::read_to_string(&args.targets)
@@ -596,13 +543,13 @@ fn main() -> anyhow::Result<()> {
     let failures: usize = files
         .iter()
         .flat_map(|f| f.results.iter())
-        .filter(|c| c.outcome == "fail")
+        .filter(|c| c.outcome == Outcome::Fail)
         .count();
     let total: usize = files.iter().map(|f| f.results.len()).sum();
     let skipped: usize = files
         .iter()
         .flat_map(|f| f.results.iter())
-        .filter(|c| c.outcome == "skipped")
+        .filter(|c| c.outcome == Outcome::Skipped)
         .count();
 
     let md = render_matrix(&targets, &files);
@@ -695,20 +642,20 @@ mod tests {
         }
     }
 
-    fn case(name: &str, features: &[&str], outcome: &str) -> CaseResult {
+    fn case(name: &str, features: &[&str], outcome: Outcome) -> CaseResult {
         CaseResult {
             name: name.to_string(),
             features: features.iter().map(|s| s.to_string()).collect(),
-            outcome: outcome.to_string(),
+            outcome,
             detail: String::new(),
         }
     }
 
     fn full_results() -> Vec<CaseResult> {
         vec![
-            case("alg/src/tc1/whole", &[], "pass"),
-            case("alg/src/tc2/whole", &["chacha20-poly1305"], "pass"),
-            case("probe/check", &[], "pass"),
+            case("alg/src/tc1/whole", &[], Outcome::Pass),
+            case("alg/src/tc2/whole", &["chacha20-poly1305"], Outcome::Pass),
+            case("probe/check", &[], Outcome::Pass),
         ]
     }
 
@@ -752,7 +699,7 @@ mod tests {
     #[test]
     fn extra_case_is_a_problem() {
         let mut results = full_results();
-        results.push(case("alg/src/tc99/whole", &[], "pass"));
+        results.push(case("alg/src/tc99/whole", &[], Outcome::Pass));
         let problems = validate(&file("native", "shared", results));
         assert!(
             problems[0].contains("not in the suite lockfile"),
@@ -763,7 +710,7 @@ mod tests {
     #[test]
     fn duplicate_case_is_a_problem() {
         let mut results = full_results();
-        results.push(case("probe/check", &[], "pass"));
+        results.push(case("probe/check", &[], Outcome::Pass));
         let problems = validate(&file("native", "shared", results));
         assert!(problems[0].contains("duplicate case"), "{problems:?}");
     }
@@ -774,6 +721,17 @@ mod tests {
         results[1].features.clear();
         let problems = validate(&file("native", "shared", results));
         assert!(problems[0].contains("feature tags"), "{problems:?}");
+    }
+
+    #[test]
+    fn unknown_outcome_is_a_problem() {
+        let mut results = full_results();
+        results[0].outcome = Outcome::Unknown;
+        let problems = validate(&file("native", "shared", results));
+        assert!(
+            problems[0].contains("not pass/fail/skipped"),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -829,6 +787,20 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_lock_case_is_a_problem() {
+        let err = parse_lock(
+            r#"
+            cases = [
+                { name = "probe/check" },
+                { name = "probe/check" },
+            ]
+            "#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate case"), "{err}");
+    }
+
+    #[test]
     fn presence_is_derived_from_suite_requirements() {
         let files = vec![
             file("native", "shared", full_results()),
@@ -875,9 +847,13 @@ mod tests {
     #[test]
     fn json_out_aligns_outcomes_with_lock_order() {
         let mut results = full_results();
-        results[1] = case("alg/src/tc2/whole", &["chacha20-poly1305"], "skipped");
+        results[1] = case(
+            "alg/src/tc2/whole",
+            &["chacha20-poly1305"],
+            Outcome::Skipped,
+        );
         results[1].detail = "feature declared missing".to_string();
-        results[2] = case("probe/check", &[], "fail");
+        results[2] = case("probe/check", &[], Outcome::Fail);
         results[2].detail = "boom".to_string();
         let files = vec![file("native", "shared", results)];
         let locks = BTreeMap::from([("shared".to_string(), lock())]);
@@ -928,7 +904,7 @@ mod tests {
     #[test]
     fn json_out_treats_unknown_outcomes_as_absent() {
         let mut results = full_results();
-        results[0] = case("alg/src/tc1/whole", &[], "mystery");
+        results[0] = case("alg/src/tc1/whole", &[], Outcome::Unknown);
         let files = vec![file("native", "shared", results)];
         let locks = BTreeMap::from([("shared".to_string(), lock())]);
         let json = render_json(&targets(), &locks, &files).unwrap();

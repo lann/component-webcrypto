@@ -1,0 +1,19 @@
+[package]
+name = "conformance-report"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The conformance wire shapes: the results files the adapters write and the runner validates, and the suite lockfile. One definition of the contract instead of a convention re-implemented per crate."
+
+[features]
+# Lockfile rendering and parsing (the adapter's --lock-out side and the
+# runner's validation side). Off by default so the composed driver's wasm
+# build carries no TOML code.
+lock = ["dep:toml"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", optional = true }
+
+[dev-dependencies]
+serde_json = "1"

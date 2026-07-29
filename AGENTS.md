@@ -103,6 +103,9 @@ conformance/            # cross-implementation conformance tests — see
                         #     the browser target gates in CI, locally opt-in
                         #     via CONFORMANCE_BROWSER=1 with Chrome installed)
                         #     — jco reads its missing-features from targets.toml
+  report/               #   the results-file and lockfile wire shapes the Rust
+                        #     adapters serialize and the runner deserializes
+                        #     (crate: conformance-report)
   runner/               #   aggregates results: validates them against
                         #     targets.toml + the suite lockfiles, renders
                         #     conformance/matrix.md + the viewer data

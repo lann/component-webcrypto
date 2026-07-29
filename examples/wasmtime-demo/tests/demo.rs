@@ -21,36 +21,11 @@ fn run(dir: &Path, program: &str, args: &[&str]) {
     );
 }
 
-/// Build the guest core module and wrap it into a component, returning the
-/// component path.
+/// Build the guest component through `just build-component` — the single
+/// definition of that build — and return the component path.
 fn build_component(workspace_root: &Path) -> PathBuf {
-    run(
-        workspace_root,
-        "cargo",
-        &[
-            "build",
-            "--release",
-            "-p",
-            "crypto-demo",
-            "--target",
-            "wasm32-unknown-unknown",
-        ],
-    );
-    let component = workspace_root.join("examples/crypto-demo/build/crypto-demo.component.wasm");
-    std::fs::create_dir_all(component.parent().unwrap())
-        .expect("failed to create the component build directory");
-    run(
-        workspace_root,
-        "wasm-tools",
-        &[
-            "component",
-            "new",
-            "target/wasm32-unknown-unknown/release/crypto_demo.wasm",
-            "-o",
-            component.to_str().unwrap(),
-        ],
-    );
-    component
+    run(workspace_root, "just", &["build-component"]);
+    workspace_root.join("examples/crypto-demo/build/crypto-demo.component.wasm")
 }
 
 #[tokio::test(flavor = "multi_thread")]
