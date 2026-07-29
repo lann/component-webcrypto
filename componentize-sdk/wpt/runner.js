@@ -101,7 +101,12 @@ function generateKeyInSubset(name) {
 
 // --- runner -----------------------------------------------------------------------
 
-const GROUPS = [
+// Exported for the parity runner (parity-runner.js), which runs the same
+// groups without the subset gating. The baseline leg (parity/baseline.mjs)
+// cannot import this module — the shim's `lann:webcrypto` specifiers only
+// resolve under componentize-js — so it carries its own copy of this table;
+// the parity comparator fails on any drift between the two.
+export const GROUPS = [
   ["sign_verify/hmac", () => runHmac(), hmacInSubset],
   ["encrypt_decrypt/aes_gcm (96-bit iv)", () => runAesGcm(), gcmInSubset],
   [

@@ -176,12 +176,53 @@ time. Secret-free operations (hashing public data, signature *verification*)
 are exempt from the classes. Keep the classification table in sync when
 adding algorithms, and keep class D out of the provider's world.
 
+`just class-d-composition` (a dependency of `just conformance`) gates that
+last sentence: it asserts the conformance signing guest, whose world imports
+`ecdsa-sign`, does not compose with the provider. Adding a class-D export
+turns that composition green and fails the gate. The failure mode it guards
+against is subtle — see guest-impl/README.md, "What the failure looks like":
+`wac plug` tolerates imports it cannot satisfy, so the composition breaks
+only because the provider exports the *generic* interface owning the key
+resource that the withheld minting interface mints.
+
 ### The jco host must stay browser-compatible
 
 `jco-impl/webcrypto.js` uses only `globalThis.crypto.subtle` and
 `globalThis.crypto.getRandomValues`. No `node:crypto`, no Node-only APIs: the
 same file must be loadable in a browser unchanged. Node is just the current
 runner (24+ for JSPI).
+
+### WPT fidelity is a first-class design constraint
+
+`componentize-sdk/webcrypto.js` re-exposes the package as `crypto.subtle`,
+and the WPT harness (`componentize-sdk/wpt/`) runs the platform's own test
+suite through it. That round trip — WPT → shim → WIT → implementation — is
+the repository's instrument for a question the conformance suites cannot
+ask: whether `crypto.subtle`'s observable semantics survive the WIT shape.
+Its coverage is first-class, like the conformance vectors: growing the
+package surface includes vendoring the WPT groups that observe it.
+
+A WPT-observable behavior the shim does not exhibit is one of two things,
+and the difference is the signal:
+
+- **Unserved**: the WIT carries the semantics; the shim does not serve them
+  yet (algorithms beyond its documented pair, key formats beyond `raw`).
+  Backlog, not a design problem.
+- **WIT-forced**: no shim could express the behavior through the interface
+  shape (AES-GCM IV lengths other than 96 bits and tags other than 128 —
+  the `aes-gcm` contract fixes both). A WIT-forced deviation can be
+  correct — the GCM nonce contract is deliberate — but it is a design
+  ruling, made when the interface is shaped and recorded where it can be
+  found, never a silent consequence of whatever shape was convenient.
+
+The shim header's deviations list is the registry: every deviation appears
+there with its classification, so the WIT-forced set — the true cost of the
+interface shape, in platform-conformance terms — is enumerable at a glance.
+When designing or changing WIT, read the WPT groups for the affected
+algorithm the way you read Wycheproof: they define what a platform
+observes, including the exact `DOMException` names the shim must reconstruct
+from `types.error` (`mapWitError`), which bounds how much an error-variant
+design may collapse.
 
 ## Build & run
 
@@ -216,6 +257,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test-jco-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since it runs cases sequentially. |
 | `just typecheck-jco` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
+| `just wpt-parity` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `componentize-sdk/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
@@ -226,7 +268,9 @@ passing under `just test` (Wasmtime), `just test-node` (jco), and
 `just test-webcrypto-composed` (in-guest). When adding behavior, extend the
 conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
-its vector cases exist (see conformance/README.md, "Growing the suites").
+its vector cases exist (see conformance/README.md, "Growing the suites")
+and the WPT groups observing it are vendored with their in-subset tests
+passing (see "WPT fidelity is a first-class design constraint" above).
 
 ## Check the rationale before implementing it
 
@@ -300,6 +344,19 @@ closed numbers remain stable references.
 
 ## Direction (designed, not yet built)
 
+- WPT platform parity through the jco path: the measuring harness exists
+  (`just wpt-parity` — see componentize-sdk/wpt/README.md, "The parity
+  gate") and pins the loss set; what remains is driving that set down.
+  Growing toward parity is tiered — first behaviors the WIT already
+  carries but the shim does not serve (more hashes, Ed25519/ECDSA,
+  symmetric JWK, the usages model, `getRandomValues`), then additive WIT
+  surface (the RSA family, derive, wrap — see the bullets below), and only
+  then WIT-forced deviations (the GCM IV/tag contract), each of which
+  needs an explicit ruling: carry it via a separate compat minting
+  interface that other providers may decline, or keep the deviation and
+  record it. Class D is not implicated: the crypto runs host-side on the
+  platform. A browser leg (the same two runs in Chromium, baseline = the
+  browser's own `crypto.subtle`) remains unbuilt.
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium

@@ -19,6 +19,7 @@ jco-checks:
     @just _step typecheck-jco
     @just _step test-jco-host
     @just _step test-node
+    @just _step wpt-parity
 
 # Everything the componentize CI job runs: the WPT WebCryptoAPI suites
 # against the componentize-sdk JS guest library.
@@ -221,6 +222,43 @@ compose-wpt-runner: build-guest-provider
 update-wpt-expectations: compose-wpt-runner
     componentize-sdk/wpt/update-expectations.sh target/wpt-runner-composed.wasm
 
+# --- WPT parity (jco path) ------------------------------------------------------
+
+# Run the WPT parity gate: the vendored WPT suites run twice — directly
+# against this platform's own crypto.subtle (the baseline) and through the
+# componentized shim transpiled by jco against jco-impl/webcrypto.js (the
+# round trip) — and the comparator holds the round trip to the baseline's
+# pass set, with known losses pinned in componentize-sdk/wpt/parity/losses.js.
+# Both legs end at the same platform crypto, so the delta isolates exactly
+# what the carrier stack (shim, WIT shape, component ABI, jco) loses.
+# Needs Node 24+ and the pinned componentize-js (downloaded — see
+# componentize-sdk/wpt/component.sh).
+wpt-parity: _wpt-parity-legs
+    node componentize-sdk/wpt/parity/compare.mjs \
+        componentize-sdk/wpt/build/parity-baseline.json \
+        componentize-sdk/wpt/build/parity-roundtrip.json
+
+# Re-record componentize-sdk/wpt/parity/losses.js from an actual run: run
+# this when a change legitimately moves the loss set, and review the diff —
+# every removed line is a platform behavior the round trip now preserves,
+# and every added line needs a classification in the shim header's
+# deviations registry.
+update-wpt-parity: _wpt-parity-legs
+    node componentize-sdk/wpt/parity/compare.mjs \
+        componentize-sdk/wpt/build/parity-baseline.json \
+        componentize-sdk/wpt/build/parity-roundtrip.json --update
+
+# Produce both parity legs' results under componentize-sdk/wpt/build/:
+# componentize the ungated parity runner from the tree, transpile it with
+# jco against the jco host, and run each leg on this Node.
+_wpt-parity-legs:
+    componentize-sdk/wpt/component.sh build-parity
+    cd componentize-sdk/wpt/parity && npm run -s transpile
+    node componentize-sdk/wpt/parity/baseline.mjs \
+        > componentize-sdk/wpt/build/parity-baseline.json
+    cd componentize-sdk/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
+        > ../build/parity-roundtrip.json
+
 # --- conformance -------------------------------------------------------------
 
 # The whole-run safety cap (seconds) for each conformance target invocation.
@@ -239,7 +277,7 @@ conformance-timeout := "600"
 # Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
 # Chrome/Chromium 137+; targets.toml marks it optional, so the runner warns
 # on its missing results rather than failing).
-conformance: _conformance-clean conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
+conformance: _conformance-clean class-d-composition conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
     cargo run --release -p conformance-runner -- \
         --targets conformance/targets.toml \
         --results conformance/results \
@@ -247,6 +285,46 @@ conformance: _conformance-clean conformance-wasmtime conformance-composed confor
         --lock signing=conformance/signing-guest/tests.lock \
         --matrix-out conformance/matrix.md \
         --json-out conformance/results/matrix.json
+
+# The class-D negative-composition gate: composing a consumer whose world
+# imports `ecdsa-sign` (the signing guest) with the in-guest provider must
+# fail. This is what makes "class D is enforced structurally" a fact rather
+# than a claim — without it, the provider could start exporting `ecdsa-sign`
+# and every other check would still report green, because targets.toml
+# excludes the composed target from the signing suite by declaration.
+#
+# The composition fails on a resource-type mismatch, not on an unsatisfied
+# import: `wac plug` leaves imports it cannot satisfy in place (that is how
+# the composed demo keeps its `wasi:cli` imports). `ecdsa-sign` does
+# `use signature.{signing-key}`, and the provider *does* export `signature`,
+# so plugging rebinds `signing-key` to the provider's own resource and
+# orphans the `ecdsa-sign` import that still names the imported one. The
+# enforcement therefore holds only while the provider exports the generic
+# interface whose resource the withheld minting interface mints — true of
+# every minting interface in the package today.
+#
+# Matching the message on that interface name is load-bearing: a gate that
+# accepted any nonzero exit would also pass on a missing artifact or a
+# changed `wac` CLI.
+class-d-composition: build-signing-guest build-guest-provider
+    #!/usr/bin/env bash
+    set -uo pipefail
+    output=$(wac plug \
+        conformance/signing-guest/build/conformance-signing-guest.component.wasm \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        -o target/class-d-composition.wasm 2>&1)
+    status=$?
+    if [ $status -eq 0 ]; then
+        echo "class-D gate: composing the signing guest with the in-guest provider SUCCEEDED." >&2
+        echo "The provider must not export lann:webcrypto/ecdsa-sign (guest-impl/wit/world.wit)." >&2
+        exit 1
+    fi
+    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/ecdsa-sign'; then
+        echo "class-D gate: the composition failed, but not on ecdsa-sign:" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    echo "class-D gate: the signing guest does not compose with the in-guest provider (ecdsa-sign is not exported)."
 
 # Serve the conformance results viewer (a collapsing cross-target matrix
 # plus a live "test this browser" run of the suites) after a full

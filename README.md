@@ -52,6 +52,14 @@ kind*, not by algorithm:
   `seal`/`open`): there is no stateful computation object to misuse, so the
   `error` variant carries no misuse cases — incrementality comes from the
   streams, not from resource state.
+- **`crypto.subtle` fidelity is measured, not assumed.** The
+  `componentize-sdk` library re-exposes the package as `crypto.subtle`, and
+  the vendored WebCryptoAPI web-platform-tests run through it in CI —
+  WPT → shim → WIT → implementation — so the platform's own test suite
+  meters what the interface shape preserves. Where the shape deliberately
+  deviates (the AES-GCM nonce contract), the deviation is a recorded
+  ruling, not an accident; see AGENTS.md, "WPT fidelity is a first-class
+  design constraint".
 
 Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
 (SHA-256/384/512), **AES-GCM** (128/256-bit keys, 12-byte nonces), and
@@ -134,6 +142,10 @@ just test-webcrypto-componentize-wpt # the WPT WebCryptoAPI suites against the
 just test-webcrypto-componentize # the composed pipeline with the JS demo guest
                              #   (needs the componentize-js CLI — see
                              #   componentize-sdk/README.md)
+just wpt-parity              # the WPT suites against the platform's own
+                             #   crypto.subtle and through the jco round trip;
+                             #   holds the round trip to the platform's pass set
+                             #   (see componentize-sdk/wpt/README.md)
 just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally
