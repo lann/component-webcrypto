@@ -158,6 +158,15 @@ condition onto an existing one (it usually does); `other(string)` carries
 operational conditions indefinitely, never semantic conditions callers must
 branch on.
 
+The evolution rules describe the cost of a change, not a prohibition — and
+they bind only once the package has external consumers, which it does not
+yet. Until then, a shape regret is fixed *in place* (signatures change,
+names change, the error variant may grow), never designed around
+additively: working around a constraint that does not yet bind produces
+the wart without buying the compatibility. What ends this regime is
+publishing the package for consumption; the change that does so should say
+it does.
+
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`wasmtime-impl/src/bindings.rs`,

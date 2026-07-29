@@ -16,8 +16,15 @@ pub async fn import_key(
 }
 
 /// Generate a fresh random HMAC key over `variant`.
-pub async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<Mac, Error> {
+///
+/// `length` is the key length in bits; `None` means the underlying hash's
+/// block size (WebCrypto's `generateKey` default).
+pub async fn generate_key(
+    variant: Sha2Variant,
+    length: Option<u32>,
+    extractable: bool,
+) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha2::generate_key(variant, extractable).await?,
+        bindings::hmac_sha2::generate_key(variant, length, extractable).await?,
     ))
 }
