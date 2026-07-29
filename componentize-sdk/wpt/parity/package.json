@@ -1,0 +1,16 @@
+{
+  "name": "@lann/wpt-parity-webcrypto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WPT parity gate: the vendored WebCryptoAPI suites run directly against the platform's crypto.subtle (baseline) and through the componentized shim transpiled by jco against jco-impl (round trip); compare.mjs holds the round trip to the baseline's pass set.",
+  "scripts": {
+    "transpile": "jco transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --async-exports 'demo:webcrypto-demo/demo@0.1.0#run' --async-imports 'lann:webcrypto/hmac-sha2@0.1.0#import-key' --async-imports 'lann:webcrypto/hmac-sha2@0.1.0#generate-key' --async-imports 'lann:webcrypto/aes-gcm@0.1.0#import-key' --async-imports 'lann:webcrypto/aes-gcm@0.1.0#generate-key' --async-imports 'lann:webcrypto/mac@0.1.0#[method]mac-key.sign' --async-imports 'lann:webcrypto/mac@0.1.0#[method]mac-key.verify' --async-imports 'lann:webcrypto/mac@0.1.0#[method]mac-key.export-key' --async-imports 'lann:webcrypto/aead@0.1.0#[method]aead-key.seal' --async-imports 'lann:webcrypto/aead@0.1.0#[method]aead-key.open' --async-imports 'lann:webcrypto/aead@0.1.0#[method]aead-key.export-key' --async-imports 'lann:webcrypto/digest@0.1.0#[method]digest.compute' --map 'lann:webcrypto/mac@0.1.0=../../../../jco-impl/webcrypto.js' --map 'lann:webcrypto/aead@0.1.0=../../../../jco-impl/webcrypto.js' --map 'lann:webcrypto/hmac-sha2@0.1.0=../../../../jco-impl/webcrypto.js#hmacSha2' --map 'lann:webcrypto/aes-gcm@0.1.0=../../../../jco-impl/webcrypto.js#aesGcm' --map 'lann:webcrypto/digest@0.1.0=../../../../jco-impl/webcrypto.js' --map 'lann:webcrypto/sha2@0.1.0=../../../../jco-impl/webcrypto.js#sha2' -o generated",
+    "baseline": "node baseline.mjs",
+    "roundtrip": "node --experimental-wasm-jspi roundtrip.mjs",
+    "compare": "node compare.mjs"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.26.0"
+  }
+}

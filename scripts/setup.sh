@@ -76,6 +76,8 @@ if [ "${SKIP_NODE:-}" != "1" ]; then
     (cd "$REPO_ROOT/examples/jco-demo" && npm install)
     log "Installing the conformance jco adapter's npm dependencies (conformance/adapters/jco)"
     (cd "$REPO_ROOT/conformance/adapters/jco" && npm install)
+    log "Installing the WPT parity gate's npm dependencies (componentize-sdk/wpt/parity)"
+    (cd "$REPO_ROOT/componentize-sdk/wpt/parity" && npm install)
 fi
 
 log "Done."
