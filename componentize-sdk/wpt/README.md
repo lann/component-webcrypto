@@ -67,6 +67,14 @@ This is the WPT path's equivalent of `conformance/*/tests.lock`. Regenerate
 it with `just update-wpt-expectations` when a change legitimately moves a
 number, and review the diff.
 
+The out-of-subset buckets are a to-do list, not a boundary: WPT coverage is
+a first-class design constraint (see AGENTS.md, "WPT fidelity is a
+first-class design constraint"), and the census is the meter of how much of
+`crypto.subtle`'s observable behavior survives the WIT shape. Growing the
+package surface includes vendoring the WPT groups that observe it; a test
+no shim could ever move in-subset marks a WIT-forced deviation, which
+belongs in the shim header's classified deviations list.
+
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
 ## What is vendored

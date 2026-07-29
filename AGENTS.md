@@ -188,6 +188,38 @@ resource that the withheld minting interface mints.
 same file must be loadable in a browser unchanged. Node is just the current
 runner (24+ for JSPI).
 
+### WPT fidelity is a first-class design constraint
+
+`componentize-sdk/webcrypto.js` re-exposes the package as `crypto.subtle`,
+and the WPT harness (`componentize-sdk/wpt/`) runs the platform's own test
+suite through it. That round trip — WPT → shim → WIT → implementation — is
+the repository's instrument for a question the conformance suites cannot
+ask: whether `crypto.subtle`'s observable semantics survive the WIT shape.
+Its coverage is first-class, like the conformance vectors: growing the
+package surface includes vendoring the WPT groups that observe it.
+
+A WPT-observable behavior the shim does not exhibit is one of two things,
+and the difference is the signal:
+
+- **Unserved**: the WIT carries the semantics; the shim does not serve them
+  yet (algorithms beyond its documented pair, key formats beyond `raw`).
+  Backlog, not a design problem.
+- **WIT-forced**: no shim could express the behavior through the interface
+  shape (AES-GCM IV lengths other than 96 bits and tags other than 128 —
+  the `aes-gcm` contract fixes both). A WIT-forced deviation can be
+  correct — the GCM nonce contract is deliberate — but it is a design
+  ruling, made when the interface is shaped and recorded where it can be
+  found, never a silent consequence of whatever shape was convenient.
+
+The shim header's deviations list is the registry: every deviation appears
+there with its classification, so the WIT-forced set — the true cost of the
+interface shape, in platform-conformance terms — is enumerable at a glance.
+When designing or changing WIT, read the WPT groups for the affected
+algorithm the way you read Wycheproof: they define what a platform
+observes, including the exact `DOMException` names the shim must reconstruct
+from `types.error` (`mapWitError`), which bounds how much an error-variant
+design may collapse.
+
 ## Build & run
 
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in
@@ -229,7 +261,9 @@ passing under `just test` (Wasmtime), `just test-node` (jco), and
 `just test-webcrypto-composed` (in-guest). When adding behavior, extend the
 conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
-its vector cases exist (see conformance/README.md, "Growing the suites").
+its vector cases exist (see conformance/README.md, "Growing the suites")
+and the WPT groups observing it are vendored with their in-subset tests
+passing (see "WPT fidelity is a first-class design constraint" above).
 
 ## Check the rationale before implementing it
 
@@ -303,6 +337,22 @@ closed numbers remain stable references.
 
 ## Direction (designed, not yet built)
 
+- WPT platform parity through the jco path: run the vendored WPT suites
+  twice — directly against the platform's own `crypto.subtle` (the
+  baseline) and through the componentized shim transpiled by jco against
+  `jco-impl/webcrypto.js` — and gate that the round trip passes everything
+  the baseline passes. The ceiling is measured, not asserted, so platform
+  gaps (Ed448, AES-192) fall out of scope per platform with no exclusion
+  list, and the gate isolates exactly the losses the WIT layer introduces.
+  Class D is not implicated: the crypto runs host-side on the platform.
+  Growing toward parity is tiered — first behaviors the WIT already
+  carries but the shim does not serve (more hashes, Ed25519/ECDSA,
+  symmetric JWK, the usages model, `getRandomValues`), then additive WIT
+  surface (the RSA family, derive, wrap — see the bullets below), and only
+  then WIT-forced deviations (the GCM IV/tag contract), each of which
+  needs an explicit ruling: carry it via a separate compat minting
+  interface that other providers may decline, or keep the deviation and
+  record it.
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium

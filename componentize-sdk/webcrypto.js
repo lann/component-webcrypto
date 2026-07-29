@@ -16,21 +16,28 @@
 // them against the world at componentize time.
 //
 // Documented deviations from the Web Cryptography API (all fail closed with
-// clear errors, never silently differ):
+// clear errors, never silently differ). Each is classified — *unserved*
+// (the WIT carries the semantics; this library does not serve them yet) or
+// *WIT-forced* (no shim could express the behavior through the interface
+// shape; a recorded design ruling) — per AGENTS.md, "WPT fidelity is a
+// first-class design constraint":
 //
-//   - Only HMAC-SHA-256 and AES-256-GCM are served; other algorithms,
-//     hashes, and AES key sizes throw `NotSupportedError`.
-//   - Only the `"raw"` key format is served; others throw
+//   - Unserved: only HMAC-SHA-256 and AES-256-GCM are served; other
+//     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
+//   - Unserved: only the `"raw"` key format is served; others throw
 //     `NotSupportedError`.
-//   - AES-GCM nonces follow the `lann:webcrypto` contract: 12-byte IVs and
-//     128-bit tags only. Other IV lengths throw `OperationError` (browsers
-//     accept them); a legal-but-unserved `tagLength` (32–120) throws
-//     `NotSupportedError`, while a value outside the registry's set throws
-//     `OperationError` as the spec's AES-GCM operations define.
-//   - HMAC's `length` parameter must be omitted or name the key's exact bit
-//     length; WebCrypto's sub-byte truncation is not supported.
-//   - There is no `DOMException` in the componentize-js runtime, so this
-//     module exports a minimal stand-in with the standard `.name` values
+//   - WIT-forced (wit/aes.wit, `aead.tag-size`): AES-GCM nonces follow the
+//     `lann:webcrypto` contract: 12-byte IVs and 128-bit tags only. Other
+//     IV lengths throw `OperationError` (browsers accept them); a
+//     legal-but-unserved `tagLength` (32–120) throws `NotSupportedError`,
+//     while a value outside the registry's set throws `OperationError` as
+//     the spec's AES-GCM operations define.
+//   - Unserved: HMAC's `length` parameter must be omitted or name the
+//     key's exact bit length; WebCrypto's sub-byte truncation is not
+//     supported.
+//   - Runtime gap, not a deviation of this library: there is no
+//     `DOMException` in the componentize-js runtime, so this module exports
+//     a minimal stand-in with the standard `.name` values
 //     ("OperationError", "InvalidAccessError", "NotSupportedError",
 //     "DataError", "SyntaxError").
 
