@@ -225,6 +225,8 @@ dependencies = [
 name = "conformance-harness"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "hex",
  "lann-webcrypto-guest",
 ]
 
