@@ -14,9 +14,16 @@
 # other consumer, CI and contributor alike, downloads it.
 #
 # Subcommands:
-#   toolchain  print the path to the pinned componentize-js, downloading it
-#              if it is not already present
-#   build      `toolchain`, then componentize build/runner.component.wasm
+#   toolchain     print the path to the pinned componentize-js, downloading
+#                 it if it is not already present
+#   suites        (re)generate the importable suite modules under build/
+#                 (no toolchain needed — the parity baseline runs these
+#                 directly on Node)
+#   build         `toolchain` + `suites`, then componentize
+#                 build/runner.component.wasm
+#   build-parity  `toolchain` + `suites`, then componentize
+#                 build/parity-runner.component.wasm (the ungated runner the
+#                 parity gate transpiles with jco — see parity/)
 #
 # Environment:
 #   COMPONENTIZE_JS          use this binary instead of the pinned download
@@ -154,6 +161,9 @@ toolchain)
     ensure_toolchain
     echo "$TOOLCHAIN"
     ;;
+suites)
+    gen_suites
+    ;;
 build)
     gen_suites
     ensure_toolchain
@@ -161,8 +171,15 @@ build)
         componentize componentize-sdk/wpt/runner.js -p . \
         -o "$B"/runner.component.wasm
     ;;
+build-parity)
+    gen_suites
+    ensure_toolchain
+    "$TOOLCHAIN" -q -d examples/componentize-demo/wit -w componentize-demo \
+        componentize componentize-sdk/wpt/parity-runner.js -p . \
+        -o "$B"/parity-runner.component.wasm
+    ;;
 *)
-    echo "usage: $0 {toolchain|build}" >&2
+    echo "usage: $0 {toolchain|suites|build|build-parity}" >&2
     exit 2
     ;;
 esac

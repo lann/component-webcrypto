@@ -75,6 +75,43 @@ package surface includes vendoring the WPT groups that observe it; a test
 no shim could ever move in-subset marks a WIT-forced deviation, which
 belongs in the shim header's classified deviations list.
 
+## The parity gate (jco path)
+
+`just wpt-parity` measures those losses instead of asserting counts. The
+same vendored suites run twice, ending at the same platform crypto, with
+only the carrier stack differing:
+
+```
+baseline:    WPT tests ─────────────────────────────────► platform crypto.subtle
+round trip:  WPT tests ► shim ► WIT ► component ABI ► jco ► platform crypto.subtle
+```
+
+`parity/baseline.mjs` runs the suite bundles directly on this Node's
+`crypto.subtle`; `parity-runner.js` (componentized from the tree like the
+gating runner, but ungated — it reports every result and asserts nothing
+in-guest) is transpiled by jco against `jco-impl/webcrypto.js` and run by
+`parity/roundtrip.mjs`. Because both legs end at the identical platform
+engine, the platform's own coverage cancels out: whatever it does not
+implement fails both legs, with no exclusion list to maintain. Every test
+the baseline passes and the round trip does not is a *loss* introduced by
+the stack in the middle, and `parity/compare.mjs` holds the loss set to
+[`parity/losses.js`](parity/losses.js) — a ratchet, maintained like
+`expected.js`: a loss not recorded there fails the run (a regression), a
+recorded loss no longer observed fails it too (progress must land as a
+reviewable diff, via `just update-wpt-parity`). Which *kind* each loss is —
+unserved or WIT-forced — is the shim header's deviations registry's to say.
+
+Two properties of the comparison follow from how WPT registers tests. Test
+names are outcome-dependent — a failed setup step registers a synthetic
+step name in place of the real test's — so round-trip-only *failures* are
+expected renames, while a round-trip-only *pass* fails the run: a pass the
+baseline never measured is outside the gate's premise and marks the legs'
+group tables drifting (the baseline duplicates the runner's group table,
+since it cannot import a module whose `lann:webcrypto` specifiers only
+resolve under componentize-js). And the baseline is recomputed per run,
+never pinned, so a platform upgrade moves both legs together; the loss set
+is sensitive to the platform only where the platform itself is.
+
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
 ## What is vendored

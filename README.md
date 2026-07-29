@@ -142,6 +142,10 @@ just test-webcrypto-componentize-wpt # the WPT WebCryptoAPI suites against the
 just test-webcrypto-componentize # the composed pipeline with the JS demo guest
                              #   (needs the componentize-js CLI — see
                              #   componentize-sdk/README.md)
+just wpt-parity              # the WPT suites against the platform's own
+                             #   crypto.subtle and through the jco round trip;
+                             #   holds the round trip to the platform's pass set
+                             #   (see componentize-sdk/wpt/README.md)
 just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally
