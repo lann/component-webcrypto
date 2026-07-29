@@ -16,6 +16,8 @@ rust-checks:
 
 # Everything the jco CI job runs.
 jco-checks:
+    @just _step typecheck-jco
+    @just _step test-jco-host
     @just _step test-node
     @just _step wpt-parity
 
@@ -91,6 +93,11 @@ transpile: build-component
 # async ABI uses JSPI, which Node exposes behind --experimental-wasm-jspi).
 test-node: transpile
     cd examples/jco-demo && npm test
+
+# Run the jco host's own unit tests: the input-buffering admission subsystem,
+# which the conformance suite cannot reach because it runs cases sequentially.
+test-jco-host:
+    cd jco-impl && npm test
 
 # Type-check the jco host against the interface definitions jco derives from
 # `wit/`. The definitions are generated on demand, so there is no checked-in
