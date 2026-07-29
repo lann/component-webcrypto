@@ -1,0 +1,25 @@
+{
+  "//": [
+    "Type-checks webcrypto.js against the interface definitions jco derives",
+    "from wit/. `generated/` is produced on demand by `just typecheck-jco`, so",
+    "there is no checked-in copy to go stale.",
+    "",
+    "`lib` is DOM, not Node: the host must load unchanged in a browser, so it",
+    "must type-check against the browser's globals and nothing else."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": false,
+    "types": []
+  },
+  "include": ["webcrypto.js", "interface-check.js"]
+}

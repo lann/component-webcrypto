@@ -16,6 +16,7 @@ rust-checks:
 
 # Everything the jco CI job runs.
 jco-checks:
+    @just _step typecheck-jco
     @just _step test-node
 
 # Everything the componentize CI job runs: the WPT WebCryptoAPI suites
@@ -66,6 +67,7 @@ clippy:
 validate-wit:
     wasm-tools component wit wit
     wasm-tools component wit wasmtime-impl/wit
+    wasm-tools component wit jco-impl/wit
     wasm-tools component wit guest-impl/wit
     wasm-tools component wit examples/crypto-demo/wit
     wasm-tools component wit examples/componentize-demo/wit
@@ -88,6 +90,12 @@ transpile: build-component
 # async ABI uses JSPI, which Node exposes behind --experimental-wasm-jspi).
 test-node: transpile
     cd examples/jco-demo && npm test
+
+# Type-check the jco host against the interface definitions jco derives from
+# `wit/`. The definitions are generated on demand, so there is no checked-in
+# copy to go stale.
+typecheck-jco:
+    cd jco-impl && npm run typecheck
 
 # Run the Wasmtime (native, RustCrypto) host demo.
 demo-wasmtime: build-component
