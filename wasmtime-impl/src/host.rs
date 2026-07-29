@@ -571,14 +571,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
+        length: Option<u32>,
         extractable: bool,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let material = match MacKeyMaterial::generate(core_sha2_variant(variant), extractable)
-            .map_err(rng_trap("random key generation"))?
-        {
-            Ok(material) => material,
-            Err(err) => return Ok(Err(err.into())),
-        };
+        let material =
+            match MacKeyMaterial::generate(core_sha2_variant(variant), length, extractable)
+                .map_err(rng_trap("random key generation"))?
+            {
+                Ok(material) => material,
+                Err(err) => return Ok(Err(err.into())),
+            };
         accessor.with(|mut access| Ok(Ok(access.get().table.push(MacKey { material })?)))
     }
 }

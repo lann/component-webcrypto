@@ -182,7 +182,7 @@ async fn hmac_verify() -> Result<(), String> {
 
 /// A generated key signs and verifies, and two calls on the same key agree.
 async fn hmac_generated_key() -> Result<(), String> {
-    let key = generate_hmac_key(Sha2Variant::Sha256, false)
+    let key = generate_hmac_key(Sha2Variant::Sha256, None, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
 
@@ -237,7 +237,7 @@ async fn hmac_key_export() -> Result<(), String> {
         .await
         .map_err(|e| format!("wrapper verify (multi-chunk): {e}"))?;
 
-    let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, true)
+    let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, None, true)
         .await
         .map_err(|e| format!("generate-key: {e}"))?;
     let exported = generated

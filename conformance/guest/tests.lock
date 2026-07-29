@@ -6231,4 +6231,5 @@ cases = [
     { name = "probe/open-short-input" },
     { name = "probe/stream-empty-writes" },
     { name = "probe/extractable-getter" },
+    { name = "probe/hmac-generate-length" },
 ]
