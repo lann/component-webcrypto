@@ -46,6 +46,9 @@ jco-impl/               # jco host LIBRARY: webcrypto.js implements the
                         #   admission subsystem conformance cannot reach
 guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
                         #   package surface; composable via `wac plug`;
+                        #   limits.rs bounds transient retention with
+                        #   component-model backpressure — the only one of
+                        #   the three that can hold a call before it starts;
                         #   crate: guest-webcrypto — see its README for the
                         #   timing-channel classification and export policy
 guest-sdk/              # guest-side Rust library over the lann:webcrypto

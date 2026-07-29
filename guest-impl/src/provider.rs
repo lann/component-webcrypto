@@ -97,8 +97,8 @@ fn rng_infallible<T>(result: Result<T, webcrypto_impl_core::RngError>) -> T {
 
 /// Drain an entire `stream<u8>` into a buffer, resolving once the stream ends
 /// (its writer dropped).
-async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
+async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> crate::limits::Buffered {
+    let mut out = crate::limits::Buffered::new();
     loop {
         let (status, batch) = data.read(Vec::with_capacity(8 * 1024)).await;
         out.extend(batch);
@@ -114,11 +114,19 @@ async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> Vec<u8> {
 
 /// Return `bytes` as a `stream<u8>`, fed by a detached task after the caller
 /// returns the reader.
+///
+/// The bytes are charged to the retention watermark until the caller has read
+/// them or dropped the stream, since until then this provider is holding
+/// them. The charge travels into the writing task rather than being released
+/// when `seal`/`open` returns: releasing at return would leave every
+/// unconsumed output invisible to the bound.
 fn stream_of(bytes: Vec<u8>) -> wit_bindgen::StreamReader<u8> {
+    let charge = crate::limits::charge(bytes.len());
     let (mut tx, rx) = crate::wit_stream::new();
     wit_bindgen::spawn_local(async move {
         let _ = tx.write_all(bytes).await;
         drop(tx);
+        drop(charge);
     });
     rx
 }
