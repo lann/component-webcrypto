@@ -80,6 +80,7 @@ probes! {
     open_short_input,
     stream_empty_writes,
     extractable_getter,
+    hmac_generate_length,
 }
 
 /// Run the probe at `index` (into [`PROBES`]) on a target providing its
@@ -246,7 +247,7 @@ async fn sha2_truncated_unsupported() -> Result<(), String> {
             }
             Ok(_) => return Err(format!("{variant:?} key imported")),
         }
-        match generate_hmac_key(variant, false).await {
+        match generate_hmac_key(variant, None, false).await {
             Err(Error::Unsupported(_)) => {}
             Err(other) => {
                 return Err(describe(
@@ -427,7 +428,7 @@ async fn not_extractable() -> Result<(), String> {
 /// keys export 32 bytes, a generated HMAC key signs and verifies, and a
 /// generated AES key round-trips seal/open.
 async fn generated_key_shape() -> Result<(), String> {
-    let hmac_key = generate_hmac_key(Sha2Variant::Sha256, true)
+    let hmac_key = generate_hmac_key(Sha2Variant::Sha256, None, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let exported = hmac_key
@@ -501,7 +502,7 @@ async fn algorithm_names() -> Result<(), String> {
         key_bits,
         "imported mac-key length",
     )?;
-    let generated = generate_hmac_key(Sha2Variant::Sha256, false)
+    let generated = generate_hmac_key(Sha2Variant::Sha256, None, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
     expect(
@@ -1408,6 +1409,44 @@ async fn extractable_getter() -> Result<(), String> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// `hmac-sha2.generate-key` honors an explicit bit length: the key reports
+/// it, an extractable key exports exactly `length / 8` bytes, and the
+/// contract's rejections hold — zero fails `invalid-key`, a length that is
+/// not a multiple of 8 fails `unsupported`.
+async fn hmac_generate_length() -> Result<(), String> {
+    let key = generate_hmac_key(Sha2Variant::Sha256, Some(256), true)
+        .await
+        .map_err(|e| describe("generate-key length 256", &e))?;
+    if key.algorithm_length() != 256 {
+        return Err(format!(
+            "generated mac-key length: got {}, want 256",
+            key.algorithm_length()
+        ));
+    }
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    if exported.len() != 32 {
+        return Err(format!(
+            "exported material length: got {}, want 32",
+            exported.len()
+        ));
+    }
+
+    match generate_hmac_key(Sha2Variant::Sha256, Some(0), false).await {
+        Err(Error::InvalidKey(_)) => {}
+        Err(other) => return Err(describe("length 0: expected invalid-key, got", &other)),
+        Ok(_) => return Err("length 0 minted a key".into()),
+    }
+    match generate_hmac_key(Sha2Variant::Sha256, Some(250), false).await {
+        Err(Error::Unsupported(_)) => {}
+        Err(other) => return Err(describe("length 250: expected unsupported, got", &other)),
+        Ok(_) => return Err("sub-byte length 250 minted a key".into()),
     }
     Ok(())
 }

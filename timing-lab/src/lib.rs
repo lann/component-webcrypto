@@ -534,7 +534,7 @@ async fn run_lab() -> Result<(), String> {
 
     // mac-key.verify: corrupted tag, first vs last byte.
     {
-        let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, false)
+        let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, None, false)
             .await
             .map_err(|e| format!("hmac generate-key: {e:?}"))?;
         let mut message = vec![0u8; TAG_PROBE_LEN];

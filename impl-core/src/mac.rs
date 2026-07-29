@@ -38,20 +38,38 @@ impl MacKeyMaterial {
         })
     }
 
-    /// Generate a fresh random HMAC key over the declared variant, with the
-    /// underlying hash's block size of key material (WebCrypto's
-    /// `generateKey` default). The inner error is `unsupported` for an
-    /// unserved variant; the outer channel is entropy failure.
+    /// Generate a fresh random HMAC key over the declared variant, per the
+    /// `hmac-sha2.generate-key` contract: `length` is the key length in
+    /// bits, `None` meaning the underlying hash's block size (WebCrypto's
+    /// `generateKey` default). The inner error is `invalid-key` for a zero
+    /// length, and `unsupported` for an unserved variant or a length that
+    /// is not a multiple of 8 (sub-byte lengths are not served); the outer
+    /// channel is entropy failure.
     pub fn generate(
         variant: Sha2Variant,
+        length: Option<u32>,
         extractable: bool,
     ) -> Result<Result<Self, Error>, RngError> {
         let variant = match served_sha2(variant) {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err)),
         };
+        let byte_len = match length {
+            None => variant.block_len(),
+            Some(0) => {
+                return Ok(Err(Error::InvalidKey(
+                    "HMAC key length must be non-zero".into(),
+                )))
+            }
+            Some(bits) if bits % 8 != 0 => {
+                return Ok(Err(Error::Unsupported(format!(
+                "HMAC key length {bits} is not a multiple of 8; sub-byte lengths are not served",
+            ))))
+            }
+            Some(bits) => bits as usize / 8,
+        };
         Ok(Ok(Self {
-            raw: Zeroizing::new(random_bytes(variant.block_len())?),
+            raw: Zeroizing::new(random_bytes(byte_len)?),
             variant,
             extractable,
         }))
@@ -144,10 +162,31 @@ mod tests {
 
     #[test]
     fn generated_key_has_block_size_material() {
-        let key = MacKeyMaterial::generate(Sha2Variant::Sha384, true)
+        let key = MacKeyMaterial::generate(Sha2Variant::Sha384, None, true)
             .unwrap()
             .unwrap();
         assert_eq!(key.export().unwrap().len(), 128);
+    }
+
+    #[test]
+    fn generated_key_honors_requested_length() {
+        let key = MacKeyMaterial::generate(Sha2Variant::Sha256, Some(256), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(key.export().unwrap().len(), 32);
+        assert_eq!(key.length_bits(), 256);
+    }
+
+    #[test]
+    fn generated_key_rejects_zero_and_sub_byte_lengths() {
+        assert!(matches!(
+            MacKeyMaterial::generate(Sha2Variant::Sha256, Some(0), true).unwrap(),
+            Err(Error::InvalidKey(_))
+        ));
+        assert!(matches!(
+            MacKeyMaterial::generate(Sha2Variant::Sha256, Some(250), true).unwrap(),
+            Err(Error::Unsupported(_))
+        ));
     }
 
     #[test]

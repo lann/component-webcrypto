@@ -506,21 +506,29 @@ async function importHmacKey(variant, raw, extractable) {
 }
 
 /**
- * Generate a fresh random HMAC key over the declared SHA-2 variant, with
- * the underlying hash's block size of key material (WebCrypto's
- * `generateKey` default). A variant this implementation declines throws
- * `{ tag: 'unsupported', val }`.
+ * Generate a fresh random HMAC key over the declared SHA-2 variant.
+ * `length` is the key length in bits, `undefined` meaning the underlying
+ * hash's block size (WebCrypto's `generateKey` default). A zero length
+ * throws `{ tag: 'invalid-key' }`; a length that is not a multiple of 8
+ * throws `{ tag: 'unsupported', val }` (sub-byte lengths are not served),
+ * as does a variant this implementation declines.
  * @param {string} variant
+ * @param {number | undefined} length
  * @param {boolean} extractable
  */
-async function generateHmacKey(variant, extractable) {
+async function generateHmacKey(variant, length, extractable) {
   const { hash, blockBytes } = sha2Variant(variant);
+  if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
+  if (length !== undefined && length % 8 !== 0) {
+    throw errUnsupported(
+      `HMAC key length ${length} is not a multiple of 8; sub-byte lengths are not served`,
+    );
+  }
+  const bits = length ?? blockBytes * 8;
   const key = await platformCall(`HMAC-${hash} key generation`, () =>
-    subtle.generateKey({ name: "HMAC", hash }, extractable, ["sign", "verify"]),
+    subtle.generateKey({ name: "HMAC", hash, length: bits }, extractable, ["sign", "verify"]),
   );
-  // WebCrypto's `generateKey` default is the hash's block size, which is the
-  // length this interface documents.
-  return new MacKey(key, blockBytes * 8, hash);
+  return new MacKey(key, bits, hash);
 }
 
 /** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
