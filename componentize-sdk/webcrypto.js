@@ -1,3 +1,4 @@
+// @ts-check
 // A WebCrypto-subset library for JS guests componentized with
 // componentize-js (https://github.com/dicej/componentize-js, the wit-dylib
 // reboot of ComponentizeJS), backed by the `lann:webcrypto` interfaces.
@@ -52,43 +53,64 @@ import "lann:webcrypto/aead@0.1.0";
  * original `{ tag, val }` variant as `cause`.
  */
 export class DOMException extends Error {
+  /**
+   * @param {string} message
+   * @param {string} [name]
+   * @param {ErrorOptions} [options]
+   */
   constructor(message, name = "Error", options = undefined) {
     super(message, options);
     this.name = name;
   }
 }
 
+/**
+ * @param {string} name
+ * @param {string} message
+ * @param {WitError} [cause]
+ */
 function dom(name, message, cause = undefined) {
   return new DOMException(message, name, cause === undefined ? undefined : { cause });
 }
 
 /**
+ * A WIT `types.error` variant, as componentize-js delivers it.
+ * @typedef {{ tag: string, val?: string }} WitError
+ */
+
+/**
  * True for errors raised by the `lann:webcrypto` imports: componentize-js
  * surfaces an `err` result as a thrown `ComponentError` whose `payload` is
  * the WIT `types.error` variant, a `{ tag, val }` object.
+ * @param {unknown} e
+ * @returns {e is Error & { payload: WitError }}
  */
 function isWitError(e) {
+  if (!(e instanceof Error)) return false;
+  const payload = /** @type {{ payload?: unknown }} */ (e).payload;
   return (
-    e instanceof Error &&
-    typeof e.payload === "object" &&
-    e.payload !== null &&
-    typeof e.payload.tag === "string"
+    typeof payload === "object" &&
+    payload !== null &&
+    typeof (/** @type {{ tag?: unknown }} */ (payload).tag) === "string"
   );
 }
 
-/** Map a WIT `types.error` variant onto the WebCrypto error vocabulary. */
+/**
+ * Map a WIT `types.error` variant onto the WebCrypto error vocabulary.
+ * @param {WitError} payload
+ */
 function mapWitError(payload) {
   switch (payload.tag) {
     case "invalid-key":
-      return dom("DataError", payload.val, payload);
+      return dom("DataError", payload.val ?? "invalid key", payload);
     case "invalid-nonce":
-      return dom("OperationError", payload.val, payload);
+      return dom("OperationError", payload.val ?? "invalid nonce", payload);
     case "authentication-failed":
       return dom("OperationError", "authentication failed", payload);
     case "not-extractable":
       return dom("InvalidAccessError", "key is not extractable", payload);
     case "unsupported":
-      return dom("NotSupportedError", payload.val, payload);
+      return dom("NotSupportedError", payload.val ?? "unsupported", payload);
     case "key-exhausted":
       return dom("OperationError", "key exhausted", payload);
     default:
@@ -96,6 +118,10 @@ function mapWitError(payload) {
   }
 }
 
+/**
+ * @param {unknown} e
+ * @returns {never}
+ */
 function rethrow(e) {
   throw isWitError(e) ? mapWitError(e.payload) : e;
 }
@@ -110,24 +136,27 @@ function rethrow(e) {
  * canonical `result` wrapper (`{ tag: "ok" | "err", val }`). Detecting the
  * wrapper is unambiguous for this surface: every `ok` payload is a
  * resource, typed array, or `undefined` — never a plain `{ tag }` object.
+ * @param {unknown} promise
+ * @returns {Promise<any>}
  */
 async function callImport(promise) {
+  /** @type {unknown} */
   let value;
   try {
     value = await promise;
   } catch (e) {
     rethrow(e);
   }
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    Object.getPrototypeOf(value) === Object.prototype &&
-    (value.tag === "ok" || value.tag === "err")
-  ) {
-    if (value.tag === "err") {
-      throw mapWitError(value.val);
+  const wrapper = /** @type {{ tag?: unknown, val?: unknown } | null} */ (
+    typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype
+      ? value
+      : null
+  );
+  if (wrapper !== null && (wrapper.tag === "ok" || wrapper.tag === "err")) {
+    if (wrapper.tag === "err") {
+      throw mapWitError(/** @type {WitError} */ (wrapper.val));
     }
-    return value.val;
+    return wrapper.val;
   }
   return value;
 }
@@ -141,6 +170,9 @@ async function callImport(promise) {
  * behaves after a `transfer()` — detached buffers report `byteLength` 0, so
  * the zero-length short-circuits below never reach `slice()` (which throws
  * on detached buffers).
+ * @param {unknown} data
+ * @param {string} what
+ * @returns {Uint8Array}
  */
 function bytesOf(data, what) {
   if (data instanceof ArrayBuffer) {
@@ -157,13 +189,21 @@ function bytesOf(data, what) {
   throw new TypeError(`${what} must be a BufferSource`);
 }
 
+/**
+ * @param {Uint8Array} u8
+ * @returns {ArrayBuffer}
+ */
 function toArrayBuffer(u8) {
-  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  return /** @type {ArrayBuffer} */ (
+    u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+  );
 }
 
 /**
  * Write `bytes` to the writable end of a stream and drop it: writer drop is
  * the stream's only end-of-input signal.
+ * @param {any} tx the writable half of a `wit-world` `u8Stream()` pair
+ * @param {Uint8Array} bytes
  */
 async function feedAll(tx, bytes) {
   try {
@@ -173,9 +213,14 @@ async function feedAll(tx, bytes) {
   }
 }
 
-/** Drain a `stream<u8>` readable end to a single Uint8Array. */
+/**
+ * Drain a `stream<u8>` readable end to a single Uint8Array.
+ * @param {any} rx the readable half of a `wit-world` `u8Stream()` pair
+ * @returns {Promise<Uint8Array>}
+ */
 async function collectStream(rx) {
   using _rx = rx;
+  /** @type {Uint8Array[]} */
   const chunks = [];
   let total = 0;
   while (!rx.writerDropped) {
@@ -200,6 +245,9 @@ async function collectStream(rx) {
  * (operations resolve only once their input stream is fully drained, and
  * the package's drain rule guarantees the feed completes even when the
  * operation fails).
+ * @param {(rx: any) => unknown} start
+ * @param {Uint8Array} input
+ * @returns {Promise<any>}
  */
 async function callFed(start, input) {
   const [tx, rx] = witWorld.u8Stream();
@@ -222,6 +270,9 @@ async function callFed(start, input) {
  * (`seal`/`open`): collect the output concurrently with the feed, so an
  * implementation producing output incrementally can never deadlock against
  * an unfinished feed.
+ * @param {(rx: any) => unknown} start
+ * @param {Uint8Array} input
+ * @returns {Promise<Uint8Array>}
  */
 async function callFedCollect(start, input) {
   const out = await callFed(start, input);
@@ -240,10 +291,19 @@ const MINT_TOKEN = Symbol("CryptoKey mint token");
  * Always `type: "secret"` here (HMAC and AES-GCM keys).
  */
 export class CryptoKey {
+  /** @type {KeyAlgorithm} */
   #algorithm;
   #extractable;
+  /** @type {readonly KeyUsage[]} */
   #usages;
 
+  /**
+   * @param {symbol} token
+   * @param {any} handle the `lann:webcrypto` key resource
+   * @param {KeyAlgorithm} algorithm
+   * @param {boolean} extractable
+   * @param {readonly KeyUsage[]} usages
+   */
   constructor(token, handle, algorithm, extractable, usages) {
     if (token !== MINT_TOKEN) {
       throw new TypeError("CryptoKey cannot be constructed directly");
@@ -254,6 +314,7 @@ export class CryptoKey {
     HANDLES.set(this, handle);
   }
 
+  /** @returns {KeyType} */
   get type() {
     return "secret";
   }
@@ -263,18 +324,33 @@ export class CryptoKey {
   get extractable() {
     return this.#extractable;
   }
+  /**
+   * @returns {KeyUsage[]} the usage list. The API declares a mutable
+   * sequence; the list handed out here is frozen, so a caller cannot edit a
+   * key's permissions through it.
+   */
   get usages() {
-    return this.#usages;
+    return /** @type {KeyUsage[]} */ (this.#usages);
   }
   get [Symbol.toStringTag]() {
     return "CryptoKey";
   }
 }
 
+/**
+ * @param {any} handle
+ * @param {KeyAlgorithm} algorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
 function mintKey(handle, algorithm, extractable, usages) {
   return new CryptoKey(MINT_TOKEN, handle, algorithm, extractable, usages);
 }
 
+/**
+ * @param {CryptoKey} key
+ * @returns {any}
+ */
 function handleOf(key) {
   const handle = HANDLES.get(key);
   if (handle === undefined) {
@@ -285,6 +361,24 @@ function handleOf(key) {
 
 // --- algorithm and usage normalization --------------------------------------------
 
+/**
+ * An author-supplied algorithm object after normalization: the `name` is
+ * validated, every other member is whatever the caller passed and is
+ * validated at its use site.
+ * @typedef {{
+ *   name: string,
+ *   hash?: unknown,
+ *   length?: unknown,
+ *   iv?: unknown,
+ *   additionalData?: unknown,
+ *   tagLength?: unknown,
+ * }} NormalizedAlgorithm
+ */
+
+/**
+ * @param {unknown} algorithm
+ * @returns {NormalizedAlgorithm}
+ */
 function normalizeAlgorithm(algorithm) {
   if (typeof algorithm === "string") {
     algorithm = { name: algorithm };
@@ -295,7 +389,7 @@ function normalizeAlgorithm(algorithm) {
   // Snapshot own enumerable properties in one pass: normalization reads each
   // property (author getters included) exactly once, like the spec's
   // conversion to an IDL dictionary.
-  const alg = { ...algorithm };
+  const alg = /** @type {NormalizedAlgorithm & { name?: unknown }} */ ({ ...algorithm });
   if (typeof alg.name !== "string") {
     throw new TypeError("algorithm must be a string or an object with a string `name`");
   }
@@ -304,12 +398,17 @@ function normalizeAlgorithm(algorithm) {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
   alg.name = name;
-  return alg;
+  return /** @type {NormalizedAlgorithm} */ (alg);
 }
 
+/**
+ * @param {unknown} hash
+ * @returns {"SHA-256"}
+ */
 function normalizeHash(hash) {
-  if (typeof hash === "object" && hash !== null && typeof hash.name === "string") {
-    hash = hash.name;
+  if (typeof hash === "object" && hash !== null) {
+    const named = /** @type {{ name?: unknown }} */ (hash).name;
+    if (typeof named === "string") hash = named;
   }
   if (typeof hash !== "string") {
     throw new TypeError("HMAC requires a `hash` member (a string or { name })");
@@ -320,18 +419,29 @@ function normalizeHash(hash) {
   return "SHA-256";
 }
 
+/** @type {Readonly<Record<string, readonly KeyUsage[] | undefined>>} */
 const USAGES = {
   HMAC: ["sign", "verify"],
   "AES-GCM": ["encrypt", "decrypt"],
 };
 
+/**
+ * @param {unknown} keyUsages
+ * @param {string} name
+ * @returns {KeyUsage[]}
+ */
 function normalizeUsages(keyUsages, name) {
-  if (keyUsages == null || typeof keyUsages[Symbol.iterator] !== "function") {
+  const iterable = /** @type {Iterable<KeyUsage> | null | undefined} */ (keyUsages);
+  if (iterable == null || typeof iterable[Symbol.iterator] !== "function") {
     throw new TypeError("keyUsages must be a sequence");
   }
   const allowed = USAGES[name];
+  if (allowed === undefined) {
+    throw dom("NotSupportedError", `unsupported algorithm ${name}`);
+  }
+  /** @type {KeyUsage[]} */
   const usages = [];
-  for (const usage of keyUsages) {
+  for (const usage of iterable) {
     if (!allowed.includes(usage)) {
       throw dom("SyntaxError", `usage ${usage} is not valid for ${name} keys`);
     }
@@ -345,12 +455,21 @@ function normalizeUsages(keyUsages, name) {
   return usages;
 }
 
+/**
+ * @param {globalThis.CryptoKey} key
+ * @param {KeyUsage} usage
+ */
 function requireUsage(key, usage) {
   if (!key.usages.includes(usage)) {
     throw dom("InvalidAccessError", `key does not permit ${usage}`);
   }
 }
 
+/**
+ * @param {unknown} key
+ * @param {string} name
+ * @returns {asserts key is CryptoKey}
+ */
 function requireKeyAlgorithm(key, name) {
   if (!(key instanceof CryptoKey)) {
     throw new TypeError("key must be a CryptoKey");
@@ -362,8 +481,15 @@ function requireKeyAlgorithm(key, name) {
 
 // --- minting ------------------------------------------------------------------------
 
+/**
+ * @param {() => unknown} start
+ * @param {NormalizedAlgorithm} algorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
 async function mintHmacKey(start, algorithm, extractable, usages) {
   const handle = await callImport(start());
+  /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
     hash: Object.freeze({ name: "SHA-256" }),
@@ -380,13 +506,28 @@ async function mintHmacKey(start, algorithm, extractable, usages) {
   return mintKey(handle, projected, extractable, usages);
 }
 
+/**
+ * @param {() => unknown} start
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
 async function mintAesGcmKey(start, extractable, usages) {
   const handle = await callImport(start());
-  return mintKey(handle, { name: "AES-GCM", length: 256 }, extractable, usages);
+  /** @type {AesKeyAlgorithm} */
+  const projected = { name: "AES-GCM", length: 256 };
+  return mintKey(handle, projected, extractable, usages);
 }
 
 // --- subtle --------------------------------------------------------------------------
 
+/**
+ * @param {KeyFormat} format
+ * @param {BufferSource | JsonWebKey} keyData
+ * @param {AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams | HmacImportParams | AesKeyAlgorithm} algorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} keyUsages
+ * @returns {Promise<CryptoKey>}
+ */
 async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   if (format !== "raw") {
     throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
@@ -415,6 +556,12 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   }
 }
 
+/**
+ * @param {AlgorithmIdentifier | RsaHashedKeyGenParams | EcKeyGenParams | HmacKeyGenParams | AesKeyGenParams | Pbkdf2Params} algorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} keyUsages
+ * @returns {Promise<CryptoKey>}
+ */
 async function generateKey(algorithm, extractable, keyUsages) {
   const alg = normalizeAlgorithm(algorithm);
   const usages = normalizeUsages(keyUsages, alg.name);
@@ -447,6 +594,11 @@ async function generateKey(algorithm, extractable, keyUsages) {
   }
 }
 
+/**
+ * @param {Exclude<KeyFormat, "jwk">} format
+ * @param {globalThis.CryptoKey} key
+ * @returns {Promise<ArrayBuffer>}
+ */
 async function exportKey(format, key) {
   if (format !== "raw") {
     throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
@@ -460,6 +612,12 @@ async function exportKey(format, key) {
   return toArrayBuffer(await callImport(handleOf(key).exportKey()));
 }
 
+/**
+ * @param {AlgorithmIdentifier | RsaPssParams | EcdsaParams} algorithm
+ * @param {globalThis.CryptoKey} key
+ * @param {BufferSource} data
+ * @returns {Promise<ArrayBuffer>}
+ */
 async function sign(algorithm, key, data) {
   const alg = normalizeAlgorithm(algorithm);
   if (alg.name !== "HMAC") {
@@ -472,6 +630,13 @@ async function sign(algorithm, key, data) {
   return toArrayBuffer(tag);
 }
 
+/**
+ * @param {AlgorithmIdentifier | RsaPssParams | EcdsaParams} algorithm
+ * @param {globalThis.CryptoKey} key
+ * @param {BufferSource} signature
+ * @param {BufferSource} data
+ * @returns {Promise<boolean>}
+ */
 async function verify(algorithm, key, signature, data) {
   const alg = normalizeAlgorithm(algorithm);
   if (alg.name !== "HMAC") {
@@ -489,7 +654,8 @@ async function verify(algorithm, key, signature, data) {
     // WebCrypto's `verify` is the one place a failed verification maps back
     // to `false`. Only `authentication-failed` is a verdict — operational
     // failures stay thrown.
-    if (e instanceof DOMException && e.cause?.tag === "authentication-failed") {
+    const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
+    if (cause?.tag === "authentication-failed") {
       return false;
     }
     throw e;
@@ -503,13 +669,17 @@ async function verify(algorithm, key, signature, data) {
 // not serve is `NotSupportedError`.
 const GCM_LEGAL_TAG_LENGTHS = [32, 64, 96, 104, 112, 120, 128];
 
+/**
+ * @param {unknown} algorithm
+ * @returns {{ iv: Uint8Array, aad: Uint8Array }}
+ */
 function gcmParams(algorithm) {
   const alg = normalizeAlgorithm(algorithm);
   if (alg.name !== "AES-GCM") {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
   if (alg.tagLength !== undefined && alg.tagLength !== 128) {
-    if (!GCM_LEGAL_TAG_LENGTHS.includes(alg.tagLength)) {
+    if (!GCM_LEGAL_TAG_LENGTHS.includes(/** @type {number} */ (alg.tagLength))) {
       throw dom("OperationError", `illegal AES-GCM tagLength ${alg.tagLength}`);
     }
     throw dom("NotSupportedError", `unsupported tagLength ${alg.tagLength}; only 128 is served`);
@@ -522,6 +692,12 @@ function gcmParams(algorithm) {
   return { iv, aad };
 }
 
+/**
+ * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} algorithm
+ * @param {globalThis.CryptoKey} key
+ * @param {BufferSource} data
+ * @returns {Promise<ArrayBuffer>}
+ */
 async function encrypt(algorithm, key, data) {
   const { iv, aad } = gcmParams(algorithm);
   requireKeyAlgorithm(key, "AES-GCM");
@@ -532,6 +708,12 @@ async function encrypt(algorithm, key, data) {
   return toArrayBuffer(sealed);
 }
 
+/**
+ * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} algorithm
+ * @param {globalThis.CryptoKey} key
+ * @param {BufferSource} data
+ * @returns {Promise<ArrayBuffer>}
+ */
 async function decrypt(algorithm, key, data) {
   const { iv, aad } = gcmParams(algorithm);
   requireKeyAlgorithm(key, "AES-GCM");

@@ -70,6 +70,8 @@ if ! have wasmtime; then
 fi
 
 if [ "${SKIP_NODE:-}" != "1" ]; then
+    log "Installing the componentize-sdk's npm dependencies (componentize-sdk)"
+    (cd "$REPO_ROOT/componentize-sdk" && npm install)
     log "Installing the jco host's npm dependencies (jco-impl)"
     (cd "$REPO_ROOT/jco-impl" && npm install)
     log "Installing the jco demo driver's npm dependencies (examples/jco-demo)"

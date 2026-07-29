@@ -1,0 +1,26 @@
+{
+  "//": [
+    "Type-checks webcrypto.js against the Web Cryptography API definitions",
+    "TypeScript ships: `interface-check.js` asserts the exported subset against",
+    "`SubtleCrypto` and `CryptoKey`. Nothing is generated, so nothing goes stale.",
+    "",
+    "`lib` is DOM because that is where the specification being implemented",
+    "lives. The componentize-js runtime provides none of it — the module",
+    "supplies its own `DOMException` stand-in — but the shapes it must match",
+    "are the browser's."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "types": []
+  },
+  "include": ["webcrypto.js", "interface-check.js", "types/imports.d.ts"]
+}
