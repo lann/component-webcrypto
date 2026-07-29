@@ -98,6 +98,13 @@ interface mac {
     /// holds the key material. The guarantee is that components holding only
     /// the handle cannot obtain the material through this API.
     ///
+    /// Every key resource carrying an extractability gate also exposes it as
+    /// a getter, so a holder can ask the question without taking the answer:
+    /// interrogating it through `export-key` alone would hand the caller the
+    /// material whenever the answer is "yes". The getter is not redundant
+    /// with the `extractable` argument the minting interfaces take — a key
+    /// resource need not have been minted by the component holding it.
+    ///
     /// Getter conventions (package-wide): `algorithm-*` getters project the
     /// W3C Web Cryptography API registry's algorithm properties, spelled
     /// and denominated (bits) as the registry defines them; `*-size`
@@ -142,6 +149,9 @@ interface mac {
         /// The key length in bits (WebCrypto's `HmacKeyAlgorithm.length`:
         /// the length of the key material).
         algorithm-length: func() -> u32;
+
+        /// Whether the key material may be exported.
+        extractable: func() -> bool;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
@@ -224,6 +234,9 @@ interface aead {
         /// arithmetic (sealed length = plaintext length + `tag-size`).
         tag-size: func() -> u32;
 
+        /// Whether the key material may be exported. See `mac-key`.
+        extractable: func() -> bool;
+
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
@@ -302,6 +315,9 @@ interface aead-internal-nonce {
         /// contract, and a consumer parsing it already knows that
         /// interface's documented constants.
         seals-remaining: func() -> option<u64>;
+
+        /// Whether the key material may be exported. See `mac-key`.
+        extractable: func() -> bool;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true. The nonce budget
@@ -422,9 +438,16 @@ interface signature {
         algorithm-hash: func() -> option<string>;
 
         /// The public key material, in the minting interface's documented
-        /// public format. Public material is always exportable — there is
-        /// no extractability gate on this resource.
-        export-key: async func() -> list<u8>;
+        /// public format.
+        ///
+        /// There is no extractability gate on this resource, so
+        /// `error.not-extractable` never occurs here. Export is still
+        /// fallible: a provider may hold the key as a handle it can *use*
+        /// but not *read* — verifying with it succeeds while recovering its
+        /// encoding fails with `error.other`. Browser WebCrypto draws the
+        /// same line, giving every export operation a "key material cannot
+        /// be accessed" failure that sign and verify do not have.
+        export-key: async func() -> result<list<u8>, error>;
     }
 
     /// A private key. `sign` is one-shot on the immutable key, mirroring

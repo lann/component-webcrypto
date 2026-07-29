@@ -482,6 +482,16 @@ impl Mac {
         self.0.algorithm_length()
     }
 
+    /// Whether [`export_key`](Self::export_key) may return the key
+    /// material.
+    ///
+    /// Asking is not the same as exporting: interrogating extractability
+    /// through [`export_key`](Self::export_key) alone would hand you the
+    /// material whenever the answer is yes.
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
     /// key was minted extractable. Extractability is an API property, not a
     /// physical one: the guarantee is that components holding only the
@@ -564,6 +574,12 @@ impl Aead {
         self.0.tag_size()
     }
 
+    /// Whether [`export_key`](Self::export_key) may return the key material
+    /// (see [`Mac::extractable`]).
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
     /// key was minted extractable (an API property, not a physical one —
     /// see [`Mac::export_key`]).
@@ -638,6 +654,12 @@ impl AeadInternalNonce {
     /// one per seal).
     pub fn seals_remaining(&self) -> Option<u64> {
         self.0.seals_remaining()
+    }
+
+    /// Whether [`export_key`](Self::export_key) may return the key material
+    /// (see [`Mac::extractable`]).
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
     }
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
@@ -724,10 +746,15 @@ impl VerifyingKey {
     }
 
     /// The public key material, in the minting interface's documented
-    /// public format. Public material is always exportable — there is no
-    /// extractability gate on this key.
-    pub async fn export_key(&self) -> Vec<u8> {
-        self.0.export_key().await
+    /// public format.
+    ///
+    /// There is no extractability gate on this key, so this never fails
+    /// with [`Error::NotExtractable`]. It can still fail with
+    /// [`Error::Other`]: a provider may hold the key as a handle it can
+    /// *use* but not *read*, so verifying succeeds while recovering the
+    /// encoding does not.
+    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key().await.map_err(Error::from)
     }
 }
 

@@ -239,6 +239,11 @@ export class MacKey {
     return this.#lengthBits;
   }
 
+  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  extractable() {
+    return this.#key.extractable;
+  }
+
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
    * was created with `extractable` true (checked on the `CryptoKey` itself
@@ -347,6 +352,11 @@ export class AeadKey {
 
   tagSize() {
     return 16;
+  }
+
+  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  extractable() {
+    return this.#key.extractable;
   }
 
   /**
@@ -682,6 +692,11 @@ export class InternalNonceKey {
   sealsRemaining() {
     const remaining = InternalNonceKey.#NONCE_BUDGET - this.#sealed;
     return remaining > 0n ? remaining : 0n;
+  }
+
+  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  extractable() {
+    return this.#key.extractable;
   }
 
   /**
@@ -1074,7 +1089,14 @@ export class VerifyingKey {
 
   /**
    * The public key material (`raw`: 32 bytes for Ed25519, an uncompressed
-   * SEC1 point for ECDSA). Public material is always exportable.
+   * SEC1 point for ECDSA).
+   *
+   * There is no extractability gate on this resource — WebCrypto sets
+   * `[[extractable]]` true on every generated public key, and the importers
+   * below pass `true` — so `not-extractable` never occurs. The export can
+   * still fail: each algorithm's export operation begins by throwing
+   * `OperationError` when the key material behind the `CryptoKey` cannot be
+   * accessed, which `platformCall` renders as `other`.
    */
   async exportKey() {
     return new Uint8Array(

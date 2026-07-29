@@ -82,6 +82,11 @@ impl MacKeyMaterial {
         length_bits(self.raw.len())
     }
 
+    /// Whether the key material may be exported (`mac-key.extractable`).
+    pub fn extractable(&self) -> bool {
+        self.extractable
+    }
+
     /// The raw material, or `not-extractable` (the `mac-key.export-key`
     /// contract).
     ///

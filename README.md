@@ -30,6 +30,11 @@ kind*, not by algorithm:
   key handles it is granted but cannot mint keys; only a world importing
   `hmac` can. `extractable: false` keys refuse `export-key`; on the jco host
   that flag is the platform `CryptoKey`'s own, so the platform enforces it.
+  Every gated key resource also reports its `extractable` flag as a getter, so
+  a holder can ask the question without taking the answer — and because a key
+  resource need not have been minted by the component holding it. Export is
+  fallible even where no gate applies: a provider may hold a key as a handle
+  it can *use* but not *read*.
 - **Byte `stream`s are the only bulk data path** (no buffer-taking `update`
   functions), so implementations have exactly one ingestion path and results
   are chunking-invariant. On Wasmtime the host consumes bytes directly from
