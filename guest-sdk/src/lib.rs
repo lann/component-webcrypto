@@ -393,6 +393,109 @@ where
     }
 }
 
+/// A pending `seal`, returned by [`Aead::seal`] and
+/// [`AeadInternalNonce::seal`].
+///
+/// Nothing runs until this is polled: the operation starts on the first
+/// `await`, so a `Seal` that is dropped unused never calls the
+/// implementation — and so never draws from an internal-nonce key's budget.
+///
+/// Awaiting it yields the whole sealed message. It is a [`Future`] rather
+/// than an `async fn`'s anonymous one so that it drops straight into
+/// [`futures::join!`], which is the shape the package's making-progress rule
+/// asks callers for: several operations in flight, all of them making
+/// progress.
+///
+/// `seal` is the one operation in the package whose result may arrive before
+/// its input is consumed — the WIT permits producing the sealed message
+/// incrementally — so the collect runs *concurrently* with the feed. Awaiting
+/// the operation first and reading the stream afterwards would deadlock
+/// against a provider that does so.
+#[must_use = "a Seal does nothing until it is awaited"]
+pub struct Seal<'a> {
+    state: SealState<'a>,
+}
+
+type LocalBoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+
+/// Starts the operation over the readable end of a freshly minted stream.
+type StartSeal<'a> = Box<
+    dyn FnOnce(
+            StreamReader<u8>,
+        ) -> LocalBoxFuture<'a, Result<StreamReader<u8>, bindings::types::Error>>
+        + 'a,
+>;
+
+enum SealState<'a> {
+    Ready(DataSource<'a>, StartSeal<'a>),
+    Running(LocalBoxFuture<'a, Result<Vec<u8>, Error>>),
+    Done,
+}
+
+impl<'a> Seal<'a> {
+    fn new(source: DataSource<'a>, start: StartSeal<'a>) -> Self {
+        Self {
+            state: SealState::Ready(source, start),
+        }
+    }
+}
+
+impl std::future::Future for Seal<'_> {
+    type Output = Result<Vec<u8>, Error>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        // `Seal` is `Unpin`: every field is a `Box` or a `Pin<Box<_>>`.
+        let this = self.get_mut();
+        if let SealState::Ready(..) = this.state {
+            let SealState::Ready(source, start) =
+                std::mem::replace(&mut this.state, SealState::Done)
+            else {
+                unreachable!("just matched Ready")
+            };
+            this.state = SealState::Running(seal_and_collect(source, start));
+        }
+        match &mut this.state {
+            SealState::Running(running) => running.as_mut().poll(cx),
+            SealState::Done => panic!("Seal polled after completion"),
+            SealState::Ready(..) => unreachable!("started above"),
+        }
+    }
+}
+
+/// Feed the source and collect the sealed message concurrently.
+fn seal_and_collect<'a>(
+    source: DataSource<'a>,
+    start: StartSeal<'a>,
+) -> LocalBoxFuture<'a, Result<Vec<u8>, Error>> {
+    Box::pin(async move {
+        match source.0 {
+            // A caller-supplied stream is fed by whoever owns its writer, so
+            // there is nothing to run concurrently here.
+            Inner::Stream(rx) => {
+                let sealed = start(rx).await.map_err(Error::from)?;
+                Ok(sealed.collect().await)
+            }
+            inner => {
+                let (tx, rx) = wit_stream::new();
+                let sealed = async {
+                    let stream = start(rx).await.map_err(Error::from)?;
+                    Ok::<_, Error>(stream.collect().await)
+                };
+                let (result, fed) = futures::join!(sealed, inner.feed(tx));
+                match (result, fed) {
+                    (_, Err(read @ Error::Read(_))) => Err(read),
+                    (Err(error), _) => Err(error),
+                    (Ok(_), Err(error)) => Err(error),
+                    (Ok(value), Ok(())) => Ok(value),
+                }
+            }
+        }
+    })
+}
+
 // --- newtypes ------------------------------------------------------------------
 
 /// Generate the shared newtype plumbing: constructors, raw accessors, and
@@ -511,23 +614,26 @@ pub struct Aead(bindings::aead::AeadKey);
 newtype_common!(Aead, bindings::aead::AeadKey, "aead-key");
 
 impl Aead {
-    /// Encrypt and authenticate `plaintext` under `nonce` and `aad`. The
-    /// returned stream carries the ciphertext followed by the
-    /// authentication tag; collect it with [`StreamReader::collect`] when
-    /// you want the bytes.
+    /// Encrypt and authenticate `plaintext` under `nonce` and `aad`,
+    /// yielding the ciphertext followed by the authentication tag.
+    ///
+    /// Returns a [`Seal`], which starts the operation when awaited.
     ///
     /// **The caller is responsible for nonce uniqueness per key.** Reusing a
     /// nonce under one key defeats the algorithm's confidentiality and
     /// authenticity guarantees; prefer [`AeadInternalNonce`], which makes
     /// reuse unrepresentable.
-    pub async fn seal(
-        &self,
-        nonce: impl Into<Cow<'_, [u8]>>,
-        aad: impl Into<Cow<'_, [u8]>>,
-        plaintext: impl Into<DataSource<'_>>,
-    ) -> Result<StreamReader<u8>, Error> {
+    pub fn seal<'a>(
+        &'a self,
+        nonce: impl Into<Cow<'a, [u8]>>,
+        aad: impl Into<Cow<'a, [u8]>>,
+        plaintext: impl Into<DataSource<'a>>,
+    ) -> Seal<'a> {
         let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
-        run_sourced(plaintext.into(), |rx| self.0.seal(nonce, aad, rx)).await
+        Seal::new(
+            plaintext.into(),
+            Box::new(move |rx| Box::pin(self.0.seal(nonce, aad, rx))),
+        )
     }
 
     /// Decrypt and verify `ciphertext` (ciphertext followed by tag, as
@@ -601,20 +707,25 @@ newtype_common!(
 
 impl AeadInternalNonce {
     /// Encrypt and authenticate `plaintext` under a fresh
-    /// implementation-generated nonce with `aad`. The returned stream
-    /// carries the self-contained sealed message; collect it with
-    /// [`StreamReader::collect`] when you want the bytes.
+    /// implementation-generated nonce with `aad`, yielding the
+    /// self-contained sealed message.
+    ///
+    /// Returns a [`Seal`], which starts the operation when awaited — so a
+    /// `Seal` dropped unused draws nothing from this key's nonce budget.
     ///
     /// Fails with [`Error::KeyExhausted`] once the implementation can no
     /// longer guarantee nonce uniqueness for this key — mint a fresh key to
     /// continue sealing.
-    pub async fn seal(
-        &self,
-        aad: impl Into<Cow<'_, [u8]>>,
-        plaintext: impl Into<DataSource<'_>>,
-    ) -> Result<StreamReader<u8>, Error> {
+    pub fn seal<'a>(
+        &'a self,
+        aad: impl Into<Cow<'a, [u8]>>,
+        plaintext: impl Into<DataSource<'a>>,
+    ) -> Seal<'a> {
         let aad = aad.into().into_owned();
-        run_sourced(plaintext.into(), |rx| self.0.seal(aad, rx)).await
+        Seal::new(
+            plaintext.into(),
+            Box::new(move |rx| Box::pin(self.0.seal(aad, rx))),
+        )
     }
 
     /// Decrypt and verify a sealed message (as produced by
