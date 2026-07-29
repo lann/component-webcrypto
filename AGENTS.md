@@ -251,6 +251,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just transpile` | anything affecting the component's interfaces, or the jco flags in `examples/jco-demo/package.json`. |
 | `just typecheck-jco` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
+| `just wpt-parity` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `componentize-sdk/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
@@ -337,14 +338,9 @@ closed numbers remain stable references.
 
 ## Direction (designed, not yet built)
 
-- WPT platform parity through the jco path: run the vendored WPT suites
-  twice — directly against the platform's own `crypto.subtle` (the
-  baseline) and through the componentized shim transpiled by jco against
-  `jco-impl/webcrypto.js` — and gate that the round trip passes everything
-  the baseline passes. The ceiling is measured, not asserted, so platform
-  gaps (Ed448, AES-192) fall out of scope per platform with no exclusion
-  list, and the gate isolates exactly the losses the WIT layer introduces.
-  Class D is not implicated: the crypto runs host-side on the platform.
+- WPT platform parity through the jco path: the measuring harness exists
+  (`just wpt-parity` — see componentize-sdk/wpt/README.md, "The parity
+  gate") and pins the loss set; what remains is driving that set down.
   Growing toward parity is tiered — first behaviors the WIT already
   carries but the shim does not serve (more hashes, Ed25519/ECDSA,
   symmetric JWK, the usages model, `getRandomValues`), then additive WIT
@@ -352,7 +348,9 @@ closed numbers remain stable references.
   then WIT-forced deviations (the GCM IV/tag contract), each of which
   needs an explicit ruling: carry it via a separate compat minting
   interface that other providers may decline, or keep the deviation and
-  record it.
+  record it. Class D is not implicated: the crypto runs host-side on the
+  platform. A browser leg (the same two runs in Chromium, baseline = the
+  browser's own `crypto.subtle`) remains unbuilt.
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium
