@@ -23,30 +23,10 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use conformance_harness::{describe, probes};
-use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
+use conformance_harness::stream::{sig_sign, sig_verify, Schedule};
+use conformance_harness::{describe, expect, expect_err, export_probe_suite, probes, ErrKind};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
-use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
-use lann_webcrypto_guest::bindings::types::Error;
-
-/// The feature names shared with the conformance guest (`all` traps on
-/// anything else), so a target passes one `missing` declaration to every
-/// guest it runs. `chacha20-poly1305` tags nothing in this suite.
-const FEATURE_CHACHA: &str = "chacha20-poly1305";
-const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
-const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
-
-struct Component;
-
-/// The features a bare tag in the `probes!` table stands for. No probe in
-/// this suite is tagged today; the arm exists so adding one is a one-line
-/// change rather than a structural one.
-macro_rules! feature_tags {
-    () => {
-        &[]
-    };
-}
 
 probes! {
     ecdsa_p256_sign_roundtrip,
@@ -55,85 +35,7 @@ probes! {
     ecdsa_sign_invalid_scalar,
 }
 
-/// Run the probe at `index` on a target providing its features.
-async fn run_one(index: usize) -> Result<(), String> {
-    match PROBES.get(index) {
-        Some(probe) => (probe.run)().await,
-        None => Err(format!("no probe at index {index}")),
-    }
-}
-
-/// One materialized signing probe.
-struct Case {
-    index: usize,
-    provided: bool,
-}
-
-impl GuestTestCase for Case {
-    fn name(&self) -> String {
-        PROBES[self.index].case_id()
-    }
-
-    fn features(&self) -> Vec<String> {
-        PROBES[self.index].feature_names()
-    }
-
-    async fn run(&self) -> Outcome {
-        if self.provided {
-            match run_one(self.index).await {
-                Ok(()) => Outcome::Pass,
-                Err(detail) => Outcome::Fail(detail),
-            }
-        } else {
-            // No probe in this suite is feature-tagged today; `provided`
-            // is computed generically so a future tagged probe fails
-            // loudly here until it brings a decline assertion.
-            Outcome::Fail("probe has no decline assertion for its features".into())
-        }
-    }
-}
-
-impl Guest for Component {
-    type TestCase = Case;
-
-    fn all(missing_features: Vec<String>) -> Vec<TestCase> {
-        let missing = conformance_harness::missing_features(&missing_features, KNOWN_FEATURES);
-        PROBES
-            .iter()
-            .enumerate()
-            .map(|(index, probe)| {
-                TestCase::new(Case {
-                    index,
-                    provided: probe.provided_by(&missing),
-                })
-            })
-            .collect()
-    }
-}
-
-// --- helpers -------------------------------------------------------------------
-
-/// Sign an entire byte stream (whole-write).
-async fn sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
-    let (mut tx, rx) = lann_webcrypto_guest::wit_stream::new();
-    let (sig, ()) = futures::join!(key.sign(rx), async {
-        let leftover = tx.write_all(data.to_vec()).await;
-        assert!(leftover.is_empty(), "stream writer closed early");
-        drop(tx);
-    });
-    sig.map_err(|e| describe("signing-key.sign", &e))
-}
-
-/// Verify `sig` over an entire byte stream (whole-write).
-async fn verify(key: &VerifyingKey, data: &[u8], sig: &[u8]) -> Result<(), Error> {
-    let (mut tx, rx) = lann_webcrypto_guest::wit_stream::new();
-    let (verified, ()) = futures::join!(key.verify(rx, sig.to_vec()), async {
-        let leftover = tx.write_all(data.to_vec()).await;
-        assert!(leftover.is_empty(), "stream writer closed early");
-        drop(tx);
-    });
-    verified
-}
+export_probe_suite!(PROBES);
 
 // --- probes --------------------------------------------------------------------
 
@@ -145,26 +47,29 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    if key.algorithm_name() != "ECDSA"
-        || key.algorithm_curve().as_deref() != Some("P-256")
-        || key.algorithm_hash().as_deref() != Some("SHA-256")
-    {
-        return Err(format!(
-            "signing-key metadata: name={} curve={:?} hash={:?}",
-            key.algorithm_name(),
-            key.algorithm_curve(),
-            key.algorithm_hash()
-        ));
-    }
+    expect(
+        key.algorithm_name(),
+        "ECDSA".to_string(),
+        "signing-key algorithm-name",
+    )?;
+    expect(
+        key.algorithm_curve(),
+        Some("P-256".to_string()),
+        "signing-key algorithm-curve",
+    )?;
+    expect(
+        key.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "signing-key algorithm-hash",
+    )?;
 
     let payload = b"host-only signing payload";
-    let sig = sign(&key, payload).await?;
-    if sig.len() != 64 {
-        return Err(format!("P-256 signatures are 64 bytes, got {}", sig.len()));
-    }
-    verify(&public, payload, &sig)
-        .await
-        .map_err(|e| describe("generated public half did not verify", &e))?;
+    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
+    fed?;
+    expect(sig.len(), 64, "P-256 signature length")?;
+    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("generated public half did not verify", &e))?;
 
     // The generated point survives an export → ecdsa-verify import round
     // trip (65-byte uncompressed SEC1), and the re-imported key verifies.
@@ -181,17 +86,20 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     let imported = import_verifying_key(EcdsaVariant::P256Sha256, point)
         .await
         .map_err(|e| describe("import-verifying-key of the exported point", &e))?;
-    verify(&imported, payload, &sig)
-        .await
-        .map_err(|e| describe("re-imported key did not verify", &e))?;
+    let (verified, fed) = sig_verify(&imported, payload, &sig, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("re-imported key did not verify", &e))?;
 
     let mut corrupted = sig;
     corrupted[0] ^= 0x01;
-    match verify(&imported, payload, &corrupted).await {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(()) => Err("corrupted signature verified".into()),
-    }
+    let (verified, fed) = sig_verify(&imported, payload, &corrupted, Schedule::Whole).await;
+    fed?;
+    expect_err(
+        "verify",
+        ErrKind::AuthenticationFailed,
+        verified,
+        "corrupted signature verified",
+    )
 }
 
 /// A generated P-384 key round-trips sign→verify, and a *different* key's
@@ -200,33 +108,36 @@ async fn ecdsa_p384_generate_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    if key.algorithm_curve().as_deref() != Some("P-384")
-        || key.algorithm_hash().as_deref() != Some("SHA-384")
-    {
-        return Err(format!(
-            "generated signing-key metadata: curve={:?} hash={:?}",
-            key.algorithm_curve(),
-            key.algorithm_hash()
-        ));
-    }
+    expect(
+        key.algorithm_curve(),
+        Some("P-384".to_string()),
+        "generated signing-key algorithm-curve",
+    )?;
+    expect(
+        key.algorithm_hash(),
+        Some("SHA-384".to_string()),
+        "generated signing-key algorithm-hash",
+    )?;
 
     let payload = b"host-only signing payload";
-    let sig = sign(&key, payload).await?;
-    if sig.len() != 96 {
-        return Err(format!("P-384 signatures are 96 bytes, got {}", sig.len()));
-    }
-    verify(&public, payload, &sig)
-        .await
-        .map_err(|e| describe("round-trip signature did not verify", &e))?;
+    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
+    fed?;
+    expect(sig.len(), 96, "P-384 signature length")?;
+    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
+    fed?;
+    verified.map_err(|e| describe("round-trip signature did not verify", &e))?;
 
     let (_other, other_public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    match verify(&other_public, payload, &sig).await {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(()) => Err("signature verified under a different key".into()),
-    }
+    let (verified, fed) = sig_verify(&other_public, payload, &sig, Schedule::Whole).await;
+    fed?;
+    expect_err(
+        "verify",
+        ErrKind::AuthenticationFailed,
+        verified,
+        "signature verified under a different key",
+    )
 }
 
 /// An extractable generated key exports a 32-byte scalar, stably; a
@@ -238,16 +149,13 @@ async fn ecdsa_sign_key_export() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    if !key.extractable() {
-        return Err("extractable key reports non-extractable".into());
-    }
+    expect(
+        key.extractable(),
+        true,
+        "extractable generated key's extractable getter",
+    )?;
     let exported = key.export_key().await.map_err(|e| describe("export", &e))?;
-    if exported.len() != 32 {
-        return Err(format!(
-            "exported P-256 scalar: got {} bytes, want 32",
-            exported.len()
-        ));
-    }
+    expect(exported.len(), 32, "exported P-256 scalar length")?;
     let again = key
         .export_key()
         .await
@@ -261,14 +169,17 @@ async fn ecdsa_sign_key_export() -> Result<(), String> {
         .map_err(|e| describe("generate-key", &e))?;
     // Read the getter in its `false` direction: asserting only `true`
     // elsewhere leaves a hardcoded `true` passing the suite.
-    if key.extractable() {
-        return Err("non-extractable generated key reports extractable".into());
-    }
-    match key.export_key().await {
-        Err(Error::NotExtractable) => Ok(()),
-        Err(other) => Err(describe("expected not-extractable, got", &other)),
-        Ok(_) => Err("non-extractable key exported".into()),
-    }
+    expect(
+        key.extractable(),
+        false,
+        "non-extractable generated key's extractable getter",
+    )?;
+    expect_err(
+        "export-key",
+        ErrKind::NotExtractable,
+        key.export_key().await,
+        "non-extractable key exported",
+    )
 }
 
 /// Wrong-length scalars fail `invalid-key` at import. Only the length
@@ -279,24 +190,16 @@ async fn ecdsa_sign_key_export() -> Result<(), String> {
 async fn ecdsa_sign_invalid_scalar() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::ecdsa_sign::import_signing_key;
 
-    async fn expect_invalid(what: &str, variant: EcdsaVariant, raw: Vec<u8>) -> Result<(), String> {
-        match import_signing_key(variant, raw, false).await {
-            Err(Error::InvalidKey(_)) => Ok(()),
-            Err(other) => Err(format!(
-                "{what}: expected invalid-key, got {}",
-                describe("", &other)
-            )),
-            Ok(_) => Err(format!("{what}: malformed scalar was accepted")),
-        }
-    }
-
-    expect_invalid("short scalar", EcdsaVariant::P256Sha256, vec![0x01; 16]).await?;
-    expect_invalid(
+    expect_err(
+        "short scalar",
+        ErrKind::InvalidKey,
+        import_signing_key(EcdsaVariant::P256Sha256, vec![0x01; 16], false).await,
+        "malformed scalar was accepted",
+    )?;
+    expect_err(
         "p384 scalar for p256",
-        EcdsaVariant::P256Sha256,
-        vec![0x01; 48],
+        ErrKind::InvalidKey,
+        import_signing_key(EcdsaVariant::P256Sha256, vec![0x01; 48], false).await,
+        "malformed scalar was accepted",
     )
-    .await
 }
-
-export!(Component);

@@ -69,9 +69,10 @@ pub use sig::{SigPublic, SigningKeyMaterial};
 pub type RngError = getrandom::Error;
 
 /// The WIT `types.error` variant, mirrored case for case. Implementations
-/// convert values of this type into their generated error types with a
-/// mechanical `From`; the message strings carried here are the ones the WIT
-/// contracts specify, shared verbatim by both implementations.
+/// convert values of this type into their generated error types with the
+/// mechanical `From` that [`impl_conversions!`] defines; the message strings
+/// carried here are the ones the WIT contracts specify, shared verbatim by
+/// both implementations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// WIT `invalid-key(string)`.
@@ -88,6 +89,70 @@ pub enum Error {
     KeyExhausted,
     /// WIT `other(string)`.
     Other(String),
+}
+
+/// Define the mechanical bindings glue both implementations need:
+/// `From<Error>` into the generated error type, and `From` from each
+/// generated variant enum into this crate's, matching case for case.
+///
+/// Invoked once per implementation with its own generated types (each
+/// `generate!`/`bindgen!` expansion produces distinct enums). The matches
+/// are exhaustive on both sides, so a case added to the WIT or to this
+/// crate is a compile error at the invocation rather than a silent drift.
+#[macro_export]
+macro_rules! impl_conversions {
+    (
+        error: $error:path,
+        sha2: $sha2:path,
+        aes: $aes:path,
+        ecdsa: $ecdsa:path $(,)?
+    ) => {
+        impl From<$crate::Error> for $error {
+            fn from(err: $crate::Error) -> Self {
+                match err {
+                    $crate::Error::InvalidKey(msg) => Self::InvalidKey(msg),
+                    $crate::Error::InvalidNonce(msg) => Self::InvalidNonce(msg),
+                    $crate::Error::AuthenticationFailed => Self::AuthenticationFailed,
+                    $crate::Error::NotExtractable => Self::NotExtractable,
+                    $crate::Error::Unsupported(msg) => Self::Unsupported(msg),
+                    $crate::Error::KeyExhausted => Self::KeyExhausted,
+                    $crate::Error::Other(msg) => Self::Other(msg),
+                }
+            }
+        }
+
+        impl From<$sha2> for $crate::Sha2Variant {
+            fn from(variant: $sha2) -> Self {
+                match variant {
+                    <$sha2>::Sha224 => Self::Sha224,
+                    <$sha2>::Sha256 => Self::Sha256,
+                    <$sha2>::Sha384 => Self::Sha384,
+                    <$sha2>::Sha512 => Self::Sha512,
+                    <$sha2>::Sha512224 => Self::Sha512224,
+                    <$sha2>::Sha512256 => Self::Sha512256,
+                }
+            }
+        }
+
+        impl From<$aes> for $crate::AesVariant {
+            fn from(variant: $aes) -> Self {
+                match variant {
+                    <$aes>::Aes128 => Self::Aes128,
+                    <$aes>::Aes192 => Self::Aes192,
+                    <$aes>::Aes256 => Self::Aes256,
+                }
+            }
+        }
+
+        impl From<$ecdsa> for $crate::EcdsaVariant {
+            fn from(variant: $ecdsa) -> Self {
+                match variant {
+                    <$ecdsa>::P256Sha256 => Self::P256Sha256,
+                    <$ecdsa>::P384Sha384 => Self::P384Sha384,
+                }
+            }
+        }
+    };
 }
 
 /// The WIT `sha2.sha2-variant` cases. Variant names match the generated

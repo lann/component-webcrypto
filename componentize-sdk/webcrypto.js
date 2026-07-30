@@ -584,7 +584,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
       );
     }
     return await mintHmacKey(
-      () => hmacSha2.generateKey("sha256", !!extractable),
+      () => hmacSha2.generateKey("sha256", undefined, !!extractable),
       alg,
       !!extractable,
       usages,

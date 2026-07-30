@@ -20,10 +20,18 @@ interface hmac-sha2 {
     /// the variant fails with `error.unsupported`.
     import-key: async func(%variant: sha2-variant, raw: list<u8>, extractable: bool) -> result<mac-key, error>;
 
-    /// Generate a fresh random HMAC key over the declared SHA-2 variant,
-    /// with the underlying hash's block size of key material (WebCrypto's
-    /// `generateKey` default: 64 bytes for SHA-256, 128 for SHA-384/512).
-    /// Fails with `error.unsupported` if this implementation does not serve
-    /// the variant.
-    generate-key: async func(%variant: sha2-variant, extractable: bool) -> result<mac-key, error>;
+    /// Generate a fresh random HMAC key over the declared SHA-2 variant.
+    ///
+    /// `length` is the key length in bits (WebCrypto's
+    /// `HmacKeyGenParams.length`, reported back by
+    /// `mac-key.algorithm-length`); `none` means the underlying hash's
+    /// block size (WebCrypto's `generateKey` default: 512 bits for
+    /// SHA-256, 1024 for SHA-384/512). A zero length fails
+    /// `error.invalid-key`. Implementations MAY decline lengths that are
+    /// not a multiple of 8 with `error.unsupported` (none of this
+    /// package's implementations serve sub-byte lengths), and MAY apply
+    /// the same policy bounds as `import-key`. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: sha2-variant, length: option<u32>, extractable: bool) -> result<mac-key, error>;
 }

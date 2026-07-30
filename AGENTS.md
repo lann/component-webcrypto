@@ -91,7 +91,8 @@ conformance/            # cross-implementation conformance tests — see
                         #     policy; its README records the upstream
                         #     revision each file came from
   harness/              #   the world-independent half of both guests:
-                        #     probe table, error rendering, feature
+                        #     probe table, feature names, error rendering,
+                        #     assertion helpers, stream delivery, feature
                         #     validation (crate: conformance-harness)
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
@@ -159,6 +160,15 @@ proposing an error case, check whether the fail-closed design maps the
 condition onto an existing one (it usually does); `other(string)` carries
 operational conditions indefinitely, never semantic conditions callers must
 branch on.
+
+The evolution rules describe the cost of a change, not a prohibition — and
+they bind only once the package has external consumers, which it does not
+yet. Until then, a shape regret is fixed *in place* (signatures change,
+names change, the error variant may grow), never designed around
+additively: working around a constraint that does not yet bind produces
+the wart without buying the compatibility. What ends this regime is
+publishing the package for consumption; the change that does so should say
+it does.
 
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
