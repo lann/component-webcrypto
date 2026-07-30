@@ -71,3 +71,37 @@ async fn tiny_buffer_limit_fails_recoverably() {
         "expected the recoverable limit error, got: {rendered}"
     );
 }
+
+/// Every check — including the eight-lane `concurrent-seal-open` — completes
+/// under a pool that admits only two operations at a time.
+///
+/// This is the deadlock-shaped concurrency test on the Wasmtime host (#103):
+/// the guest drives its operations the way the making-progress rule
+/// requires, so completion is the host's obligation — FIFO admission must
+/// advance, and an operation's capacity must free when its output is
+/// drained. A regression in either direction does not fail this test, it
+/// hangs it, which is what the timeout converts into a failure.
+///
+/// The per-call limit is sized above the demo's largest payload (~24 KiB),
+/// so nothing overflows; the pool is two reservations, so the concurrent
+/// check contends four deep.
+#[tokio::test(flavor = "multi_thread")]
+async fn checks_complete_under_a_contended_pool() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let component = build_component(&workspace_root);
+
+    let mut ctx = wasmtime_webcrypto::WasiWebcryptoCtx::new();
+    ctx.set_per_call_buffer_limit(Some(32 * 1024));
+    ctx.set_total_buffer_limit(Some(64 * 1024));
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        wasmtime_webcrypto_demo::run_demo_with(&component, ctx),
+    )
+    .await
+    .expect("the demo deadlocked against the contended pool")
+    .expect("run_demo_with failed");
+    assert!(
+        summary.contains("concurrent-seal-open"),
+        "the concurrent check must have run: {summary}"
+    );
+}
