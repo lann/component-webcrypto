@@ -3,9 +3,15 @@ name = "conformance-harness"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "The parts of the conformance guests that are not specific to a world: the probe table, error rendering, and missing-feature validation."
+description = "The parts of the conformance guests that are not specific to a world: the probe table, the feature names, error rendering and assertion helpers, stream delivery, and missing-feature validation."
 
 [dependencies]
-# Only for the WIT `error` type that `describe` renders. Both guests obtain
-# it from here, so they render failures identically.
+# The WIT `error` type that `describe` renders and the key resources the
+# stream helpers drive. Both guests obtain them from here, so they render
+# failures and deliver inputs identically.
 lann-webcrypto-guest = { path = "../../guest-sdk" }
+# `join!` runs an operation and its stream feeder concurrently within a
+# single cooperative task — the core of the stream helpers.
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+# Decoding probe-internal hex constants.
+hex = "0.4"

@@ -91,7 +91,8 @@ conformance/            # cross-implementation conformance tests — see
                         #     policy; its README records the upstream
                         #     revision each file came from
   harness/              #   the world-independent half of both guests:
-                        #     probe table, error rendering, feature
+                        #     probe table, feature names, error rendering,
+                        #     assertion helpers, stream delivery, feature
                         #     validation (crate: conformance-harness)
   guest/                #   the shared conformance guest (vectors compiled
                         #     in; self-describing cases with feature tags,
