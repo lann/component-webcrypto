@@ -913,8 +913,29 @@ function requireGcmNonce(nonce) {
  * pool is full, and releases when its buffers are gone (including the
  * returned output stream). Inputs beyond the per-call cap are drained and
  * discarded (the WIT drain rule holds) and the operation throws a
- * recoverable `{ tag: 'other' }`. Defaults mirror the wasmtime host: a
- * 128 MiB pool, per-call cap of a quarter of it.
+ * recoverable `{ tag: 'other' }`.
+ *
+ * Two divergences from the Wasmtime host, both structural rather than
+ * oversights:
+ *
+ * - **The defaults are constants here, not derived.** The Wasmtime host
+ *   defaults its pool to the store's hostcall fuel, which has no analogue in
+ *   a browser. 128 MiB with a per-call cap of a quarter is the same *shape*
+ *   at a fixed figure, not the same number.
+ * - **The pool is module-global, not per-instance.** `jco --map` binds an
+ *   interface to a JS module, and a module has one instance per realm; no
+ *   instance identity reaches these functions, so there is nothing to key a
+ *   pool on. Two components transpiled against this file in one realm share
+ *   one pool and one `configure`. The Wasmtime host scopes its pool to the
+ *   context and does not have this property.
+ *
+ * Neither host can hold a call before it starts, which is what the component
+ * model provides to a component callee (`backpressure.{inc,dec}`, see the
+ * in-guest provider's `limits` module) and does not expose to a host import:
+ * a host import's arguments are lifted by the canonical ABI before the host
+ * function runs. Admission here therefore happens *inside* the call, so a
+ * queued operation has already had its `list<u8>` parameters lifted — they
+ * are retained but not counted.
  */
 const DEFAULT_TOTAL_BUFFER_LIMIT = 128 * 1024 * 1024;
 
@@ -997,23 +1018,39 @@ async function admitInput() {
 }
 
 /**
- * A single-chunk byte `ReadableStream` over `bytes`, releasing
- * `reservation` (when given) once the bytes are handed off or the stream
- * is cancelled.
+ * A single-chunk byte `ReadableStream` over `bytes`, releasing `reservation`
+ * (when given) once the caller has taken the bytes or dropped the stream.
+ *
+ * The reservation is held until then rather than released when the operation
+ * returns: an unconsumed output is still retained here, and releasing early
+ * would leave it invisible to the pool — the bound would cover the inputs and
+ * silently not the outputs.
+ *
+ * `pull` is only called when the consumer asks for a chunk, so the queuing
+ * strategy matters: the default would fill a chunk eagerly at construction
+ * and release before the caller had read anything. A zero high-water mark
+ * keeps the stream from producing until it is read.
+ *
+ * The package's making-progress rule is what makes this safe to hold: a
+ * caller must drain each returned stream as it becomes available, so the
+ * capacity an operation holds is always one its own consumer can free.
  * @param {Uint8Array} bytes
  * @param {Reservation} [reservation]
  */
 function bytesToStream(bytes, reservation = undefined) {
-  return new ReadableStream({
-    pull(controller) {
-      if (bytes.length) controller.enqueue(bytes);
-      controller.close();
-      reservation?.release();
+  return new ReadableStream(
+    {
+      pull(controller) {
+        if (bytes.length) controller.enqueue(bytes);
+        controller.close();
+        reservation?.release();
+      },
+      cancel() {
+        reservation?.release();
+      },
     },
-    cancel() {
-      reservation?.release();
-    },
-  });
+    { highWaterMark: 0 },
+  );
 }
 
 /**
