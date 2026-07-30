@@ -52,6 +52,22 @@ use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::wit_stream;
 
+/// Assert that `result` failed with an error matching `pattern` (e.g.
+/// `Error::InvalidKey(_)`). `accepted` says what its wrongly succeeding
+/// would mean.
+macro_rules! expect_error {
+    ($result:expr, $pattern:pat, $accepted:expr $(,)?) => {
+        match $result {
+            Err(err) if matches!(err, $pattern) => Ok(()),
+            Err(other) => Err(describe(
+                concat!("expected ", stringify!($pattern), ", got"),
+                &other,
+            )),
+            Ok(_) => Err(String::from($accepted)),
+        }
+    };
+}
+
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
 
 const HMAC_KEY: &[u8] = b"Jefe";
@@ -174,11 +190,11 @@ async fn hmac_verify() -> Result<(), String> {
         .map_err(|e| describe("correct tag did not verify", &e))?;
 
     tag[0] ^= 0x01;
-    match verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await? {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(()) => Err("corrupted tag verified".into()),
-    }
+    expect_error!(
+        verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await?,
+        Error::AuthenticationFailed,
+        "corrupted tag verified",
+    )
 }
 
 /// A generated key signs and verifies, and two calls on the same key agree.
@@ -195,11 +211,11 @@ async fn hmac_generated_key() -> Result<(), String> {
     }
 
     // A non-extractable key must not export.
-    match key.export_key().await {
-        Err(Error::NotExtractable) => Ok(()),
-        Err(other) => Err(describe("expected not-extractable, got", &other)),
-        Ok(_) => Err("non-extractable key exported".into()),
-    }
+    expect_error!(
+        key.export_key().await,
+        Error::NotExtractable,
+        "non-extractable key exported",
+    )
 }
 
 /// `import` → `export` on an extractable key is the identity; a generated
@@ -424,11 +440,11 @@ async fn gcm_tampered() -> Result<(), String> {
         .await
         .map_err(|e| describe("seal", &e))?;
     sealed[0] ^= 0x80;
-    match open_chunked(&key, &nonce, b"", &sealed, usize::MAX).await {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(_) => Err("tampered ciphertext opened".into()),
-    }
+    expect_error!(
+        open_chunked(&key, &nonce, b"", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
+        "tampered ciphertext opened",
+    )
 }
 
 /// The wrong associated data fails with `authentication-failed`.
@@ -440,20 +456,20 @@ async fn gcm_wrong_aad() -> Result<(), String> {
     let sealed = seal_chunked(&key, &nonce, b"right aad", b"payload", usize::MAX)
         .await
         .map_err(|e| describe("seal", &e))?;
-    match open_chunked(&key, &nonce, b"wrong aad", &sealed, usize::MAX).await {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(_) => Err("wrong aad opened".into()),
-    }
+    expect_error!(
+        open_chunked(&key, &nonce, b"wrong aad", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
+        "wrong aad opened",
+    )
 }
 
 /// Importing wrong-length key material fails with `invalid-key`.
 async fn gcm_invalid_key() -> Result<(), String> {
-    match import_key(AesVariant::Aes256, vec![0u8; 16], false).await {
-        Err(Error::InvalidKey(_)) => Ok(()),
-        Err(other) => Err(describe("expected invalid-key, got", &other)),
-        Ok(_) => Err("16-byte key imported as AES-256".into()),
-    }
+    expect_error!(
+        import_key(AesVariant::Aes256, vec![0u8; 16], false).await,
+        Error::InvalidKey(_),
+        "16-byte key imported as AES-256",
+    )
 }
 
 /// Sealing with a wrong-length nonce fails with `invalid-nonce`.
@@ -461,11 +477,11 @@ async fn gcm_invalid_nonce() -> Result<(), String> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    match seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await {
-        Err(Error::InvalidNonce(_)) => Ok(()),
-        Err(other) => Err(describe("expected invalid-nonce, got", &other)),
-        Ok(_) => Err("8-byte nonce accepted".into()),
-    }
+    expect_error!(
+        seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await,
+        Error::InvalidNonce(_),
+        "8-byte nonce accepted",
+    )
 }
 
 /// Extractability behaves for AEAD keys exactly as for MAC keys.
@@ -483,11 +499,11 @@ async fn gcm_key_export() -> Result<(), String> {
     let sealed_key = generate_key(AesVariant::Aes256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    match sealed_key.export_key().await {
-        Err(Error::NotExtractable) => Ok(()),
-        Err(other) => Err(describe("expected not-extractable, got", &other)),
-        Ok(_) => Err("non-extractable key exported".into()),
-    }
+    expect_error!(
+        sealed_key.export_key().await,
+        Error::NotExtractable,
+        "non-extractable key exported",
+    )
 }
 
 /// The internal-nonce discipline end to end: sealed messages are
@@ -543,45 +559,55 @@ async fn gcm_internal_nonce() -> Result<(), String> {
         "distinct nonces across seals",
     )?;
 
-    match in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(_) => Err("wrong aad opened".into()),
-    }
+    expect_error!(
+        in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
+        "wrong aad opened",
+    )
 }
 
 // --- stream helpers ----------------------------------------------------------
 
-/// `sign`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`
-/// writes it whole).
+/// Run the operation built by `op` over a fresh stream, feeding it `data`
+/// in `chunk`-byte writes concurrently with the call (`usize::MAX` writes
+/// it whole). The outer error is the feeder's; the inner result is the
+/// operation's own.
+async fn run_chunked<T, F>(
+    data: &[u8],
+    chunk: usize,
+    op: impl FnOnce(lann_webcrypto_guest::StreamReader<u8>) -> F,
+) -> Result<Result<T, Error>, String>
+where
+    F: std::future::Future<Output = Result<T, Error>>,
+{
+    let (tx, rx) = wit_stream::new();
+    let (result, fed) = futures::join!(op(rx), feed(tx, data, chunk));
+    fed?;
+    Ok(result)
+}
+
+/// `sign`, feeding `data` in `chunk`-byte pieces.
 async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
-    let (tx, rx) = wit_stream::new();
-    let (tag, fed) = futures::join!(key.sign(rx), feed(tx, data, chunk));
-    fed?;
-    tag.map_err(|e| describe("mac-key.sign", &e))
+    run_chunked(data, chunk, |rx| key.sign(rx))
+        .await?
+        .map_err(|e| describe("mac-key.sign", &e))
 }
 
-/// `compute`, feeding `data` in `chunk`-byte pieces (one stream;
-/// `usize::MAX` writes it whole).
+/// `compute`, feeding `data` in `chunk`-byte pieces.
 async fn compute_chunked(digest: &Digest, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
-    let (tx, rx) = wit_stream::new();
-    let (got, fed) = futures::join!(digest.compute(rx), feed(tx, data, chunk));
-    fed?;
-    got.map_err(|e| describe("digest.compute", &e))
+    run_chunked(data, chunk, |rx| digest.compute(rx))
+        .await?
+        .map_err(|e| describe("digest.compute", &e))
 }
 
-/// `verify`, feeding `data` in `chunk`-byte pieces (one stream; `usize::MAX`
-/// writes it whole).
+/// `verify`, feeding `data` in `chunk`-byte pieces.
 async fn verify_chunked(
     key: &MacKey,
     data: &[u8],
     tag: Vec<u8>,
     chunk: usize,
 ) -> Result<Result<(), Error>, String> {
-    let (tx, rx) = wit_stream::new();
-    let (verified, fed) = futures::join!(key.verify(rx, tag), feed(tx, data, chunk));
-    fed?;
-    Ok(verified)
+    run_chunked(data, chunk, |rx| key.verify(rx, tag)).await
 }
 
 /// `seal`, feeding the plaintext in `chunk`-byte pieces and collecting the
@@ -593,13 +619,12 @@ async fn seal_chunked(
     plaintext: &[u8],
     chunk: usize,
 ) -> Result<Vec<u8>, Error> {
-    let (tx, rx) = wit_stream::new();
-    let (sealed, fed) = futures::join!(
-        key.seal(nonce.to_vec(), aad.to_vec(), rx),
-        feed(tx, plaintext, chunk)
-    );
-    fed.map_err(Error::Other)?;
-    Ok(sealed?.collect().await)
+    let sealed = run_chunked(plaintext, chunk, |rx| {
+        key.seal(nonce.to_vec(), aad.to_vec(), rx)
+    })
+    .await
+    .map_err(Error::Other)??;
+    Ok(sealed.collect().await)
 }
 
 /// `open`, feeding the ciphertext in `chunk`-byte pieces and collecting the
@@ -611,13 +636,12 @@ async fn open_chunked(
     ciphertext: &[u8],
     chunk: usize,
 ) -> Result<Vec<u8>, Error> {
-    let (tx, rx) = wit_stream::new();
-    let (opened, fed) = futures::join!(
-        key.open(nonce.to_vec(), aad.to_vec(), rx),
-        feed(tx, ciphertext, chunk)
-    );
-    fed.map_err(Error::Other)?;
-    Ok(opened?.collect().await)
+    let opened = run_chunked(ciphertext, chunk, |rx| {
+        key.open(nonce.to_vec(), aad.to_vec(), rx)
+    })
+    .await
+    .map_err(Error::Other)??;
+    Ok(opened.collect().await)
 }
 
 /// `internal-nonce-key.seal`, feeding the plaintext in `chunk`-byte pieces
@@ -628,10 +652,10 @@ async fn in_seal_chunked(
     plaintext: &[u8],
     chunk: usize,
 ) -> Result<Vec<u8>, Error> {
-    let (tx, rx) = wit_stream::new();
-    let (sealed, fed) = futures::join!(key.seal(aad.to_vec(), rx), feed(tx, plaintext, chunk));
-    fed.map_err(Error::Other)?;
-    Ok(sealed?.collect().await)
+    let sealed = run_chunked(plaintext, chunk, |rx| key.seal(aad.to_vec(), rx))
+        .await
+        .map_err(Error::Other)??;
+    Ok(sealed.collect().await)
 }
 
 /// `internal-nonce-key.open`, feeding the sealed message in `chunk`-byte
@@ -642,10 +666,10 @@ async fn in_open_chunked(
     sealed: &[u8],
     chunk: usize,
 ) -> Result<Vec<u8>, Error> {
-    let (tx, rx) = wit_stream::new();
-    let (opened, fed) = futures::join!(key.open(aad.to_vec(), rx), feed(tx, sealed, chunk));
-    fed.map_err(Error::Other)?;
-    Ok(opened?.collect().await)
+    let opened = run_chunked(sealed, chunk, |rx| key.open(aad.to_vec(), rx))
+        .await
+        .map_err(Error::Other)??;
+    Ok(opened.collect().await)
 }
 
 /// Write `data` to `tx` in `chunk`-byte pieces, then drop the writer to end
@@ -666,18 +690,12 @@ async fn feed(
 
 // --- small utilities ---------------------------------------------------------
 
-/// Render a WIT `error` with a context prefix.
+/// Render a WIT `error` with a context prefix (the case-name-first
+/// rendering is the guest SDK's [`render_error`]).
+///
+/// [`render_error`]: lann_webcrypto_guest::render_error
 fn describe(context: &str, error: &Error) -> String {
-    let rendered = match error {
-        Error::InvalidKey(detail) => format!("invalid-key: {detail}"),
-        Error::InvalidNonce(detail) => format!("invalid-nonce: {detail}"),
-        Error::AuthenticationFailed => "authentication-failed".to_string(),
-        Error::NotExtractable => "not-extractable".to_string(),
-        Error::Unsupported(detail) => format!("unsupported: {detail}"),
-        Error::KeyExhausted => "key-exhausted".to_string(),
-        Error::Other(detail) => format!("other: {detail}"),
-    };
-    format!("{context}: {rendered}")
+    format!("{context}: {}", lann_webcrypto_guest::render_error(error))
 }
 
 fn expect_eq<T: PartialEq + std::fmt::Debug>(got: T, want: T, what: &str) -> Result<(), String> {
@@ -706,10 +724,9 @@ export!(Component);
 
 /// Sign an entire byte stream (whole-write) with a `signing-key`.
 async fn sig_sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
-    let (tx, rx) = wit_stream::new();
-    let (sig, fed) = futures::join!(key.sign(rx), feed(tx, data, usize::MAX));
-    fed?;
-    sig.map_err(|e| describe("signing-key.sign", &e))
+    run_chunked(data, usize::MAX, |rx| key.sign(rx))
+        .await?
+        .map_err(|e| describe("signing-key.sign", &e))
 }
 
 /// Verify `sig` over an entire byte stream (whole-write) with a
@@ -719,10 +736,7 @@ async fn sig_verify(
     data: &[u8],
     sig: Vec<u8>,
 ) -> Result<Result<(), Error>, String> {
-    let (tx, rx) = wit_stream::new();
-    let (verified, fed) = futures::join!(key.verify(rx, sig), feed(tx, data, usize::MAX));
-    fed?;
-    Ok(verified)
+    run_chunked(data, usize::MAX, |rx| key.verify(rx, sig)).await
 }
 
 /// The RFC 8032 known answer: importing the seed reproduces the vector's
@@ -773,11 +787,11 @@ async fn ed25519_verify_check() -> Result<(), String> {
         .map_err(|e| describe("correct signature did not verify", &e))?;
 
     sig[0] ^= 0x01;
-    match sig_verify(&key, ED25519_MESSAGE, sig).await? {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(()) => Err("corrupted signature verified".into()),
-    }
+    expect_error!(
+        sig_verify(&key, ED25519_MESSAGE, sig).await?,
+        Error::AuthenticationFailed,
+        "corrupted signature verified",
+    )
 }
 
 /// A generated key pair round-trips sign→verify, and the private half's
@@ -794,11 +808,11 @@ async fn ed25519_generated_key() -> Result<(), String> {
         .await?
         .map_err(|e| describe("round-trip signature did not verify", &e))?;
 
-    match key.export_key().await {
-        Err(Error::NotExtractable) => Ok(()),
-        Err(other) => Err(describe("expected not-extractable, got", &other)),
-        Ok(_) => Err("non-extractable key exported".into()),
-    }
+    expect_error!(
+        key.export_key().await,
+        Error::NotExtractable,
+        "non-extractable key exported",
+    )
 }
 
 /// An extractable imported key exports the seed it was imported from.
@@ -844,9 +858,9 @@ async fn ecdsa_verify_known_answer() -> Result<(), String> {
         .map_err(|e| describe("known-answer signature did not verify", &e))?;
 
     sig[0] ^= 0x01;
-    match sig_verify(&key, ECDSA_MESSAGE, sig).await? {
-        Err(Error::AuthenticationFailed) => Ok(()),
-        Err(other) => Err(describe("expected authentication-failed, got", &other)),
-        Ok(()) => Err("corrupted signature verified".into()),
-    }
+    expect_error!(
+        sig_verify(&key, ECDSA_MESSAGE, sig).await?,
+        Error::AuthenticationFailed,
+        "corrupted signature verified",
+    )
 }
