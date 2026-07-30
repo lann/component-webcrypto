@@ -8,6 +8,9 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+# Failure reporting inside the checks (`context`/`ensure!`); rendered with
+# `{:#}` at the WIT `result<string, string>` boundary.
+anyhow = "1"
 # `async` pulls in the component-model `stream`/`future` runtime support and
 # the `wit_stream` helpers used to feed byte streams to the imports.
 wit-bindgen = { version = "0.59", features = ["async"] }
