@@ -24,17 +24,17 @@ const MIME = {
 // host-only signing guest — through the results viewer's harness modules
 // (conformance/web/harness.mjs + worker.mjs, served from the repo root), so
 // the gating adapter and the page's live "test this browser" run share one
-// driver: striped across parallel Web Workers, each with its own instances
-// of the guests, falling back to a sequential main-thread run if the worker
-// path fails. Results are re-sorted into suite order (workers interleave)
-// before reporting. The target's missing-features declaration is resolved
-// Node-side from targets.toml and inlined (the page cannot import the
-// Node-side helper).
+// driver *and* one worker pool (harness.mjs's runInWorkers): striped across
+// parallel Web Workers, each with its own instances of the guests, falling
+// back to a sequential main-thread run if the worker path fails. Results
+// are re-sorted into suite order (workers interleave) before reporting. The
+// target's missing-features declaration is resolved Node-side from
+// targets.toml and inlined (the page cannot import the Node-side helper).
 const harness = (missing) => `<!doctype html>
 <link rel="icon" href="data:,">
 <title>lann:webcrypto conformance</title>
 <script type="module">
-import { runAll } from "/conformance/web/harness.mjs";
+import { runAll, runInWorkers } from "/conformance/web/harness.mjs";
 
 const missing = ${JSON.stringify(missing)};
 const collected = { shared: [], signing: [] };
@@ -59,49 +59,10 @@ const collect = (message) => {
   if (beats % 100 === 0) beat("result " + beats + ": " + suite + "/" + name);
 };
 
-/** Run one suite stripe per worker; resolve to null on success or the
- *  first failure (any worker failing aborts them all). */
-const runInWorkers = (count) =>
-  new Promise((resolve) => {
-    const workers = [];
-    let done = 0;
-    let settled = false;
-    const settle = (failure) => {
-      if (settled) return;
-      settled = true;
-      for (const worker of workers) worker.terminate();
-      resolve(failure);
-    };
-    for (let index = 0; index < count; index += 1) {
-      let worker;
-      try {
-        worker = new Worker("/conformance/web/worker.mjs", { type: "module" });
-      } catch (err) {
-        settle(String(err));
-        return;
-      }
-      worker.onmessage = ({ data }) => {
-        if (settled) return;
-        if (data.kind === "error") settle(data.error);
-        else if (data.kind === "done") {
-          done += 1;
-          if (done === count) settle(null);
-        } else collect(data);
-      };
-      worker.onerror = (event) => {
-        settle(String(event.message ?? "worker failed to start"));
-      };
-      worker.postMessage({ missing, shard: { index, count } });
-      workers.push(worker);
-    }
-  });
-
 (async () => {
   try {
     beat("starting worker run");
-    const failure = await runInWorkers(
-      Math.min(navigator.hardwareConcurrency || 2, 8),
-    );
+    const failure = await runInWorkers(missing, collect);
     if (failure !== null) {
       console.warn("worker run failed (" + failure + "); retrying on the main thread");
       beat("worker run failed; starting the main-thread fallback");

@@ -2,7 +2,9 @@
 // conformance suites against jco-impl/webcrypto.js running in *this*
 // browser, reporting each result as it completes. Shared between the page's
 // Web Worker (worker.mjs) and the main-thread fallback (app.mjs), so both
-// paths run identically.
+// paths run identically; the worker pool itself (`runInWorkers`) also lives
+// here, so the gating browser adapter and the viewer speak the one worker
+// protocol this module and worker.mjs define between them.
 //
 // The module paths are resolved relative to this file, so they work from
 // any base path (the local server's repo root, or a GitHub Pages project
@@ -78,4 +80,62 @@ export async function runCase(testCase) {
   } catch (err) {
     return { outcome: "fail", detail: `the guest trapped: ${err}` };
   }
+}
+
+/** The default worker-pool size for this machine. */
+export function workerCount() {
+  return Math.min(navigator.hardwareConcurrency || 2, 8);
+}
+
+/**
+ * Run every suite across `count` parallel Web Workers (worker.mjs, resolved
+ * beside this module), each with its own instances of the guests, running
+ * the `i % count` stripe of the cases; everything a worker reports besides
+ * its terminal `done`/`error` goes to `onMessage` (the [`runAll`] message
+ * shapes). Resolves to null when every worker finished, or to the first
+ * failure (any worker failing aborts them all) — callers discard partial
+ * results and fall back to a main-thread [`runAll`].
+ * @param {string[]} missing
+ * @param {(message: object) => void} onMessage
+ * @param {number} [count]
+ */
+export function runInWorkers(missing, onMessage, count = workerCount()) {
+  return new Promise((resolve) => {
+    const workers = [];
+    let done = 0;
+    let settled = false;
+    const settle = (failure) => {
+      if (settled) return;
+      settled = true;
+      for (const worker of workers) worker.terminate();
+      resolve(failure);
+    };
+    for (let index = 0; index < count; index += 1) {
+      let worker;
+      try {
+        worker = new Worker(new URL("./worker.mjs", import.meta.url), {
+          type: "module",
+        });
+      } catch (err) {
+        settle(String(err));
+        return;
+      }
+      worker.onmessage = ({ data }) => {
+        if (settled) return;
+        if (data.kind === "error") {
+          settle(data.error);
+        } else if (data.kind === "done") {
+          done += 1;
+          if (done === count) settle(null);
+        } else {
+          onMessage(data);
+        }
+      };
+      worker.onerror = (event) => {
+        settle(String(event.message ?? "worker failed to start"));
+      };
+      worker.postMessage({ missing, shard: { index, count } });
+      workers.push(worker);
+    }
+  });
 }

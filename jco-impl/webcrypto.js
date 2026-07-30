@@ -233,16 +233,27 @@ const SHA2_VARIANTS = Object.assign(Object.create(null), {
 });
 
 /**
- * The served `sha2-variant` entry for `variant`, throwing
+ * The served entry for `variant` in a variant table, throwing
  * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ * @template T
+ * @param {Readonly<Record<string, T | undefined>>} table
  * @param {string} variant
+ * @returns {T}
  */
-function sha2Variant(variant) {
-  const entry = SHA2_VARIANTS[variant];
+function served(table, variant) {
+  const entry = table[variant];
   if (entry === undefined) {
     throw errUnsupported(`${variant} is not served by this implementation`);
   }
   return entry;
+}
+
+/**
+ * The served `sha2-variant` entry for `variant`.
+ * @param {string} variant
+ */
+function sha2Variant(variant) {
+  return served(SHA2_VARIANTS, variant);
 }
 
 /**
@@ -284,15 +295,11 @@ export class MacKey {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
-    const reservation = await admitInput();
-    try {
-      const message = await collectByteStream(data, reservation.cap);
+    return withCollectedInput(data, async (message) => {
       return new Uint8Array(
         await platformCall("HMAC sign", () => subtle.sign("HMAC", this.#key, message)),
       );
-    } finally {
-      reservation.release();
-    }
+    });
   }
 
   /**
@@ -303,18 +310,14 @@ export class MacKey {
    * @param {Uint8Array} tag
    */
   async verify(data, tag) {
-    const reservation = await admitInput();
-    try {
-      const message = await collectByteStream(data, reservation.cap);
+    await withCollectedInput(data, async (message) => {
       const ok = await platformCall("HMAC verify", () =>
         subtle.verify("HMAC", this.#key, asBufferSource(tag), message),
       );
       if (!ok) {
         throw errAuthenticationFailed();
       }
-    } finally {
-      reservation.release();
-    }
+    });
   }
 
   /**
@@ -340,14 +343,10 @@ export class MacKey {
 
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (checked on the `CryptoKey` itself
-   * rather than relying on the `DOMException` from `exportKey`).
+   * was created with `extractable` true (see `exportRawGated`).
    */
   async exportKey() {
-    if (!this.#key.extractable) throw errNotExtractable();
-    return new Uint8Array(
-      await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
-    );
+    return exportRawGated(this.#key);
   }
 }
 
@@ -389,10 +388,7 @@ export class AeadKey {
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
   async seal(nonce, aad, plaintext) {
-    const reservation = await admitInput();
-    let handedOff = false;
-    try {
-      const message = await collectByteStream(plaintext, reservation.cap);
+    return withCollectedInputToStream(plaintext, async (message) => {
       requireGcmNonce(nonce);
       const sealed = await platformCall("AES-GCM seal", () =>
         subtle.encrypt(
@@ -401,11 +397,8 @@ export class AeadKey {
           message,
         ),
       );
-      handedOff = true;
-      return bytesToStream(new Uint8Array(sealed), reservation);
-    } finally {
-      if (!handedOff) reservation.release();
-    }
+      return new Uint8Array(sealed);
+    });
   }
 
   /**
@@ -419,10 +412,7 @@ export class AeadKey {
    * @param {AsyncIterable<unknown> | ReadableStream} ciphertext
    */
   async open(nonce, aad, ciphertext) {
-    const reservation = await admitInput();
-    let handedOff = false;
-    try {
-      const message = await collectByteStream(ciphertext, reservation.cap);
+    return withCollectedInputToStream(ciphertext, async (message) => {
       requireGcmNonce(nonce);
       let opened;
       try {
@@ -434,11 +424,8 @@ export class AeadKey {
       } catch (err) {
         throw decryptFailure(err);
       }
-      handedOff = true;
-      return bytesToStream(new Uint8Array(opened), reservation);
-    } finally {
-      if (!handedOff) reservation.release();
-    }
+      return new Uint8Array(opened);
+    });
   }
 
   /**
@@ -470,14 +457,10 @@ export class AeadKey {
 
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (checked on the `CryptoKey` itself
-   * rather than relying on the `DOMException` from `exportKey`).
+   * was created with `extractable` true (see `exportRawGated`).
    */
   async exportKey() {
-    if (!this.#key.extractable) throw errNotExtractable();
-    return new Uint8Array(
-      await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
-    );
+    return exportRawGated(this.#key);
   }
 }
 
@@ -500,7 +483,7 @@ async function importHmacKey(variant, raw, extractable) {
       "verify",
     ]);
   } catch (err) {
-    throw errInvalidKey(String(err));
+    invalidKey(err, "HMAC key");
   }
   return new MacKey(key, raw.length * 8, hash);
 }
@@ -556,15 +539,11 @@ export class Digest {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async compute(data) {
-    const reservation = await admitInput();
-    try {
-      const message = await collectByteStream(data, reservation.cap);
+    return withCollectedInput(data, async (message) => {
       return new Uint8Array(
         await platformCall(`${this.#hash} digest`, () => subtle.digest(this.#hash, message)),
       );
-    } finally {
-      reservation.release();
-    }
+    });
   }
 
   /** The registry name of the algorithm, e.g. `"SHA-256"`. */
@@ -615,61 +594,66 @@ export const bytes = { constantTimeEqual };
 const AES_VARIANT_BYTES = Object.assign(Object.create(null), { aes128: 16, aes256: 32 });
 
 /**
- * The raw key length in bytes declared by `variant`, throwing
- * `{ tag: 'unsupported', val }` for a variant this implementation declines.
+ * The raw key length in bytes declared by `variant`.
  * @param {string} variant
  */
 function aesVariantByteLength(variant) {
-  const expected = AES_VARIANT_BYTES[variant];
-  if (expected === undefined) {
-    throw errUnsupported(`${variant} is not served by this implementation`);
-  }
-  return expected;
+  return served(AES_VARIANT_BYTES, variant);
 }
 
 /**
- * Import raw key material as the declared AES variant. A variant this
- * implementation declines throws `{ tag: 'unsupported', val }`; material
- * whose length disagrees with `variant` throws `{ tag: 'invalid-key', val }`.
- * @param {string} variant
- * @param {Uint8Array} raw
- * @param {boolean} extractable
+ * The `aes-gcm` / `aes-gcm-internal-nonce` minting pair over `Ctor`: the
+ * two interfaces share the whole import/generate contract and differ only
+ * in the resource they mint.
+ * @template T
+ * @param {new (key: CryptoKey, lengthBits: number) => T} Ctor
  */
-async function importAesKey(variant, raw, extractable) {
-  const expected = aesVariantByteLength(variant);
-  if (raw.length !== expected) {
-    throw errInvalidKey(
-      `${variant} requires ${expected} key bytes, got ${raw.length}`,
-    );
-  }
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
-      "encrypt",
-      "decrypt",
-    ]);
-  } catch (err) {
-    throw errInvalidKey(String(err));
-  }
-  return new AeadKey(key, expected * 8);
-}
+function aesMinting(Ctor) {
+  return {
+    /**
+     * Import raw key material as the declared AES variant. A variant this
+     * implementation declines throws `{ tag: 'unsupported', val }`;
+     * material whose length disagrees with `variant` throws
+     * `{ tag: 'invalid-key', val }`.
+     * @param {string} variant
+     * @param {Uint8Array} raw
+     * @param {boolean} extractable
+     */
+    async importKey(variant, raw, extractable) {
+      const expected = aesVariantByteLength(variant);
+      if (raw.length !== expected) {
+        throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
+      }
+      let key;
+      try {
+        key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
+          "encrypt",
+          "decrypt",
+        ]);
+      } catch (err) {
+        invalidKey(err, `${variant} key`);
+      }
+      return new Ctor(key, expected * 8);
+    },
 
-/**
- * Generate a fresh random AES key of the declared variant. A variant this
- * implementation declines throws `{ tag: 'unsupported', val }`.
- * @param {string} variant
- * @param {boolean} extractable
- */
-async function generateAesKey(variant, extractable) {
-  const length = aesVariantByteLength(variant) * 8;
-  const key = await platformCall(`${variant} key generation`, () =>
-    subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
-  );
-  return new AeadKey(key, length);
+    /**
+     * Generate a fresh random AES key of the declared variant. A variant
+     * this implementation declines throws `{ tag: 'unsupported', val }`.
+     * @param {string} variant
+     * @param {boolean} extractable
+     */
+    async generateKey(variant, extractable) {
+      const length = aesVariantByteLength(variant) * 8;
+      const key = await platformCall(`${variant} key generation`, () =>
+        subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
+      );
+      return new Ctor(key, length);
+    },
+  };
 }
 
 /** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
-export const aesGcm = { importKey: importAesKey, generateKey: generateAesKey };
+export const aesGcm = aesMinting(AeadKey);
 
 /**
  * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
@@ -746,10 +730,7 @@ export class InternalNonceKey {
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
   async seal(aad, plaintext) {
-    const reservation = await admitInput();
-    let handedOff = false;
-    try {
-      const message = await collectByteStream(plaintext, reservation.cap);
+    return withCollectedInputToStream(plaintext, async (message) => {
       if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
         throw errKeyExhausted();
       }
@@ -767,11 +748,8 @@ export class InternalNonceKey {
       const sealed = new Uint8Array(iv.length + body.length);
       sealed.set(iv, 0);
       sealed.set(body, iv.length);
-      handedOff = true;
-      return bytesToStream(sealed, reservation);
-    } finally {
-      if (!handedOff) reservation.release();
-    }
+      return sealed;
+    });
   }
 
   /**
@@ -784,10 +762,7 @@ export class InternalNonceKey {
    * @param {AsyncIterable<unknown> | ReadableStream} sealed
    */
   async open(aad, sealed) {
-    const reservation = await admitInput();
-    let handedOff = false;
-    try {
-      const message = await collectByteStream(sealed, reservation.cap);
+    return withCollectedInputToStream(sealed, async (message) => {
       if (message.length < InternalNonceKey.#IV_BYTES) {
         throw errAuthenticationFailed();
       }
@@ -803,11 +778,8 @@ export class InternalNonceKey {
       } catch (err) {
         throw decryptFailure(err);
       }
-      handedOff = true;
-      return bytesToStream(new Uint8Array(opened), reservation);
-    } finally {
-      if (!handedOff) reservation.release();
-    }
+      return new Uint8Array(opened);
+    });
   }
 
   /**
@@ -838,61 +810,15 @@ export class InternalNonceKey {
 
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
-   * key was created with `extractable` true.
+   * key was created with `extractable` true (see `exportRawGated`).
    */
   async exportKey() {
-    if (!this.#key.extractable) throw errNotExtractable();
-    return new Uint8Array(
-      await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
-    );
+    return exportRawGated(this.#key);
   }
-}
-
-/**
- * Import raw key material as an internal-nonce AES-GCM key of the declared
- * variant. Same variant/length contract as `aesGcm.importKey`.
- * @param {string} variant
- * @param {Uint8Array} raw
- * @param {boolean} extractable
- */
-async function importAesInternalNonceKey(variant, raw, extractable) {
-  const expected = aesVariantByteLength(variant);
-  if (raw.length !== expected) {
-    throw errInvalidKey(
-      `${variant} requires ${expected} key bytes, got ${raw.length}`,
-    );
-  }
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
-      "encrypt",
-      "decrypt",
-    ]);
-  } catch (err) {
-    throw errInvalidKey(String(err));
-  }
-  return new InternalNonceKey(key, expected * 8);
-}
-
-/**
- * Generate a fresh random internal-nonce AES-GCM key of the declared
- * variant.
- * @param {string} variant
- * @param {boolean} extractable
- */
-async function generateAesInternalNonceKey(variant, extractable) {
-  const length = aesVariantByteLength(variant) * 8;
-  const key = await platformCall(`${variant} key generation`, () =>
-    subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
-  );
-  return new InternalNonceKey(key, length);
 }
 
 /** The `lann:webcrypto/aes-gcm-internal-nonce` interface (`--map '…#aesGcmInternalNonce'`). */
-export const aesGcmInternalNonce = {
-  importKey: importAesInternalNonceKey,
-  generateKey: generateAesInternalNonceKey,
-};
+export const aesGcmInternalNonce = aesMinting(InternalNonceKey);
 
 /**
  * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes
@@ -1014,6 +940,67 @@ function bytesToStream(bytes, reservation = undefined) {
       reservation?.release();
     },
   });
+}
+
+/**
+ * Run `op` over the collected bytes of `stream` under one admission
+ * reservation, releasing it when `op` settles — the shape of every
+ * buffer-then-compute operation. The stream is collected *before* `op`
+ * runs, so an operation's own validation can never precede the drain the
+ * WIT requires.
+ * @template T
+ * @param {ByteStream} stream
+ * @param {(message: Uint8Array<ArrayBuffer>) => Promise<T>} op
+ * @returns {Promise<T>}
+ */
+async function withCollectedInput(stream, op) {
+  const reservation = await admitInput();
+  try {
+    const message = await collectByteStream(stream, reservation.cap);
+    return await op(message);
+  } finally {
+    reservation.release();
+  }
+}
+
+/**
+ * Like `withCollectedInput`, for the seal/open shape: `op`'s output bytes
+ * are handed back as a stream whose producer carries the reservation
+ * (releasing when the bytes are handed off), so pool capacity tracks the
+ * bytes the host actually retains.
+ *
+ * The return is deliberately `ReadableStream<any>`-shaped: the generated
+ * interface types spell `stream<u8>` as `ReadableStream<number>`, while
+ * jco actually ingests `Uint8Array` chunks (batching is the runtime's).
+ * @param {ByteStream} stream
+ * @param {(message: Uint8Array<ArrayBuffer>) => Promise<Uint8Array>} op
+ * @returns {Promise<ReadableStream>}
+ */
+async function withCollectedInputToStream(stream, op) {
+  const reservation = await admitInput();
+  let out;
+  try {
+    const message = await collectByteStream(stream, reservation.cap);
+    out = await op(message);
+  } catch (err) {
+    reservation.release();
+    throw err;
+  }
+  return bytesToStream(out, reservation);
+}
+
+/**
+ * The shared raw `export-key` gate: throw `{ tag: 'not-extractable' }`
+ * unless `key` was minted extractable (checked on the `CryptoKey` itself
+ * rather than relying on the `DOMException` from `exportKey`), then export
+ * the raw material.
+ * @param {CryptoKey} key
+ */
+async function exportRawGated(key) {
+  if (!key.extractable) throw errNotExtractable();
+  return new Uint8Array(
+    await platformCall("raw key export", () => subtle.exportKey("raw", key)),
+  );
 }
 
 /**
@@ -1159,17 +1146,12 @@ const ED25519_ALGORITHM = {
 };
 
 /**
- * The served `ecdsa-variant` entry for `variant`, throwing
- * `{ tag: 'unsupported', val }` for anything unknown.
+ * The served `ecdsa-variant` entry for `variant`.
  * @param {string} variant
  * @returns {EcdsaAlgorithm}
  */
 function ecdsaVariant(variant) {
-  const entry = ECDSA_VARIANTS[variant];
-  if (entry === undefined) {
-    throw errUnsupported(`${variant} is not served by this implementation`);
-  }
-  return entry;
+  return served(ECDSA_VARIANTS, variant);
 }
 
 /**
@@ -1216,9 +1198,7 @@ export class VerifyingKey {
    * @param {Uint8Array} sig
    */
   async verify(data, sig) {
-    const reservation = await admitInput();
-    try {
-      const message = await collectByteStream(data, reservation.cap);
+    await withCollectedInput(data, async (message) => {
       // Each algorithm's signature width is fixed by the WIT (Ed25519's
       // 64-byte `R ‖ S`; ECDSA's P1363 `r ‖ s`). Chromium's engine rejects
       // other lengths itself; Firefox zero-pads short halves and accepts
@@ -1247,9 +1227,7 @@ export class VerifyingKey {
       if (!ok) {
         throw errAuthenticationFailed();
       }
-    } finally {
-      reservation.release();
-    }
+    });
   }
 
   /** Projections of the mint-bound algorithm record. */
@@ -1310,18 +1288,14 @@ export class SigningKey {
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
-    const reservation = await admitInput();
-    try {
-      const message = await collectByteStream(data, reservation.cap);
+    return withCollectedInput(data, async (message) => {
       const params = signParams(this.#algorithm);
       return new Uint8Array(
         await platformCall(`${this.#algorithm.name} sign`, () =>
           subtle.sign(params, this.#privateKey, message),
         ),
       );
-    } finally {
-      reservation.release();
-    }
+    });
   }
 
   /** Projections of the mint-bound algorithm record. */
