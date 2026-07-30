@@ -19,6 +19,13 @@ aes-gcm = "0.10"
 # expanded schedule; `chacha20poly1305` and the signature crates already
 # zeroize their key material by default).
 aes = { version = "0.8", features = ["zeroize"] }
+# The general GCM path (nonces other than 96 bits, truncated tags), which
+# `aes-gcm`'s type-level parameterization cannot express at runtime: GCM is
+# assembled from the same primitives the crate composes — `ghash` is the
+# same masked-multiply universal hash, `ctr` the same counter mode over the
+# fixsliced `aes` — so the timing-channel classification is unchanged.
+ghash = "0.5"
+ctr = "0.9"
 chacha20poly1305 = "0.10"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see

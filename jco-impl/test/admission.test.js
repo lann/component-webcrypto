@@ -75,7 +75,7 @@ const NO_AAD = new Uint8Array(0);
  * drained by the same task that awaited the operation, so the capacity it
  * holds is freed without waiting on any other operation.
  */
-const sealAndDrain = (aead, stream) => aead.seal(NONCE, NO_AAD, stream).then(drain);
+const sealAndDrain = (aead, stream) => aead.seal(NONCE, NO_AAD, undefined, stream).then(drain);
 
 test("concurrent operations within the pool all complete", async () => {
   configure({ perCallBufferLimit: 1024, totalBufferLimit: 4096 });
@@ -97,7 +97,7 @@ test("an input past the per-call limit is drained and fails recoverably", async 
   configure({ perCallBufferLimit: 64, totalBufferLimit: 4096 });
   const aead = await key();
   await assert.rejects(
-    () => aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(4096))),
+    () => aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(4096))),
     (err) => err.tag === "other",
   );
   // The pool is not leaked by the failure: a later operation is still admitted.
@@ -111,10 +111,10 @@ test("an output holds its capacity until it is read", async () => {
   // merely to have returned.
   configure({ perCallBufferLimit: 1024, totalBufferLimit: 2048 });
   const aead = await key();
-  const first = await aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(64)));
-  const second = await aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(64)));
+  const first = await aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(64)));
+  const second = await aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(64)));
 
-  const third = aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(64)));
+  const third = aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(64)));
   third.catch(() => {});
   assert.equal(await settledWithin(third, 100), "pending", "the pool is full of outputs");
 
@@ -134,7 +134,7 @@ test("GUARD: deferring every read until the last call returns deadlocks", async 
   configure({ perCallBufferLimit: 1024, totalBufferLimit: 4096 });
   const aead = await key();
   const ops = Array.from({ length: 5 }, () =>
-    aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(64))),
+    aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(64))),
   );
   ops.forEach((op) => op.catch(() => {}));
   assert.equal(await settledWithin(Promise.all(ops), 150), "pending");
@@ -153,7 +153,7 @@ test("GUARD: withholding an admitted operation's input stalls a queued one", asy
   configure({ perCallBufferLimit: 1024, totalBufferLimit: 4096 });
   const aead = await key();
   const held = Array.from({ length: 5 }, heldStream);
-  const ops = held.map((h) => aead.seal(NONCE, NO_AAD, h.stream));
+  const ops = held.map((h) => aead.seal(NONCE, NO_AAD, undefined, h.stream));
   ops.forEach((op) => op.catch(() => {}));
 
   held[4].feed();
@@ -178,7 +178,7 @@ test("configure updates only the limits it is given", async () => {
   // And the converse: updating the per-call limit alone leaves the pool.
   configure({ perCallBufferLimit: 512 });
   await assert.rejects(
-    () => aead.seal(NONCE, NO_AAD, streamOf(new Uint8Array(1024))),
+    () => aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(1024))),
     (err) => err.tag === "other",
     "the per-call limit just set must be in force",
   );
@@ -195,8 +195,8 @@ test("a raised total admits a waiter queued against the old one", async () => {
   const first = heldStream();
   const second = heldStream();
   const ops = [
-    aead.seal(NONCE, NO_AAD, first.stream),
-    aead.seal(NONCE, NO_AAD, second.stream),
+    aead.seal(NONCE, NO_AAD, undefined, first.stream),
+    aead.seal(NONCE, NO_AAD, undefined, second.stream),
   ];
   ops.forEach((op) => op.catch(() => {}));
 

@@ -160,11 +160,12 @@ pub async fn seal(
     key: &AeadKey,
     nonce: &[u8],
     aad: &[u8],
+    tag_size: Option<u8>,
     plaintext: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
     let (sealed, fed) = run_split(schedule.chunks(plaintext), |rx| {
-        key.seal(nonce.to_vec(), aad.to_vec(), rx)
+        key.seal(nonce.to_vec(), aad.to_vec(), tag_size, rx)
     })
     .await;
     (collect(sealed).await, fed)
@@ -176,11 +177,12 @@ pub async fn open(
     key: &AeadKey,
     nonce: &[u8],
     aad: &[u8],
+    tag_size: Option<u8>,
     ciphertext: &[u8],
     schedule: Schedule,
 ) -> (Result<Vec<u8>, Error>, Result<(), String>) {
     let (opened, fed) = run_split(schedule.chunks(ciphertext), |rx| {
-        key.open(nonce.to_vec(), aad.to_vec(), rx)
+        key.open(nonce.to_vec(), aad.to_vec(), tag_size, rx)
     })
     .await;
     (collect(opened).await, fed)

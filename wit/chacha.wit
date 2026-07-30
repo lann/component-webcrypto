@@ -3,8 +3,11 @@ package lann:webcrypto@0.1.0;
 /// ChaCha20-Poly1305 key minting (RFC 8439): the IETF construction, with
 /// 12-byte nonces.
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
-/// and the `ciphertext ‖ tag` wire format. The 12-byte nonce space is too
+/// Keys returned here drive `aead.aead-key.seal`/`open` with the
+/// `ciphertext ‖ tag` wire format. The construction fixes both parameters:
+/// nonces are exactly 12 bytes (`error.invalid-nonce` otherwise) and tags
+/// exactly 16 (a `tag-size` other than `none` or 16 fails
+/// `error.unsupported`). The 12-byte nonce space is too
 /// small to draw nonces at random; callers need a deterministic uniqueness
 /// scheme (such as a counter). For random nonces, use
 /// `xchacha20-poly1305`; to stop managing nonces entirely, use
@@ -34,8 +37,9 @@ interface chacha20-poly1305 {
 /// 24-byte nonces — large enough to be chosen at random. Not
 /// IETF-standardized.
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 16-byte tags
-/// and the `ciphertext ‖ tag` wire format. See `chacha20-poly1305` for why
+/// Keys returned here drive `aead.aead-key.seal`/`open` with the
+/// `ciphertext ‖ tag` wire format; nonces are exactly 24 bytes and tags
+/// exactly 16, as in `chacha20-poly1305`. See `chacha20-poly1305` for why
 /// the two constructions are separate interfaces rather than a variant
 /// enum.
 interface xchacha20-poly1305 {

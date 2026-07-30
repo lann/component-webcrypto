@@ -27,12 +27,6 @@
 //     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
 //   - Unserved: only the `"raw"` key format is served; others throw
 //     `NotSupportedError`.
-//   - WIT-forced (wit/aes.wit, `aead.tag-size`): AES-GCM nonces follow the
-//     `lann:webcrypto` contract: 12-byte IVs and 128-bit tags only. Other
-//     IV lengths throw `OperationError` (browsers accept them); a
-//     legal-but-unserved `tagLength` (32–120) throws `NotSupportedError`,
-//     while a value outside the registry's set throws `OperationError` as
-//     the spec's AES-GCM operations define.
 //   - Unserved: HMAC's `length` parameter must be omitted or name the
 //     key's exact bit length; WebCrypto's sub-byte truncation is not
 //     supported.
@@ -41,6 +35,9 @@
 //     a minimal stand-in with the standard `.name` values
 //     ("OperationError", "InvalidAccessError", "NotSupportedError",
 //     "DataError", "SyntaxError").
+//
+// The WIT-forced set is empty: AES-GCM's per-call IV lengths and
+// `tagLength`s are carried by `aead-key.seal`/`open`'s parameters.
 
 import * as hmacSha2 from "lann:webcrypto/hmac-sha2@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
@@ -669,34 +666,34 @@ async function verify(algorithm, key, signature, data) {
   }
 }
 
-// The tag lengths the AES-GCM registry entry permits. This library serves
-// only 128 (the `lann:webcrypto` contract), but the distinction matters for
-// errors: a value outside this set is *illegal* (`OperationError`, as the
-// AES-GCM encrypt operation defines), while a legal value this library does
-// not serve is `NotSupportedError`.
+// The tag lengths the AES-GCM registry entry permits, in bits. A value
+// outside this set is *illegal* (`OperationError`, as the AES-GCM encrypt
+// operation defines); every value in it is served, carried per call by
+// `aead-key.seal`/`open`'s `tag-size`.
 const GCM_LEGAL_TAG_LENGTHS = [32, 64, 96, 104, 112, 120, 128];
 
 /**
  * @param {unknown} algorithm
- * @returns {{ iv: Uint8Array, aad: Uint8Array }}
+ * @returns {{ iv: Uint8Array, aad: Uint8Array, tagSize: number | undefined }}
  */
 function gcmParams(algorithm) {
   const alg = normalizeAlgorithm(algorithm);
   if (alg.name !== "AES-GCM") {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
-  if (alg.tagLength !== undefined && alg.tagLength !== 128) {
+  let tagSize;
+  if (alg.tagLength !== undefined) {
     if (!GCM_LEGAL_TAG_LENGTHS.includes(/** @type {number} */ (alg.tagLength))) {
       throw dom("OperationError", `illegal AES-GCM tagLength ${alg.tagLength}`);
     }
-    throw dom("NotSupportedError", `unsupported tagLength ${alg.tagLength}; only 128 is served`);
+    tagSize = /** @type {number} */ (alg.tagLength) / 8;
   }
   const iv = bytesOf(alg.iv, "iv");
   const aad =
     alg.additionalData === undefined
       ? new Uint8Array(0)
       : bytesOf(alg.additionalData, "additionalData");
-  return { iv, aad };
+  return { iv, aad, tagSize };
 }
 
 /**
@@ -706,12 +703,15 @@ function gcmParams(algorithm) {
  * @returns {Promise<ArrayBuffer>}
  */
 async function encrypt(algorithm, key, data) {
-  const { iv, aad } = gcmParams(algorithm);
+  const { iv, aad, tagSize } = gcmParams(algorithm);
   requireKeyAlgorithm(key, "AES-GCM");
   requireUsage(key, "encrypt");
   const handle = handleOf(key);
   // `seal` output is ciphertext ‖ tag: exactly `subtle.encrypt`'s format.
-  const sealed = await callFedCollect((rx) => handle.seal(iv, aad, rx), bytesOf(data, "data"));
+  const sealed = await callFedCollect(
+    (rx) => handle.seal(iv, aad, tagSize, rx),
+    bytesOf(data, "data"),
+  );
   return toArrayBuffer(sealed);
 }
 
@@ -722,11 +722,14 @@ async function encrypt(algorithm, key, data) {
  * @returns {Promise<ArrayBuffer>}
  */
 async function decrypt(algorithm, key, data) {
-  const { iv, aad } = gcmParams(algorithm);
+  const { iv, aad, tagSize } = gcmParams(algorithm);
   requireKeyAlgorithm(key, "AES-GCM");
   requireUsage(key, "decrypt");
   const handle = handleOf(key);
-  const plaintext = await callFedCollect((rx) => handle.open(iv, aad, rx), bytesOf(data, "data"));
+  const plaintext = await callFedCollect(
+    (rx) => handle.open(iv, aad, tagSize, rx),
+    bytesOf(data, "data"),
+  );
   return toArrayBuffer(plaintext);
 }
 

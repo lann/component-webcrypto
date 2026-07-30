@@ -227,11 +227,13 @@ and the difference is the signal:
   yet (algorithms beyond its documented pair, key formats beyond `raw`).
   Backlog, not a design problem.
 - **WIT-forced**: no shim could express the behavior through the interface
-  shape (AES-GCM IV lengths other than 96 bits and tags other than 128 —
-  the `aes-gcm` contract fixes both). A WIT-forced deviation can be
-  correct — the GCM nonce contract is deliberate — but it is a design
-  ruling, made when the interface is shaped and recorded where it can be
-  found, never a silent consequence of whatever shape was convenient.
+  shape. The set is currently empty — its one historical member, the
+  fixed AES-GCM IV/tag contract, was resolved by carrying both as
+  per-call `aead-key.seal`/`open` parameters — and keeping it empty is
+  the goal. A WIT-forced deviation can still be correct, but it is a
+  design ruling, made when the interface is shaped and recorded where it
+  can be found, never a silent consequence of whatever shape was
+  convenient.
 
 The shim header's deviations list is the registry: every deviation appears
 there with its classification, so the WIT-forced set — the true cost of the
@@ -402,10 +404,9 @@ closed numbers remain stable references.
   carries but the shim does not serve (more hashes, Ed25519/ECDSA,
   symmetric JWK, the usages model, `getRandomValues`), then additive WIT
   surface (the RSA family, derive, wrap — see the bullets below), and only
-  then WIT-forced deviations (the GCM IV/tag contract), each of which
-  needs an explicit ruling: carry it via a separate compat minting
-  interface that other providers may decline, or keep the deviation and
-  record it. Class D is not implicated: the crypto runs host-side on the
+  then any future WIT-forced deviations, each of which needs an explicit
+  ruling (the historical example, the GCM IV/tag contract, was resolved
+  by enriching the `aead` kind with per-call parameters). Class D is not implicated: the crypto runs host-side on the
   platform. A browser leg (the same two runs in Chromium, baseline = the
   browser's own `crypto.subtle`) remains unbuilt.
 - More algorithms per kind — each is a new minting interface plus

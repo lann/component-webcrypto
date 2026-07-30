@@ -54,6 +54,7 @@
 //! the return type says; wrapping it buys a second copy and no protection.
 
 mod aead;
+mod gcm;
 mod hash;
 mod mac;
 mod sig;

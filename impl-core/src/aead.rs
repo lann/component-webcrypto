@@ -232,10 +232,29 @@ impl AeadKeyMaterial {
         }
     }
 
-    /// The tag length in bytes every served algorithm trails its ciphertext
-    /// with (`aead-key.tag-size`).
+    /// The default tag length in bytes every served algorithm trails its
+    /// ciphertext with when `seal` is called with no explicit tag size
+    /// (`aead-key.tag-size`).
     pub fn tag_len(&self) -> usize {
         16
+    }
+
+    /// Resolve and validate a per-call tag size for this key's algorithm:
+    /// GCM accepts [`crate::gcm::GCM_TAG_SIZES`]; the ChaCha constructions
+    /// fix 16. `None` is the algorithm default.
+    fn check_tag_size(&self, tag_size: Option<u8>) -> Result<usize, Error> {
+        match &self.cipher {
+            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => {
+                crate::gcm::check_tag_size(tag_size)
+            }
+            AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => match tag_size {
+                None | Some(16) => Ok(16),
+                Some(size) => Err(Error::Unsupported(format!(
+                    "{} tags are always 16 bytes, got a tag size of {size}",
+                    self.name()
+                ))),
+            },
+        }
     }
 
     /// The internal-nonce seal budget for this key's algorithm: the WIT
@@ -267,42 +286,100 @@ impl AeadKeyMaterial {
             .map(|budget| budget.saturating_sub(sealed))
     }
 
-    /// Validate a nonce's length, rendering the WIT `invalid-nonce` error
-    /// for anything but the algorithm's nonce length.
+    /// Validate a caller nonce's length for this key's algorithm, rendering
+    /// the WIT `invalid-nonce` error: GCM accepts any non-empty nonce (the
+    /// `aes-gcm` minting contract); the ChaCha constructions accept exactly
+    /// their standard length.
     fn check_nonce(&self, nonce: &[u8]) -> Result<(), Error> {
-        if nonce.len() == self.nonce_len() {
-            Ok(())
-        } else {
-            Err(Error::InvalidNonce(format!(
-                "{} requires a {}-byte nonce, got {} bytes",
-                self.name(),
-                self.nonce_len(),
-                nonce.len()
-            )))
+        match &self.cipher {
+            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => {
+                if nonce.is_empty() {
+                    Err(Error::InvalidNonce(
+                        "AES-GCM requires a non-empty nonce".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => {
+                if nonce.len() == self.nonce_len() {
+                    Ok(())
+                } else {
+                    Err(Error::InvalidNonce(format!(
+                        "{} requires a {}-byte nonce, got {} bytes",
+                        self.name(),
+                        self.nonce_len(),
+                        nonce.len()
+                    )))
+                }
+            }
         }
     }
 
-    /// Encrypt and authenticate `msg` under the caller's `nonce` with `aad`,
-    /// returning `ciphertext ‖ tag` (the `aead-key.seal` contract minus the
-    /// stream transport: nonce validation renders `invalid-nonce`,
-    /// encryption failure `other`).
-    pub fn seal(&self, nonce: &[u8], aad: &[u8], msg: &[u8]) -> Result<Vec<u8>, Error> {
-        self.check_nonce(nonce)?;
-        self.cipher
-            .encrypt(nonce, Payload { msg, aad })
-            .map_err(|_| Error::Other(format!("{} encryption failed", self.name())))
+    /// Whether `(nonce, tag_len)` is the standard GCM parameter point the
+    /// `aes-gcm` crate serves; anything else routes to the general path
+    /// ([`crate::gcm`]).
+    fn is_standard_point(&self, nonce: &[u8], tag_len: usize) -> bool {
+        nonce.len() == self.nonce_len() && tag_len == 16
     }
 
-    /// Decrypt and verify `msg` (`ciphertext ‖ tag`) under the caller's
-    /// `nonce` and `aad` (the `aead-key.open` contract minus the stream
-    /// transport). Any decryption failure — truncated input, bad tag, wrong
-    /// key, wrong associated data — reports `authentication-failed` with no
-    /// detail, per the WIT contract.
-    pub fn open(&self, nonce: &[u8], aad: &[u8], msg: &[u8]) -> Result<Vec<u8>, Error> {
+    /// The general-path AES cipher, keyed from this key's material. Only
+    /// reachable for the AES variants: `check_nonce`/`check_tag_size` bound
+    /// the ChaCha constructions to the standard point, which never routes
+    /// here.
+    fn general_gcm(&self) -> crate::gcm::GcmAes {
+        debug_assert!(matches!(
+            self.cipher,
+            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_)
+        ));
+        crate::gcm::GcmAes::new(&self.raw).expect("AES key length fixed at minting")
+    }
+
+    /// Encrypt and authenticate `msg` under the caller's `nonce` with `aad`
+    /// and a `tag_size`-byte tag (`None` = the algorithm default),
+    /// returning `ciphertext ‖ tag` (the `aead-key.seal` contract minus the
+    /// stream transport: nonce validation renders `invalid-nonce`, an
+    /// unserved tag size `unsupported`, encryption failure `other`).
+    pub fn seal(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        msg: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         self.check_nonce(nonce)?;
-        self.cipher
-            .decrypt(nonce, Payload { msg, aad })
-            .map_err(|_| Error::AuthenticationFailed)
+        let tag_len = self.check_tag_size(tag_size)?;
+        if self.is_standard_point(nonce, tag_len) {
+            self.cipher
+                .encrypt(nonce, Payload { msg, aad })
+                .map_err(|_| Error::Other(format!("{} encryption failed", self.name())))
+        } else {
+            Ok(self.general_gcm().seal(nonce, aad, tag_len, msg))
+        }
+    }
+
+    /// Decrypt and verify `msg` (`ciphertext ‖ tag`, with a `tag_size`-byte
+    /// tag; `None` = the algorithm default) under the caller's `nonce` and
+    /// `aad` (the `aead-key.open` contract minus the stream transport). Any
+    /// decryption failure — truncated input, bad tag, wrong key, wrong
+    /// associated data — reports `authentication-failed` with no detail,
+    /// per the WIT contract.
+    pub fn open(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        msg: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        self.check_nonce(nonce)?;
+        let tag_len = self.check_tag_size(tag_size)?;
+        if self.is_standard_point(nonce, tag_len) {
+            self.cipher
+                .decrypt(nonce, Payload { msg, aad })
+                .map_err(|_| Error::AuthenticationFailed)
+        } else {
+            self.general_gcm().open(nonce, aad, tag_len, msg)
+        }
     }
 
     /// Encrypt and authenticate `msg` under a fresh random nonce with `aad`,
@@ -403,20 +480,64 @@ mod tests {
     fn caller_nonce_round_trip_and_failures() {
         let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], false).unwrap();
         let nonce = [2u8; 12];
-        let sealed = key.seal(&nonce, b"aad", b"plaintext").unwrap();
+        let sealed = key.seal(&nonce, b"aad", None, b"plaintext").unwrap();
         assert_eq!(sealed.len(), b"plaintext".len() + key.tag_len());
-        assert_eq!(key.open(&nonce, b"aad", &sealed).unwrap(), b"plaintext");
         assert_eq!(
-            key.open(&nonce, b"other aad", &sealed),
+            key.open(&nonce, b"aad", None, &sealed).unwrap(),
+            b"plaintext"
+        );
+        assert_eq!(
+            key.open(&nonce, b"other aad", None, &sealed),
             Err(Error::AuthenticationFailed)
         );
-        match key.seal(&[0; 16], b"", b"") {
+        match key.seal(&[], b"", None, b"") {
             Err(Error::InvalidNonce(msg)) => {
-                assert_eq!(msg, "AES-GCM requires a 12-byte nonce, got 16 bytes")
+                assert_eq!(msg, "AES-GCM requires a non-empty nonce")
             }
             _ => panic!("expected invalid-nonce"),
         }
         assert_eq!(key.export(), Err(Error::NotExtractable));
+    }
+
+    /// The full GCM parameter space on one key: a non-standard nonce
+    /// length routes to the general path and round-trips, a truncated tag
+    /// round-trips and fails at the wrong declared size, and out-of-set
+    /// sizes are declined. ChaCha keys stay bound to the standard point.
+    #[test]
+    fn full_parameter_space_on_one_key() {
+        let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], false).unwrap();
+        let sealed = key.seal(&[7u8; 16], b"aad", None, b"msg").unwrap();
+        assert_eq!(key.open(&[7u8; 16], b"aad", None, &sealed).unwrap(), b"msg");
+        assert_eq!(
+            key.open(&[8u8; 16], b"aad", None, &sealed),
+            Err(Error::AuthenticationFailed)
+        );
+
+        let short = key.seal(&[7u8; 12], b"aad", Some(4), b"msg").unwrap();
+        assert_eq!(short.len(), 3 + 4);
+        assert_eq!(
+            key.open(&[7u8; 12], b"aad", Some(4), &short).unwrap(),
+            b"msg"
+        );
+        assert_eq!(
+            key.open(&[7u8; 12], b"aad", None, &short),
+            Err(Error::AuthenticationFailed)
+        );
+        assert!(matches!(
+            key.seal(&[7u8; 12], b"", Some(5), b""),
+            Err(Error::Unsupported(_))
+        ));
+
+        let chacha = AeadKeyMaterial::generate_chacha20_poly1305(false).unwrap();
+        assert!(chacha.seal(&[0u8; 12], b"", Some(16), b"x").is_ok());
+        assert!(matches!(
+            chacha.seal(&[0u8; 12], b"", Some(12), b"x"),
+            Err(Error::Unsupported(_))
+        ));
+        assert!(matches!(
+            chacha.seal(&[0u8; 16], b"", None, b"x"),
+            Err(Error::InvalidNonce(_))
+        ));
     }
 
     #[test]

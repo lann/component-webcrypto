@@ -56,13 +56,13 @@ kind*, not by algorithm:
   `componentize-sdk` library re-exposes the package as `crypto.subtle`, and
   the vendored WebCryptoAPI web-platform-tests run through it in CI —
   WPT → shim → WIT → implementation — so the platform's own test suite
-  meters what the interface shape preserves. Where the shape deliberately
-  deviates (the AES-GCM nonce contract), the deviation is a recorded
-  ruling, not an accident; see AGENTS.md, "WPT fidelity is a first-class
-  design constraint".
+  meters what the interface shape preserves. Any deviation the shape forced
+  would be a recorded ruling, not an accident (the set is currently empty);
+  see AGENTS.md, "WPT fidelity is a first-class design constraint".
 
 Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
-(SHA-256/384/512), **AES-GCM** (128/256-bit keys, 12-byte nonces), and
+(SHA-256/384/512), **AES-GCM** (128/256-bit keys; per-call nonce lengths
+and tag sizes, the full SP 800-38D parameter space), and
 **ChaCha20-Poly1305** (both the RFC 8439 construction and XChaCha20-Poly1305
 with 24-byte nonces; browsers implement neither, so the jco host declines
 them) — the AEADs share 16-byte tags and the `ciphertext ‖ tag` wire format

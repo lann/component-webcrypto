@@ -275,7 +275,7 @@ async fn timed_verify(key: &MacKey, message: &[u8], tag: Vec<u8>) -> Result<u64,
 async fn timed_open_fail(key: &AeadKey, nonce: &[u8], sealed: &[u8]) -> Result<u64, String> {
     let start = Instant::now();
     let (mut tx, rx) = wit_stream::new();
-    let (result, _) = futures::join!(key.open(nonce.to_vec(), Vec::new(), rx), async move {
+    let (result, _) = futures::join!(key.open(nonce.to_vec(), Vec::new(), None, rx), async move {
         let _ = tx.write_all(sealed.to_vec()).await;
         drop(tx);
     });
@@ -295,7 +295,7 @@ async fn timed_open_fail(key: &AeadKey, nonce: &[u8], sealed: &[u8]) -> Result<u
 async fn timed_seal(key: &AeadKey, nonce: &[u8], plaintext: &[u8]) -> Result<u64, String> {
     let start = Instant::now();
     let (mut tx, rx) = wit_stream::new();
-    let (result, _) = futures::join!(key.seal(nonce.to_vec(), Vec::new(), rx), async move {
+    let (result, _) = futures::join!(key.seal(nonce.to_vec(), Vec::new(), None, rx), async move {
         let _ = tx.write_all(plaintext.to_vec()).await;
         drop(tx);
     });
@@ -345,7 +345,7 @@ async fn sign(key: &MacKey, message: &[u8]) -> Result<Vec<u8>, String> {
 /// sealed message the corrupted classes are derived from).
 async fn seal_bytes(key: &AeadKey, nonce: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
     let (mut tx, rx) = wit_stream::new();
-    let (result, _) = futures::join!(key.seal(nonce.to_vec(), Vec::new(), rx), async move {
+    let (result, _) = futures::join!(key.seal(nonce.to_vec(), Vec::new(), None, rx), async move {
         let _ = tx.write_all(plaintext.to_vec()).await;
         drop(tx);
     });
