@@ -203,17 +203,16 @@ async function gcmGenerateRoundtrip() {
 
 /**
  * Malformed requests fail closed: wrong-length raw AES key material is
- * `DataError`, a non-12-byte IV is `OperationError` (a documented deviation:
- * the `lann:webcrypto` AES-GCM contract serves 12-byte nonces only), and an
- * unsupported algorithm name is `NotSupportedError`.
+ * `DataError`, an empty IV is `OperationError` (AES-GCM accepts any
+ * non-empty IV), and an unsupported algorithm name is `NotSupportedError`.
  */
 async function gcmRejectsMalformed() {
   await expectDomException("DataError", "31-byte key", () =>
     subtle.importKey("raw", new Uint8Array(31), "AES-GCM", false, ["encrypt"]),
   );
   const key = await subtle.importKey("raw", unhex(GCM_KEY), "AES-GCM", false, ["encrypt"]);
-  await expectDomException("OperationError", "16-byte iv", () =>
-    subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(16) }, key, HMAC_DATA),
+  await expectDomException("OperationError", "empty iv", () =>
+    subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(0) }, key, HMAC_DATA),
   );
   await expectDomException("NotSupportedError", "AES-CBC", () =>
     subtle.importKey("raw", unhex(GCM_KEY), "AES-CBC", false, ["encrypt"]),

@@ -25,11 +25,8 @@
 //
 //   - Unserved: only HMAC-SHA-256 and AES-256-GCM are served; other
 //     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
-//   - Unserved: only the `"raw"` key format is served; others throw
-//     `NotSupportedError`.
-//   - Unserved: HMAC's `length` parameter must be omitted or name the
-//     key's exact bit length; WebCrypto's sub-byte truncation is not
-//     supported.
+//   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
+//     others throw `NotSupportedError`.
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
@@ -426,7 +423,10 @@ function normalizeHash(hash) {
 /** @type {Readonly<Record<string, readonly KeyUsage[] | undefined>>} */
 const USAGES = {
   HMAC: ["sign", "verify"],
-  "AES-GCM": ["encrypt", "decrypt"],
+  // `wrapKey`/`unwrapKey` are recognized AES-GCM usages a key may carry
+  // even though this library exposes no wrap operations yet: usages are
+  // key metadata, validated at use.
+  "AES-GCM": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
 };
 
 /**
@@ -483,30 +483,141 @@ function requireKeyAlgorithm(key, name) {
   }
 }
 
+// --- JWK ----------------------------------------------------------------------------
+
+const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * Unpadded base64url of `bytes` (RFC 7515's JWK `k` encoding).
+ * @param {Uint8Array} bytes
+ */
+function toBase64url(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += B64URL[(n >> 18) & 63];
+    out += B64URL[(n >> 12) & 63];
+    if (i + 1 < bytes.length) out += B64URL[(n >> 6) & 63];
+    if (i + 2 < bytes.length) out += B64URL[n & 63];
+  }
+  return out;
+}
+
+/**
+ * Decode unpadded base64url, throwing `DataError` on anything else (the
+ * spec's JWK parse failure).
+ * @param {string} text
+ */
+function fromBase64url(text) {
+  if (text.length % 4 === 1) {
+    throw dom("DataError", "invalid base64url length in JWK `k`");
+  }
+  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let bits = 0;
+  let acc = 0;
+  let at = 0;
+  for (const ch of text) {
+    const v = B64URL.indexOf(ch);
+    if (v < 0) {
+      throw dom("DataError", "invalid base64url in JWK `k`");
+    }
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[at++] = (acc >> bits) & 0xff;
+    }
+  }
+  return out;
+}
+
+/**
+ * Validate a JsonWebKey's fields against the requested import and return
+ * the raw key bytes — the spec's oct-key JWK import steps, shared by HMAC
+ * and AES-GCM (which differ only in the expected `alg` and `use` values).
+ * @param {unknown} keyData
+ * @param {string} alg the expected JWK `alg` (e.g. `"HS256"`, `"A256GCM"`)
+ * @param {string} use the expected JWK `use` (`"sig"` or `"enc"`)
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
+function rawFromJwk(keyData, alg, use, extractable, usages) {
+  if (typeof keyData !== "object" || keyData === null) {
+    throw new TypeError("JWK key data must be an object");
+  }
+  const jwk = /** @type {JsonWebKey} */ (keyData);
+  if (jwk.kty !== "oct") {
+    throw dom("DataError", `JWK kty must be "oct", got ${jwk.kty}`);
+  }
+  if (typeof jwk.k !== "string") {
+    throw dom("DataError", "JWK must carry `k` (base64url key material)");
+  }
+  if (jwk.alg !== undefined && jwk.alg !== alg) {
+    throw dom("DataError", `JWK alg is ${jwk.alg}, not ${alg}`);
+  }
+  if (jwk.use !== undefined && usages.length !== 0 && jwk.use !== use) {
+    throw dom("DataError", `JWK use is ${jwk.use}, not ${use}`);
+  }
+  if (jwk.key_ops !== undefined) {
+    if (!Array.isArray(jwk.key_ops)) {
+      throw dom("DataError", "JWK key_ops must be an array");
+    }
+    for (const usage of usages) {
+      if (!jwk.key_ops.includes(usage)) {
+        throw dom("DataError", `JWK key_ops does not permit ${usage}`);
+      }
+    }
+  }
+  if (jwk.ext === false && extractable) {
+    throw dom("DataError", "JWK ext is false; the key cannot be imported extractable");
+  }
+  return fromBase64url(jwk.k);
+}
+
+/**
+ * Build the oct-key JsonWebKey for an export (RFC 7517/7518; the spec's
+ * HMAC and AES export-key JWK steps).
+ * @param {Uint8Array} raw
+ * @param {string} alg
+ * @param {globalThis.CryptoKey} key
+ * @returns {JsonWebKey}
+ */
+function jwkOf(raw, alg, key) {
+  return {
+    kty: "oct",
+    k: toBase64url(raw),
+    alg,
+    key_ops: [...key.usages],
+    ext: key.extractable,
+  };
+}
+
+/**
+ * The JWK `alg` for a served key's algorithm.
+ * @param {globalThis.CryptoKey} key
+ */
+function jwkAlgOf(key) {
+  return key.algorithm.name === "HMAC" ? "HS256" : "A256GCM";
+}
+
 // --- minting ------------------------------------------------------------------------
 
 /**
  * @param {() => unknown} start
- * @param {NormalizedAlgorithm} algorithm
+ * @param {number | undefined} length the `HmacKeyAlgorithm.length` to
+ *   project, when it differs from the handle's material bits (a sub-byte
+ *   import shave); `undefined` projects the handle's own length
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-async function mintHmacKey(start, algorithm, extractable, usages) {
+async function mintHmacKey(start, length, extractable, usages) {
   const handle = await callImport(start());
   /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
     hash: Object.freeze({ name: "SHA-256" }),
-    length: handle.algorithmLength(),
+    length: length ?? handle.algorithmLength(),
   };
-  // `length`, when supplied, must name the key's exact bit length (see the
-  // deviations note above).
-  if (algorithm.length !== undefined && algorithm.length !== projected.length) {
-    throw dom(
-      "NotSupportedError",
-      `HMAC length ${algorithm.length} does not match the key's ${projected.length} bits`,
-    );
-  }
   return mintKey(handle, projected, extractable, usages);
 }
 
@@ -533,22 +644,46 @@ async function mintAesGcmKey(start, extractable, usages) {
  * @returns {Promise<CryptoKey>}
  */
 async function importKey(format, keyData, algorithm, extractable, keyUsages) {
-  if (format !== "raw") {
-    throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
+  if (format !== "raw" && format !== "jwk") {
+    throw dom(
+      "NotSupportedError",
+      `unsupported key format ${format}; only "raw" and "jwk" are served`,
+    );
   }
   const alg = normalizeAlgorithm(algorithm);
   const usages = normalizeUsages(keyUsages, alg.name);
-  const raw = bytesOf(keyData, "keyData");
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
+    const raw =
+      format === "jwk"
+        ? rawFromJwk(keyData, "HS256", "sig", !!extractable, usages)
+        : bytesOf(keyData, "keyData");
+    // The spec's HMAC length window: when present, `length` may shave up
+    // to 7 trailing bits off the material's bit length. The WIT key holds
+    // the material unchanged (HMAC zero-pads keys to the block size, so
+    // the shave cannot change a tag); the shaved length is CryptoKey
+    // metadata, projected below.
+    let length;
+    if (alg.length !== undefined) {
+      const requested = Number(alg.length);
+      const dataBits = raw.length * 8;
+      if (!(requested > dataBits - 8 && requested <= dataBits)) {
+        throw dom("DataError", `HMAC length ${alg.length} does not fit ${dataBits} bits of key`);
+      }
+      length = requested;
+    }
     return await mintHmacKey(
       () => hmacSha2.importKey("sha256", raw, !!extractable),
-      alg,
+      length,
       !!extractable,
       usages,
     );
   } else {
+    const raw =
+      format === "jwk"
+        ? rawFromJwk(keyData, "A256GCM", "enc", !!extractable, usages)
+        : bytesOf(keyData, "keyData");
     // The library serves AES-256-GCM only, so key material is always minted
     // as the aes256 variant; other lengths fail with `DataError` (from the
     // WIT contract's `invalid-key`).
@@ -572,17 +707,15 @@ async function generateKey(algorithm, extractable, keyUsages) {
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
-    // The backing `generate-key` mints WebCrypto's default HMAC-SHA-256 key
-    // length (the hash's 512-bit block size).
-    if (alg.length !== undefined && alg.length !== 512) {
-      throw dom(
-        "NotSupportedError",
-        `unsupported HMAC length ${alg.length}; only the default 512 is served`,
-      );
+    // The spec's get-key-length: absent means the hash's block size (the
+    // WIT default); zero is an `OperationError` before any key exists.
+    if (alg.length === 0) {
+      throw dom("OperationError", "HMAC length cannot be 0");
     }
+    const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
-      () => hmacSha2.generateKey("sha256", undefined, !!extractable),
-      alg,
+      () => hmacSha2.generateKey("sha256", length, !!extractable),
+      undefined,
       !!extractable,
       usages,
     );
@@ -599,13 +732,28 @@ async function generateKey(algorithm, extractable, keyUsages) {
 }
 
 /**
+ * @overload
+ * @param {"jwk"} format
+ * @param {globalThis.CryptoKey} key
+ * @returns {Promise<JsonWebKey>}
+ */
+/**
+ * @overload
  * @param {Exclude<KeyFormat, "jwk">} format
  * @param {globalThis.CryptoKey} key
  * @returns {Promise<ArrayBuffer>}
  */
+/**
+ * @param {KeyFormat} format
+ * @param {globalThis.CryptoKey} key
+ * @returns {Promise<ArrayBuffer | JsonWebKey>}
+ */
 async function exportKey(format, key) {
-  if (format !== "raw") {
-    throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
+  if (format !== "raw" && format !== "jwk") {
+    throw dom(
+      "NotSupportedError",
+      `unsupported key format ${format}; only "raw" and "jwk" are served`,
+    );
   }
   if (!(key instanceof CryptoKey)) {
     throw new TypeError("key must be a CryptoKey");
@@ -613,7 +761,11 @@ async function exportKey(format, key) {
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
   }
-  return toArrayBuffer(await callImport(handleOf(key).exportKey()));
+  const raw = /** @type {Uint8Array} */ (await callImport(handleOf(key).exportKey()));
+  if (format === "jwk") {
+    return jwkOf(raw, jwkAlgOf(key), key);
+  }
+  return toArrayBuffer(raw);
 }
 
 /**

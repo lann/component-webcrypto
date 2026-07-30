@@ -18,6 +18,6 @@
 export const EXPECTED = {
   "sign_verify/hmac": { inPassed: 15, inFailed: 0, outPassed: 0, outFailed: 50 },
   "encrypt_decrypt/aes_gcm (96-bit iv)": { inPassed: 179, inFailed: 0, outPassed: 0, outFailed: 398 },
-  "import_export/symmetric_importKey (HMAC, AES-GCM)": { inPassed: 78, inFailed: 0, outPassed: 0, outFailed: 282 },
-  "generateKey/successes (HMAC, AES-GCM)": { inPassed: 21, inFailed: 0, outPassed: 0, outFailed: 459 },
+  "import_export/symmetric_importKey (HMAC, AES-GCM)": { inPassed: 140, inFailed: 0, outPassed: 0, outFailed: 220 },
+  "generateKey/successes (HMAC, AES-GCM)": { inPassed: 144, inFailed: 0, outPassed: 0, outFailed: 336 },
 };
