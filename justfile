@@ -83,7 +83,11 @@ test:
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 build-component:
-    cd examples/jco-demo && npm run build:component
+    cargo build --release -p crypto-demo --target wasm32-unknown-unknown
+    mkdir -p examples/crypto-demo/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/crypto_demo.wasm \
+        -o examples/crypto-demo/build/crypto-demo.component.wasm
 
 # Transpile the crypto-demo component for the Node host (runs build-component).
 transpile: build-component
@@ -122,18 +126,27 @@ demo-wasmtime: build-component
 build-guest-provider:
     cargo build --release -p guest-webcrypto --target wasm32-wasip2
 
+# Compose `guest` with the in-guest provider and plug `driver` (a
+# wasm32-wasip2 bin crate) on top, yielding one self-contained component at
+# target/<stem>-composed.wasm (via target/<stem>-with-crypto.wasm). Every
+# composition in this file is this same two-step `wac plug`.
+_compose stem guest driver: build-guest-provider
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p {{driver}} --target wasm32-wasip2
+    driver_wasm="target/wasm32-wasip2/release/$(echo '{{driver}}' | tr - _).wasm"
+    wac plug {{guest}} \
+        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        -o target/{{stem}}-with-crypto.wasm
+    wac plug "$driver_wasm" \
+        --plug target/{{stem}}-with-crypto.wasm \
+        -o target/{{stem}}-composed.wasm
+
 # Compose the fully in-guest demo: the crypto-demo guest's lann:webcrypto
 # imports are satisfied by the in-guest provider's exports (`wac plug`), then
 # the CLI driver (async wasi:cli/run) is plugged on top, yielding one
 # self-contained component in target/crypto-demo-composed.wasm.
-compose-demo: build-component build-guest-provider
-    cargo build --release -p crypto-demo-driver --target wasm32-wasip2
-    wac plug examples/crypto-demo/build/crypto-demo.component.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
-        -o target/crypto-demo-with-crypto.wasm
-    wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
-        --plug target/crypto-demo-with-crypto.wasm \
-        -o target/crypto-demo-composed.wasm
+compose-demo: build-component (_compose "crypto-demo" "examples/crypto-demo/build/crypto-demo.component.wasm" "crypto-demo-driver")
 
 # In-guest integration test: run the composed demo under `wasmtime` — the
 # guest checks execute against RustCrypto running entirely inside wasm.
@@ -166,14 +179,7 @@ build-componentize-demo:
 # Compose the fully in-guest JS demo (the `compose-demo` recipe with the JS
 # guest in place of the Rust one): the JS guest's lann:webcrypto imports are
 # satisfied by the in-guest provider, then the CLI driver is plugged on top.
-compose-componentize-demo: build-componentize-demo build-guest-provider
-    cargo build --release -p crypto-demo-driver --target wasm32-wasip2
-    wac plug examples/componentize-demo/build/componentize-demo.component.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
-        -o target/componentize-demo-with-crypto.wasm
-    wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
-        --plug target/componentize-demo-with-crypto.wasm \
-        -o target/componentize-demo-composed.wasm
+compose-componentize-demo: build-componentize-demo (_compose "componentize-demo" "examples/componentize-demo/build/componentize-demo.component.wasm" "crypto-demo-driver")
 
 # JS-guest integration test: run the composed JS demo under `wasmtime` — the
 # WebCrypto-subset library's checks execute against RustCrypto running
@@ -205,15 +211,12 @@ test-webcrypto-componentize-wpt: compose-wpt-runner
 
 # Componentize the WPT runner from the working tree and compose it with a
 # freshly built in-guest provider and driver.
-compose-wpt-runner: build-guest-provider
+compose-wpt-runner: _componentize-wpt-runner (_compose "wpt-runner" "componentize-sdk/wpt/build/runner.component.wasm" "crypto-demo-driver")
+
+# Componentize the WPT runner from the working tree with the pinned
+# componentize-js (downloaded on first use).
+_componentize-wpt-runner:
     componentize-sdk/wpt/component.sh build
-    cargo build --release -p crypto-demo-driver --target wasm32-wasip2
-    wac plug componentize-sdk/wpt/build/runner.component.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
-        -o target/wpt-runner-with-crypto.wasm
-    wac plug target/wasm32-wasip2/release/crypto_demo_driver.wasm \
-        --plug target/wpt-runner-with-crypto.wasm \
-        -o target/wpt-runner-composed.wasm
 
 # Re-record componentize-sdk/wpt/expected.js from an actual run: run this
 # when a change legitimately moves a count, and review the diff — each moved
@@ -390,29 +393,27 @@ _conformance-jco-browser-gate:
     fi
     just conformance-jco-browser
 
-# Build the shared conformance guest component into conformance/guest/build/.
-build-conformance-guest:
-    cargo build --release -p conformance-guest --target wasm32-unknown-unknown
-    mkdir -p conformance/guest/build
+# Build a wasm32-unknown-unknown guest crate and wrap it into a component
+# at `out`.
+_build-guest crate out:
+    cargo build --release -p {{crate}} --target wasm32-unknown-unknown
+    mkdir -p "$(dirname {{out}})"
     wasm-tools component new \
-        target/wasm32-unknown-unknown/release/conformance_guest.wasm \
-        -o conformance/guest/build/conformance-guest.component.wasm
+        "target/wasm32-unknown-unknown/release/$(echo '{{crate}}' | tr - _).wasm" \
+        -o {{out}}
+
+# Build the shared conformance guest component into conformance/guest/build/.
+build-conformance-guest: (_build-guest "conformance-guest" "conformance/guest/build/conformance-guest.component.wasm")
 
 # Build the host-only signing guest component (probes for interfaces the
 # in-guest provider deliberately does not export) into
 # conformance/signing-guest/build/.
-build-signing-guest:
-    cargo build --release -p conformance-signing-guest --target wasm32-unknown-unknown
-    mkdir -p conformance/signing-guest/build
-    wasm-tools component new \
-        target/wasm32-unknown-unknown/release/conformance_signing_guest.wasm \
-        -o conformance/signing-guest/build/conformance-signing-guest.component.wasm
+build-signing-guest: (_build-guest "conformance-signing-guest" "conformance/signing-guest/build/conformance-signing-guest.component.wasm")
 
 # Run both conformance suites under the Wasmtime host (the shared guest plus
 # the host-only signing guest). Writes conformance/results/wasmtime.json and
 # wasmtime-signing.json (both target `wasmtime`; the runner merges them).
 conformance-wasmtime: build-conformance-guest build-signing-guest
-    mkdir -p conformance/results
     timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
         --guest conformance/guest/build/conformance-guest.component.wasm \
         --suite shared --out conformance/results/wasmtime.json
@@ -423,14 +424,7 @@ conformance-wasmtime: build-conformance-guest build-signing-guest
 # Build the composed conformance component: the conformance guest
 # plugged with the in-guest provider, under the CLI driver that prints the
 # results JSON on stdout.
-build-conformance-composed: build-conformance-guest build-guest-provider
-    cargo build --release -p conformance-composed-driver --target wasm32-wasip2
-    wac plug conformance/guest/build/conformance-guest.component.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
-        -o target/conformance-with-crypto.wasm
-    wac plug target/wasm32-wasip2/release/conformance_composed_driver.wasm \
-        --plug target/conformance-with-crypto.wasm \
-        -o target/conformance-composed.wasm
+build-conformance-composed: build-conformance-guest (_compose "conformance" "conformance/guest/build/conformance-guest.component.wasm" "conformance-composed-driver")
 
 # Run the shared conformance suite fully in-guest (RustCrypto in wasm). Writes
 # conformance/results/composed.json.

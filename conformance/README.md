@@ -84,6 +84,8 @@ adapters/
                    #   with Chrome/Chromium 137+ installed); the browser
                    #   adapter drives the suites through web/'s harness
                    #   (parallel workers), so gate and viewer cannot drift
+report/            # the results-file and lockfile wire shapes the Rust
+                   #   adapters serialize and the runner deserializes
 runner/            # aggregation: transport invariants + matrix.md rendering
                    #   + the results-viewer data (--json-out)
 web/               # the results viewer: a dependency-free static page

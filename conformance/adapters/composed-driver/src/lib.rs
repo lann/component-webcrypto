@@ -30,26 +30,8 @@ mod bindings {
     });
 }
 
-use bindings::conformance::webcrypto::tests::{all, Outcome};
-
-/// One case result, as serialized into the results JSON.
-#[derive(serde::Serialize)]
-struct JsonResult {
-    name: String,
-    features: Vec<String>,
-    outcome: &'static str,
-    detail: String,
-}
-
-/// The results shape the conformance runner consumes.
-#[derive(serde::Serialize)]
-struct Output {
-    target: &'static str,
-    suite: &'static str,
-    #[serde(rename = "missing-features")]
-    missing_features: Vec<String>,
-    results: Vec<JsonResult>,
-}
+use bindings::conformance::webcrypto::tests::{all, Outcome as GuestOutcome};
+use conformance_report::{CaseResult, Outcome, ResultsFile};
 
 struct Component;
 
@@ -64,11 +46,11 @@ impl wasip3::exports::cli::run::Guest for Component {
         let mut results = Vec::with_capacity(cases.len());
         for case in &cases {
             let (outcome, detail) = match case.run().await {
-                Outcome::Pass => ("pass", String::new()),
-                Outcome::Fail(detail) => ("fail", detail),
-                Outcome::Skipped(detail) => ("skipped", detail),
+                GuestOutcome::Pass => (Outcome::Pass, String::new()),
+                GuestOutcome::Fail(detail) => (Outcome::Fail, detail),
+                GuestOutcome::Skipped(detail) => (Outcome::Skipped, detail),
             };
-            results.push(JsonResult {
+            results.push(CaseResult {
                 name: case.name(),
                 features: case.features(),
                 outcome,
@@ -77,10 +59,13 @@ impl wasip3::exports::cli::run::Guest for Component {
         }
 
         let total = results.len();
-        let failed = results.iter().filter(|r| r.outcome == "fail").count();
-        let output = Output {
-            target: "composed",
-            suite: "shared",
+        let failed = results
+            .iter()
+            .filter(|r| r.outcome == Outcome::Fail)
+            .count();
+        let output = ResultsFile {
+            target: "composed".into(),
+            suite: "shared".into(),
             missing_features,
             results,
         };

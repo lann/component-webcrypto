@@ -10,5 +10,8 @@ wasmtime-webcrypto = { path = "../../../wasmtime-impl" }
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1"
-serde = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+# The results-file and lockfile wire shapes, shared with the composed
+# driver and the runner.
+conformance-report = { path = "../../report", features = ["lock"] }
 serde_json = "1"

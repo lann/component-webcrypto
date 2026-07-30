@@ -5,14 +5,14 @@
 //! loads the same `crypto-demo` component and invokes the component's
 //! exported async `run`. The component drives every check itself through the
 //! standard `lann:webcrypto` interfaces, so this host provisions nothing
-//! beyond [`wasmtime_webcrypto::add_to_linker`].
+//! beyond [`wasmtime_webcrypto::standalone`]'s canned embedding.
 
 use std::path::Path;
 
-use wasmtime::component::{Accessor, Component, HasData, Linker, ResourceTable};
-use wasmtime::error::Context as _;
-use wasmtime::{Config, Engine, Store};
-use wasmtime_webcrypto::{WasiWebcryptoCtx, WasiWebcryptoCtxView, WasiWebcryptoView};
+use wasmtime::component::Accessor;
+use wasmtime_webcrypto::standalone::{self, Ctx};
+use wasmtime_webcrypto::WasiWebcryptoCtx;
+
 mod bindings {
     wasmtime::component::bindgen!({
         path: "../crypto-demo/wit",
@@ -24,33 +24,6 @@ mod bindings {
             default: async,
         },
     });
-}
-
-/// The store state: the WebCrypto host context plus the resource table its
-/// keys and computations live in.
-struct Ctx {
-    webcrypto: WasiWebcryptoCtx,
-    table: ResourceTable,
-}
-
-impl HasData for Ctx {
-    type Data<'a> = &'a mut Self;
-}
-
-impl WasiWebcryptoView for Ctx {
-    fn webcrypto(&mut self) -> WasiWebcryptoCtxView<'_> {
-        WasiWebcryptoCtxView {
-            ctx: &mut self.webcrypto,
-            table: &mut self.table,
-        }
-    }
-}
-
-fn engine() -> anyhow::Result<Engine> {
-    let mut config = Config::new();
-    config.wasm_component_model(true);
-    config.wasm_component_model_async(true);
-    Ok(Engine::new(&config)?)
 }
 
 /// Instantiate the `crypto-demo` component at `component_path` with the
@@ -69,21 +42,7 @@ pub async fn run_demo_with(
     component_path: &Path,
     webcrypto: WasiWebcryptoCtx,
 ) -> anyhow::Result<String> {
-    let engine = engine()?;
-    let component = Component::from_file(&engine, component_path)
-        .with_context(|| format!("loading component {}", component_path.display()))?;
-
-    let mut linker: Linker<Ctx> = Linker::new(&engine);
-    // Shared `lann:webcrypto` imports — the component's only ones.
-    wasmtime_webcrypto::add_to_linker(&mut linker)?;
-
-    let mut store = Store::new(
-        &engine,
-        Ctx {
-            webcrypto,
-            table: ResourceTable::new(),
-        },
-    );
+    let (component, linker, mut store) = standalone::load(component_path, webcrypto)?;
     let demo = bindings::CryptoDemo::instantiate_async(&mut store, &component, &linker).await?;
 
     let result = store
