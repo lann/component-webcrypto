@@ -6,6 +6,43 @@ use zeroize::Zeroizing;
 
 use crate::{EcdsaVariant, Error, RngError, ECDSA_NAME, ED25519_NAME};
 
+/// The algorithm behind a signature key, shared by the public and private
+/// halves so the `algorithm-name`/`-curve`/`-hash` getters have one table.
+#[derive(Clone, Copy)]
+enum SigAlg {
+    Ed25519,
+    P256,
+    P384,
+}
+
+impl SigAlg {
+    /// The registry algorithm name (`algorithm-name`).
+    fn name(self) -> &'static str {
+        match self {
+            Self::Ed25519 => ED25519_NAME,
+            Self::P256 | Self::P384 => ECDSA_NAME,
+        }
+    }
+
+    /// The registry curve name (`algorithm-curve`).
+    fn curve(self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519 => None,
+            Self::P256 => Some("P-256"),
+            Self::P384 => Some("P-384"),
+        }
+    }
+
+    /// The mint-bound digest name (`algorithm-hash`).
+    fn hash(self) -> Option<&'static str> {
+        match self {
+            Self::Ed25519 => None,
+            Self::P256 => Some("SHA-256"),
+            Self::P384 => Some("SHA-384"),
+        }
+    }
+}
+
 /// The public key behind a `signature.verifying-key` resource, bound to its
 /// algorithm (and, for ECDSA, its curve/digest variant) at minting.
 /// Verification is secret-free, so every arm exists on every target.
@@ -55,30 +92,28 @@ impl SigPublic {
         }
     }
 
+    /// The key's algorithm tag.
+    fn alg(&self) -> SigAlg {
+        match self {
+            Self::Ed25519(_) => SigAlg::Ed25519,
+            Self::EcdsaP256(_) => SigAlg::P256,
+            Self::EcdsaP384(_) => SigAlg::P384,
+        }
+    }
+
     /// The registry algorithm name (`verifying-key.algorithm-name`).
     pub fn name(&self) -> &'static str {
-        match self {
-            Self::Ed25519(_) => ED25519_NAME,
-            Self::EcdsaP256(_) | Self::EcdsaP384(_) => ECDSA_NAME,
-        }
+        self.alg().name()
     }
 
     /// The registry curve name (`verifying-key.algorithm-curve`).
     pub fn curve(&self) -> Option<&'static str> {
-        match self {
-            Self::Ed25519(_) => None,
-            Self::EcdsaP256(_) => Some("P-256"),
-            Self::EcdsaP384(_) => Some("P-384"),
-        }
+        self.alg().curve()
     }
 
     /// The mint-bound digest name (`verifying-key.algorithm-hash`).
     pub fn hash(&self) -> Option<&'static str> {
-        match self {
-            Self::Ed25519(_) => None,
-            Self::EcdsaP256(_) => Some("SHA-256"),
-            Self::EcdsaP384(_) => Some("SHA-384"),
-        }
+        self.alg().hash()
     }
 
     /// The public key material in the minting interface's documented form:
@@ -137,6 +172,19 @@ enum SigPrivate {
     EcdsaP256(p256::ecdsa::SigningKey),
     #[cfg(not(target_family = "wasm"))]
     EcdsaP384(p384::ecdsa::SigningKey),
+}
+
+impl SigPrivate {
+    /// The key's algorithm tag.
+    fn alg(&self) -> SigAlg {
+        match self {
+            Self::Ed25519(_) => SigAlg::Ed25519,
+            #[cfg(not(target_family = "wasm"))]
+            Self::EcdsaP256(_) => SigAlg::P256,
+            #[cfg(not(target_family = "wasm"))]
+            Self::EcdsaP384(_) => SigAlg::P384,
+        }
+    }
 }
 
 /// The material behind a `signature.signing-key` resource: the private key
@@ -268,33 +316,17 @@ impl SigningKeyMaterial {
 
     /// The registry algorithm name (`signing-key.algorithm-name`).
     pub fn name(&self) -> &'static str {
-        match &self.private {
-            SigPrivate::Ed25519(_) => ED25519_NAME,
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(_) | SigPrivate::EcdsaP384(_) => ECDSA_NAME,
-        }
+        self.private.alg().name()
     }
 
     /// The registry curve name (`signing-key.algorithm-curve`).
     pub fn curve(&self) -> Option<&'static str> {
-        match &self.private {
-            SigPrivate::Ed25519(_) => None,
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(_) => Some("P-256"),
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(_) => Some("P-384"),
-        }
+        self.private.alg().curve()
     }
 
     /// The mint-bound digest name (`signing-key.algorithm-hash`).
     pub fn hash(&self) -> Option<&'static str> {
-        match &self.private {
-            SigPrivate::Ed25519(_) => None,
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(_) => Some("SHA-256"),
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(_) => Some("SHA-384"),
-        }
+        self.private.alg().hash()
     }
 
     /// Whether `export-key` may return the private material
@@ -399,35 +431,28 @@ mod tests {
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_rfc6979_known_answers() {
-        fn unhex(hex: &str) -> Vec<u8> {
-            (0..hex.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-                .collect()
-        }
-        let scalar = unhex("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+        use hex_literal::hex;
+
+        let scalar = hex!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
         let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &scalar, true)
             .unwrap();
 
         // Deterministic signature: exact r ‖ s reproduction.
-        let mut expected =
-            unhex("efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716");
-        expected.extend(unhex(
-            "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8",
-        ));
+        let expected = hex!(
+            "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716"
+            "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
+        );
         assert_eq!(key.sign(b"sample"), expected);
 
         // Scalar export identity.
         assert_eq!(key.export().unwrap(), scalar);
 
         // Derived public point (uncompressed SEC1).
-        let mut point = vec![0x04];
-        point.extend(unhex(
-            "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
-        ));
-        point.extend(unhex(
-            "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
-        ));
+        let point = hex!(
+            "04"
+            "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+            "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299"
+        );
         assert_eq!(key.public().export(), point);
     }
 

@@ -17,6 +17,7 @@
 pub mod bindings;
 mod host;
 mod limits;
+mod streams;
 
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
