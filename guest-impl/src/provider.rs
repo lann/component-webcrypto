@@ -97,11 +97,24 @@ fn rng_infallible<T>(result: Result<T, webcrypto_impl_core::RngError>) -> T {
 
 /// Drain an entire `stream<u8>` into a buffer, resolving once the stream ends
 /// (its writer dropped).
-async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> crate::limits::Buffered {
-    let mut out = crate::limits::Buffered::new();
+///
+/// If the buffer's allocation fails, the remainder of the stream is drained
+/// and discarded before the error is returned — the WIT contract promises
+/// the input stream is fully drained even when the call resolves with an
+/// error, so the caller's writer always completes.
+async fn drain_stream(
+    mut data: wit_bindgen::StreamReader<u8>,
+) -> Result<crate::buffer::Buffered, Error> {
+    let mut out = Ok(crate::buffer::Buffered::new());
     loop {
         let (status, batch) = data.read(Vec::with_capacity(8 * 1024)).await;
-        out.extend(batch);
+        if let Ok(buffered) = &mut out {
+            if buffered.extend(&batch).is_err() {
+                out = Err(Error::Other(
+                    "allocation failed buffering stream input".to_string(),
+                ));
+            }
+        }
         if matches!(
             status,
             wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
@@ -114,19 +127,11 @@ async fn drain_stream(mut data: wit_bindgen::StreamReader<u8>) -> crate::limits:
 
 /// Return `bytes` as a `stream<u8>`, fed by a detached task after the caller
 /// returns the reader.
-///
-/// The bytes are charged to the retention watermark until the caller has read
-/// them or dropped the stream, since until then this provider is holding
-/// them. The charge travels into the writing task rather than being released
-/// when `seal`/`open` returns: releasing at return would leave every
-/// unconsumed output invisible to the bound.
 fn stream_of(bytes: Vec<u8>) -> wit_bindgen::StreamReader<u8> {
-    let charge = crate::limits::charge(bytes.len());
     let (mut tx, rx) = crate::wit_stream::new();
     wit_bindgen::spawn_local(async move {
         let _ = tx.write_all(bytes).await;
         drop(tx);
-        drop(charge);
     });
     rx
 }
@@ -147,14 +152,14 @@ impl GuestMacKey for MacKey {
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
         //
-        // The WIT `err` case exists for operational keystore failures; this
-        // implementation holds the material in-process, so it never errs.
-        let bytes = drain_stream(data).await;
+        // The key material is held in-process, so the only operational
+        // failure is the buffering itself.
+        let bytes = drain_stream(data).await?;
         Ok(self.material.sign(&bytes))
     }
 
     async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
-        let bytes = drain_stream(data).await;
+        let bytes = drain_stream(data).await?;
         Ok(self.material.verify(&bytes, &tag)?)
     }
 
@@ -208,7 +213,7 @@ impl GuestAeadKey for AeadKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(plaintext).await;
+        let msg = drain_stream(plaintext).await?;
         Ok(stream_of(self.material.seal(&nonce, &aad, &msg)?))
     }
 
@@ -221,7 +226,7 @@ impl GuestAeadKey for AeadKey {
         // Like `seal`: fully drain the input first. Buffering the whole
         // message is inherent to `open`: no unverified plaintext may be
         // observable.
-        let msg = drain_stream(ciphertext).await;
+        let msg = drain_stream(ciphertext).await?;
         Ok(stream_of(self.material.open(&nonce, &aad, &msg)?))
     }
 
@@ -260,10 +265,9 @@ impl GuestDigest for Digest {
         // Buffer the whole stream, then hash it; the result is
         // chunking-invariant either way.
         //
-        // The WIT `err` case exists for operational failures (e.g. an
-        // external digest engine); this implementation computes in-process,
-        // so it never errs.
-        let bytes = drain_stream(data).await;
+        // Hashing computes in-process, so the only operational failure is
+        // the buffering itself.
+        let bytes = drain_stream(data).await?;
         Ok(self.variant.digest(&bytes))
     }
 
@@ -423,7 +427,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
-        let msg = drain_stream(plaintext).await;
+        let msg = drain_stream(plaintext).await?;
         // Count this invocation against the algorithm's nonce budget, per
         // the minting interfaces' SHOULD-enforce contract.
         if let Some(budget) = self.material.nonce_budget() {
@@ -444,7 +448,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         // Like `seal`: fully drain the input first; buffering the whole
         // message is inherent to `open` (no unverified plaintext may be
         // observable).
-        let msg = drain_stream(sealed).await;
+        let msg = drain_stream(sealed).await?;
         Ok(stream_of(self.material.open_internal(&aad, &msg)?))
     }
 
@@ -543,7 +547,7 @@ pub struct VerifyingKey {
 
 impl GuestVerifyingKey for VerifyingKey {
     async fn verify(&self, data: wit_bindgen::StreamReader<u8>, sig: Vec<u8>) -> Result<(), Error> {
-        let bytes = drain_stream(data).await;
+        let bytes = drain_stream(data).await?;
         Ok(self.public.verify(&bytes, &sig)?)
     }
 
@@ -578,9 +582,9 @@ pub struct SigningKey {
 
 impl GuestSigningKey for SigningKey {
     async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
-        // The WIT `err` case exists for operational keystore failures; this
-        // implementation holds the material in-process, so it never errs.
-        let bytes = drain_stream(data).await;
+        // The key material is held in-process, so the only operational
+        // failure is the buffering itself.
+        let bytes = drain_stream(data).await?;
         Ok(self.material.sign(&bytes))
     }
 

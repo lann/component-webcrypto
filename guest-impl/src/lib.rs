@@ -21,7 +21,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-mod limits;
+mod buffer;
 mod provider;
 
 use provider::Component;

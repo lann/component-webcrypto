@@ -62,9 +62,9 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// function runs, so they are already in host memory when admission is
 /// reached. Bounding those needs a hold *before* the call starts, which the
 /// component model provides to a component callee (`backpressure.{inc,dec}`)
-/// and does not currently expose to a host import. The in-guest provider,
-/// being a component, uses it and therefore counts what it actually holds
-/// rather than reserving per call.
+/// and does not currently expose to a host import. The in-guest provider
+/// leans on its sandbox's memory limit instead, surfacing allocation
+/// failure in its buffers as `error.other` rather than a trap.
 ///
 /// The pool's budget is resolved **once**, at the first operation that
 /// buffers, and belongs to the pool from then on. Changing
