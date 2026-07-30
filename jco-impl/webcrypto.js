@@ -922,9 +922,10 @@ function requireGcmNonce(nonce) {
  *   context and does not have this property.
  *
  * Neither host can hold a call before it starts, which is what the component
- * model provides for this (`backpressure.{inc,dec}`, see the in-guest
- * provider's `limits` module): a host import's arguments are lifted by the
- * canonical ABI before the host function runs. Admission here therefore
+ * model provides to a component callee (`backpressure.{inc,dec}`) and does
+ * not currently expose to a host import: a host import's arguments are
+ * lifted by the canonical ABI before the host function runs. Admission here
+ * therefore
  * happens *inside* the call, so a queued operation has already had its
  * `list<u8>` parameters lifted — they are retained but not counted.
  */
