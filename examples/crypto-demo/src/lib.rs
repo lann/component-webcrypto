@@ -52,6 +52,22 @@ use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::wit_stream;
 
+/// Assert that `result` failed with an error matching `pattern` (e.g.
+/// `Error::InvalidKey(_)`). `accepted` says what its wrongly succeeding
+/// would mean.
+macro_rules! expect_error {
+    ($result:expr, $pattern:pat, $accepted:expr $(,)?) => {
+        match $result {
+            Err(err) if matches!(err, $pattern) => Ok(()),
+            Err(other) => Err(describe(
+                concat!("expected ", stringify!($pattern), ", got"),
+                &other,
+            )),
+            Ok(_) => Err(String::from($accepted)),
+        }
+    };
+}
+
 // --- RFC 4231 test case 2 (HMAC-SHA-256) ------------------------------------
 
 const HMAC_KEY: &[u8] = b"Jefe";
@@ -174,9 +190,9 @@ async fn hmac_verify() -> Result<(), String> {
         .map_err(|e| describe("correct tag did not verify", &e))?;
 
     tag[0] ^= 0x01;
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         verify_chunked(&key, HMAC_DATA, tag, usize::MAX).await?,
+        Error::AuthenticationFailed,
         "corrupted tag verified",
     )
 }
@@ -195,9 +211,9 @@ async fn hmac_generated_key() -> Result<(), String> {
     }
 
     // A non-extractable key must not export.
-    expect_error(
-        &Error::NotExtractable,
+    expect_error!(
         key.export_key().await,
+        Error::NotExtractable,
         "non-extractable key exported",
     )
 }
@@ -424,9 +440,9 @@ async fn gcm_tampered() -> Result<(), String> {
         .await
         .map_err(|e| describe("seal", &e))?;
     sealed[0] ^= 0x80;
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         open_chunked(&key, &nonce, b"", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
         "tampered ciphertext opened",
     )
 }
@@ -440,18 +456,18 @@ async fn gcm_wrong_aad() -> Result<(), String> {
     let sealed = seal_chunked(&key, &nonce, b"right aad", b"payload", usize::MAX)
         .await
         .map_err(|e| describe("seal", &e))?;
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         open_chunked(&key, &nonce, b"wrong aad", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
         "wrong aad opened",
     )
 }
 
 /// Importing wrong-length key material fails with `invalid-key`.
 async fn gcm_invalid_key() -> Result<(), String> {
-    expect_error(
-        &Error::InvalidKey(String::new()),
+    expect_error!(
         import_key(AesVariant::Aes256, vec![0u8; 16], false).await,
+        Error::InvalidKey(_),
         "16-byte key imported as AES-256",
     )
 }
@@ -461,9 +477,9 @@ async fn gcm_invalid_nonce() -> Result<(), String> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    expect_error(
-        &Error::InvalidNonce(String::new()),
+    expect_error!(
         seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await,
+        Error::InvalidNonce(_),
         "8-byte nonce accepted",
     )
 }
@@ -483,9 +499,9 @@ async fn gcm_key_export() -> Result<(), String> {
     let sealed_key = generate_key(AesVariant::Aes256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    expect_error(
-        &Error::NotExtractable,
+    expect_error!(
         sealed_key.export_key().await,
+        Error::NotExtractable,
         "non-extractable key exported",
     )
 }
@@ -543,9 +559,9 @@ async fn gcm_internal_nonce() -> Result<(), String> {
         "distinct nonces across seals",
     )?;
 
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await,
+        Error::AuthenticationFailed,
         "wrong aad opened",
     )
 }
@@ -682,33 +698,6 @@ fn describe(context: &str, error: &Error) -> String {
     format!("{context}: {}", lann_webcrypto_guest::render_error(error))
 }
 
-/// The WIT case name of `error`'s case.
-fn case_name(error: &Error) -> &'static str {
-    match error {
-        Error::InvalidKey(_) => "invalid-key",
-        Error::InvalidNonce(_) => "invalid-nonce",
-        Error::AuthenticationFailed => "authentication-failed",
-        Error::NotExtractable => "not-extractable",
-        Error::Unsupported(_) => "unsupported",
-        Error::KeyExhausted => "key-exhausted",
-        Error::Other(_) => "other",
-    }
-}
-
-/// Assert that `result` failed with the same error case as `want` (compared
-/// by discriminant; details are not compared). `accepted` says what its
-/// wrongly succeeding would mean.
-fn expect_error<T>(want: &Error, result: Result<T, Error>, accepted: &str) -> Result<(), String> {
-    match result {
-        Err(err) if std::mem::discriminant(&err) == std::mem::discriminant(want) => Ok(()),
-        Err(other) => Err(describe(
-            &format!("expected {}, got", case_name(want)),
-            &other,
-        )),
-        Ok(_) => Err(accepted.into()),
-    }
-}
-
 fn expect_eq<T: PartialEq + std::fmt::Debug>(got: T, want: T, what: &str) -> Result<(), String> {
     if got == want {
         Ok(())
@@ -798,9 +787,9 @@ async fn ed25519_verify_check() -> Result<(), String> {
         .map_err(|e| describe("correct signature did not verify", &e))?;
 
     sig[0] ^= 0x01;
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         sig_verify(&key, ED25519_MESSAGE, sig).await?,
+        Error::AuthenticationFailed,
         "corrupted signature verified",
     )
 }
@@ -819,9 +808,9 @@ async fn ed25519_generated_key() -> Result<(), String> {
         .await?
         .map_err(|e| describe("round-trip signature did not verify", &e))?;
 
-    expect_error(
-        &Error::NotExtractable,
+    expect_error!(
         key.export_key().await,
+        Error::NotExtractable,
         "non-extractable key exported",
     )
 }
@@ -869,9 +858,9 @@ async fn ecdsa_verify_known_answer() -> Result<(), String> {
         .map_err(|e| describe("known-answer signature did not verify", &e))?;
 
     sig[0] ^= 0x01;
-    expect_error(
-        &Error::AuthenticationFailed,
+    expect_error!(
         sig_verify(&key, ECDSA_MESSAGE, sig).await?,
+        Error::AuthenticationFailed,
         "corrupted signature verified",
     )
 }
