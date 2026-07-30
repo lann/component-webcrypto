@@ -60,8 +60,11 @@ missing-features = ["ecdsa-sign"]
 missing-features = ["chacha20-poly1305", "aes-gcm-any-iv"]
 
 [targets.jco-browser]
-# The same host module as jco-node, in headless Chromium.
-missing-features = ["chacha20-poly1305", "aes-gcm-any-iv"]
+# The same host module as jco-node, in headless Chromium — whose WebCrypto,
+# unlike Node's, serves the full GCM nonce contract (the host adapts: it
+# reinterprets platform failures as `unsupported` only when they happen,
+# so no declaration lives in the module).
+missing-features = ["chacha20-poly1305"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
