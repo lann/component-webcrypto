@@ -343,6 +343,39 @@ matters, a gate asserts it (e.g. the demo harness's expected-summary check);
 if it doesn't, omit it. Machine-derived counts belong only in generated
 artifacts like `conformance/matrix.md`.
 
+## Sizing pull requests
+
+Three factors decide how much lands in one PR. They pull in different
+directions, so they bind in this order.
+
+1. **Necessity.** Changes that cannot land separately without leaving `main`
+   worse between them — a stated contract the tree violates, a fix that
+   activates a latent defect elsewhere, a gate red until the counterpart
+   arrives — go in one PR, whatever that does to its size. This repository
+   has a standing instance: the conformance suites gate all implementations
+   against one behavior, so a change to the package surface is co-dependent
+   across the WIT, every implementation, and the SDKs *by construction*.
+   Name the co-dependence in the description; a reviewer who cannot see why
+   the pieces are inseparable will reasonably ask for the split.
+
+2. **Cohesion.** One decision per PR: the description should be a single
+   ruling plus its consequences, however many files those touch. "And also"
+   is the tell that two PRs are sharing a branch. Cohesion caps what a PR
+   may contain — it never forces changes together. One decision whose
+   consequences land safely apart (say, in two implementations that do not
+   gate each other) is two PRs, not one.
+
+3. **Review time.** Within what the first two allow, smaller is better: the
+   budget being spent is a human's attention on the diff. The converse also
+   holds and is not an exception — many *nearly identical* changes (a getter
+   added to every key resource, a signature migrated across its call sites)
+   are one PR, not many, because near-identical diffs review sublinearly:
+   the reviewer verifies the pattern once and scans the instances, while a
+   PR apiece pays full cost in CI and context each time and lets the pattern
+   drift between them. The test is textual similarity of the diffs, not
+   thematic similarity of the work — two subsystems getting "the same
+   treatment" through different mechanisms are two PRs.
+
 ## Tracking open findings in GitHub issues
 
 Open review findings and design decisions live in this repository's GitHub
