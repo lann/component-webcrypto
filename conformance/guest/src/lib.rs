@@ -20,39 +20,16 @@ wit_bindgen::generate!({
 
 mod probes;
 mod translate;
-mod util;
 mod vectors;
 
 use std::collections::BTreeSet;
 
+use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
-use translate::{
-    ChaChaCase, GcmCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase,
-};
+use translate::{AeadCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase};
 
-/// The `chacha20-poly1305` feature: both ChaCha20-Poly1305 constructions
-/// and the XChaCha internal-nonce minting interface. Browser WebCrypto
-/// implements none of them, so the jco targets declare it missing.
-pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
-
-/// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
-/// Nothing in this suite is tagged with it — the signing suite's world
-/// *imports* the interface, so a target missing the feature (the composed
-/// target: class D) is excluded from that suite structurally rather than
-/// case by case. No case *can* be tagged with it: a guest asking whether
-/// the interface declines must import it, and a target missing it cannot
-/// instantiate that guest. The declaration is held to the truth by
-/// `just class-d-composition` instead. Declared here so every guest
-/// validates the same names.
-pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
-
-/// Every feature name a target may declare missing. `all` traps on names
-/// outside this set, so a misspelled declaration is a harness bug rather
-/// than a silently-inert one.
-pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
-
-/// Validate a `missing-features` declaration against [`KNOWN_FEATURES`],
-/// returning the set. Panics (traps) on unknown names.
+/// Validate a `missing-features` declaration against
+/// [`KNOWN_FEATURES`], returning the set. Panics (traps) on unknown names.
 pub fn missing_set(missing: &[String]) -> BTreeSet<&str> {
     conformance_harness::missing_features(missing, KNOWN_FEATURES)
 }
@@ -73,8 +50,7 @@ pub struct Case {
 
 enum CaseKind {
     Hmac(HmacCase),
-    Gcm(GcmCase),
-    ChaCha(ChaChaCase),
+    Aead(AeadCase),
     InternalNonce(InternalNonceCase),
     Sha2(Sha2Case),
     Sig(SigCase),
@@ -92,7 +68,7 @@ fn materialize(
     TestCase::new(Case {
         name,
         features,
-        provided: features.iter().all(|feature| !missing.contains(feature)),
+        provided: conformance_harness::provided(features, missing),
         kind,
     })
 }
@@ -110,13 +86,14 @@ impl GuestTestCase for Case {
         if self.provided {
             let outcome = match &self.kind {
                 CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
-                CaseKind::Gcm(case) => vectors::run_gcm_case(case).await,
-                CaseKind::ChaCha(case) => vectors::run_chacha_case(case).await,
+                CaseKind::Aead(case) => vectors::run_aead_case(case).await,
                 CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
                 CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
                 CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
-                CaseKind::Probe(index) => probes::run_one(*index).await,
+                CaseKind::Probe(index) => {
+                    conformance_harness::run_probe(probes::PROBES, *index).await
+                }
             };
             match outcome {
                 Ok(()) => Outcome::Pass,
@@ -129,7 +106,7 @@ impl GuestTestCase for Case {
             // serve a feature it declares missing); vector cases skip
             // without re-asserting it thousands of times.
             let asserted = match &self.kind {
-                CaseKind::Probe(index) => probes::run_declined(*index).await,
+                CaseKind::Probe(_) => probes::run_declined(self.features).await,
                 _ => Ok(format!(
                     "feature {} declared missing by the target",
                     self.features.join("+")
@@ -150,79 +127,52 @@ impl Guest for Component {
         let missing = missing_set(&missing_features);
         let mut cases = Vec::new();
         for case in translate::hmac_cases() {
-            let name = format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            );
-            cases.push(materialize(name, &[], &missing, CaseKind::Hmac(case)));
-        }
-        for case in translate::gcm_cases() {
-            let name = format!(
-                "aes-gcm/wycheproof/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            );
-            cases.push(materialize(name, &[], &missing, CaseKind::Gcm(case)));
-        }
-        for case in translate::chacha_cases() {
-            let name = format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            );
             cases.push(materialize(
-                name,
-                &[FEATURE_CHACHA],
+                case.case_id(),
+                case.features(),
                 &missing,
-                CaseKind::ChaCha(case),
+                CaseKind::Hmac(case),
+            ));
+        }
+        for case in translate::aead_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Aead(case),
             ));
         }
         for case in translate::internal_nonce_cases() {
-            let name = format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            );
-            let features: &'static [&'static str] = match case.alg {
-                translate::InternalNonceAlg::AesGcm => &[],
-                translate::InternalNonceAlg::XChaCha20Poly1305 => &[FEATURE_CHACHA],
-            };
             cases.push(materialize(
-                name,
-                features,
+                case.case_id(),
+                case.features(),
                 &missing,
                 CaseKind::InternalNonce(case),
             ));
         }
         for case in translate::sha2_cases() {
-            let name = format!(
-                "sha2/nist-cavp/{}-len{}/{}",
-                case.alg.name(),
-                case.len_bits,
-                case.schedule.name()
-            );
-            cases.push(materialize(name, &[], &missing, CaseKind::Sha2(case)));
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Sha2(case),
+            ));
         }
         for case in translate::sig_cases() {
-            let name = format!(
-                "{}/wycheproof/tc{}/{}",
-                case.alg.name(),
-                case.tc_id,
-                case.schedule.name()
-            );
-            cases.push(materialize(name, &[], &missing, CaseKind::Sig(case)));
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Sig(case),
+            ));
         }
         for case in translate::speccheck_cases() {
-            let name = format!(
-                "ed25519/speccheck/tc{}/{}",
-                case.tc_id,
-                case.schedule.name()
-            );
-            cases.push(materialize(name, &[], &missing, CaseKind::Speccheck(case)));
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Speccheck(case),
+            ));
         }
         for (index, probe) in probes::PROBES.iter().enumerate() {
             cases.push(materialize(

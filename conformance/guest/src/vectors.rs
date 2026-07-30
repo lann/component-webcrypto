@@ -2,12 +2,13 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::translate::{
-    AeadExpectation, ChaChaAlg, ChaChaCase, GcmCase, HmacAlg, HmacCase, InternalNonceAlg,
-    InternalNonceCase, Schedule, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
+    AeadAlg, AeadCase, AeadExpectation, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase,
+    Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
 };
-use crate::util::{
-    compute, describe, expect_bytes, in_open, in_seal, open, seal, sig_verify, sign, verify,
+use conformance_harness::stream::{
+    compute, in_open, in_seal, open, seal, sig_verify, sign, verify, Schedule,
 };
+use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::{import_key, AesVariant};
 use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
@@ -22,6 +23,16 @@ use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::xchacha20_poly1305::import_key as import_xchacha_key;
 use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
+
+/// The `aes-variant` for a vector's key size (the sizes the translation
+/// emits; AES-192 never reaches execution).
+fn aes_variant(key_bits: u32) -> Result<AesVariant, String> {
+    match key_bits {
+        128 => Ok(AesVariant::Aes128),
+        256 => Ok(AesVariant::Aes256),
+        bits => Err(format!("untranslatable AES key size: {bits}")),
+    }
+}
 
 /// Run one SHA-2 digest vector under its schedule.
 pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
@@ -63,52 +74,24 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
     } else {
         let (verified, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
         fed.map_err(|e| format!("verify data feeder: {e}"))?;
-        match verified {
-            Err(Error::AuthenticationFailed) => {}
-            Err(other) => {
-                return Err(describe(
-                    "verify of an invalid vector: expected authentication-failed, got",
-                    &other,
-                ));
-            }
-            Ok(()) => return Err("verify(tag) succeeded for an invalid vector".into()),
-        }
+        expect_err(
+            "verify of an invalid vector",
+            ErrKind::AuthenticationFailed,
+            verified,
+            "verify(tag) succeeded",
+        )?;
     }
     Ok(())
 }
 
-/// Run one AES-GCM vector under its schedule.
-pub async fn run_gcm_case(case: &GcmCase) -> Result<(), String> {
-    let variant = match case.key_bits {
-        128 => AesVariant::Aes128,
-        256 => AesVariant::Aes256,
-        bits => return Err(format!("untranslatable AES key size: {bits}")),
-    };
-    let key = import_key(variant, case.key.clone(), false)
-        .await
-        .map_err(|e| describe("import-key", &e))?;
-    run_aead_expectation(
-        &key,
-        case.expectation,
-        &case.iv,
-        &case.aad,
-        &case.msg,
-        &case.ct_tag,
-        case.schedule,
-    )
-    .await
-}
-
-/// Run one ChaCha20-Poly1305 vector (either variant) under its schedule.
-pub async fn run_chacha_case(case: &ChaChaCase) -> Result<(), String> {
+/// Run one caller-nonce AEAD vector (any algorithm) under its schedule.
+pub async fn run_aead_case(case: &AeadCase) -> Result<(), String> {
     let key = match case.alg {
-        ChaChaAlg::ChaCha20Poly1305 => import_chacha_key(case.key.clone(), false)
-            .await
-            .map_err(|e| describe("import-key", &e))?,
-        ChaChaAlg::XChaCha20Poly1305 => import_xchacha_key(case.key.clone(), false)
-            .await
-            .map_err(|e| describe("import-key", &e))?,
-    };
+        AeadAlg::AesGcm => import_key(aes_variant(case.key_bits)?, case.key.clone(), false).await,
+        AeadAlg::ChaCha20Poly1305 => import_chacha_key(case.key.clone(), false).await,
+        AeadAlg::XChaCha20Poly1305 => import_xchacha_key(case.key.clone(), false).await,
+    }
+    .map_err(|e| describe("import-key", &e))?;
     run_aead_expectation(
         &key,
         case.expectation,
@@ -136,20 +119,20 @@ async fn run_aead_expectation(
         AeadExpectation::InvalidNonce => {
             let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
             fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-            match sealed {
-                Err(Error::InvalidNonce(_)) => {}
-                Err(other) => return Err(describe("seal: expected invalid-nonce, got", &other)),
-                Ok(_) => {
-                    return Err(format!("seal accepted a {}-byte nonce", iv.len()));
-                }
-            }
+            expect_err(
+                "seal",
+                ErrKind::InvalidNonce,
+                sealed,
+                &format!("accepted a {}-byte nonce", iv.len()),
+            )?;
             let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-            match opened {
-                Err(Error::InvalidNonce(_)) => Ok(()),
-                Err(other) => Err(describe("open: expected invalid-nonce, got", &other)),
-                Ok(_) => Err(format!("open accepted a {}-byte nonce", iv.len())),
-            }
+            expect_err(
+                "open",
+                ErrKind::InvalidNonce,
+                opened,
+                &format!("accepted a {}-byte nonce", iv.len()),
+            )
         }
         AeadExpectation::Valid => {
             let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
@@ -165,14 +148,12 @@ async fn run_aead_expectation(
         AeadExpectation::AuthenticationFailed => {
             let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-            match opened {
-                Err(Error::AuthenticationFailed) => Ok(()),
-                Err(other) => Err(describe(
-                    "open: expected authentication-failed, got",
-                    &other,
-                )),
-                Ok(_) => Err("open accepted an invalid vector".into()),
-            }
+            expect_err(
+                "open",
+                ErrKind::AuthenticationFailed,
+                opened,
+                "accepted an invalid vector",
+            )
         }
     }
 }
@@ -184,12 +165,7 @@ async fn run_aead_expectation(
 pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), String> {
     let key = match case.alg {
         InternalNonceAlg::AesGcm => {
-            let variant = match case.key_bits {
-                128 => AesVariant::Aes128,
-                256 => AesVariant::Aes256,
-                bits => return Err(format!("untranslatable AES key size: {bits}")),
-            };
-            import_gcm_internal_key(variant, case.key.clone(), false)
+            import_gcm_internal_key(aes_variant(case.key_bits)?, case.key.clone(), false)
                 .await
                 .map_err(|e| describe("import-key", &e))?
         }
@@ -206,26 +182,18 @@ pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), Str
         let (resealed, fed) = in_seal(&key, &case.aad, &case.msg, case.schedule).await;
         fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
         let resealed = resealed.map_err(|e| describe("seal", &e))?;
-        if resealed.len() != case.sealed.len() {
-            return Err(format!(
-                "resealed length: got {}, want {}",
-                resealed.len(),
-                case.sealed.len()
-            ));
-        }
+        expect(resealed.len(), case.sealed.len(), "resealed length")?;
         let (reopened, fed) = in_open(&key, &case.aad, &resealed, Schedule::Whole).await;
         fed.map_err(|e| format!("re-open sealed feeder: {e}"))?;
         let reopened = reopened.map_err(|e| describe("open of fresh seal", &e))?;
         expect_bytes(&reopened, &case.msg, "round-tripped bytes")
     } else {
-        match opened {
-            Err(Error::AuthenticationFailed) => Ok(()),
-            Err(other) => Err(describe(
-                "open: expected authentication-failed, got",
-                &other,
-            )),
-            Ok(_) => Err("open accepted an invalid sealed message".into()),
-        }
+        expect_err(
+            "open",
+            ErrKind::AuthenticationFailed,
+            opened,
+            "accepted an invalid sealed message",
+        )
     }
 }
 
@@ -244,14 +212,12 @@ pub async fn run_speccheck_case(case: &SpeccheckCase) -> Result<(), String> {
     if case.valid {
         verified.map_err(|e| describe("verify failed for the valid case", &e))
     } else {
-        match verified {
-            Err(Error::AuthenticationFailed) => Ok(()),
-            Err(other) => Err(describe(
-                "verify: expected authentication-failed, got",
-                &other,
-            )),
-            Ok(()) => Err("a degenerate signature verified".into()),
-        }
+        expect_err(
+            "verify",
+            ErrKind::AuthenticationFailed,
+            verified,
+            "a degenerate signature verified",
+        )
     }
 }
 
@@ -277,13 +243,11 @@ pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
     if case.valid {
         verified.map_err(|e| describe("verify(sig) failed for a valid vector", &e))
     } else {
-        match verified {
-            Err(Error::AuthenticationFailed) => Ok(()),
-            Err(other) => Err(describe(
-                "verify of an invalid vector: expected authentication-failed, got",
-                &other,
-            )),
-            Ok(()) => Err("verify(sig) succeeded for an invalid vector".into()),
-        }
+        expect_err(
+            "verify of an invalid vector",
+            ErrKind::AuthenticationFailed,
+            verified,
+            "verify(sig) succeeded",
+        )
     }
 }

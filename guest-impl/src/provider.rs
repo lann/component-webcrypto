@@ -256,8 +256,16 @@ impl HmacSha2Guest for Component {
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
-    async fn generate_key(variant: Sha2Variant, extractable: bool) -> Result<mac::MacKey, Error> {
-        let material = rng_infallible(MacKeyMaterial::generate(variant.into(), extractable))?;
+    async fn generate_key(
+        variant: Sha2Variant,
+        length: Option<u32>,
+        extractable: bool,
+    ) -> Result<mac::MacKey, Error> {
+        let material = rng_infallible(MacKeyMaterial::generate(
+            variant.into(),
+            length,
+            extractable,
+        ))?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 }
