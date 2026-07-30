@@ -49,10 +49,24 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 ///   embedder's one configured number, at a default concurrency of four
 ///   operations.
 ///
-/// Admission shares one pool per context: an operation may therefore wait
-/// on *unrelated* operations' completion (the same shape of coupling as
-/// wasi:http body backpressure). Do not withhold an admitted operation's
-/// input while awaiting a queued one.
+/// Admission shares one pool per context, so an operation may wait on
+/// *unrelated* operations' completion. The package states the caller's side
+/// of this as the making-progress rule (see the `mac-key` docs): feed each
+/// in-flight operation's input, and drain each returned stream as it becomes
+/// available, without waiting on another operation. A caller that defers
+/// either can deadlock against the bound, and no implementation can rescue
+/// it.
+///
+/// What is bounded is what this host *accumulates*: the stream buffers, and
+/// the output stream until its bytes are read or dropped. What is not
+/// bounded is the `list<u8>` parameters — `aad`, `nonce`, and the minting
+/// interfaces' `raw` — which the canonical ABI lifts before the host
+/// function runs, so they are already in host memory when admission is
+/// reached. Bounding those needs a hold *before* the call starts, which the
+/// component model provides to a component callee (`backpressure.{inc,dec}`)
+/// and does not expose to a host import. (The in-guest provider, which could
+/// use it, deliberately does not: it has essentially one caller, so its
+/// instance memory limit is its bound — see guest-impl's `buffer` module.)
 ///
 /// The pool's budget is resolved **once**, at the first operation that
 /// buffers, and belongs to the pool from then on. Changing
