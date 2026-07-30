@@ -210,7 +210,17 @@ interface aead {
     /// identically here.
     resource aead-key {
         /// Encrypt and authenticate `plaintext` under `nonce` with the
-        /// associated data `aad`.
+        /// associated data `aad`, producing a tag of `tag-size` bytes —
+        /// `none` means the algorithm's default (the `tag-size` getter).
+        ///
+        /// The algorithm defines which nonce lengths and tag sizes it
+        /// accepts (its minting interface documents both; the getters'
+        /// defaults are always accepted). A nonce of an unaccepted length
+        /// fails `error.invalid-nonce`; a tag size outside the algorithm's
+        /// set — or one an implementation's security policy declines —
+        /// fails `error.unsupported`. Callers wanting the algorithm's
+        /// standard behavior pass the getters' sizes and `none`, and never
+        /// need to match on `algorithm-name`.
         ///
         /// The returned stream carries the ciphertext followed by the
         /// authentication tag (the `crypto.subtle.encrypt` wire format).
@@ -222,15 +232,19 @@ interface aead {
         /// unread output before it has taken the whole input.
         ///
         /// The caller is responsible for nonce uniqueness per key; nonce
-        /// misuse defeats the algorithm's guarantees.
+        /// misuse defeats the algorithm's guarantees. Short tags weaken the
+        /// forgery bound and are opt-in by construction: they exist only
+        /// behind an explicit `tag-size`.
         ///
         /// The plaintext stream is fully drained even when the result is an
         /// error, so a caller feeding the stream concurrently never observes
         /// its writer failing instead of the error.
-        seal: async func(nonce: list<u8>, aad: list<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
+        seal: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
 
-        /// Decrypt and verify `ciphertext` (ciphertext followed by tag, as
-        /// produced by `seal`) under `nonce` and `aad`.
+        /// Decrypt and verify `ciphertext` (ciphertext followed by a
+        /// `tag-size`-byte tag, as produced by `seal`) under `nonce` and
+        /// `aad`. See `seal` for the `nonce` and `tag-size` contracts,
+        /// which apply identically here.
         ///
         /// Resolves only after the ciphertext stream is fully drained and the
         /// tag verified: `ok(stream)` *is* the authentication statement, and
@@ -239,7 +253,7 @@ interface aead {
         ///
         /// Like `seal`, the ciphertext stream is fully drained even when the
         /// result is an error.
-        open: async func(nonce: list<u8>, aad: list<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
+        open: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
         /// The registry name of the algorithm family this key is bound to,
         /// e.g. `"AES-GCM"` (WebCrypto's `KeyAlgorithm.name`, spelled as
@@ -254,15 +268,19 @@ interface aead {
         /// `AesKeyAlgorithm.length`).
         algorithm-length: func() -> u32;
 
-        /// The size in bytes of the nonce this key's `seal`/`open` require,
-        /// e.g. `12` for AES-GCM — so a component granted only the key
-        /// handle can construct nonces without matching on
-        /// `algorithm-name`.
+        /// The algorithm's standard nonce size in bytes, e.g. `12` for
+        /// AES-GCM — always accepted by this key's `seal`/`open`, so a
+        /// component granted only the key handle can construct nonces
+        /// without matching on `algorithm-name`. Whether *other* lengths
+        /// are accepted is the algorithm's contract, documented by its
+        /// minting interface (GCM accepts any non-empty nonce; the ChaCha
+        /// constructions accept exactly this size).
         nonce-size: func() -> u32;
 
-        /// The size in bytes of the authentication tag trailing the
-        /// ciphertext in `seal`'s output, e.g. `16` — for framing
-        /// arithmetic (sealed length = plaintext length + `tag-size`).
+        /// The algorithm's default tag size in bytes, e.g. `16` — what a
+        /// `tag-size` of `none` selects, and the framing arithmetic for
+        /// default-tag messages (sealed length = plaintext length +
+        /// `tag-size`).
         tag-size: func() -> u32;
 
         /// Whether the key material may be exported. See `mac-key`.

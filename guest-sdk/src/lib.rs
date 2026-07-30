@@ -634,7 +634,26 @@ impl Aead {
         let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
         Seal::new(
             plaintext.into(),
-            Box::new(move |rx| Box::pin(self.0.seal(nonce, aad, rx))),
+            Box::new(move |rx| Box::pin(self.0.seal(nonce, aad, None, rx))),
+        )
+    }
+
+    /// [`seal`](Self::seal) with an explicit tag size in bytes, for
+    /// algorithms whose tag size is a per-call parameter (AES-GCM's set is
+    /// 4, 8, 12, 13, 14, 15, or 16; other algorithms fix 16). Short tags
+    /// weaken the forgery bound; prefer [`seal`](Self::seal), which uses
+    /// the algorithm default ([`tag_size`](Self::tag_size)).
+    pub fn seal_with_tag_size<'a>(
+        &'a self,
+        nonce: impl Into<Cow<'a, [u8]>>,
+        aad: impl Into<Cow<'a, [u8]>>,
+        tag_size: u8,
+        plaintext: impl Into<DataSource<'a>>,
+    ) -> Seal<'a> {
+        let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
+        Seal::new(
+            plaintext.into(),
+            Box::new(move |rx| Box::pin(self.0.seal(nonce, aad, Some(tag_size), rx))),
         )
     }
 
@@ -652,7 +671,24 @@ impl Aead {
         ciphertext: impl Into<DataSource<'_>>,
     ) -> Result<StreamReader<u8>, Error> {
         let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
-        run_sourced(ciphertext.into(), |rx| self.0.open(nonce, aad, rx)).await
+        run_sourced(ciphertext.into(), |rx| self.0.open(nonce, aad, None, rx)).await
+    }
+
+    /// [`open`](Self::open) with an explicit tag size in bytes (the size
+    /// the message was sealed with — see
+    /// [`seal_with_tag_size`](Self::seal_with_tag_size)).
+    pub async fn open_with_tag_size(
+        &self,
+        nonce: impl Into<Cow<'_, [u8]>>,
+        aad: impl Into<Cow<'_, [u8]>>,
+        tag_size: u8,
+        ciphertext: impl Into<DataSource<'_>>,
+    ) -> Result<StreamReader<u8>, Error> {
+        let (nonce, aad) = (nonce.into().into_owned(), aad.into().into_owned());
+        run_sourced(ciphertext.into(), |rx| {
+            self.0.open(nonce, aad, Some(tag_size), rx)
+        })
+        .await
     }
 
     /// The name of the key's algorithm family, e.g. `"AES-GCM"` —
@@ -669,8 +705,11 @@ impl Aead {
         self.0.algorithm_length()
     }
 
-    /// The size in bytes of the nonce [`seal`](Self::seal)/[`open`](Self::open)
-    /// require, e.g. `12` for AES-GCM.
+    /// The algorithm's standard nonce size in bytes, e.g. `12` for AES-GCM
+    /// — always accepted by [`seal`](Self::seal)/[`open`](Self::open).
+    /// Whether other lengths are accepted is the algorithm's contract
+    /// (AES-GCM accepts any non-empty nonce; the ChaCha constructions
+    /// accept exactly this size).
     pub fn nonce_size(&self) -> u32 {
         self.0.nonce_size()
     }

@@ -117,7 +117,7 @@ async fn run_aead_expectation(
 ) -> Result<(), String> {
     match expectation {
         AeadExpectation::InvalidNonce => {
-            let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
+            let (sealed, fed) = seal(key, iv, aad, None, msg, schedule).await;
             fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
             expect_err(
                 "seal",
@@ -125,7 +125,7 @@ async fn run_aead_expectation(
                 sealed,
                 &format!("accepted a {}-byte nonce", iv.len()),
             )?;
-            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
+            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             expect_err(
                 "open",
@@ -135,18 +135,18 @@ async fn run_aead_expectation(
             )
         }
         AeadExpectation::Valid => {
-            let (sealed, fed) = seal(key, iv, aad, msg, schedule).await;
+            let (sealed, fed) = seal(key, iv, aad, None, msg, schedule).await;
             fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
             let sealed = sealed.map_err(|e| describe("seal", &e))?;
             expect_bytes(&sealed, ct_tag, "sealed bytes")?;
 
-            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
+            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             let opened = opened.map_err(|e| describe("open", &e))?;
             expect_bytes(&opened, msg, "opened bytes")
         }
         AeadExpectation::AuthenticationFailed => {
-            let (opened, fed) = open(key, iv, aad, ct_tag, schedule).await;
+            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
             fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
             expect_err(
                 "open",

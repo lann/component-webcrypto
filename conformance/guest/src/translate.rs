@@ -6,9 +6,9 @@
 //! | Vector property | Our expectation |
 //! | --- | --- |
 //! | GCM, keySize ≠ 256 | Skipped (import rejection is covered by probes). |
-//! | GCM, keySize 256, ivSize ≠ 96 | `seal`/`open` both fail `invalid-nonce`. |
-//! | GCM, keySize 256, ivSize 96, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
-//! | GCM, keySize 256, ivSize 96, `invalid` | `open` fails `authentication-failed`. |
+//! | GCM, keySize 256, ivSize 0 | `seal`/`open` both fail `invalid-nonce`. |
+//! | GCM, keySize 256, any other ivSize, `valid` | `seal` = `ct ‖ tag`; `open` = `msg` (the non-96-bit sizes exercise the `J0` derivation). |
+//! | GCM, keySize 256, any other ivSize, `invalid` | `open` fails `authentication-failed`. |
 //! | ChaCha20-Poly1305, ivSize ≠ the variant's (96 / 192 for X) | `seal`/`open` both fail `invalid-nonce`. |
 //! | ChaCha20-Poly1305, variant ivSize, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
 //! | ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed`. |
@@ -24,7 +24,7 @@
 //! degenerate duplicates).
 
 use conformance_harness::stream::Schedule;
-use conformance_harness::FEATURE_CHACHA;
+use conformance_harness::{FEATURE_CHACHA, FEATURE_GCM_ANY_IV};
 use serde::Deserialize;
 
 /// The schedule set for a vector whose longest stream input is
@@ -179,8 +179,17 @@ impl AeadCase {
         )
     }
 
-    /// The features this case exercises beyond the baseline surface.
+    /// The features this case exercises beyond the baseline surface: the
+    /// algorithm's, plus `aes-gcm-any-iv` for GCM nonces outside the
+    /// 12–128-byte window every implementation serves (empty nonces are
+    /// untagged — every target rejects them `invalid-nonce`).
     pub fn features(&self) -> &'static [&'static str] {
+        if matches!(self.alg, AeadAlg::AesGcm)
+            && !self.iv.is_empty()
+            && !(12..=128).contains(&self.iv.len())
+        {
+            return &[FEATURE_GCM_ANY_IV];
+        }
         self.alg.features()
     }
 }
@@ -522,8 +531,7 @@ pub fn aead_cases() -> Vec<AeadCase> {
             }
             for test in &group.tests {
                 let field = format!("{} tc{}", alg.name(), test.tc_id);
-                let (fields, expectation, max_input_len) =
-                    translate_aead(&field, group, test, alg.iv_bits());
+                let (fields, expectation, max_input_len) = translate_aead(&field, alg, group, test);
                 let valid = matches!(expectation, AeadExpectation::Valid);
                 for schedule in schedules(max_input_len, valid) {
                     let (key, iv, aad, msg, ct_tag) = fields.clone();
@@ -546,15 +554,18 @@ pub fn aead_cases() -> Vec<AeadCase> {
     cases
 }
 
-/// Decode one Wycheproof AEAD test and derive its expectation: a group whose
-/// `ivSize` is not the algorithm's nonce length must fail `invalid-nonce`;
-/// otherwise the vector's own verdict applies.
+/// Decode one Wycheproof AEAD test and derive its expectation. Nonce-length
+/// policy is the algorithm's: GCM accepts any non-empty nonce (only the
+/// `ZeroLengthIv` groups fail `invalid-nonce`; every other `ivSize` runs
+/// the vector's own verdict, the non-96-bit sizes exercising the `J0`
+/// derivation), while the ChaCha constructions fail `invalid-nonce` for any
+/// `ivSize` but their own.
 #[allow(clippy::type_complexity)]
 fn translate_aead(
     field: &str,
+    alg: AeadAlg,
     group: &AeadGroup,
     test: &AeadTest,
-    valid_iv_bits: u32,
 ) -> (
     (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>),
     AeadExpectation,
@@ -567,7 +578,11 @@ fn translate_aead(
     let mut ct_tag = unhex(field, &test.ct);
     ct_tag.extend(unhex(field, &test.tag));
     let valid = is_valid(field, &test.result);
-    let (expectation, max_input_len) = if group.iv_size != valid_iv_bits {
+    let nonce_accepted = match alg {
+        AeadAlg::AesGcm => group.iv_size != 0,
+        _ => group.iv_size == alg.iv_bits(),
+    };
+    let (expectation, max_input_len) = if !nonce_accepted {
         (AeadExpectation::InvalidNonce, msg.len().max(ct_tag.len()))
     } else if valid {
         (AeadExpectation::Valid, msg.len().max(ct_tag.len()))

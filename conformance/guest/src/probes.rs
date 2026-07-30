@@ -8,6 +8,7 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
+    FEATURE_GCM_ANY_IV,
 };
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVariant};
@@ -47,6 +48,9 @@ macro_rules! feature_tags {
     (chacha) => {
         &[FEATURE_CHACHA]
     };
+    (gcm_any_iv) => {
+        &[FEATURE_GCM_ANY_IV]
+    };
 }
 
 probes! {
@@ -80,20 +84,53 @@ probes! {
     stream_empty_writes,
     extractable_getter,
     hmac_generate_length,
+    gcm_full_parameters,
+    gcm_any_iv(gcm_any_iv),
+    chacha_tag_size_fixed(chacha),
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
-/// the correct decline. Every feature-tagged probe here exercises
-/// ChaCha20-Poly1305, so the assertion is shared — each ChaCha minting path
-/// must fail `unsupported`. This is the two-way guarantee behind the plain
+/// the correct decline. This is the two-way guarantee behind the plain
 /// `skipped` the vector cases report: a target cannot silently serve a
 /// feature it declares missing.
 pub async fn run_declined(features: &[&str]) -> Result<String, String> {
     if features == [FEATURE_CHACHA] {
         chacha_minting_declined().await
+    } else if features == [FEATURE_GCM_ANY_IV] {
+        gcm_any_iv_declined().await
     } else {
         Err("probe has no decline assertion for its features".into())
     }
+}
+
+/// Assert that AES-GCM nonces outside the 12–128-byte window decline
+/// `unsupported` in both directions — a target declaring `aes-gcm-any-iv`
+/// missing must genuinely refuse them, not serve them or misreport the
+/// refusal.
+async fn gcm_any_iv_declined() -> Result<String, String> {
+    let key = generate_key_256(false)
+        .await
+        .map_err(|detail| format!("minting an AES-256 key: {detail}"))?;
+    for len in [8usize, 257] {
+        let iv = vec![0x11u8; len];
+        let (sealed, fed) = seal(&key, &iv, b"", None, b"msg", Schedule::Whole).await;
+        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        expect_err(
+            &format!("seal ({len}-byte nonce)"),
+            ErrKind::Unsupported,
+            sealed,
+            "served a nonce length the target declares missing",
+        )?;
+        let (opened, fed) = open(&key, &iv, b"", None, &[0u8; 32], Schedule::Whole).await;
+        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+        expect_err(
+            &format!("open ({len}-byte nonce)"),
+            ErrKind::Unsupported,
+            opened,
+            "served a nonce length the target declares missing",
+        )?;
+    }
+    Ok("AES-GCM nonces outside 12–128 bytes declined unsupported".into())
 }
 
 /// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
@@ -248,8 +285,9 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (sealed, fed) = seal(
         &key,
-        &[0u8; 8],
+        &[],
         b"probe aad",
+        None,
         &plaintext,
         Schedule::Straddle,
     )
@@ -259,7 +297,7 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
         "seal",
         ErrKind::InvalidNonce,
         sealed,
-        "8-byte nonce accepted",
+        "empty nonce accepted",
     )
 }
 
@@ -270,8 +308,9 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
     let ciphertext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (opened, fed) = open(
         &key,
-        &[0u8; 8],
+        &[],
         b"probe aad",
+        None,
         &ciphertext,
         Schedule::Straddle,
     )
@@ -281,7 +320,7 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
         "open",
         ErrKind::InvalidNonce,
         opened,
-        "8-byte nonce accepted",
+        "empty nonce accepted",
     )
 }
 
@@ -293,7 +332,7 @@ async fn sealed_length() -> Result<(), String> {
     expect(key.tag_size(), 16, "aead-key.tag-size")?;
     for len in [0usize, 1, 15, 16, 17, 1024] {
         let plaintext = vec![0xa5u8; len];
-        let (sealed, fed) = seal(&key, &[1u8; 12], b"", &plaintext, Schedule::Whole).await;
+        let (sealed, fed) = seal(&key, &[1u8; 12], b"", None, &plaintext, Schedule::Whole).await;
         fed.map_err(|e| format!("plaintext feeder ({len} bytes): {e}"))?;
         let sealed = sealed.map_err(|e| describe(&format!("seal of {len} bytes"), &e))?;
         expect(
@@ -387,10 +426,26 @@ async fn generated_key_shape() -> Result<(), String> {
 
     let nonce = [7u8; 12];
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(3 * 16 + 5).collect();
-    let (sealed, fed) = seal(&aes_key, &nonce, b"shape aad", &plaintext, Schedule::Whole).await;
+    let (sealed, fed) = seal(
+        &aes_key,
+        &nonce,
+        b"shape aad",
+        None,
+        &plaintext,
+        Schedule::Whole,
+    )
+    .await;
     fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
     let sealed = sealed.map_err(|e| describe("seal under generated key", &e))?;
-    let (opened, fed) = open(&aes_key, &nonce, b"shape aad", &sealed, Schedule::Whole).await;
+    let (opened, fed) = open(
+        &aes_key,
+        &nonce,
+        b"shape aad",
+        None,
+        &sealed,
+        Schedule::Whole,
+    )
+    .await;
     fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open under generated key", &e))?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
@@ -664,7 +719,7 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
         let key = import(vec![0x42u8; 32], false)
             .await
             .map_err(|e| describe("import-key", &e))?;
-        let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", msg, Schedule::Whole).await;
+        let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", None, msg, Schedule::Whole).await;
         fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
         expect_err(
             &format!("{name} seal ({bad_len}-byte nonce)"),
@@ -672,10 +727,18 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
             sealed,
             "sealed under the other construction's nonce length",
         )?;
-        let (sealed, fed) = seal(&key, &vec![0u8; good_len], b"", msg, Schedule::Whole).await;
+        let (sealed, fed) = seal(&key, &vec![0u8; good_len], b"", None, msg, Schedule::Whole).await;
         fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
         let sealed = sealed.map_err(|e| describe("seal", &e))?;
-        let (opened, fed) = open(&key, &vec![0u8; good_len], b"", &sealed, Schedule::Whole).await;
+        let (opened, fed) = open(
+            &key,
+            &vec![0u8; good_len],
+            b"",
+            None,
+            &sealed,
+            Schedule::Whole,
+        )
+        .await;
         fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
         let opened = opened.map_err(|e| describe("open", &e))?;
         expect_bytes(&opened, msg, "opened bytes")?;
@@ -1054,10 +1117,10 @@ async fn aes128_shape() -> Result<(), String> {
 
     let plaintext = b"aes-128 round trip payload".to_vec();
     let nonce = [3u8; 12];
-    let (sealed, fed) = seal(&key, &nonce, b"aad", &plaintext, Schedule::Straddle).await;
+    let (sealed, fed) = seal(&key, &nonce, b"aad", None, &plaintext, Schedule::Straddle).await;
     fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
     let sealed = sealed.map_err(|e| describe("seal", &e))?;
-    let (opened, fed) = open(&key, &nonce, b"aad", &sealed, Schedule::Whole).await;
+    let (opened, fed) = open(&key, &nonce, b"aad", None, &sealed, Schedule::Whole).await;
     fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open", &e))?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
@@ -1122,7 +1185,15 @@ async fn ed25519_sign_known_answer() -> Result<(), String> {
 async fn open_short_input() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     for len in [0usize, 1, 15] {
-        let (opened, fed) = open(&key, &[0u8; 12], b"", &vec![0xa5; len], Schedule::Whole).await;
+        let (opened, fed) = open(
+            &key,
+            &[0u8; 12],
+            b"",
+            None,
+            &vec![0xa5; len],
+            Schedule::Whole,
+        )
+        .await;
         fed.map_err(|e| format!("{len}-byte open feeder: {e}"))?;
         expect_err(
             &format!("open ({len}-byte input)"),
@@ -1188,12 +1259,20 @@ async fn stream_empty_writes() -> Result<(), String> {
     let nonce = [7u8; 12];
     let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (sealed, fed) = futures::join!(
-        aes.seal(nonce.to_vec(), b"empty-write aad".to_vec(), rx),
+        aes.seal(nonce.to_vec(), b"empty-write aad".to_vec(), None, rx),
         feed(tx, vec![Vec::new(), payload.clone(), Vec::new()])
     );
     fed?;
     let sealed = sealed.map_err(|e| describe("seal", &e))?.collect().await;
-    let (opened, fed) = open(&aes, &nonce, b"empty-write aad", &sealed, Schedule::Whole).await;
+    let (opened, fed) = open(
+        &aes,
+        &nonce,
+        b"empty-write aad",
+        None,
+        &sealed,
+        Schedule::Whole,
+    )
+    .await;
     fed.map_err(|e| format!("open feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open", &e))?;
     expect_bytes(&opened, &payload, "round-tripped plaintext")
@@ -1292,6 +1371,93 @@ async fn hmac_generate_length() -> Result<(), String> {
         Err(Error::Unsupported(_)) => {}
         Err(other) => return Err(describe("length 250: expected unsupported, got", &other)),
         Ok(_) => return Err("sub-byte length 250 minted a key".into()),
+    }
+    Ok(())
+}
+
+/// The full GCM parameter space, cross-target: a 16-byte nonce
+/// round-trips (the non-96-bit `J0` derivation), a 4-byte tag round-trips
+/// and fails when opened at the default size, an out-of-set tag size is
+/// declined `unsupported`, ChaCha declines any non-default tag size, and
+/// the empty nonce fails `invalid-nonce`.
+async fn gcm_full_parameters() -> Result<(), String> {
+    let key = generate_key_256(false).await?;
+    let msg = b"gcm-full-parameters";
+
+    let (sealed, fed) = seal(&key, &[7u8; 16], b"aad", None, msg, Schedule::Straddle).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal (16-byte nonce)", &e))?;
+    let (opened, fed) = open(&key, &[7u8; 16], b"aad", None, &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open (16-byte nonce)", &e))?;
+    expect_bytes(&opened, msg, "opened bytes (16-byte nonce)")?;
+
+    let (short, fed) = seal(&key, &[9u8; 12], b"aad", Some(4), msg, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let short = short.map_err(|e| describe("seal (4-byte tag)", &e))?;
+    expect(short.len(), msg.len() + 4, "sealed length (4-byte tag)")?;
+    let (opened, fed) = open(&key, &[9u8; 12], b"aad", Some(4), &short, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open (4-byte tag)", &e))?;
+    expect_bytes(&opened, msg, "opened bytes (4-byte tag)")?;
+    let (opened, fed) = open(&key, &[9u8; 12], b"aad", None, &short, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    expect_err(
+        "open of a 4-byte-tag message at the default size",
+        ErrKind::AuthenticationFailed,
+        opened,
+        "verified with the wrong declared tag size",
+    )?;
+
+    let (sealed, fed) = seal(&key, &[9u8; 12], b"", Some(5), msg, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    expect_err(
+        "seal with a 5-byte tag size",
+        ErrKind::Unsupported,
+        sealed,
+        "sealed with a tag size outside the GCM set",
+    )?;
+
+    Ok(())
+}
+
+/// The ChaCha constructions fix their tag size: a non-default per-call
+/// `tag-size` is declined `unsupported` (the parameter exists for GCM, and
+/// nothing else may silently honor it).
+async fn chacha_tag_size_fixed() -> Result<(), String> {
+    let msg = b"chacha-tag-size";
+    let chacha = import_chacha_key(vec![0x42u8; 32], false)
+        .await
+        .map_err(|e| describe("chacha import-key", &e))?;
+    let (sealed, fed) = seal(&chacha, &[0u8; 12], b"", Some(12), msg, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    expect_err(
+        "ChaCha20-Poly1305 seal with a 12-byte tag size",
+        ErrKind::Unsupported,
+        sealed,
+        "sealed with a non-default tag size",
+    )?;
+    let (sealed, fed) = seal(&chacha, &[0u8; 12], b"", Some(16), msg, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    sealed.map_err(|e| describe("seal with the explicit default tag size", &e))?;
+    Ok(())
+}
+
+/// AES-GCM nonces outside the 12–128-byte window round-trip on targets
+/// serving the full contract (the short end and the long end both exercise
+/// the `J0` derivation).
+async fn gcm_any_iv() -> Result<(), String> {
+    let key = generate_key_256(false).await?;
+    let msg = b"gcm-any-iv";
+    for len in [8usize, 257] {
+        let iv = vec![0x11u8; len];
+        let (sealed, fed) = seal(&key, &iv, b"aad", None, msg, Schedule::Whole).await;
+        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        let sealed = sealed.map_err(|e| describe(&format!("seal ({len}-byte nonce)"), &e))?;
+        let (opened, fed) = open(&key, &iv, b"aad", None, &sealed, Schedule::Whole).await;
+        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe(&format!("open ({len}-byte nonce)"), &e))?;
+        expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
 }

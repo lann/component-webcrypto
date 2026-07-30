@@ -18,10 +18,29 @@ interface aes {
     }
 }
 
-/// AES-GCM key minting (NIST SP 800-38D).
+/// AES-GCM key minting (NIST SP 800-38D, the full parameter space).
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with 12-byte nonces
-/// and 16-byte tags.
+/// Keys returned here drive `aead.aead-key.seal`/`open` with the parameters
+/// as the Web Cryptography API's `AesGcmParams` defines them, per call:
+///
+/// - **Nonce**: any non-empty length (an empty nonce fails
+///   `error.invalid-nonce`). 96 bits is the standard size (the `nonce-size`
+///   getter) and the fast path; other lengths cost an extra GHASH pass
+///   (SP 800-38D §7.1's `J0` derivation) and forfeit §8.2's deterministic-
+///   construction guidance. The caller owns uniqueness either way. An
+///   implementation whose backend cannot serve a length MAY decline it with
+///   `error.unsupported` (platform-backed hosts inherit their platform's
+///   window; the standard size is always served).
+/// - **Tag size**: 16 bytes by default (`tag-size` of `none`); the
+///   algorithm's set is 4, 8, 12, 13, 14, 15, or 16 bytes (the registry's
+///   32–128-bit set). Short tags weaken the forgery bound (SP 800-38D
+///   Appendix C); implementations MAY decline sizes their security policy
+///   does not serve with `error.unsupported`.
+///
+/// For nonce-misuse resistance prefer `aes-gcm-internal-nonce`, which keeps
+/// the nonce out of the API entirely. A FIPS 140-3 approved-mode provider
+/// does not export this interface (caller-supplied encryption IVs fall
+/// outside SP 800-38D §8's approved envelope) — see `aes-gcm-internal-nonce`.
 interface aes-gcm {
     use types.{error};
     use aead.{aead-key};

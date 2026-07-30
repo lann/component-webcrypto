@@ -518,15 +518,16 @@ async fn gcm_invalid_key() -> Result<()> {
     )
 }
 
-/// Sealing with a wrong-length nonce fails with `invalid-nonce`.
+/// Sealing with an empty nonce fails with `invalid-nonce` (GCM accepts any
+/// non-empty length).
 async fn gcm_invalid_nonce() -> Result<()> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
         .context("generate-key")?;
     expect_error!(
-        seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await?,
+        seal_chunked(&key, &[], b"", b"payload", usize::MAX).await?,
         Error::InvalidNonce(_),
-        "8-byte nonce accepted",
+        "empty nonce accepted",
     )
 }
 
@@ -677,7 +678,7 @@ async fn seal_chunked(
     chunk: usize,
 ) -> Result<Result<Vec<u8>, Error>> {
     match run_chunked(plaintext, chunk, |rx| {
-        key.seal(nonce.to_vec(), aad.to_vec(), rx)
+        key.seal(nonce.to_vec(), aad.to_vec(), None, rx)
     })
     .await?
     {
@@ -696,7 +697,7 @@ async fn open_chunked(
     chunk: usize,
 ) -> Result<Result<Vec<u8>, Error>> {
     match run_chunked(ciphertext, chunk, |rx| {
-        key.open(nonce.to_vec(), aad.to_vec(), rx)
+        key.open(nonce.to_vec(), aad.to_vec(), None, rx)
     })
     .await?
     {

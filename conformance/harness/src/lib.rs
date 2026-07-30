@@ -42,11 +42,19 @@ pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
 /// the truth by `just class-d-composition` instead.
 pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 
+/// The `aes-gcm-any-iv` feature: AES-GCM nonces outside the 12–128-byte
+/// window every implementation serves. The `aes-gcm` contract accepts any
+/// non-empty nonce but lets an implementation decline lengths its backend
+/// cannot serve with `unsupported`; platform-backed hosts inherit their
+/// platform's window (Node's WebCrypto rejects nonces shorter than 12 or
+/// longer than 128 bytes).
+pub const FEATURE_GCM_ANY_IV: &str = "aes-gcm-any-iv";
+
 /// Every feature name a target may declare missing — shared here so every
 /// guest validates the same names. `all` traps on names outside this set,
 /// so a misspelled declaration is a harness bug rather than a silently
 /// inert one.
-pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN];
+pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN, FEATURE_GCM_ANY_IV];
 
 /// A probe body. Boxed because each `async fn` has its own opaque type.
 pub type ProbeFn = fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>>;

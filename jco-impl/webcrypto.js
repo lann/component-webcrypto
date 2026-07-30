@@ -375,53 +375,80 @@ export class AeadKey {
   }
 
   /**
-   * Encrypt and authenticate the plaintext stream under `nonce` and `aad`.
-   * Returns a `ReadableStream` carrying ciphertext followed by the 16-byte
-   * authentication tag (the `crypto.subtle.encrypt` wire format). Throws
-   * `{ tag: 'invalid-nonce', val }` for a nonce that is not exactly 12 bytes
-   * (AES-GCM per this package's WIT; WebCrypto itself would accept other
-   * lengths). The plaintext stream is drained before any failure is raised,
-   * so the guest's writer always completes rather than blocking on an
-   * unread stream.
+   * Encrypt and authenticate the plaintext stream under `nonce` and `aad`,
+   * with a `tagSize`-byte authentication tag (`undefined` = the 16-byte
+   * default). Returns a `ReadableStream` carrying ciphertext followed by
+   * the tag (the `crypto.subtle.encrypt` wire format). Throws
+   * `{ tag: 'invalid-nonce', val }` for an empty nonce and
+   * `{ tag: 'unsupported', val }` for a tag size outside the GCM set, per
+   * the WIT contract. The plaintext stream is drained before any failure
+   * is raised, so the guest's writer always completes rather than blocking
+   * on an unread stream.
    * @param {Uint8Array} nonce
    * @param {Uint8Array} aad
+   * @param {number | undefined} tagSize
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
-  async seal(nonce, aad, plaintext) {
+  async seal(nonce, aad, tagSize, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
       requireGcmNonce(nonce);
-      const sealed = await platformCall("AES-GCM seal", () =>
-        subtle.encrypt(
-          { name: "AES-GCM", iv: asBufferSource(nonce), additionalData: asBufferSource(aad) },
-          this.#key,
-          message,
-        ),
-      );
+      const tagLength = gcmTagLengthBits(tagSize);
+      let sealed;
+      try {
+        sealed = await platformCall("AES-GCM seal", () =>
+          subtle.encrypt(
+            {
+              name: "AES-GCM",
+              iv: asBufferSource(nonce),
+              additionalData: asBufferSource(aad),
+              tagLength,
+            },
+            this.#key,
+            message,
+          ),
+        );
+      } catch (err) {
+        if (gcmNonceUnservable(nonce)) {
+          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
+        }
+        throw err;
+      }
       return new Uint8Array(sealed);
     });
   }
 
   /**
-   * Decrypt and verify the ciphertext‖tag stream under `nonce` and `aad`.
+   * Decrypt and verify the ciphertext‖tag stream under `nonce` and `aad`,
+   * with a `tagSize`-byte tag (`undefined` = the 16-byte default).
    * Resolves only after the stream is fully drained and the tag verified
    * (`subtle.decrypt` releases no unverified plaintext); a verification
    * failure throws `{ tag: 'authentication-failed' }`. As with `seal`, the
    * ciphertext stream is drained before any failure is raised.
    * @param {Uint8Array} nonce
    * @param {Uint8Array} aad
+   * @param {number | undefined} tagSize
    * @param {AsyncIterable<unknown> | ReadableStream} ciphertext
    */
-  async open(nonce, aad, ciphertext) {
+  async open(nonce, aad, tagSize, ciphertext) {
     return withCollectedInputToStream(ciphertext, async (message) => {
       requireGcmNonce(nonce);
+      const tagLength = gcmTagLengthBits(tagSize);
       let opened;
       try {
         opened = await subtle.decrypt(
-          { name: "AES-GCM", iv: asBufferSource(nonce), additionalData: asBufferSource(aad) },
+          {
+            name: "AES-GCM",
+            iv: asBufferSource(nonce),
+            additionalData: asBufferSource(aad),
+            tagLength,
+          },
           this.#key,
           message,
         );
       } catch (err) {
+        if (gcmNonceUnservable(nonce)) {
+          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
+        }
         throw decryptFailure(err);
       }
       return new Uint8Array(opened);
@@ -430,9 +457,10 @@ export class AeadKey {
 
   /**
    * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
-   * from the mint (see `#lengthBits`), and the operation-contract sizes are
-   * fixed — every AEAD this host serves is AES-GCM: 12-byte nonces, 16-byte
-   * tags.
+   * from the mint (see `#lengthBits`), and the size getters report the
+   * standard/default parameters — every AEAD this host serves is AES-GCM:
+   * 12-byte nonces and 16-byte tags by default, with other sizes accepted
+   * per call.
    */
   algorithmName() {
     return this.#key.algorithm.name;
@@ -821,14 +849,49 @@ export class InternalNonceKey {
 export const aesGcmInternalNonce = aesMinting(InternalNonceKey);
 
 /**
- * Throw `{ tag: 'invalid-nonce', val }` unless `nonce` is the 12 bytes
- * AES-GCM specifies in this package's WIT.
+ * Throw `{ tag: 'invalid-nonce', val }` for an empty nonce. AES-GCM accepts
+ * any non-empty length per the `aes-gcm` minting contract; how much of that
+ * contract this host serves is the platform's window (see
+ * `gcmNonceUnservable`).
  * @param {Uint8Array} nonce
  */
 function requireGcmNonce(nonce) {
-  if (nonce.length !== 12) {
-    throw errInvalidNonce(`AES-GCM requires a 12-byte nonce, got ${nonce.length}`);
+  if (nonce.length === 0) {
+    throw errInvalidNonce("AES-GCM requires a non-empty nonce");
   }
+}
+
+/**
+ * Reinterpret a platform failure as `{ tag: 'unsupported' }` when the nonce
+ * sits outside the 12–128-byte window every known platform serves — the
+ * `aes-gcm-any-iv` conformance feature. The check runs only on *failures*:
+ * a platform that serves the full contract (nothing reaches this), and one
+ * with a window (Node's WebCrypto) declines rather than misreporting. A
+ * platform failing an outside-window call for some unrelated operational
+ * reason is folded in — the nonce is overwhelmingly the cause.
+ * @param {Uint8Array} nonce
+ */
+function gcmNonceUnservable(nonce) {
+  return nonce.length < 12 || nonce.length > 128;
+}
+
+/** The GCM tag sizes in bytes (the registry's 32–128-bit set). */
+const GCM_TAG_SIZES = [4, 8, 12, 13, 14, 15, 16];
+
+/**
+ * Resolve a per-call tag size to bits for `AesGcmParams.tagLength`,
+ * defaulting `undefined` to the 16-byte default and throwing
+ * `{ tag: 'unsupported', val }` outside the set, per the WIT contract.
+ * @param {number | undefined} tagSize
+ */
+function gcmTagLengthBits(tagSize) {
+  const size = tagSize ?? 16;
+  if (!GCM_TAG_SIZES.includes(size)) {
+    throw errUnsupported(
+      `AES-GCM does not define ${size}-byte tags; the set is 4, 8, 12, 13, 14, 15, or 16`,
+    );
+  }
+  return size * 8;
 }
 
 /**

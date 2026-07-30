@@ -44,19 +44,16 @@ function hmacInSubset(name) {
 }
 
 /**
- * encrypt_decrypt/aes_gcm (96-bit iv): 256-bit keys with 128-bit tags, plus
- * the illegal-tag-length rejections; other key sizes and legal-but-unserved
- * tag lengths are out, as is the mismatched-key test (it needs AES-CBC
- * normalization to succeed before the key check).
+ * encrypt_decrypt/aes_gcm (96-bit iv): 256-bit keys at every legal tag
+ * length (per-call `tag-size` carries them all), plus the illegal-tag-length
+ * rejections; other key sizes are out, as is the mismatched-key test (it
+ * needs AES-CBC normalization to succeed before the key check).
  */
 function gcmInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  if (!name.includes("256-bit key") || name.includes("mismatched key and algorithm")) {
-    return false;
-  }
-  return name.includes("128-bit tag") || name.includes("illegal tag length");
+  return name.includes("256-bit key") && !name.includes("mismatched key and algorithm");
 }
 
 /**

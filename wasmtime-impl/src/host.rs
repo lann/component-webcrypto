@@ -251,10 +251,14 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<AeadKey>,
         nonce: Vec<u8>,
         aad: Vec<u8>,
+        tag_size: Option<u8>,
         plaintext: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
         drain_then_stream(accessor, self_, plaintext, |key, msg| {
-            Ok(key.material.seal(&nonce, &aad, msg).map_err(Error::from))
+            Ok(key
+                .material
+                .seal(&nonce, &aad, tag_size, msg)
+                .map_err(Error::from))
         })
         .await
     }
@@ -264,10 +268,14 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<AeadKey>,
         nonce: Vec<u8>,
         aad: Vec<u8>,
+        tag_size: Option<u8>,
         ciphertext: StreamReader<u8>,
     ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
         drain_then_stream(accessor, self_, ciphertext, |key, msg| {
-            Ok(key.material.open(&nonce, &aad, msg).map_err(Error::from))
+            Ok(key
+                .material
+                .open(&nonce, &aad, tag_size, msg)
+                .map_err(Error::from))
         })
         .await
     }

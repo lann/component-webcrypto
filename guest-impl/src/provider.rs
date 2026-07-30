@@ -171,26 +171,28 @@ impl GuestAeadKey for AeadKey {
         &self,
         nonce: Vec<u8>,
         aad: Vec<u8>,
+        tag_size: Option<u8>,
         plaintext: wit_bindgen::StreamReader<u8>,
     ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
         // Per the WIT contract, the input stream is fully drained even when
         // the call resolves with an error, so the caller's writer always
         // completes.
         let msg = drain_stream(plaintext).await?;
-        Ok(stream_of(self.material.seal(&nonce, &aad, &msg)?))
+        Ok(stream_of(self.material.seal(&nonce, &aad, tag_size, &msg)?))
     }
 
     async fn open(
         &self,
         nonce: Vec<u8>,
         aad: Vec<u8>,
+        tag_size: Option<u8>,
         ciphertext: wit_bindgen::StreamReader<u8>,
     ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
         // Like `seal`: fully drain the input first. Buffering the whole
         // message is inherent to `open`: no unverified plaintext may be
         // observable.
         let msg = drain_stream(ciphertext).await?;
-        Ok(stream_of(self.material.open(&nonce, &aad, &msg)?))
+        Ok(stream_of(self.material.open(&nonce, &aad, tag_size, &msg)?))
     }
 
     fn algorithm_name(&self) -> String {
