@@ -134,6 +134,7 @@ impl Guest for Component {
         check("gcm-key-export", gcm_key_export().await).await?;
         check("gcm-internal-nonce", gcm_internal_nonce().await).await?;
         check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
+        check("concurrent-seal-open", concurrent_seal_open().await).await?;
         check("ed25519-known-answer", ed25519_known_answer().await).await?;
         check("ed25519-verify", ed25519_verify_check().await).await?;
         check("ed25519-generated-key", ed25519_generated_key().await).await?;
@@ -339,6 +340,54 @@ async fn aead_wrapper_seal() -> Result<()> {
         plaintext.len() + 12 + 16
     );
     Ok(())
+}
+
+/// Eight seal→open round trips in flight at once, each draining its own
+/// streams — the making-progress shape the package asks callers for.
+///
+/// Correctness is asserted here; the *contended* case is the Wasmtime
+/// integration test that reruns this demo with a pool smaller than the
+/// concurrency (examples/wasmtime-demo/tests/demo.rs), where this check
+/// hangs if an implementation stops releasing an operation's capacity when
+/// its output is drained. On other hosts the pool is ample and this is a
+/// plain concurrency check.
+async fn concurrent_seal_open() -> Result<()> {
+    use lann_webcrypto_guest::aes_gcm;
+
+    let key = aes_gcm::generate_key(AesVariant::Aes256, false)
+        .await
+        .context("generate-key")?;
+
+    async fn round_trip(key: &lann_webcrypto_guest::Aead, lane: u8) -> Result<()> {
+        let mut nonce = [0u8; 12];
+        nonce[0] = lane;
+        let payload: Vec<u8> = (0..2048u32).map(|i| (i as u8).wrapping_add(lane)).collect();
+        let sealed = key
+            .seal(&nonce[..], &b"concurrent"[..], &payload[..])
+            .await
+            .with_context(|| format!("seal (lane {lane})"))?;
+        let opened = key
+            .open(&nonce[..], &b"concurrent"[..], &sealed[..])
+            .await
+            .with_context(|| format!("open (lane {lane})"))?
+            .collect()
+            .await;
+        ensure!(opened == payload, "lane {lane} round trip differs");
+        Ok(())
+    }
+
+    let lanes = futures::join!(
+        round_trip(&key, 0),
+        round_trip(&key, 1),
+        round_trip(&key, 2),
+        round_trip(&key, 3),
+        round_trip(&key, 4),
+        round_trip(&key, 5),
+        round_trip(&key, 6),
+        round_trip(&key, 7),
+    );
+    let (a, b, c, d, e, f, g, h) = lanes;
+    a.and(b).and(c).and(d).and(e).and(f).and(g).and(h)
 }
 
 // --- digest & bytes checks -----------------------------------------------------
