@@ -79,7 +79,7 @@ validate-wit:
 # Run the Rust tests, including the wasmtime-demo integration test (which
 # builds and runs the crypto-demo guest under the Wasmtime host).
 test:
-    cargo test --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab
+    cargo test --workspace --exclude crypto-demo --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 build-component:
