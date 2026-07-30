@@ -29,6 +29,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+use anyhow::{ensure, Context, Result};
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
@@ -59,11 +60,12 @@ macro_rules! expect_error {
     ($result:expr, $pattern:pat, $accepted:expr $(,)?) => {
         match $result {
             Err(err) if matches!(err, $pattern) => Ok(()),
-            Err(other) => Err(describe(
-                concat!("expected ", stringify!($pattern), ", got"),
-                &other,
-            )),
-            Ok(_) => Err(String::from($accepted)),
+            Err(other) => Err(anyhow::Error::new(other).context(concat!(
+                "expected ",
+                stringify!($pattern),
+                ", got"
+            ))),
+            Ok(_) => anyhow::bail!($accepted),
         }
     };
 }
@@ -106,12 +108,12 @@ struct Component;
 impl Guest for Component {
     async fn run() -> Result<String, String> {
         let mut passed: Vec<&'static str> = Vec::new();
-        let mut check = async |name: &'static str, result: Result<(), String>| match result {
+        let mut check = async |name: &'static str, result: Result<()>| match result {
             Ok(()) => {
                 passed.push(name);
                 Ok(())
             }
-            Err(detail) => Err(format!("check '{name}' failed: {detail}")),
+            Err(err) => Err(format!("check '{name}' failed: {err:#}")),
         };
 
         check("hmac-known-answer", hmac_known_answer(usize::MAX).await).await?;
@@ -154,40 +156,41 @@ impl Guest for Component {
 
 /// HMAC the RFC 4231 payload, feeding it in `chunk`-byte writes, and compare
 /// against the vector's tag. `usize::MAX` feeds the payload as one write.
-async fn hmac_known_answer(chunk: usize) -> Result<(), String> {
+async fn hmac_known_answer(chunk: usize) -> Result<()> {
     let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .map_err(|e| describe("import-key", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "HMAC".to_string(),
-        "mac-key.algorithm-name",
-    )?;
-    expect_eq(
-        key.algorithm_hash(),
-        Some("SHA-256".to_string()),
-        "mac-key.algorithm-hash",
-    )?;
-    expect_eq(
-        key.algorithm_length(),
-        HMAC_KEY.len() as u32 * 8,
-        "mac-key.algorithm-length",
-    )?;
+        .context("import-key")?;
+    ensure!(
+        key.algorithm_name() == "HMAC",
+        "mac-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_hash().as_deref() == Some("SHA-256"),
+        "mac-key.algorithm-hash: got {:?}",
+        key.algorithm_hash()
+    );
+    ensure!(
+        key.algorithm_length() == HMAC_KEY.len() as u32 * 8,
+        "mac-key.algorithm-length: got {}",
+        key.algorithm_length()
+    );
 
-    let tag = sign_chunked(&key, HMAC_DATA, chunk).await?;
-    expect_eq(hex(&tag), HMAC_TAG.to_string(), "sign tag")
+    let tag = hex(&sign_chunked(&key, HMAC_DATA, chunk).await?);
+    ensure!(tag == HMAC_TAG, "sign tag: got {tag}, want {HMAC_TAG}");
+    Ok(())
 }
 
 /// `verify` accepts the correct tag and rejects a corrupted one.
-async fn hmac_verify() -> Result<(), String> {
+async fn hmac_verify() -> Result<()> {
     let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .context("import-key")?;
 
     let mut tag = unhex(HMAC_TAG);
     verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX)
         .await?
-        .map_err(|e| describe("correct tag did not verify", &e))?;
+        .context("correct tag did not verify")?;
 
     tag[0] ^= 0x01;
     expect_error!(
@@ -198,17 +201,17 @@ async fn hmac_verify() -> Result<(), String> {
 }
 
 /// A generated key signs and verifies, and two calls on the same key agree.
-async fn hmac_generated_key() -> Result<(), String> {
+async fn hmac_generated_key() -> Result<()> {
     let key = generate_hmac_key(Sha2Variant::Sha256, None, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
 
     let tag = sign_chunked(&key, b"payload", usize::MAX).await?;
-    expect_eq(tag.len(), 32, "tag length")?;
+    ensure!(tag.len() == 32, "tag length: got {}, want 32", tag.len());
 
-    if verify_chunked(&key, b"payload", tag, 3).await?.is_err() {
-        return Err("generated key's tag did not verify".into());
-    }
+    verify_chunked(&key, b"payload", tag, 3)
+        .await?
+        .context("generated key's tag did not verify")?;
 
     // A non-extractable key must not export.
     expect_error!(
@@ -221,26 +224,31 @@ async fn hmac_generated_key() -> Result<(), String> {
 /// `import` → `export` on an extractable key is the identity; a generated
 /// extractable key exports the hash's block size of material (WebCrypto's
 /// `generateKey` default: 64 bytes for SHA-256).
-async fn hmac_key_export() -> Result<(), String> {
+async fn hmac_key_export() -> Result<()> {
     // Exercises the library's newtype layer (`hmac_sha2` + `Mac`) rather
     // than the raw bindings the rest of the demo drives.
     use lann_webcrypto_guest::hmac_sha2;
     let key = hmac_sha2::import_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .map_err(|e| format!("import-key: {e}"))?;
+        .context("import-key")?;
     let exported = key
         .export_key()
         .await
-        .map_err(|e| format!("export of extractable key: {e}"))?;
-    expect_eq(exported, HMAC_KEY.to_vec(), "exported key material")?;
-    let tag = key
-        .sign(HMAC_DATA)
-        .await
-        .map_err(|e| format!("sign: {e}"))?;
-    expect_eq(hex(&tag), HMAC_TAG.to_string(), "wrapper sign tag")?;
+        .context("export of extractable key")?;
+    ensure!(
+        exported == HMAC_KEY,
+        "exported key material: got {}",
+        hex(&exported)
+    );
+    let tag = key.sign(HMAC_DATA).await.context("sign")?;
+    ensure!(
+        hex(&tag) == HMAC_TAG,
+        "wrapper sign tag: got {}, want {HMAC_TAG}",
+        hex(&tag)
+    );
     key.verify(HMAC_DATA, &tag)
         .await
-        .map_err(|e| format!("wrapper verify: {e}"))?;
+        .context("wrapper verify")?;
 
     // A borrowed payload spanning several of the wrapper's feed chunks
     // round-trips sign→verify (the wrapper feeds borrowed sources
@@ -249,19 +257,24 @@ async fn hmac_key_export() -> Result<(), String> {
     let tag = key
         .sign(&big[..])
         .await
-        .map_err(|e| format!("wrapper sign (multi-chunk): {e}"))?;
+        .context("wrapper sign (multi-chunk)")?;
     key.verify(&big[..], tag)
         .await
-        .map_err(|e| format!("wrapper verify (multi-chunk): {e}"))?;
+        .context("wrapper verify (multi-chunk)")?;
 
     let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, None, true)
         .await
-        .map_err(|e| format!("generate-key: {e}"))?;
+        .context("generate-key")?;
     let exported = generated
         .export_key()
         .await
-        .map_err(|e| format!("export of generated key: {e}"))?;
-    expect_eq(exported.len(), 64, "generated key length")
+        .context("export of generated key")?;
+    ensure!(
+        exported.len() == 64,
+        "generated key length: got {}, want 64",
+        exported.len()
+    );
+    Ok(())
 }
 
 /// The library's `Aead`/`AeadInternalNonce` wrappers: `seal` is the one
@@ -272,12 +285,12 @@ async fn hmac_key_export() -> Result<(), String> {
 /// Two `Seal`s under one `join!` is the shape the package's making-progress
 /// rule asks for, and the reason `Seal` is a `Future` rather than an
 /// `async fn`'s anonymous one.
-async fn aead_wrapper_seal() -> Result<(), String> {
+async fn aead_wrapper_seal() -> Result<()> {
     use lann_webcrypto_guest::{aes_gcm, aes_gcm_internal_nonce};
 
     let key = aes_gcm::import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .map_err(|e| format!("import-key: {e}"))?;
+        .context("import-key")?;
     let nonce = unhex(GCM_IV);
     let plaintext = unhex(GCM_PLAINTEXT);
     let aad = unhex(GCM_AAD);
@@ -285,12 +298,12 @@ async fn aead_wrapper_seal() -> Result<(), String> {
     let sealed = key
         .seal(&nonce[..], &aad[..], &plaintext[..])
         .await
-        .map_err(|e| format!("wrapper seal: {e}"))?;
-    expect_eq(
-        hex(&sealed),
-        format!("{GCM_CIPHERTEXT}{GCM_TAG}"),
-        "wrapper sealed message",
-    )?;
+        .context("wrapper seal")?;
+    ensure!(
+        hex(&sealed) == format!("{GCM_CIPHERTEXT}{GCM_TAG}"),
+        "wrapper sealed message: got {}",
+        hex(&sealed)
+    );
 
     // A payload spanning several of the wrapper's feed chunks: the collect
     // runs alongside the feed, so this must not depend on the whole input
@@ -300,29 +313,32 @@ async fn aead_wrapper_seal() -> Result<(), String> {
         key.seal(&nonce[..], &aad[..], &big[..]),
         key.seal(&nonce[..], &aad[..], &big[..]),
     );
-    let first = first.map_err(|e| format!("wrapper seal (multi-chunk): {e}"))?;
-    let second = second.map_err(|e| format!("wrapper seal (concurrent): {e}"))?;
-    expect_eq(hex(&first), hex(&second), "concurrent seals of one payload")?;
-    expect_eq(
+    let first = first.context("wrapper seal (multi-chunk)")?;
+    let second = second.context("wrapper seal (concurrent)")?;
+    ensure!(first == second, "concurrent seals of one payload differ");
+    ensure!(
+        first.len() == big.len() + 16,
+        "sealed length is plaintext plus tag: got {}, want {}",
         first.len(),
-        big.len() + 16,
-        "sealed length is plaintext plus tag",
-    )?;
+        big.len() + 16
+    );
 
     // The internal-nonce wrapper seals over the same shape; its wire format
     // carries the nonce, so the sealed message is longer still.
     let internal = aes_gcm_internal_nonce::generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| format!("generate-key (internal nonce): {e}"))?;
+        .context("generate-key (internal nonce)")?;
     let sealed = internal
         .seal(&aad[..], &plaintext[..])
         .await
-        .map_err(|e| format!("internal-nonce wrapper seal: {e}"))?;
-    expect_eq(
+        .context("internal-nonce wrapper seal")?;
+    ensure!(
+        sealed.len() == plaintext.len() + 12 + 16,
+        "internal-nonce sealed length: got {}, want {}",
         sealed.len(),
-        plaintext.len() + 12 + 16,
-        "internal-nonce sealed length",
-    )
+        plaintext.len() + 12 + 16
+    );
+    Ok(())
 }
 
 // --- digest & bytes checks -----------------------------------------------------
@@ -332,54 +348,72 @@ const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff
 
 /// SHA-256 the FIPS example message, feeding it in `chunk`-byte writes, and
 /// compare against the known digest. `usize::MAX` feeds it as one write.
-async fn sha256_digest(chunk: usize) -> Result<(), String> {
-    let digest = make_digest(Sha2Variant::Sha256).map_err(|e| describe("make-digest", &e))?;
-    expect_eq(
-        digest.algorithm_name(),
-        "SHA-256".to_string(),
-        "digest.algorithm-name",
-    )?;
-    let got = compute_chunked(&digest, b"abc", chunk).await?;
-    expect_eq(hex(&got), SHA256_ABC.to_string(), "computed digest")?;
+async fn sha256_digest(chunk: usize) -> Result<()> {
+    let digest = make_digest(Sha2Variant::Sha256).context("make-digest")?;
+    ensure!(
+        digest.algorithm_name() == "SHA-256",
+        "digest.algorithm-name: got {}",
+        digest.algorithm_name()
+    );
+    let got = hex(&compute_chunked(&digest, b"abc", chunk).await?);
+    ensure!(got == SHA256_ABC, "computed digest: got {got}");
     // The resource is reusable: a second compute agrees.
-    let again = compute_chunked(&digest, b"abc", chunk).await?;
-    expect_eq(hex(&again), SHA256_ABC.to_string(), "recomputed digest")
+    let again = hex(&compute_chunked(&digest, b"abc", chunk).await?);
+    ensure!(again == SHA256_ABC, "recomputed digest: got {again}");
+    Ok(())
 }
 
 /// `constant-time-equal` agrees with plain equality.
-async fn bytes_equal() -> Result<(), String> {
+async fn bytes_equal() -> Result<()> {
     let digest = unhex(SHA256_ABC);
     let mut tampered = digest.clone();
     tampered[0] ^= 0x01;
-    expect_eq(constant_time_equal(&digest, &digest), true, "equal inputs")?;
-    expect_eq(
-        constant_time_equal(&digest, &tampered),
-        false,
-        "differing inputs",
-    )?;
-    expect_eq(
-        constant_time_equal(&digest, &digest[..31]),
-        false,
-        "different lengths",
-    )?;
-    expect_eq(constant_time_equal(&[], &[]), true, "empty inputs")
+    ensure!(
+        constant_time_equal(&digest, &digest),
+        "equal inputs compared unequal"
+    );
+    ensure!(
+        !constant_time_equal(&digest, &tampered),
+        "differing inputs compared equal"
+    );
+    ensure!(
+        !constant_time_equal(&digest, &digest[..31]),
+        "different lengths compared equal"
+    );
+    ensure!(
+        constant_time_equal(&[], &[]),
+        "empty inputs compared unequal"
+    );
+    Ok(())
 }
 
 // --- aead checks -------------------------------------------------------------
 
 /// Seal the NIST vector's plaintext and compare against its ciphertext‖tag.
-async fn gcm_known_answer_seal() -> Result<(), String> {
+async fn gcm_known_answer_seal() -> Result<()> {
     let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "AES-GCM".to_string(),
-        "aead-key.algorithm-name",
-    )?;
-    expect_eq(key.algorithm_length(), 256, "aead-key.algorithm-length")?;
-    expect_eq(key.nonce_size(), 12, "aead-key.nonce-size")?;
-    expect_eq(key.tag_size(), 16, "aead-key.tag-size")?;
+        .context("import-key")?;
+    ensure!(
+        key.algorithm_name() == "AES-GCM",
+        "aead-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_length() == 256,
+        "aead-key.algorithm-length: got {}",
+        key.algorithm_length()
+    );
+    ensure!(
+        key.nonce_size() == 12,
+        "aead-key.nonce-size: got {}",
+        key.nonce_size()
+    );
+    ensure!(
+        key.tag_size() == 16,
+        "aead-key.tag-size: got {}",
+        key.tag_size()
+    );
 
     let sealed = seal_chunked(
         &key,
@@ -388,83 +422,95 @@ async fn gcm_known_answer_seal() -> Result<(), String> {
         &unhex(GCM_PLAINTEXT),
         7,
     )
-    .await
-    .map_err(|e| describe("seal", &e))?;
+    .await?
+    .context("seal")?;
     let mut expected = unhex(GCM_CIPHERTEXT);
     expected.extend(unhex(GCM_TAG));
-    expect_eq(hex(&sealed), hex(&expected), "sealed bytes")
+    ensure!(sealed == expected, "sealed bytes: got {}", hex(&sealed));
+    Ok(())
 }
 
 /// Open the NIST vector's ciphertext‖tag (fed one byte at a time) and compare
 /// against its plaintext.
-async fn gcm_known_answer_open() -> Result<(), String> {
+async fn gcm_known_answer_open() -> Result<()> {
     let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .context("import-key")?;
 
     let mut ciphertext = unhex(GCM_CIPHERTEXT);
     ciphertext.extend(unhex(GCM_TAG));
     let opened = open_chunked(&key, &unhex(GCM_IV), &unhex(GCM_AAD), &ciphertext, 1)
-        .await
-        .map_err(|e| describe("open", &e))?;
-    expect_eq(hex(&opened), GCM_PLAINTEXT.replace(' ', ""), "opened bytes")
+        .await?
+        .context("open")?;
+    ensure!(
+        hex(&opened) == GCM_PLAINTEXT.replace(' ', ""),
+        "opened bytes: got {}",
+        hex(&opened)
+    );
+    Ok(())
 }
 
 /// Seal then open under a generated key round-trips the plaintext.
-async fn gcm_round_trip() -> Result<(), String> {
+async fn gcm_round_trip() -> Result<()> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
     let nonce = [7u8; 12];
     let aad = b"round-trip aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(3 * 1024 + 17).collect();
 
     let sealed = seal_chunked(&key, &nonce, aad, &plaintext, 512)
-        .await
-        .map_err(|e| describe("seal", &e))?;
-    expect_eq(sealed.len(), plaintext.len() + 16, "sealed length")?;
+        .await?
+        .context("seal")?;
+    ensure!(
+        sealed.len() == plaintext.len() + 16,
+        "sealed length: got {}, want {}",
+        sealed.len(),
+        plaintext.len() + 16
+    );
 
     let opened = open_chunked(&key, &nonce, aad, &sealed, 512)
-        .await
-        .map_err(|e| describe("open", &e))?;
-    expect_eq(opened == plaintext, true, "round-tripped plaintext")
+        .await?
+        .context("open")?;
+    ensure!(opened == plaintext, "round-tripped plaintext differs");
+    Ok(())
 }
 
 /// A flipped ciphertext bit fails with `authentication-failed`.
-async fn gcm_tampered() -> Result<(), String> {
+async fn gcm_tampered() -> Result<()> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
     let nonce = [9u8; 12];
     let mut sealed = seal_chunked(&key, &nonce, b"", b"attack at dawn", usize::MAX)
-        .await
-        .map_err(|e| describe("seal", &e))?;
+        .await?
+        .context("seal")?;
     sealed[0] ^= 0x80;
     expect_error!(
-        open_chunked(&key, &nonce, b"", &sealed, usize::MAX).await,
+        open_chunked(&key, &nonce, b"", &sealed, usize::MAX).await?,
         Error::AuthenticationFailed,
         "tampered ciphertext opened",
     )
 }
 
 /// The wrong associated data fails with `authentication-failed`.
-async fn gcm_wrong_aad() -> Result<(), String> {
+async fn gcm_wrong_aad() -> Result<()> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
     let nonce = [11u8; 12];
     let sealed = seal_chunked(&key, &nonce, b"right aad", b"payload", usize::MAX)
-        .await
-        .map_err(|e| describe("seal", &e))?;
+        .await?
+        .context("seal")?;
     expect_error!(
-        open_chunked(&key, &nonce, b"wrong aad", &sealed, usize::MAX).await,
+        open_chunked(&key, &nonce, b"wrong aad", &sealed, usize::MAX).await?,
         Error::AuthenticationFailed,
         "wrong aad opened",
     )
 }
 
 /// Importing wrong-length key material fails with `invalid-key`.
-async fn gcm_invalid_key() -> Result<(), String> {
+async fn gcm_invalid_key() -> Result<()> {
     expect_error!(
         import_key(AesVariant::Aes256, vec![0u8; 16], false).await,
         Error::InvalidKey(_),
@@ -473,32 +519,36 @@ async fn gcm_invalid_key() -> Result<(), String> {
 }
 
 /// Sealing with a wrong-length nonce fails with `invalid-nonce`.
-async fn gcm_invalid_nonce() -> Result<(), String> {
+async fn gcm_invalid_nonce() -> Result<()> {
     let key = generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
     expect_error!(
-        seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await,
+        seal_chunked(&key, &[0u8; 8], b"", b"payload", usize::MAX).await?,
         Error::InvalidNonce(_),
         "8-byte nonce accepted",
     )
 }
 
 /// Extractability behaves for AEAD keys exactly as for MAC keys.
-async fn gcm_key_export() -> Result<(), String> {
+async fn gcm_key_export() -> Result<()> {
     let raw = unhex(GCM_KEY);
     let key = import_key(AesVariant::Aes256, raw.clone(), true)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .context("import-key")?;
     let exported = key
         .export_key()
         .await
-        .map_err(|e| describe("export of extractable key", &e))?;
-    expect_eq(exported, raw, "exported key material")?;
+        .context("export of extractable key")?;
+    ensure!(
+        exported == raw,
+        "exported key material: got {}",
+        hex(&exported)
+    );
 
     let sealed_key = generate_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key", &e))?;
+        .context("generate-key")?;
     expect_error!(
         sealed_key.export_key().await,
         Error::NotExtractable,
@@ -509,58 +559,65 @@ async fn gcm_key_export() -> Result<(), String> {
 /// The internal-nonce discipline end to end: sealed messages are
 /// self-contained (`iv ‖ ciphertext ‖ tag`), round-trip under the same key,
 /// draw a fresh nonce per seal, and fail closed on wrong associated data.
-async fn gcm_internal_nonce() -> Result<(), String> {
+async fn gcm_internal_nonce() -> Result<()> {
     let key = generate_internal_nonce_key(AesVariant::Aes256, false)
         .await
-        .map_err(|e| describe("generate-key (internal nonce)", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "AES-GCM".to_string(),
-        "internal-nonce-key.algorithm-name",
-    )?;
-    expect_eq(
-        key.algorithm_length(),
-        256,
-        "internal-nonce-key.algorithm-length",
-    )?;
+        .context("generate-key (internal nonce)")?;
+    ensure!(
+        key.algorithm_name() == "AES-GCM",
+        "internal-nonce-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_length() == 256,
+        "internal-nonce-key.algorithm-length: got {}",
+        key.algorithm_length()
+    );
 
     let before = key
         .seals_remaining()
-        .ok_or("AES-GCM internal-nonce key reports no nonce budget")?;
+        .context("AES-GCM internal-nonce key reports no nonce budget")?;
 
     let aad = b"internal-nonce aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2 * 1024 + 9).collect();
 
     let sealed = in_seal_chunked(&key, aad, &plaintext, 512)
-        .await
-        .map_err(|e| describe("seal", &e))?;
+        .await?
+        .context("seal")?;
     // 12-byte IV prefix + ciphertext + 16-byte tag.
-    expect_eq(sealed.len(), plaintext.len() + 12 + 16, "sealed length")?;
+    ensure!(
+        sealed.len() == plaintext.len() + 12 + 16,
+        "sealed length: got {}, want {}",
+        sealed.len(),
+        plaintext.len() + 12 + 16
+    );
 
     let opened = in_open_chunked(&key, aad, &sealed, 512)
-        .await
-        .map_err(|e| describe("open", &e))?;
-    expect_eq(opened == plaintext, true, "round-tripped plaintext")?;
+        .await?
+        .context("open")?;
+    ensure!(opened == plaintext, "round-tripped plaintext differs");
 
     // The budget hint decreases as seals consume it: if the key permits N
     // further seals, after one it permits at most N - 1.
     let after = key
         .seals_remaining()
-        .ok_or("nonce budget disappeared after sealing")?;
-    expect_eq(after < before, true, "seals-remaining decreased")?;
+        .context("nonce budget disappeared after sealing")?;
+    ensure!(
+        after < before,
+        "seals-remaining did not decrease: {before} then {after}"
+    );
 
     // A second seal of the same plaintext must draw a fresh nonce.
     let resealed = in_seal_chunked(&key, aad, &plaintext, usize::MAX)
-        .await
-        .map_err(|e| describe("second seal", &e))?;
-    expect_eq(
+        .await?
+        .context("second seal")?;
+    ensure!(
         sealed[..12] != resealed[..12],
-        true,
-        "distinct nonces across seals",
-    )?;
+        "two seals drew the same nonce"
+    );
 
     expect_error!(
-        in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await,
+        in_open_chunked(&key, b"wrong aad", &sealed, usize::MAX).await?,
         Error::AuthenticationFailed,
         "wrong aad opened",
     )
@@ -576,7 +633,7 @@ async fn run_chunked<T, F>(
     data: &[u8],
     chunk: usize,
     op: impl FnOnce(lann_webcrypto_guest::StreamReader<u8>) -> F,
-) -> Result<Result<T, Error>, String>
+) -> Result<Result<T, Error>>
 where
     F: std::future::Future<Output = Result<T, Error>>,
 {
@@ -587,17 +644,17 @@ where
 }
 
 /// `sign`, feeding `data` in `chunk`-byte pieces.
-async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
+async fn sign_chunked(key: &MacKey, data: &[u8], chunk: usize) -> Result<Vec<u8>> {
     run_chunked(data, chunk, |rx| key.sign(rx))
         .await?
-        .map_err(|e| describe("mac-key.sign", &e))
+        .context("mac-key.sign")
 }
 
 /// `compute`, feeding `data` in `chunk`-byte pieces.
-async fn compute_chunked(digest: &Digest, data: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
+async fn compute_chunked(digest: &Digest, data: &[u8], chunk: usize) -> Result<Vec<u8>> {
     run_chunked(data, chunk, |rx| digest.compute(rx))
         .await?
-        .map_err(|e| describe("digest.compute", &e))
+        .context("digest.compute")
 }
 
 /// `verify`, feeding `data` in `chunk`-byte pieces.
@@ -606,7 +663,7 @@ async fn verify_chunked(
     data: &[u8],
     tag: Vec<u8>,
     chunk: usize,
-) -> Result<Result<(), Error>, String> {
+) -> Result<Result<(), Error>> {
     run_chunked(data, chunk, |rx| key.verify(rx, tag)).await
 }
 
@@ -618,13 +675,15 @@ async fn seal_chunked(
     aad: &[u8],
     plaintext: &[u8],
     chunk: usize,
-) -> Result<Vec<u8>, Error> {
-    let sealed = run_chunked(plaintext, chunk, |rx| {
+) -> Result<Result<Vec<u8>, Error>> {
+    match run_chunked(plaintext, chunk, |rx| {
         key.seal(nonce.to_vec(), aad.to_vec(), rx)
     })
-    .await
-    .map_err(Error::Other)??;
-    Ok(sealed.collect().await)
+    .await?
+    {
+        Ok(sealed) => Ok(Ok(sealed.collect().await)),
+        Err(err) => Ok(Err(err)),
+    }
 }
 
 /// `open`, feeding the ciphertext in `chunk`-byte pieces and collecting the
@@ -635,13 +694,15 @@ async fn open_chunked(
     aad: &[u8],
     ciphertext: &[u8],
     chunk: usize,
-) -> Result<Vec<u8>, Error> {
-    let opened = run_chunked(ciphertext, chunk, |rx| {
+) -> Result<Result<Vec<u8>, Error>> {
+    match run_chunked(ciphertext, chunk, |rx| {
         key.open(nonce.to_vec(), aad.to_vec(), rx)
     })
-    .await
-    .map_err(Error::Other)??;
-    Ok(opened.collect().await)
+    .await?
+    {
+        Ok(opened) => Ok(Ok(opened.collect().await)),
+        Err(err) => Ok(Err(err)),
+    }
 }
 
 /// `internal-nonce-key.seal`, feeding the plaintext in `chunk`-byte pieces
@@ -651,11 +712,11 @@ async fn in_seal_chunked(
     aad: &[u8],
     plaintext: &[u8],
     chunk: usize,
-) -> Result<Vec<u8>, Error> {
-    let sealed = run_chunked(plaintext, chunk, |rx| key.seal(aad.to_vec(), rx))
-        .await
-        .map_err(Error::Other)??;
-    Ok(sealed.collect().await)
+) -> Result<Result<Vec<u8>, Error>> {
+    match run_chunked(plaintext, chunk, |rx| key.seal(aad.to_vec(), rx)).await? {
+        Ok(sealed) => Ok(Ok(sealed.collect().await)),
+        Err(err) => Ok(Err(err)),
+    }
 }
 
 /// `internal-nonce-key.open`, feeding the sealed message in `chunk`-byte
@@ -665,46 +726,24 @@ async fn in_open_chunked(
     aad: &[u8],
     sealed: &[u8],
     chunk: usize,
-) -> Result<Vec<u8>, Error> {
-    let opened = run_chunked(sealed, chunk, |rx| key.open(aad.to_vec(), rx))
-        .await
-        .map_err(Error::Other)??;
-    Ok(opened.collect().await)
+) -> Result<Result<Vec<u8>, Error>> {
+    match run_chunked(sealed, chunk, |rx| key.open(aad.to_vec(), rx)).await? {
+        Ok(opened) => Ok(Ok(opened.collect().await)),
+        Err(err) => Ok(Err(err)),
+    }
 }
 
 /// Write `data` to `tx` in `chunk`-byte pieces, then drop the writer to end
 /// the stream.
-async fn feed(
-    mut tx: wit_bindgen::StreamWriter<u8>,
-    data: &[u8],
-    chunk: usize,
-) -> Result<(), String> {
+async fn feed(mut tx: wit_bindgen::StreamWriter<u8>, data: &[u8], chunk: usize) -> Result<()> {
     for piece in data.chunks(chunk.max(1)) {
         let leftover = tx.write_all(piece.to_vec()).await;
-        if !leftover.is_empty() {
-            return Err("stream writer closed early".into());
-        }
+        ensure!(leftover.is_empty(), "stream writer closed early");
     }
     Ok(())
 }
 
 // --- small utilities ---------------------------------------------------------
-
-/// Render a WIT `error` with a context prefix (the case-name-first
-/// rendering is the guest SDK's [`render_error`]).
-///
-/// [`render_error`]: lann_webcrypto_guest::render_error
-fn describe(context: &str, error: &Error) -> String {
-    format!("{context}: {}", lann_webcrypto_guest::render_error(error))
-}
-
-fn expect_eq<T: PartialEq + std::fmt::Debug>(got: T, want: T, what: &str) -> Result<(), String> {
-    if got == want {
-        Ok(())
-    } else {
-        Err(format!("{what}: got {got:?}, want {want:?}"))
-    }
-}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -723,68 +762,73 @@ export!(Component);
 // --- signature checks ----------------------------------------------------------
 
 /// Sign an entire byte stream (whole-write) with a `signing-key`.
-async fn sig_sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>, String> {
+async fn sig_sign(key: &SigningKey, data: &[u8]) -> Result<Vec<u8>> {
     run_chunked(data, usize::MAX, |rx| key.sign(rx))
         .await?
-        .map_err(|e| describe("signing-key.sign", &e))
+        .context("signing-key.sign")
 }
 
 /// Verify `sig` over an entire byte stream (whole-write) with a
 /// `verifying-key`.
-async fn sig_verify(
-    key: &VerifyingKey,
-    data: &[u8],
-    sig: Vec<u8>,
-) -> Result<Result<(), Error>, String> {
+async fn sig_verify(key: &VerifyingKey, data: &[u8], sig: Vec<u8>) -> Result<Result<(), Error>> {
     run_chunked(data, usize::MAX, |rx| key.verify(rx, sig)).await
 }
 
 /// The RFC 8032 known answer: importing the seed reproduces the vector's
 /// signature (Ed25519 is deterministic), the getters report the algorithm,
 /// and the vector's public key verifies the result.
-async fn ed25519_known_answer() -> Result<(), String> {
+async fn ed25519_known_answer() -> Result<()> {
     let key = import_ed25519_signing_key(unhex(ED25519_SEED), false)
         .await
-        .map_err(|e| describe("import-signing-key", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "Ed25519".to_string(),
-        "signing-key.algorithm-name",
-    )?;
-    expect_eq(key.algorithm_curve(), None, "signing-key.algorithm-curve")?;
-    expect_eq(key.algorithm_hash(), None, "signing-key.algorithm-hash")?;
+        .context("import-signing-key")?;
+    ensure!(
+        key.algorithm_name() == "Ed25519",
+        "signing-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_curve().is_none(),
+        "signing-key.algorithm-curve: got {:?}",
+        key.algorithm_curve()
+    );
+    ensure!(
+        key.algorithm_hash().is_none(),
+        "signing-key.algorithm-hash: got {:?}",
+        key.algorithm_hash()
+    );
 
     let sig = sig_sign(&key, ED25519_MESSAGE).await?;
-    expect_eq(
-        hex(&sig),
-        ED25519_SIG.replace(char::is_whitespace, ""),
-        "signature",
-    )?;
+    ensure!(
+        hex(&sig) == ED25519_SIG.replace(char::is_whitespace, ""),
+        "signature: got {}",
+        hex(&sig)
+    );
 
     let public = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
         .await
-        .map_err(|e| describe("import-verifying-key", &e))?;
+        .context("import-verifying-key")?;
     sig_verify(&public, ED25519_MESSAGE, sig)
         .await?
-        .map_err(|e| describe("known-answer signature did not verify", &e))
+        .context("known-answer signature did not verify")?;
+    Ok(())
 }
 
 /// An imported public key verifies the vector's signature and rejects a
 /// corrupted one with `authentication-failed`.
-async fn ed25519_verify_check() -> Result<(), String> {
+async fn ed25519_verify_check() -> Result<()> {
     let key = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
         .await
-        .map_err(|e| describe("import-verifying-key", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "Ed25519".to_string(),
-        "verifying-key.algorithm-name",
-    )?;
+        .context("import-verifying-key")?;
+    ensure!(
+        key.algorithm_name() == "Ed25519",
+        "verifying-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
 
     let mut sig = unhex(&ED25519_SIG.replace(char::is_whitespace, ""));
     sig_verify(&key, ED25519_MESSAGE, sig.clone())
         .await?
-        .map_err(|e| describe("correct signature did not verify", &e))?;
+        .context("correct signature did not verify")?;
 
     sig[0] ^= 0x01;
     expect_error!(
@@ -796,17 +840,22 @@ async fn ed25519_verify_check() -> Result<(), String> {
 
 /// A generated key pair round-trips sign→verify, and the private half's
 /// non-extractable material stays that way.
-async fn ed25519_generated_key() -> Result<(), String> {
-    let (key, public) = generate_ed25519_key(false)
-        .await
-        .map_err(|e| describe("generate-key", &e))?;
-    expect_eq(key.extractable(), false, "signing-key.extractable")?;
+async fn ed25519_generated_key() -> Result<()> {
+    let (key, public) = generate_ed25519_key(false).await.context("generate-key")?;
+    ensure!(
+        !key.extractable(),
+        "non-extractable signing key reports extractable"
+    );
 
     let sig = sig_sign(&key, b"payload").await?;
-    expect_eq(sig.len(), 64, "signature length")?;
+    ensure!(
+        sig.len() == 64,
+        "signature length: got {}, want 64",
+        sig.len()
+    );
     sig_verify(&public, b"payload", sig)
         .await?
-        .map_err(|e| describe("round-trip signature did not verify", &e))?;
+        .context("round-trip signature did not verify")?;
 
     expect_error!(
         key.export_key().await,
@@ -816,46 +865,54 @@ async fn ed25519_generated_key() -> Result<(), String> {
 }
 
 /// An extractable imported key exports the seed it was imported from.
-async fn ed25519_key_export() -> Result<(), String> {
+async fn ed25519_key_export() -> Result<()> {
     let key = import_ed25519_signing_key(unhex(ED25519_SEED), true)
         .await
-        .map_err(|e| describe("import-signing-key", &e))?;
-    expect_eq(key.extractable(), true, "signing-key.extractable")?;
-    let exported = key.export_key().await.map_err(|e| describe("export", &e))?;
-    expect_eq(hex(&exported), ED25519_SEED.to_string(), "exported seed")
+        .context("import-signing-key")?;
+    ensure!(
+        key.extractable(),
+        "extractable signing key reports non-extractable"
+    );
+    let exported = key.export_key().await.context("export")?;
+    ensure!(
+        hex(&exported) == ED25519_SEED,
+        "exported seed: got {}",
+        hex(&exported)
+    );
+    Ok(())
 }
 
 /// The RFC 6979 known answer: an imported P-256 public key reports its
 /// variant through the getters, verifies the deterministic signature over
 /// "sample", and rejects a corrupted one.
-async fn ecdsa_verify_known_answer() -> Result<(), String> {
+async fn ecdsa_verify_known_answer() -> Result<()> {
     let mut point = vec![0x04];
     point.extend(unhex(ECDSA_PUBLIC_X));
     point.extend(unhex(ECDSA_PUBLIC_Y));
     let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
         .await
-        .map_err(|e| describe("import-verifying-key", &e))?;
-    expect_eq(
-        key.algorithm_name(),
-        "ECDSA".to_string(),
-        "verifying-key.algorithm-name",
-    )?;
-    expect_eq(
-        key.algorithm_curve(),
-        Some("P-256".to_string()),
-        "verifying-key.algorithm-curve",
-    )?;
-    expect_eq(
-        key.algorithm_hash(),
-        Some("SHA-256".to_string()),
-        "verifying-key.algorithm-hash",
-    )?;
+        .context("import-verifying-key")?;
+    ensure!(
+        key.algorithm_name() == "ECDSA",
+        "verifying-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_curve().as_deref() == Some("P-256"),
+        "verifying-key.algorithm-curve: got {:?}",
+        key.algorithm_curve()
+    );
+    ensure!(
+        key.algorithm_hash().as_deref() == Some("SHA-256"),
+        "verifying-key.algorithm-hash: got {:?}",
+        key.algorithm_hash()
+    );
 
     let mut sig = unhex(ECDSA_SIG_R);
     sig.extend(unhex(ECDSA_SIG_S));
     sig_verify(&key, ECDSA_MESSAGE, sig.clone())
         .await?
-        .map_err(|e| describe("known-answer signature did not verify", &e))?;
+        .context("known-answer signature did not verify")?;
 
     sig[0] ^= 0x01;
     expect_error!(
