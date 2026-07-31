@@ -18,6 +18,10 @@ import { run_test as runHmac } from "../build/group-hmac.js";
 import { run_test as runAesGcm } from "../build/group-aes-gcm.js";
 import { runTests as runImportKey } from "../build/group-import-key.js";
 import { run_test as runGenerateKey } from "../build/group-generate-key.js";
+import { define_tests_25519 as defineCfrgBits } from "../build/group-cfrg-bits.js";
+import { define_tests_25519 as defineCfrgKeys } from "../build/group-cfrg-keys.js";
+import { runTests as runOkpImportKey } from "../build/group-okp-import-key.js";
+import { run_test as runOkpImportKeyFailures } from "../build/group-okp-import-key-failures.js";
 
 const GROUPS = [
   ["sign_verify/hmac", () => runHmac()],
@@ -30,6 +34,17 @@ const GROUPS = [
     },
   ],
   ["generateKey/successes (HMAC, AES-GCM)", () => runGenerateKey(["HMAC", "AES-GCM"])],
+  [
+    "derive_bits_keys/cfrg_curves_bits (X25519)",
+    () => promise_test(defineCfrgBits, "setup - define tests"),
+  ],
+  [
+    "derive_bits_keys/cfrg_curves_keys (X25519)",
+    () => promise_test(defineCfrgKeys, "setup - define tests"),
+  ],
+  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519")],
+  ["import_export/okp_importKey_failures (X25519)", () => runOkpImportKeyFailures(["X25519"])],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"])],
 ];
 
 const records = [];

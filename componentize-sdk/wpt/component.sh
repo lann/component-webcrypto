@@ -154,6 +154,23 @@ gen_suites() {
     echo 'export { runTests };' >> "$B"/group-import-key.js
     cat "$V"/helpers.js "$V"/successes.js > "$B"/group-generate-key.js
     echo 'export { run_test };' >> "$B"/group-generate-key.js
+    # The cfrg helpers assign their key tables as sloppy-mode implicit
+    # globals; a concatenated module is strict, so declare them here (the
+    # vendored sources stay pristine, like the appended exports).
+    cat > "$B"/group-cfrg-bits.js <<'JS'
+var publicKeys, privateKeys, noDeriveBitsKeys, noDeriveKeyKeys, ecdhKeys;
+JS
+    cat "$V"/helpers.js "$V"/cfrg_curves_bits_fixtures.js "$V"/cfrg_curves_bits.js >> "$B"/group-cfrg-bits.js
+    echo 'export { define_tests_25519 };' >> "$B"/group-cfrg-bits.js
+    cat > "$B"/group-cfrg-keys.js <<'JS'
+var publicKeys, privateKeys, noDeriveBitsKeys, noDeriveKeyKeys, ecdhKeys;
+JS
+    cat "$V"/helpers.js "$V"/cfrg_curves_bits_fixtures.js "$V"/cfrg_curves_keys.js >> "$B"/group-cfrg-keys.js
+    echo 'export { define_tests_25519 };' >> "$B"/group-cfrg-keys.js
+    cat "$V"/helpers.js "$V"/okp_importKey_fixtures.js "$V"/okp_importKey.js > "$B"/group-okp-import-key.js
+    echo 'export { runTests };' >> "$B"/group-okp-import-key.js
+    cat "$V"/helpers.js "$V"/okp_importKey_failures_fixtures.js "$V"/importKey_failures.js > "$B"/group-okp-import-key-failures.js
+    echo 'export { run_test };' >> "$B"/group-okp-import-key-failures.js
 }
 
 case "${1:-}" in

@@ -21,16 +21,17 @@
 // Module specifiers resolve against componentize-js's `--base-directory`,
 // which the justfile recipe sets to the repository root.
 
-import { crypto, CryptoKey } from "./componentize-sdk/webcrypto.js";
+import "./componentize-sdk/wpt/install-shim-globals.js";
 import { EXPECTED } from "./componentize-sdk/wpt/expected.js";
 import { drain, takeResults } from "./componentize-sdk/wpt/harness.js";
 import { run_test as runHmac } from "./componentize-sdk/wpt/build/group-hmac.js";
 import { run_test as runAesGcm } from "./componentize-sdk/wpt/build/group-aes-gcm.js";
 import { runTests as runImportKey } from "./componentize-sdk/wpt/build/group-import-key.js";
 import { run_test as runGenerateKey } from "./componentize-sdk/wpt/build/group-generate-key.js";
-
-globalThis.crypto = crypto;
-globalThis.CryptoKey = CryptoKey;
+import { define_tests_25519 as defineCfrgBits } from "./componentize-sdk/wpt/build/group-cfrg-bits.js";
+import { define_tests_25519 as defineCfrgKeys } from "./componentize-sdk/wpt/build/group-cfrg-keys.js";
+import { runTests as runOkpImportKey } from "./componentize-sdk/wpt/build/group-okp-import-key.js";
+import { run_test as runOkpImportKeyFailures } from "./componentize-sdk/wpt/build/group-okp-import-key-failures.js";
 
 // --- the subset definition, one classifier per group ---------------------------
 
@@ -94,6 +95,18 @@ function generateKeyInSubset(name) {
   return false;
 }
 
+/**
+ * The X25519 groups (derive_bits_keys/cfrg_curves_*, import_export/okp_*,
+ * generateKey/successes_X25519): the library serves no X25519 at all —
+ * the WIT carries it (`lann:webcrypto/x25519` and `key-agreement`), but
+ * `deriveBits`/`deriveKey` and OKP key formats are unserved shim surface
+ * (see the header's deviations list) — so the subset is empty and every
+ * test is an out-of-subset expected failure until the shim grows.
+ */
+function x25519InSubset() {
+  return false;
+}
+
 // --- runner -----------------------------------------------------------------------
 
 // Exported for the parity runner (parity-runner.js), which runs the same
@@ -117,6 +130,23 @@ export const GROUPS = [
     () => runGenerateKey(["HMAC", "AES-GCM"]),
     generateKeyInSubset,
   ],
+  [
+    "derive_bits_keys/cfrg_curves_bits (X25519)",
+    () => promise_test(defineCfrgBits, "setup - define tests"),
+    x25519InSubset,
+  ],
+  [
+    "derive_bits_keys/cfrg_curves_keys (X25519)",
+    () => promise_test(defineCfrgKeys, "setup - define tests"),
+    x25519InSubset,
+  ],
+  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), x25519InSubset],
+  [
+    "import_export/okp_importKey_failures (X25519)",
+    () => runOkpImportKeyFailures(["X25519"]),
+    x25519InSubset,
+  ],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), x25519InSubset],
 ];
 
 export const demoWebcryptoDemoDemo010 = {
