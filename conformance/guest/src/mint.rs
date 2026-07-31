@@ -141,16 +141,8 @@ pub async fn import_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKe
     chacha20_poly1305::import_key(raw, aead_options(extractable)).await
 }
 
-pub async fn generate_chacha_key(extractable: bool) -> Result<AeadKey, Error> {
-    chacha20_poly1305::generate_key(aead_options(extractable)).await
-}
-
 pub async fn import_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
     xchacha20_poly1305::import_key(raw, aead_options(extractable)).await
-}
-
-pub async fn generate_xchacha_key(extractable: bool) -> Result<AeadKey, Error> {
-    xchacha20_poly1305::generate_key(aead_options(extractable)).await
 }
 
 pub async fn import_xchacha_internal_nonce_key(

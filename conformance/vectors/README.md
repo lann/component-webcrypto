@@ -68,9 +68,13 @@ generation stamps in their headers.
 Vectors whose expected outcome is *acceptance* run under every chunking
 schedule (`whole`, 1-byte `bytes`, block-straddling `straddle`):
 assembled-input correctness is the claim chunking can affect.
-Rejection-expectation vectors run only `whole` — their verdict is computed
-after assembly, and mis-assembly is already a detected failure of the
-accepted cases — so chunking them adds runs without adding a claim.
+Rejection-expectation vectors run `whole`, plus `straddle` for a
+deterministic 1-in-20 sample (selected by vector id in
+`guest/src/translate.rs`) — their verdict is computed after assembly, and
+mis-assembly is already a detected failure of the accepted cases, so
+chunking every rejection would add runs without adding that claim; the
+sample instead pins the drain-on-error rule under chunked delivery on
+every rejecting path family.
 
 ## Translation policy
 
