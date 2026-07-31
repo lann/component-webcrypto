@@ -2478,6 +2478,7 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "aes-gcm",
+ "base64",
  "chacha20poly1305",
  "ctr",
  "ed25519-dalek",
@@ -2487,6 +2488,7 @@ dependencies = [
  "hmac",
  "p256",
  "p384",
+ "serde_json",
  "sha2",
  "subtle",
  "zeroize",

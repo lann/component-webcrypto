@@ -484,77 +484,27 @@ function requireKeyAlgorithm(key, name) {
 }
 
 // --- JWK ----------------------------------------------------------------------------
-
-const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-/**
- * Unpadded base64url of `bytes` (RFC 7515's JWK `k` encoding).
- * @param {Uint8Array} bytes
- */
-function toBase64url(bytes) {
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
-    out += B64URL[(n >> 18) & 63];
-    out += B64URL[(n >> 12) & 63];
-    if (i + 1 < bytes.length) out += B64URL[(n >> 6) & 63];
-    if (i + 2 < bytes.length) out += B64URL[n & 63];
-  }
-  return out;
-}
+//
+// The material-bearing JWK work — JSON parsing, strict base64url, `kty`/
+// `alg`/`ext` validation, and building on export — lives behind the WIT
+// (`import-key-jwk`/`export-key-jwk`; the contract is on
+// `mac-key.export-key-jwk`). What remains here is the policy the WIT
+// deliberately does not model: `use`/`key_ops` against the requested
+// usages, and stamping `key_ops`/`ext` onto exported JWKs.
 
 /**
- * Decode unpadded base64url, throwing `DataError` on anything else (the
- * spec's JWK parse failure).
- * @param {string} text
- */
-function fromBase64url(text) {
-  if (text.length % 4 === 1) {
-    throw dom("DataError", "invalid base64url length in JWK `k`");
-  }
-  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
-  let bits = 0;
-  let acc = 0;
-  let at = 0;
-  for (const ch of text) {
-    const v = B64URL.indexOf(ch);
-    if (v < 0) {
-      throw dom("DataError", "invalid base64url in JWK `k`");
-    }
-    acc = (acc << 6) | v;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[at++] = (acc >> bits) & 0xff;
-    }
-  }
-  return out;
-}
-
-/**
- * Validate a JsonWebKey's fields against the requested import and return
- * the raw key bytes — the spec's oct-key JWK import steps, shared by HMAC
- * and AES-GCM (which differ only in the expected `alg` and `use` values).
+ * The spec's `use`/`key_ops` checks — consumer policy over the usages
+ * model, which the WIT does not carry. The material fields go down as-is.
  * @param {unknown} keyData
- * @param {string} alg the expected JWK `alg` (e.g. `"HS256"`, `"A256GCM"`)
  * @param {string} use the expected JWK `use` (`"sig"` or `"enc"`)
- * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
+ * @returns {string} the JWK as JSON text, for the WIT import
  */
-function rawFromJwk(keyData, alg, use, extractable, usages) {
+function jwkForImport(keyData, use, usages) {
   if (typeof keyData !== "object" || keyData === null) {
     throw new TypeError("JWK key data must be an object");
   }
   const jwk = /** @type {JsonWebKey} */ (keyData);
-  if (jwk.kty !== "oct") {
-    throw dom("DataError", `JWK kty must be "oct", got ${jwk.kty}`);
-  }
-  if (typeof jwk.k !== "string") {
-    throw dom("DataError", "JWK must carry `k` (base64url key material)");
-  }
-  if (jwk.alg !== undefined && jwk.alg !== alg) {
-    throw dom("DataError", `JWK alg is ${jwk.alg}, not ${alg}`);
-  }
   if (jwk.use !== undefined && usages.length !== 0 && jwk.use !== use) {
     throw dom("DataError", `JWK use is ${jwk.use}, not ${use}`);
   }
@@ -568,55 +518,52 @@ function rawFromJwk(keyData, alg, use, extractable, usages) {
       }
     }
   }
-  if (jwk.ext === false && extractable) {
-    throw dom("DataError", "JWK ext is false; the key cannot be imported extractable");
-  }
-  return fromBase64url(jwk.k);
+  return JSON.stringify(jwk);
 }
 
 /**
- * Build the oct-key JsonWebKey for an export (RFC 7517/7518; the spec's
- * HMAC and AES export-key JWK steps).
- * @param {Uint8Array} raw
- * @param {string} alg
+ * An exported JWK: the WIT returns the material-bearing members; the
+ * metadata the interface does not model is this library's to stamp.
+ * @param {string} jwkText
  * @param {globalThis.CryptoKey} key
  * @returns {JsonWebKey}
  */
-function jwkOf(raw, alg, key) {
-  return {
-    kty: "oct",
-    k: toBase64url(raw),
-    alg,
-    key_ops: [...key.usages],
-    ext: key.extractable,
-  };
-}
-
-/**
- * The JWK `alg` for a served key's algorithm.
- * @param {globalThis.CryptoKey} key
- */
-function jwkAlgOf(key) {
-  return key.algorithm.name === "HMAC" ? "HS256" : "A256GCM";
+function jwkForExport(jwkText, key) {
+  const jwk = /** @type {JsonWebKey} */ (JSON.parse(jwkText));
+  jwk.key_ops = [...key.usages];
+  jwk.ext = key.extractable;
+  return jwk;
 }
 
 // --- minting ------------------------------------------------------------------------
 
 /**
  * @param {() => unknown} start
- * @param {number | undefined} length the `HmacKeyAlgorithm.length` to
- *   project, when it differs from the handle's material bits (a sub-byte
- *   import shave); `undefined` projects the handle's own length
+ * @param {number | undefined} requestedLength the `HmacKeyAlgorithm.length`
+ *   to project, validated against the handle's material bits per the
+ *   spec's shave window; `undefined` projects the handle's own length
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-async function mintHmacKey(start, length, extractable, usages) {
+async function mintHmacKey(start, requestedLength, extractable, usages) {
   const handle = await callImport(start());
+  const dataBits = /** @type {number} */ (handle.algorithmLength());
+  let length = dataBits;
+  if (requestedLength !== undefined) {
+    // The spec's HMAC length window: `length` may shave up to 7 trailing
+    // bits off the material's bit length. The WIT key holds the material
+    // unchanged (HMAC zero-pads keys to the block size, so the shave
+    // cannot change a tag); the shaved length is CryptoKey metadata.
+    if (!(requestedLength > dataBits - 8 && requestedLength <= dataBits)) {
+      throw dom("DataError", `HMAC length ${requestedLength} does not fit ${dataBits} bits of key`);
+    }
+    length = requestedLength;
+  }
   /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
     hash: Object.freeze({ name: "SHA-256" }),
-    length: length ?? handle.algorithmLength(),
+    length,
   };
   return mintKey(handle, projected, extractable, usages);
 }
@@ -655,40 +602,22 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
-    const raw =
-      format === "jwk"
-        ? rawFromJwk(keyData, "HS256", "sig", !!extractable, usages)
-        : bytesOf(keyData, "keyData");
-    // The spec's HMAC length window: when present, `length` may shave up
-    // to 7 trailing bits off the material's bit length. The WIT key holds
-    // the material unchanged (HMAC zero-pads keys to the block size, so
-    // the shave cannot change a tag); the shaved length is CryptoKey
-    // metadata, projected below.
-    let length;
-    if (alg.length !== undefined) {
-      const requested = Number(alg.length);
-      const dataBits = raw.length * 8;
-      if (!(requested > dataBits - 8 && requested <= dataBits)) {
-        throw dom("DataError", `HMAC length ${alg.length} does not fit ${dataBits} bits of key`);
-      }
-      length = requested;
-    }
     return await mintHmacKey(
-      () => hmacSha2.importKey("sha256", raw, !!extractable),
-      length,
+      format === "jwk"
+        ? () => hmacSha2.importKeyJwk("sha256", jwkForImport(keyData, "sig", usages), !!extractable)
+        : () => hmacSha2.importKey("sha256", bytesOf(keyData, "keyData"), !!extractable),
+      alg.length === undefined ? undefined : Number(alg.length),
       !!extractable,
       usages,
     );
   } else {
-    const raw =
-      format === "jwk"
-        ? rawFromJwk(keyData, "A256GCM", "enc", !!extractable, usages)
-        : bytesOf(keyData, "keyData");
     // The library serves AES-256-GCM only, so key material is always minted
     // as the aes256 variant; other lengths fail with `DataError` (from the
     // WIT contract's `invalid-key`).
     return await mintAesGcmKey(
-      () => aesGcm.importKey("aes256", raw, !!extractable),
+      format === "jwk"
+        ? () => aesGcm.importKeyJwk("aes256", jwkForImport(keyData, "enc", usages), !!extractable)
+        : () => aesGcm.importKey("aes256", bytesOf(keyData, "keyData"), !!extractable),
       !!extractable,
       usages,
     );
@@ -761,11 +690,11 @@ async function exportKey(format, key) {
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
   }
-  const raw = /** @type {Uint8Array} */ (await callImport(handleOf(key).exportKey()));
   if (format === "jwk") {
-    return jwkOf(raw, jwkAlgOf(key), key);
+    const jwkText = /** @type {string} */ (await callImport(handleOf(key).exportKeyJwk()));
+    return jwkForExport(jwkText, key);
   }
-  return toArrayBuffer(raw);
+  return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKey())));
 }
 
 /**

@@ -221,6 +221,51 @@ async function gcmRejectsMalformed() {
 
 // --- entry point -----------------------------------------------------------------
 
+/**
+ * JWK round trip: an HMAC key imported as an RFC 7517 `oct` JWK computes
+ * the RFC 4231 known answer, and its export re-imports to the same key.
+ */
+async function jwkRoundtrip() {
+  // "Jefe" as unpadded base64url.
+  const jwk = { kty: "oct", k: "SmVmZQ", alg: "HS256" };
+  const key = await subtle.importKey("jwk", jwk, { name: "HMAC", hash: "SHA-256" }, true, [
+    "sign",
+  ]);
+  const tag = await subtle.sign("HMAC", key, HMAC_DATA);
+  expectEq(hex(new Uint8Array(tag)), HMAC_TAG, "tag from JWK-imported key");
+
+  const exported = await subtle.exportKey("jwk", key);
+  expectEq(exported.kty, "oct", "exported kty");
+  expectEq(exported.k, "SmVmZQ", "exported k");
+  expectEq(exported.alg, "HS256", "exported alg");
+  expectEq(exported.ext, true, "exported ext");
+  const again = await subtle.importKey("jwk", exported, { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const tag2 = await subtle.sign("HMAC", again, HMAC_DATA);
+  expectEq(hex(new Uint8Array(tag2)), HMAC_TAG, "tag after JWK round trip");
+}
+
+/**
+ * Malformed JWKs fail closed with `DataError`: wrong `kty`, an `alg`
+ * disagreeing with the requested algorithm, padded (non-strict) base64url,
+ * an `ext: false` conflict, and `key_ops` refusing a requested usage.
+ */
+async function jwkRejectsMalformed() {
+  const cases = [
+    ["wrong kty", { kty: "EC", k: "SmVmZQ" }],
+    ["alg mismatch", { kty: "oct", k: "SmVmZQ", alg: "HS384" }],
+    ["padded base64url", { kty: "oct", k: "SmVmZQ==" }],
+    ["ext conflict", { kty: "oct", k: "SmVmZQ", ext: false }],
+    ["key_ops mismatch", { kty: "oct", k: "SmVmZQ", key_ops: ["verify"] }],
+  ];
+  for (const [what, jwk] of cases) {
+    await expectDomException("DataError", what, () =>
+      subtle.importKey("jwk", jwk, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]),
+    );
+  }
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -231,6 +276,8 @@ const CHECKS = [
   ["gcm-known-answer-decrypt", gcmKnownAnswerDecrypt],
   ["gcm-generate-roundtrip", gcmGenerateRoundtrip],
   ["gcm-rejects-malformed", gcmRejectsMalformed],
+  ["jwk-roundtrip", jwkRoundtrip],
+  ["jwk-rejects-malformed", jwkRejectsMalformed],
 ];
 
 // The `demo:webcrypto-demo/demo@0.1.0` export. `run` returns the ok summary

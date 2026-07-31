@@ -56,6 +56,7 @@
 mod aead;
 mod gcm;
 mod hash;
+mod jwk;
 mod mac;
 mod sig;
 
