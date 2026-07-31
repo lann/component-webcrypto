@@ -17,3 +17,15 @@ members = [
     "timing-lab",
 ]
 resolver = "2"
+
+# The mutation run's profile (`just mutants`): dependencies optimized —
+# wasmtime and the RustCrypto cores are compiled once, at baseline, and make
+# the conformance-oracle runs near release speed — while workspace members
+# stay unoptimized, so the per-mutant rebuild of the mutated crate and its
+# dependents stays cheap. (`package."*"` matches dependencies only, not
+# workspace members.)
+[profile.mutants]
+inherits = "dev"
+
+[profile.mutants.package."*"]
+opt-level = 2

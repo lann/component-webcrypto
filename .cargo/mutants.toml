@@ -1,0 +1,27 @@
+# Configuration for the weekly mutation run (`just mutants`; scheduled in
+# .github/workflows/timing-lab.yml). Mutated packages are named by the
+# recipe; the test oracle is the unit tests of the mutated crates plus the
+# conformance suites driven through the wasmtime adapter (its env-gated
+# `oracle` test), so a mutant survives only if neither the unit tests nor
+# the cross-implementation cases distinguish it.
+
+test_package = [
+    "webcrypto-impl-core",
+    "wasmtime-webcrypto",
+    "conformance-adapter-wasmtime",
+]
+
+# Redacting `Debug` impls have their own dedicated tests
+# (debug_redacts_key_material); mutants of the rendering itself are noise no
+# suite should be asked to pin. The generated-trait resource `drop` impls
+# are excluded because a no-op drop is unobservable by construction: it
+# leaks a resource-table entry within a session, which no suite (and no
+# guest) can distinguish from cleanup.
+exclude_re = [
+    "impl std::fmt::Debug",
+    "WithStore<T> for WasiWebcrypto>::drop",
+]
+
+# The auto-derived floor is too tight when the oracle's suite runs slow
+# down under a mutant without hanging outright.
+minimum_test_timeout = 60

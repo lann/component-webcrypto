@@ -508,3 +508,20 @@ timing-lab-scheduled:
     fi
     exit $status
 
+# --- mutation testing -----------------------------------------------------------
+
+# Run cargo-mutants over the shared crypto core and the Wasmtime host, with
+# the unit tests plus both conformance suites (via the wasmtime adapter's
+# env-gated oracle test) as the oracle: a mutant survives only if neither
+# distinguishes it. This is what polices assertion *strength* — the
+# lockfiles pin the case inventory, not what the cases check. Expensive and
+# deliberately NOT part of `just ci`; a weekly job runs it (the timing-lab
+# workflow). Needs cargo-mutants (`cargo install cargo-mutants --locked`).
+# Guests are prebuilt from unmutated sources: the subject is the host stack
+# the wasm calls into. Results land in mutants.out/.
+mutants shard="": build-conformance-guest build-signing-guest
+    CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/conformance/guest/build/conformance-guest.component.wasm" \
+    CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/conformance/signing-guest/build/conformance-signing-guest.component.wasm" \
+        cargo mutants --in-place --profile mutants \
+        -p webcrypto-impl-core -p wasmtime-webcrypto \
+        {{ if shard != "" { "--shard " + shard } else { "" } }}
