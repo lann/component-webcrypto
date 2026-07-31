@@ -28,10 +28,10 @@ app.js  ──componentize-js──▶  componentize-demo.component.wasm
 
 ## Prerequisites
 
-Everything in `scripts/setup.sh`, plus the patched componentize-js CLI — see
-["Toolchain" in the library's README](../../componentize-sdk/README.md#toolchain)
-for install steps (it is not part of the default setup: building it compiles
-SpiderMonkey to wasm and needs WASI-SDK 30).
+Everything in `scripts/setup.sh`. The componentize-js CLI build the
+recipes need is downloaded and digest-verified automatically on first use
+(`component.sh toolchain`; set `COMPONENTIZE_JS` to use your own build) —
+see ["Toolchain" in the library's README](../../componentize-sdk/README.md#toolchain).
 
 ## Running
 

@@ -4,15 +4,16 @@
 # repository. Safe to run repeatedly (idempotent).
 #
 # What it installs:
-#   - the pinned Rust toolchain and the wasm32-unknown-unknown target the
-#     guest component compiles to, as declared in rust-toolchain.toml
+#   - the pinned Rust toolchain and the wasm targets the guest crates
+#     compile to, as declared in rust-toolchain.toml
 #   - wasm-tools, used to wrap guest modules into components and validate WIT
 #   - just, the command runner used for development and CI recipes
 #   - wac, the component linker used to compose the crypto-demo guest with the
 #     in-guest provider (`just compose-demo`)
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
 #     integration test (`just test-webcrypto-composed`)
-#   - the jco demo driver's npm dependencies (jco)
+#   - the npm dependencies of every JS tree in the repository (jco host,
+#     demos, conformance adapter, componentize-sdk and its parity harness)
 #
 # Prerequisites (not installed here): a Rust toolchain via rustup, and — for
 # the jco host — Node 24+ with npm (jco's async ABI uses JSPI, which Node
@@ -21,8 +22,7 @@
 # Environment overrides:
 #   WASM_TOOLS_VERSION   version of wasm-tools to install (default below)
 #   JUST_VERSION         version of just to install (default below)
-#   SKIP_NODE=1          skip installing the npm dependencies (jco demo
-#                        driver and conformance jco adapter)
+#   SKIP_NODE=1          skip installing the npm dependencies
 
 set -euo pipefail
 

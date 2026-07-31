@@ -1,12 +1,8 @@
 //! Raw `bindgen!` output for the `lann:webcrypto` package.
 //!
-//! The crate implements the `types` and `bytes` interfaces, the `mac`,
-//! `aead`, `digest`, and `signature` primitive-kind interfaces (the
-//! `mac-key`, `aead-key`, `digest`, `verifying-key`, and `signing-key`
-//! resources), and the `hmac-sha2` / `aes-gcm` / `chacha20-poly1305` /
-//! `sha2` / `ed25519-verify` / `ed25519-sign` / `ecdsa-verify` /
-//! `ecdsa-sign` minting interfaces. See [`crate`] for the public API built
-//! on top of these bindings.
+//! The crate implements the full package surface — every interface the
+//! `imports` world below names. See [`crate`] for the public API built on
+//! top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]
 mod generated {

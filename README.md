@@ -9,14 +9,15 @@ following the same architecture.
 
 ## Design
 
-The package ([`wit/webcrypto.wit`](wit/webcrypto.wit)) is layered by *primitive
-kind*, not by algorithm:
+The package ([`wit/`](wit/), documented in
+[`wit/README.md`](wit/README.md)) is layered by *primitive kind*, not by
+algorithm:
 
-- **Generic primitive interfaces** (`mac`, `aead`, `digest`, `signature`;
-  later `stream-aead`, …) each own the algorithm-agnostic resources. Adding
-  an algorithm never touches them.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
-  `sha2`, `ed25519-verify`/`-sign`, `ecdsa-verify`/`-sign`) contain only
+- **Generic primitive interfaces** (`mac`, `aead`, `aead-internal-nonce`,
+  `digest`, `signature`, `derivation`; later `stream-aead`, …) each own the
+  algorithm-agnostic resources. Adding an algorithm never touches them.
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `sha2`,
+  `ed25519-verify`/`-sign`, …) contain only
   *key minting* (`import-*`/`generate-*`). Everything else hangs off the key
   resource, so a key can never be used with the wrong algorithm. Signature
   minting splits the public and private halves into separate interfaces, so
@@ -60,20 +61,21 @@ kind*, not by algorithm:
   would be a recorded ruling, not an accident (the set is currently empty);
   see AGENTS.md, "WPT fidelity is a first-class design constraint".
 
-Current algorithms: **SHA-2 digests** (SHA-256/384/512), **HMAC-SHA-2**
-(SHA-256/384/512), **AES-GCM** (128/256-bit keys; per-call nonce lengths
-and tag sizes, the full SP 800-38D parameter space), and
-**ChaCha20-Poly1305** (both the RFC 8439 construction and XChaCha20-Poly1305
-with 24-byte nonces; browsers implement neither, so the jco host declines
-them) — the AEADs share 16-byte tags and the `ciphertext ‖ tag` wire format
-(`crypto.subtle`'s, which RustCrypto produces identically) — plus
-**Ed25519** and **ECDSA** (P-256/SHA-256, P-384/SHA-384; fixed-width
-`r ‖ s` signatures, WebCrypto's format; the in-guest provider serves ECDSA
-*verification only* — signing is class D) and the
-`bytes.constant-time-equal` utility. The variant enums also declare cases no
+Current algorithms: **SHA-2 digests**, **HMAC-SHA-2**, **AES-GCM** (the
+full SP 800-38D parameter space, plus an internal-nonce variant),
+**ChaCha20-Poly1305** and **XChaCha20-Poly1305** (the latter also with an
+internal-nonce variant; browsers implement neither construction, so the jco
+host declines them), **HKDF** and **PBKDF2** (minting `derive-input`s the
+key-minting interfaces consume), **Ed25519** and **ECDSA** (P-256/SHA-256,
+P-384/SHA-384; the in-guest provider serves ECDSA *verification only* —
+signing is class D), and the `bytes.constant-time-equal` utility. The
+AEADs share the `ciphertext ‖ tag` wire format (`crypto.subtle`'s, which
+RustCrypto produces identically). The variant enums also declare cases no
 implementation here serves (`aes192`, the truncated SHA-2 variants) — each
 algorithm's spec closes its set — which fail `unsupported`; a composition
-needing one must supply its own provider.
+needing one must supply its own provider. The exact per-interface contracts
+and the package-wide ones (streaming, key options, errors, extractability)
+are specified in [`wit/README.md`](wit/README.md) and the WIT doc comments.
 
 ## Layout
 
@@ -100,9 +102,10 @@ componentize-sdk/       # WebCrypto-subset library (crypto.subtle) for JS
                         #   lann:webcrypto imports; the JS counterpart of
                         #   guest-sdk
 examples/
-  crypto-demo/          # guest component: RFC 4231 + NIST GCM known-answer
-                        #   vectors, chunked streams, error taxonomy,
-                        #   extractability — one check per behavior
+  crypto-demo/          # guest component: known-answer vectors, chunked
+                        #   streams, error taxonomy, extractability —
+                        #   one check per behavior, across the package's
+                        #   primitive kinds
   demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
   jco-demo/             # Node 24+ driver: transpiles crypto-demo with jco
@@ -120,8 +123,10 @@ timing-lab/             # dudect-style statistical timing tests of the
                         #   README for methodology and detection limits)
 ```
 
-Demo components pull the shared package in through `wit/deps/lann-webcrypto`
-symlinks back to the root `wit/`, so there is a single copy to edit.
+Components that name the package in their own WIT pull it in through
+`wit/deps/lann-webcrypto` symlinks back to the root `wit/`, so there is a
+single copy to edit; guests built on `guest-sdk` reach it through that
+crate's bindings instead.
 
 ## Build & run
 
@@ -157,9 +162,9 @@ just ci                      # everything CI runs
 ```
 
 All three implementations run identical guest components. The conformance
-tests (Wycheproof HMAC-SHA-256, AES-GCM, and ChaCha20-Poly1305 vectors and
-NIST CAVP SHA-2 vectors under multiple stream-chunking schedules, plus
-API-contract probes) gate the wasmtime, composed, and jco-node
+tests (the vendored Wycheproof/CAVP/speccheck vectors — see
+[`conformance/vectors/README.md`](conformance/vectors/README.md) — under
+multiple stream-chunking schedules, plus API-contract probes) gate the wasmtime, composed, and jco-node
 targets everywhere, and the jco-browser target in CI (locally, opt in
 with `CONFORMANCE_BROWSER=1`; needs Chrome/Chromium 137+); the
 `crypto-demo` guest additionally covers the jco host end to end.

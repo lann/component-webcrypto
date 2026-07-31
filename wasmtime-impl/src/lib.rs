@@ -7,10 +7,8 @@
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
-//! and calls [`add_to_linker`] to satisfy the `types`, `bytes`, `mac`,
-//! `aead`, `digest`, `signature`, and the minting interfaces
-//! imports with HMAC-SHA-2, AES-GCM, ChaCha20-Poly1305, and SHA-2
-//! implementations.
+//! and calls [`add_to_linker`] to satisfy the full `lann:webcrypto`
+//! package surface with RustCrypto implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 

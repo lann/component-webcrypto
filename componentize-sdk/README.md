@@ -16,7 +16,7 @@ namespace) serving:
 
 | method | algorithms |
 | --- | --- |
-| `importKey` / `exportKey` | `"raw"` format |
+| `importKey` / `exportKey` | `"raw"` and `"jwk"` formats |
 | `generateKey` | HMAC-SHA-256, AES-256-GCM |
 | `sign` / `verify` | HMAC-SHA-256 |
 | `encrypt` / `decrypt` | AES-256-GCM |
@@ -32,10 +32,11 @@ other failure stays a thrown error, preserving the WIT surface's fail-closed
 shape.
 
 Deviations from the Web Cryptography API are documented at the top of
-`webcrypto.js`; all of them fail closed with clear errors rather than
-silently differing (fixed 12-byte GCM IVs and 128-bit tags per the
-`lann:webcrypto` contract, `"raw"` keys only, the two algorithms only, and a
-minimal `DOMException` stand-in, which the componentize-js runtime lacks).
+`webcrypto.js` (the registry: every deviation appears there with its
+classification); all of them fail closed with clear errors rather than
+silently differing (the two algorithms only, `"raw"`/`"jwk"` formats only,
+and a minimal `DOMException` stand-in, which the componentize-js runtime
+lacks).
 
 Within that subset the library tracks the spec closely enough to pass the
 relevant [web-platform-tests] suites: [`wpt/`](wpt) vendors the WebCryptoAPI

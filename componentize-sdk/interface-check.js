@@ -10,7 +10,7 @@
 //
 // What this does *not* check is the library's documented deviations, which
 // are runtime restrictions on values, not on shapes: HMAC-SHA-256 and
-// AES-256-GCM only, `"raw"` format only, the `tagLength` rules. Those are
+// AES-256-GCM only, `"raw"`/`"jwk"` formats only, the `tagLength` rules. Those are
 // the WPT suite's job (`just test-webcrypto-componentize-wpt`). The split is
 // deliberate: types pin the shape, the vendored web-platform-tests pin the
 // behaviour, and both describe the same surface.
