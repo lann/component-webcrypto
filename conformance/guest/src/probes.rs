@@ -4,11 +4,10 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::mint::{
-    derive_options, generate_chacha_key, generate_ed25519_key, generate_hmac_key,
-    generate_internal_nonce_key, generate_key, generate_xchacha_internal_nonce_key,
-    generate_xchacha_key, import_aes_key_jwk, import_chacha_key, import_hmac_key,
-    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key,
-    import_xchacha_internal_nonce_key, import_xchacha_key,
+    derive_options, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
+    generate_key, generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key,
+    import_hmac_key, import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key,
+    import_xchacha_internal_nonce_key,
 };
 use conformance_harness::stream::{
     compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, try_sign, verify,
@@ -18,7 +17,6 @@ use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
     FEATURE_GCM_ANY_IV,
 };
-use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
@@ -59,7 +57,6 @@ probes! {
     sign_prefix_drop,
     digest_reuse,
     constant_time_equal,
-    chacha_key_metadata(chacha),
     chacha_nonce_lengths(chacha),
     ed25519_sign_roundtrip,
     sig_key_metadata,
@@ -67,7 +64,7 @@ probes! {
     verifying_key_export_roundtrip,
     internal_nonce_shape,
     chacha_internal_nonce_roundtrip(chacha),
-    aes128_shape,
+    aes128_internal_nonce,
     open_short_input,
     stream_empty_writes,
     extractable_getter,
@@ -80,7 +77,7 @@ probes! {
     jwk_semantics,
     chacha_jwk_unsupported(chacha),
     mac_usage_policy,
-    aead_usage_policy,
+    aead_wrap_grants,
     internal_nonce_usage_policy,
     signing_usage_policy,
     hkdf_derive_key_equivalence,
@@ -133,17 +130,21 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
 
 /// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
 async fn chacha_minting_declined() -> Result<String, String> {
-    for (name, import, generate) in CHACHA_MINTERS {
+    for family in chacha_families() {
         expect_err(
-            &format!("{name} import-key"),
+            &format!("{} import-key", family.name),
             ErrKind::Unsupported,
-            import(vec![0x42u8; 32], false).await,
+            (family.import)(
+                vec![0x42u8; family.key_len],
+                crate::mint::aead_options(false),
+            )
+            .await,
             "minted a key: the target serves a feature it declares missing",
         )?;
         expect_err(
-            &format!("{name} generate-key"),
+            &format!("{} generate-key", family.name),
             ErrKind::Unsupported,
-            generate(false).await,
+            (family.generate)(crate::mint::aead_options(false)).await,
             "minted a key: the target serves a feature it declares missing",
         )?;
     }
@@ -342,8 +343,8 @@ async fn sealed_length() -> Result<(), String> {
     Ok(())
 }
 
-/// Import then export of an extractable key is the identity, for both HMAC
-/// and AES keys.
+/// Import then export of an extractable HMAC key is the identity (the
+/// AEAD families' identity is the contract battery's `export` area).
 async fn key_export_roundtrip() -> Result<(), String> {
     let hmac_raw = b"key-export-roundtrip".to_vec();
     let key = import_hmac_key(Sha2Variant::Sha256, hmac_raw.clone(), true)
@@ -353,21 +354,11 @@ async fn key_export_roundtrip() -> Result<(), String> {
         .export_key()
         .await
         .map_err(|e| describe("hmac export", &e))?;
-    expect_bytes(&exported, &hmac_raw, "exported HMAC key material")?;
-
-    let aes_raw: Vec<u8> = (0..32u8).collect();
-    let key = import_key(AesVariant::Aes256, aes_raw.clone(), true)
-        .await
-        .map_err(|e| describe("import-key", &e))?;
-    let exported = key
-        .export_key()
-        .await
-        .map_err(|e| describe("aes export", &e))?;
-    expect_bytes(&exported, &aes_raw, "exported AES key material")
+    expect_bytes(&exported, &hmac_raw, "exported HMAC key material")
 }
 
-/// Export of a non-extractable key fails `not-extractable`, for both HMAC
-/// and AES keys.
+/// Export of a non-extractable HMAC key fails `not-extractable` (the
+/// AEAD families' gate is the contract battery's `export` area).
 async fn not_extractable() -> Result<(), String> {
     let key = import_hmac_key(Sha2Variant::Sha256, b"not-extractable".to_vec(), false)
         .await
@@ -377,16 +368,6 @@ async fn not_extractable() -> Result<(), String> {
         ErrKind::NotExtractable,
         key.export_key().await,
         "non-extractable HMAC key exported",
-    )?;
-
-    let key = import_key(AesVariant::Aes256, vec![0x42u8; 32], false)
-        .await
-        .map_err(|e| describe("import-key", &e))?;
-    expect_err(
-        "aes export-key",
-        ErrKind::NotExtractable,
-        key.export_key().await,
-        "non-extractable AES key exported",
     )
 }
 
@@ -633,76 +614,14 @@ async fn constant_time_equal() -> Result<(), String> {
     Ok(())
 }
 
-/// Both `chacha-variant`s mint 256-bit keys reporting their own algorithm
-/// names, decline non-32-byte material as `invalid-key`, and generate
-/// 32 bytes of key material.
-async fn chacha_key_metadata() -> Result<(), String> {
-    for (name, import, generate) in CHACHA_MINTERS {
-        let key = import(vec![0x42u8; 32], false)
-            .await
-            .map_err(|e| describe("import-key", &e))?;
-        expect(
-            key.algorithm_name(),
-            name.to_string(),
-            &format!("{name} key algorithm-name"),
-        )?;
-        expect(
-            key.algorithm_length(),
-            256,
-            &format!("{name} key algorithm-length"),
-        )?;
-        // The size getters exist so a component holding only the key handle
-        // can frame nonces and ciphertext without matching on
-        // `algorithm-name` (see the WIT). XChaCha is the one family where
-        // the nonce size differs from the AES default, so asserting them
-        // only on AES-GCM left the getters' whole purpose untested.
-        let want_nonce = if name == "XChaCha20-Poly1305" { 24 } else { 12 };
-        expect(key.nonce_size(), want_nonce, &format!("{name} nonce-size"))?;
-        expect(key.tag_size(), 16, &format!("{name} tag-size"))?;
-        expect_err(
-            &format!("{name} import-key (16 bytes)"),
-            ErrKind::InvalidKey,
-            import(vec![0x42u8; 16], false).await,
-            "imported 16 bytes of key material",
-        )?;
-        let generated = generate(true)
-            .await
-            .map_err(|e| describe("generate-key", &e))?;
-        let raw = generated
-            .export_key()
-            .await
-            .map_err(|e| describe("export", &e))?;
-        expect(
-            raw.len(),
-            32,
-            &format!("{name} generated key material length"),
-        )?;
-    }
-    Ok(())
+/// The contract battery's ChaCha rows (`contract::AEAD_FAMILIES` tagged
+/// with the feature): the minting entry points the decline and
+/// nonce-length probes iterate.
+fn chacha_families() -> impl Iterator<Item = &'static crate::contract::AeadFamily> {
+    crate::contract::AEAD_FAMILIES
+        .iter()
+        .filter(|family| family.features.contains(&FEATURE_CHACHA))
 }
-
-/// The two ChaCha constructions' minting interfaces, name-tagged for probe
-/// messages. Boxed futures because the interfaces are distinct functions
-/// with identical shapes.
-type MintFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, Error>>>>;
-/// One construction's minting entry: (name, import-key, generate-key).
-type ChachaMinter = (
-    &'static str,
-    fn(Vec<u8>, bool) -> MintFuture<AeadKey>,
-    fn(bool) -> MintFuture<AeadKey>,
-);
-const CHACHA_MINTERS: [ChachaMinter; 2] = [
-    (
-        "ChaCha20-Poly1305",
-        |raw, extractable| Box::pin(import_chacha_key(raw, extractable)),
-        |extractable| Box::pin(generate_chacha_key(extractable)),
-    ),
-    (
-        "XChaCha20-Poly1305",
-        |raw, extractable| Box::pin(import_xchacha_key(raw, extractable)),
-        |extractable| Box::pin(generate_xchacha_key(extractable)),
-    ),
-];
 
 /// Each construction's key accepts exactly its own nonce length: the other
 /// construction's length is `invalid-nonce` (nonce-length confusion between
@@ -710,13 +629,15 @@ const CHACHA_MINTERS: [ChachaMinter; 2] = [
 /// round-trips.
 async fn chacha_nonce_lengths() -> Result<(), String> {
     let msg = b"chacha-nonce-lengths";
-    for ((name, import, _), good_len, bad_len) in [
-        (CHACHA_MINTERS[0], 12usize, 24usize),
-        (CHACHA_MINTERS[1], 24, 12),
-    ] {
-        let key = import(vec![0x42u8; 32], false)
-            .await
-            .map_err(|e| describe("import-key", &e))?;
+    for family in chacha_families() {
+        let (name, good_len) = (family.name, family.nonce_len);
+        let bad_len = if good_len == 12 { 24 } else { 12 };
+        let key = (family.import)(
+            vec![0x42u8; family.key_len],
+            crate::mint::aead_options(false),
+        )
+        .await
+        .map_err(|e| describe("import-key", &e))?;
         let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", None, msg, Schedule::Whole).await;
         fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
         expect_err(
@@ -1090,34 +1011,11 @@ async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
 }
 
-/// AES-128-GCM minting and round trip: every implementation serves the
-/// variant, so its key shape (16-byte material, 128-bit length, the same
-/// 12/16 nonce/tag contract) and a seal/open round trip are pinned for
-/// both nonce disciplines.
-async fn aes128_shape() -> Result<(), String> {
-    let key = generate_key(AesVariant::Aes128, true)
-        .await
-        .map_err(|e| describe("generate-key", &e))?;
-    expect(key.algorithm_length(), 128, "algorithm-length")?;
-    expect(key.nonce_size(), 12, "nonce-size")?;
-    expect(key.tag_size(), 16, "tag-size")?;
-    let exported = key
-        .export_key()
-        .await
-        .map_err(|e| describe("export-key", &e))?;
-    expect(exported.len(), 16, "exported key length")?;
-
+/// The internal-nonce discipline serves AES-128 too: a generated key
+/// reports the 128-bit length and round-trips (the caller-nonce AES-128
+/// shape is the contract battery's `aes-gcm/contract/aes128-*` cases).
+async fn aes128_internal_nonce() -> Result<(), String> {
     let plaintext = b"aes-128 round trip payload".to_vec();
-    let nonce = [3u8; 12];
-    let (sealed, fed) = seal(&key, &nonce, b"aad", None, &plaintext, Schedule::Straddle).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal", &e))?;
-    let (opened, fed) = open(&key, &nonce, b"aad", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open", &e))?;
-    expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
-
-    // The internal-nonce discipline serves AES-128 too.
     let key = generate_internal_nonce_key(AesVariant::Aes128, false)
         .await
         .map_err(|e| describe("generate-key (internal nonce)", &e))?;
@@ -1639,74 +1537,30 @@ async fn mac_usage_policy() -> Result<(), String> {
     )
 }
 
-/// Usage policy on `aead-key`: the seal/open grants are enforced per
-/// operation and reported by the getters, and the wrap grants — recorded
-/// ahead of operations — mint a key on their own but permit neither
-/// operation.
-async fn aead_usage_policy() -> Result<(), String> {
+/// The wrap grants on `aead-key`: recorded ahead of the wrap operations
+/// existing, they mint a key on their own but permit neither operation.
+/// (The seal/open grants' enforcement and getters are the contract
+/// battery's `usage` area, per family.)
+async fn aead_wrap_grants() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
 
-    let raw = vec![0x5au8; 32];
-    expect_err(
-        "zero-usage import-key",
-        ErrKind::NotPermitted,
-        aes_gcm::import_key(AesVariant::Aes256, raw.clone(), AeadKeyOptions::new()).await,
-        "minted a key with no enabled usage",
-    )?;
-
-    let options = AeadKeyOptions::new();
-    options.can_seal(true);
-    let seal_only = aes_gcm::import_key(AesVariant::Aes256, raw.clone(), options)
-        .await
-        .map_err(|e| describe("seal-only import-key", &e))?;
-    expect(seal_only.can_seal(), true, "seal-only key can-seal")?;
-    expect(seal_only.can_open(), false, "seal-only key can-open")?;
-    expect(seal_only.can_wrap(), false, "seal-only key can-wrap")?;
-    expect(seal_only.can_unwrap(), false, "seal-only key can-unwrap")?;
-
-    let nonce = [3u8; 12];
-    let plaintext = b"usage-policy plaintext";
-    let (sealed, fed) = seal(&seal_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal under a seal-only key", &e))?;
-    let (refused, fed) = open(&seal_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    expect_err(
-        "open on a seal-only key",
-        ErrKind::NotPermitted,
-        refused,
-        "seal-only key opened",
-    )?;
-
-    let options = AeadKeyOptions::new();
-    options.can_open(true);
-    let open_only = aes_gcm::import_key(AesVariant::Aes256, raw.clone(), options)
-        .await
-        .map_err(|e| describe("open-only import-key", &e))?;
-    expect(open_only.can_seal(), false, "open-only key can-seal")?;
-    expect(open_only.can_open(), true, "open-only key can-open")?;
-    let (opened, fed) = open(&open_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open under an open-only key", &e))?;
-    expect_bytes(&opened, plaintext, "plaintext under an open-only key")?;
-    let (refused, fed) = seal(&open_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    expect_err(
-        "seal on an open-only key",
-        ErrKind::NotPermitted,
-        refused,
-        "open-only key sealed",
-    )?;
-
     let options = AeadKeyOptions::new();
     options.can_wrap(true);
-    let wrap_only = aes_gcm::import_key(AesVariant::Aes256, raw, options)
+    let wrap_only = aes_gcm::import_key(AesVariant::Aes256, vec![0x5au8; 32], options)
         .await
         .map_err(|e| describe("wrap-only import-key", &e))?;
     expect(wrap_only.can_wrap(), true, "wrap-only key can-wrap")?;
     expect(wrap_only.can_seal(), false, "wrap-only key can-seal")?;
-    let (refused, fed) = seal(&wrap_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
+    let (refused, fed) = seal(
+        &wrap_only,
+        &[3u8; 12],
+        b"",
+        None,
+        b"usage-policy plaintext",
+        Schedule::Whole,
+    )
+    .await;
     fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
     expect_err(
         "seal on a wrap-only key",
