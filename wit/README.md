@@ -188,6 +188,11 @@ short:
 - **Signing keys are generate-only for now.** Private-key import/export
   returns with the PKCS#8/JWK format work, whose inputs stay on specified
   platform paths.
+- **Empty PBKDF2 passwords are accepted; empty HKDF IKM is not.** RFC 8018
+  admits an empty `P`, the platform serves it, and the upstream test
+  vectors exercise it as valid, so rejecting it would break platform
+  fidelity without a safety win. A zero-entropy HKDF IKM, by contrast, is
+  never what a caller meant.
 - **Per-algorithm interfaces instead of variant enums** where platform
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one

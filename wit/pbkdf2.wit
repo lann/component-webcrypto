@@ -3,26 +3,23 @@ package lann:webcrypto@0.1.0;
 /// PBKDF2 (RFC 8018) over the SHA-2 hash family: password-based key
 /// derivation, as the Web Cryptography API serves it.
 ///
-/// Like `hkdf`, this interface mints no keys: it mints `derive-input`s,
-/// which the key-minting interfaces' `derive-key` functions consume and
-/// which yield raw output through `derivation.derive-input.derive-bits`.
-/// Adding this source touched no target interface — that is the
-/// `derivation` design's shape.
+/// Like `hkdf`, this interface mints no keys. It mints `derive-input`s —
+/// parameterized derivations — which the key-minting interfaces'
+/// `derive-key` functions consume, and which yield raw output through
+/// `derivation.derive-input.derive-bits`.
 ///
-/// The pre-image lives here as the `password` resource: a password a
-/// caller imports once and parameterizes many times, held in the
-/// implementation's memory for the resource's construction-to-drop
-/// lifetime. That window is the secret's exposure to memory side channels
-/// — import late, drop early; dropping releases (and, in the in-guest
-/// provider, scrubs) it. No operation returns a `password`'s bytes, under
-/// any grant: WebCrypto's forced non-extractability on PBKDF2 base keys,
-/// made structural.
+/// Security:
+/// - No operation returns a `password`'s bytes, under any grant:
+///   WebCrypto's forced non-extractability on PBKDF2 base keys, made
+///   structural.
+/// - The implementation holds an imported password in memory for the
+///   resource's construction-to-drop lifetime; that window is the
+///   secret's exposure to memory side channels. Import late, drop early.
+///   Dropping releases (and, in scrubbing implementations, zeroizes) it.
 ///
-/// There is deliberately no `prepare-from` here. Its meaning — adopting
-/// another derivation's output as a *password* — is WebCrypto's
-/// `deriveKey(… → "PBKDF2")`, which is registry-legal nonsense (deriving a
-/// password from key material inverts the primitive's purpose), and no
-/// platform test exercises it. `hkdf.prepare-from` is the chaining path.
+/// There is deliberately no `prepare-from` here: adopting another
+/// derivation's output as a *password* inverts the primitive's purpose.
+/// `hkdf.prepare-from` is the chaining path.
 interface pbkdf2 {
     use types.{error};
     use sha2.{sha2-variant};
@@ -38,19 +35,25 @@ interface pbkdf2 {
         can-derive-key: func() -> bool;
     }
 
-    /// Import a password. *Empty* passwords are accepted — deliberately
-    /// asymmetric with `hkdf.import-ikm`, which rejects empty material:
-    /// RFC 8018 admits an empty `P`, the platform serves it, and the
-    /// upstream test vectors exercise it as valid, so rejecting it here
-    /// would be a fidelity break rather than a safety win. Fails
+    /// Import a password.
+    ///
+    /// *Empty* passwords are accepted, unlike `hkdf.import-ikm`: RFC 8018
+    /// admits an empty `P` and the platform serves it. Fails
     /// `error.not-permitted` if `options` grants nothing, per the
-    /// package-wide options contract.
+    /// package-wide options contract (see `README.md`).
     import-password: async func(raw: list<u8>, options: derive-options) -> result<password, error>;
 
     /// Parameterize a derivation: `salt` and the iteration count are
-    /// bound now, the output length arrives per use (the platform's own
-    /// split — `Pbkdf2Params` at `deriveBits`, length from the target's
-    /// get-key-length at `deriveKey`).
+    /// bound now, and the output length arrives per use (the platform's
+    /// own split — `Pbkdf2Params` at `deriveBits`, length from the
+    /// target's get-key-length at `deriveKey`).
+    ///
+    /// Security:
+    /// - `iterations` is the work factor: it is the only brake on
+    ///   brute-force attack against the password. Use the largest count
+    ///   your latency budget allows.
+    /// - Use a unique random `salt` per password, so equal passwords do
+    ///   not derive equal keys and precomputed tables do not apply.
     ///
     /// A zero iteration count fails `error.other`, the platform's
     /// `OperationError` (RFC 8018 requires a positive count), checked here
@@ -58,7 +61,7 @@ interface pbkdf2 {
     /// implementation not serving the variant fails `error.unsupported`
     /// (the truncated SHA-2 variants are unserved package-wide).
     ///
-    /// Unlike `hkdf.prepare`, realization cannot shed the pre-image
+    /// Unlike `hkdf.prepare`, realization cannot shed the base secret
     /// entirely: PBKDF2 has no extract step, so the input retains
     /// password-derived keyed state (the PRF's key schedule) for its
     /// lifetime — equivalent in sensitivity to HKDF's retained PRK, and
