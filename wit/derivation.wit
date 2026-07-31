@@ -1,58 +1,63 @@
 package lann:webcrypto@0.1.0;
 
 /// The `derivation` primitive kind: turning secrets that are not yet keys —
-/// an agreement's shared secret, imported input keying material, a password
-/// — into bits or typed keys, without the secret transiting the caller.
+/// an agreement's shared secret, imported input keying material (IKM), a
+/// password — into bits or typed keys, without the secret transiting the
+/// caller.
 ///
 /// Every WebCrypto `deriveBits`/`deriveKey` call operates on a pair the
 /// spec never names: the base key plus the normalized algorithm parameters
 /// (IKM + salt/info; password + salt/iterations; private key + peer
 /// public). `derive-input` is that pair as a resource — a fully
-/// parameterized derivation, pending or realized, lacking only the output
-/// length, which the platform too supplies per use (explicitly at
-/// `deriveBits`, from the target's `get key length` at `deriveKey`).
+/// parameterized derivation, lacking only the output length, which the
+/// platform too supplies per use.
 ///
 /// Sources construct it on their own interfaces (`hkdf.prepare`, a future
 /// `pbkdf2.prepare`, a future agreement's `agree`); targets consume it
 /// beside `import-key` on their minting interfaces (`aes-gcm.derive-key`,
-/// `hmac-sha2.derive-key`). Raw bytes enter only as pre-images on the KDF
-/// interfaces, so nothing reaching a `derive-key` has skipped
-/// agreement-or-KDF, and no operation anywhere returns a pre-image:
-/// WebCrypto's forced non-extractability on KDF base keys (its `importKey`
-/// throws `SyntaxError` for `extractable: true`, and no export operation is
-/// registered) is a structural property here rather than a checked one.
+/// `hmac-sha2.derive-key`).
+///
+/// Security:
+/// - Raw secret bytes enter only on the KDF interfaces, so nothing
+///   reaching a `derive-key` has skipped agreement-or-KDF, and no
+///   operation anywhere returns a base secret's bytes. WebCrypto's forced
+///   non-extractability on KDF base keys is a structural property here
+///   rather than a checked one.
 interface derivation {
     use types.{error};
 
-    /// Mint-time policy for derive pre-images, following the package-wide
-    /// options contract (see `mac.mac-key-options`): the constructor
+    /// Mint-time policy for derivation base secrets, following the
+    /// package-wide options contract (see `README.md`): the constructor
     /// grants nothing, at least one grant is required to mint, and the
     /// vocabulary is WebCrypto's usage pair for derive-capable keys.
     resource derive-options {
         constructor();
-        /// Whether inputs built on this pre-image may yield raw bits
+        /// Whether inputs built on this base secret may yield raw bits
         /// through `derive-input.derive-bits`, and — because an extractable
         /// key is bits disclosure by other means — whether they may mint
         /// *extractable* keys. Disabled by default.
         can-derive-bits: func(allowed: bool);
-        /// Whether inputs built on this pre-image may mint keys through the
-        /// target interfaces' `derive-key`. Disabled by default.
+        /// Whether inputs built on this base secret may mint keys through
+        /// the target interfaces' `derive-key`. Disabled by default.
         can-derive-key: func(allowed: bool);
     }
 
-    /// A fully parameterized derivation, pending or realized.
+    /// A fully parameterized derivation. The output may already be
+    /// computed, or the computation may still be pending.
     ///
-    /// Grants are copied from the pre-image (or upstream input) at
+    /// Grants are copied from the base secret (or upstream input) at
     /// construction; parameterization neither grants nor revokes.
-    /// Implementations may realize the derivation eagerly or hold it
-    /// pending — functionally indistinguishable, but not
-    /// residency-indistinguishable: an unrealized input built over a
-    /// pre-image retains its own copy of that pre-image, so a secret's
-    /// total residency is the union of every resource that denotes it.
-    /// Implementations SHOULD NOT extend a pre-image's residency beyond
-    /// the resources that denote it, and SHOULD prefer eager realization
-    /// where it shortens the window (for HKDF, the extract step at
-    /// `prepare` retains only the PRK and drops the IKM copy).
+    ///
+    /// Security:
+    /// - An implementation may run the derivation as soon as the input is
+    ///   constructed, or wait until the input is used. While the
+    ///   computation is pending, the input holds its own copy of the base
+    ///   secret, so a secret stays in memory as long as any resource
+    ///   derived from it. Implementations SHOULD NOT keep a base secret in
+    ///   memory longer than the resources that denote it, and SHOULD
+    ///   compute early where that shortens the window (for HKDF, the
+    ///   extract step at `prepare` retains only the PRK and drops the IKM
+    ///   copy).
     resource derive-input {
         /// Whether `derive-bits` (and minting extractable keys) is
         /// permitted. See `derive-options.can-derive-bits`.

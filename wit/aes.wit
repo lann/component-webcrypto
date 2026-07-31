@@ -20,35 +20,38 @@ interface aes {
 
 /// AES-GCM key minting (NIST SP 800-38D, the full parameter space).
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with the parameters
-/// as the Web Cryptography API's `AesGcmParams` defines them, per call:
+/// Keys minted here drive `aead.aead-key.seal`/`open` with the parameters
+/// as the Web Cryptography API's `AesGcmParams` defines them, per call.
 ///
-/// - **Nonce**: any non-empty length (an empty nonce fails
-///   `error.invalid-nonce`). 96 bits is the standard size (the `nonce-size`
-///   getter) and the fast path; other lengths cost an extra GHASH pass
-///   (SP 800-38D §7.1's `J0` derivation) and forfeit §8.2's deterministic-
-///   construction guidance. The caller owns uniqueness either way. An
-///   implementation whose backend cannot serve a length MAY decline it with
-///   `error.unsupported` (platform-backed hosts inherit their platform's
-///   window; the standard size is always served).
+/// Security:
+/// - The caller owns nonce uniqueness. For nonce-misuse resistance,
+///   prefer `aes-gcm-internal-nonce`, which keeps the nonce out of the
+///   API entirely.
+/// - Short tags weaken the forgery bound (SP 800-38D Appendix C) and are
+///   opt-in only, behind an explicit `tag-size`.
+/// - 96 bits (12 bytes) is the standard nonce size (the `nonce-size`
+///   getter) and the fast path. Other lengths cost an extra GHASH pass
+///   (SP 800-38D §7.1) and forfeit §8.2's deterministic-construction
+///   guidance.
+///
+/// Parameter acceptance:
+///
+/// - **Nonce**: any non-empty length; an empty nonce fails
+///   `error.invalid-nonce`. An implementation whose backend cannot serve a
+///   length MAY decline it with `error.unsupported` (platform-backed hosts
+///   inherit their platform's window; the standard size is always served).
 /// - **Tag size**: 16 bytes by default (`tag-size` of `none`); the
 ///   algorithm's set is 4, 8, 12, 13, 14, 15, or 16 bytes (the registry's
-///   32–128-bit set). Short tags weaken the forgery bound (SP 800-38D
-///   Appendix C); implementations MAY decline sizes their security policy
-///   does not serve with `error.unsupported`. (WebCrypto's spec admits no
-///   such decline, so a consumer projecting its error vocabulary sees
-///   `NotSupportedError` where the platform would have served the call —
-///   the cost of permitting security profiles at this boundary.)
+///   32–128-bit set). Implementations MAY decline sizes their security
+///   policy does not serve with `error.unsupported`.
 /// - **Bounds**: GCM defines a maximum plaintext of 2^39 − 256 bits
 ///   (~64 GiB) per invocation and an AAD bound of 2^64 − 1 bits.
 ///   Implementations reaching them fail rather than wrap, but their
-///   buffering limits (`error.other`) are reached far earlier in
-///   practice.
+///   buffering limits (`error.other`) are reached far earlier in practice.
 ///
-/// For nonce-misuse resistance prefer `aes-gcm-internal-nonce`, which keeps
-/// the nonce out of the API entirely. A FIPS 140-3 approved-mode provider
-/// does not export this interface (caller-supplied encryption IVs fall
-/// outside SP 800-38D §8's approved envelope) — see `aes-gcm-internal-nonce`.
+/// A FIPS 140-3 approved-mode provider does not export this interface:
+/// caller-supplied encryption IVs fall outside SP 800-38D §8's approved
+/// envelope. See `aes-gcm-internal-nonce`.
 interface aes-gcm {
     use types.{error};
     use aead.{aead-key, aead-key-options};
@@ -69,10 +72,10 @@ interface aes-gcm {
     /// variant.
     ///
     /// `jwk` is the JWK as JSON text; the implementation owns the parse
-    /// (see `mac.mac-key.export-key-jwk` for the package-wide JWK
-    /// contract). The key must be an `oct` key whose `alg`, if present,
-    /// names the declared variant (`"A128GCM"`/`"A192GCM"`/`"A256GCM"`);
-    /// the decoded material is then subject to `import-key`'s contract.
+    /// (see `README.md`, "JWK contract"). The key must be an `oct` key
+    /// whose `alg`, if present, names the declared variant
+    /// (`"A128GCM"`/`"A192GCM"`/`"A256GCM"`); the decoded material is then
+    /// subject to `import-key`'s contract.
     import-key-jwk: async func(%variant: aes-variant, jwk: string, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random key of the given AES variant. Fails with
@@ -80,18 +83,14 @@ interface aes-gcm {
     /// variant.
     generate-key: async func(%variant: aes-variant, options: aead-key-options) -> result<aead-key, error>;
 
-    /// Mint a key from a parameterized derivation: the input is realized
+    /// Mint a key from a parameterized derivation: the derivation runs
     /// at the variant's key length (WebCrypto's `deriveKey` chain — get
     /// key length, derive bits, import) and the result is subject to
     /// `import-key`'s contract.
     ///
     /// Requires `can-derive-key` on the input, else `error.not-permitted`.
-    /// Requesting an *extractable* key requires `can-derive-bits` too — an
-    /// exportable key is bits disclosure by other means, so the grant
-    /// distinction would otherwise be theater (WebCrypto accepts this
-    /// laundering; this package closes it, and the shim never requests
-    /// extractable derived keys on a bits-less input, so nothing
-    /// observable through `crypto.subtle` changes).
+    /// Requesting an *extractable* key requires `can-derive-bits` too: an
+    /// exportable key is bits disclosure by other means.
     derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: aead-key-options) -> result<aead-key, error>;
 }
 
@@ -100,16 +99,17 @@ interface aes-gcm {
 ///
 /// Sealed messages are `iv ‖ ciphertext ‖ tag` (12-byte IV, 16-byte tag).
 ///
-/// A key's nonce budget is 2^32 `seal` invocations (§8.2.2's
-/// repeat-probability bound). Implementations SHOULD enforce it with
-/// `error.key-exhausted`; a FIPS 140-3 profile MUST. For workloads that
-/// could approach the bound, prefer `xchacha20-poly1305-internal-nonce`.
+/// Security:
+/// - A key's nonce budget (see `README.md`, "Terminology") is 2^32 `seal`
+///   invocations (§8.2.2's repeat-probability bound). Implementations
+///   SHOULD enforce it with `error.key-exhausted`; a FIPS 140-3 profile
+///   MUST. For workloads that could approach the bound, prefer
+///   `xchacha20-poly1305-internal-nonce`.
 ///
 /// This interface is deliberately separate from `aes-gcm` (caller-nonce
 /// minting) so a security profile can serve one nonce discipline without
-/// the other at `wac plug` time — e.g. a FIPS 140-3 approved-mode provider
-/// exports this interface but not `aes-gcm`, whose caller-supplied
-/// encryption IVs SP 800-38D §8 forbids in approved mode.
+/// the other at composition time — e.g. a FIPS 140-3 approved-mode
+/// provider exports this interface but not `aes-gcm`.
 interface aes-gcm-internal-nonce {
     use types.{error};
     use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
@@ -119,14 +119,16 @@ interface aes-gcm-internal-nonce {
     /// declared variant (see `aes-gcm.import-key` for the
     /// variant/`raw`-length contract, which applies identically here).
     ///
-    /// The nonce-uniqueness guarantee is per key *as managed by this
-    /// implementation*: importing the same material into multiple
-    /// implementations divides the nonce budget among them blindly. An
-    /// implementation MAY reject imported material per its security policy
-    /// (for example, a profile that cannot establish uniqueness for
+    /// Security:
+    /// - The nonce-uniqueness guarantee is per key *as managed by this
+    ///   implementation*: importing the same material into multiple
+    ///   implementations divides the nonce budget among them blindly.
+    ///   Prefer `generate-key` where interop does not require import.
+    ///
+    /// An implementation MAY reject imported material per its security
+    /// policy (for example, a profile that cannot establish uniqueness for
     /// externally sourced material) with `error.invalid-key` or
-    /// `error.unsupported`; prefer `generate-key` where interop does not
-    /// require import.
+    /// `error.unsupported`.
     import-key: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce AES-GCM key of the declared

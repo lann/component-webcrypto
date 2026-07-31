@@ -2,19 +2,19 @@ package lann:webcrypto@0.1.0;
 
 /// Shared structural types for the WebCrypto-style interfaces.
 ///
-/// Every non-resource type used by the package lives here. Structural types
-/// carry no host-side identity, so a single composition can freely share these
-/// definitions across multiple components. The stateful objects — keys and
-/// in-progress computations — live in the per-primitive-kind interfaces
-/// (`mac`, `aead`, …), since a resource is always owned by the one component
-/// that implements it.
+/// Every non-resource type used by the package lives here. The stateful
+/// objects (keys) live in the per-primitive-kind interfaces (`mac`, `aead`,
+/// …), because a resource is always owned by the one component that
+/// implements it.
+///
+/// See `README.md` in this package for the package-wide contracts and
+/// terminology.
 interface types {
     /// Errors surfaced by key creation and cryptographic operations.
     ///
-    /// Failures that indicate misuse of the API are unrepresentable by
-    /// construction — operations are one-shot calls on immutable key
-    /// resources, so there is no state to misuse — and so have no variant
-    /// here.
+    /// There is no case for API misuse: the package aims to make misuse
+    /// inexpressible instead of reporting it (see `README.md`, "Design
+    /// notes"). See also `README.md`, "Error contract".
     variant error {
         /// The supplied key material is invalid for the algorithm (for
         /// example, a wrong-length raw key, or one rejected by an
@@ -24,24 +24,15 @@ interface types {
         /// The supplied nonce is invalid for the algorithm (for example, a
         /// wrong-length AES-GCM nonce). The string is human-readable.
         invalid-nonce(string),
-        /// Verification failed: the MAC tag, or the ciphertext or its
-        /// associated data, did not verify under the key. Deliberately
-        /// carries no detail, so implementations cannot leak *why*
-        /// verification failed.
+        /// Verification failed: the input is unauthenticated under the key.
         ///
-        /// The guarantee is one-sided. Failed verification MUST report
-        /// this case and nothing else — security telemetry may rely on it
-        /// never being misfiled. An implementation whose backend collapses
-        /// verification failure with other failures (WebCrypto's `decrypt`
-        /// throws one `OperationError` for both) MAY report this case for
-        /// failures it cannot distinguish from it, so rare operational
-        /// false positives are possible on `open`; `verify` is exact on
-        /// every current implementation (boolean-returning backends
-        /// preserve the distinction). Either way the case means
-        /// *unauthenticated input* — at the cryptographic layer a forgery
-        /// and accidental corruption are indistinguishable in principle,
-        /// so no implementation could report an attack/corruption
-        /// distinction.
+        /// Security:
+        /// - Failed verification MUST report this case and nothing else.
+        ///   Security telemetry may rely on it never being misfiled.
+        /// - The case deliberately carries no detail, so implementations
+        ///   cannot leak *why* verification failed.
+        /// - Rare operational false positives are possible on `open`,
+        ///   never on `verify`. See `README.md`, "Error contract".
         authentication-failed,
         /// The key was created with `extractable` false, so its material
         /// cannot be exported.
@@ -51,66 +42,40 @@ interface types {
         /// size the platform's crypto API declines). The string is
         /// human-readable.
         unsupported(string),
-        /// The key does not permit the requested operation: it was minted
-        /// (or arrived from a platform keystore) with the operation's
-        /// usage disabled. The string names the refused operation. Distinct
-        /// from `unsupported` (the implementation serves the operation;
-        /// this key refuses it) and never a verdict on the input.
+        /// The key does not permit the requested operation: the operation's
+        /// usage was not granted at mint. The string names the refused
+        /// operation. Distinct from `unsupported` (the implementation
+        /// serves the operation; this key refuses it) and never a verdict
+        /// on the input.
         not-permitted(string),
-        /// The key's nonce budget is exhausted: the implementation can no
-        /// longer guarantee nonce uniqueness for this key (for example, an
-        /// AES-GCM internal-nonce key reaching SP 800-38D's
-        /// 2^32-invocation bound for the RBG-based IV construction). The
-        /// key remains valid for `open`; mint a fresh key to continue
-        /// sealing.
+        /// The key's nonce budget (see `README.md`, "Terminology") is
+        /// exhausted: the implementation can no longer guarantee nonce
+        /// uniqueness for this key (for example, an AES-GCM internal-nonce
+        /// key reaching SP 800-38D's 2^32-invocation bound). The key
+        /// remains valid for `open`; mint a fresh key to continue sealing.
         key-exhausted,
-        /// An implementation-specific operational failure — for example, an
-        /// implementation backed by an external keystore (an HSM, a platform
-        /// key service) that cannot complete the operation right now, or an
-        /// input exceeding a resource limit the implementation enforces
-        /// (implementations MAY bound how much input one operation may
-        /// buffer; the stream is still fully drained first, per the drain
-        /// rule). The string is human-readable. API misuse remains
-        /// unrepresentable by construction and never appears here.
+        /// An implementation-specific operational failure: for example, an
+        /// external keystore that cannot complete the operation now, or an
+        /// input exceeding an implementation's buffering limit (the stream
+        /// is still fully drained first). The string is human-readable.
+        /// Never a semantic condition a caller must branch on.
         other(string),
     }
 }
 
 /// The `mac` primitive kind: message-authentication codes.
 ///
-/// This interface is algorithm-agnostic. Keys are minted by per-algorithm
-/// interfaces (such as `hmac-sha2`) and returned as `mac-key` resources bound to
-/// their algorithm at creation; every operation then hangs off the key, so a
-/// key can never be used with the wrong algorithm.
-///
-/// A component whose world imports only this interface can *use* any
-/// `mac-key` handle it is granted but cannot mint or import keys; only a
-/// world importing a key-minting interface (such as `hmac-sha2`) can create them.
-/// Key handles are therefore capabilities.
+/// This interface is algorithm-agnostic. Per-algorithm interfaces (such as
+/// `hmac-sha2`) mint `mac-key` resources bound to their algorithm; every
+/// operation hangs off the key. Key handles are capabilities: a world that
+/// imports only this interface can use keys it is granted, but cannot mint
+/// them (see `README.md`).
 interface mac {
     use types.{error};
 
     /// Mint-time policy for a `mac-key`, consumed by the minting
-    /// interfaces' functions (single-use: mutating it after a mint is
-    /// unrepresentable because the mint took ownership).
-    ///
-    /// Package-wide options contract (every `*-key-options` resource
-    /// follows it): **the constructor grants nothing** — every usage and
-    /// extractability are opt-in, so a mint names exactly what the key is
-    /// for. At least one usage must be enabled at mint; an untouched
-    /// options resource therefore cannot mint, failing
-    /// `error.not-permitted` (the same statement WebCrypto makes by
-    /// refusing zero-usage secret-key mints). The vocabulary covers the
-    /// algorithm family's WebCrypto usages even where this package has no
-    /// operation yet: usages are write-once enforcement bits on
-    /// platform-backed keys (structured clone carries them into storage),
-    /// so a grant absent at mint is unrecoverable for a non-extractable
-    /// key — the vocabulary must be complete before the operations are.
-    /// Deny-by-default also covers evolution: future usages arrive
-    /// ungranted for every existing caller, so growth can never silently
-    /// widen a grant. An options resource cannot cross providers
-    /// (resource types are per-instance); construct it from the same
-    /// import the mint comes from.
+    /// interfaces' functions. Grants nothing by default; see `README.md`,
+    /// "Key-options contract".
     resource mac-key-options {
         constructor();
         /// Whether the minted key may `sign`. Disabled by default.
@@ -125,116 +90,59 @@ interface mac {
     /// A MAC key: an unforgeable capability, bound to one algorithm at
     /// creation.
     ///
-    /// `sign`/`verify` are one-shot and stateless per call, mirroring
-    /// `crypto.subtle.sign`/`verify`: there is deliberately no incremental
-    /// computation resource, so misuse of in-progress state (concurrent
-    /// updates, use after finalization) is unrepresentable. The byte
-    /// `stream` is the only ingestion path and also the incremental one —
-    /// implementations may fold each chunk into the computation as it
-    /// arrives or buffer the stream whole; the result is chunking-invariant
-    /// either way.
+    /// `sign` and `verify` are one-shot and stateless per call, mirroring
+    /// `crypto.subtle.sign`/`verify`. The byte `stream` is the only
+    /// ingestion path; the result is chunking-invariant.
     ///
-    /// Warning on truncating producers (applies to every stream-taking
-    /// operation in this package): dropping the writer is the stream's only
-    /// end-of-input signal and carries no verdict, so a producer that fails
-    /// midway is indistinguishable from one that finished — the operation
-    /// correctly computes over the delivered prefix. A bare `stream` is
-    /// never sufficient input for a fallible producer: when the write path
-    /// can fail independently of the party consuming the result (for
-    /// example, a writable end forwarded to another component), convey
-    /// completeness in-band (e.g. length framing) or discard the result on
-    /// producer failure.
+    /// Security:
+    /// - A closed input stream carries no verdict: an operation computes
+    ///   correctly over whatever prefix a failed producer delivered. See
+    ///   `README.md`, "Streaming contract" (truncating producers).
     ///
-    /// Making progress (applies to every stream-taking operation in this
-    /// package): an implementation holds each in-flight operation's bytes,
-    /// so it necessarily bounds how many it will service at once — by
-    /// leaving a call waiting to start, which the component model already
-    /// defines and which needs nothing from this interface. A caller with
-    /// several operations in flight must therefore *make progress on all of
-    /// them concurrently*, in both directions:
+    /// Callers with several operations in flight must feed and drain them
+    /// concurrently, or they can deadlock; see `README.md`, "Streaming
+    /// contract" (making progress, returned streams).
     ///
-    /// - feed each operation's input stream without waiting on any other
-    ///   operation, and
-    /// - drain each operation's returned stream as it becomes available,
-    ///   rather than deferring every read until the last call has returned.
-    ///
-    /// A caller that withholds one in-flight operation's input or output
-    /// while awaiting another can deadlock against the implementation's
-    /// bound, and no implementation can rescue it: the bytes it is waiting
-    /// to reclaim are the ones the caller is holding. The natural shape is
-    /// safe — await an operation and drain its stream in the same task,
-    /// then run those tasks concurrently. Deferring all draining until
-    /// every call has returned is the shape that is not.
-    ///
-    /// A returned stream must be read to completion or dropped; an
-    /// implementation may hold resources until one of the two happens.
-    /// Dropping it is always available and always sufficient — a caller that
-    /// no longer wants the result never has to drain it to release the
-    /// implementation.
-    ///
-    /// Note on extractability: `extractable` is an API property, not a
-    /// physical one — the *implementation* of this interface necessarily
-    /// holds the key material. The guarantee is that components holding only
-    /// the handle cannot obtain the material through this API.
-    ///
-    /// Every key resource carrying an extractability gate also exposes it as
-    /// a getter, so a holder can ask the question without taking the answer:
-    /// interrogating it through `export-key` alone would hand the caller the
-    /// material whenever the answer is "yes". The getter is not redundant
-    /// with the `extractable` argument the minting interfaces take — a key
-    /// resource need not have been minted by the component holding it.
-    ///
-    /// Getter conventions (package-wide): `algorithm-*` getters project the
-    /// W3C Web Cryptography API registry's algorithm properties, spelled
-    /// and denominated (bits) as the registry defines them; `*-size`
-    /// getters report operation-contract quantities in bytes.
+    /// For the meaning of `extractable` and the getter conventions, see
+    /// `README.md`, "Extractability" and "Getter conventions".
     resource mac-key {
         /// Compute the authentication tag over an entire byte stream keyed
         /// by this key. Resolves once the stream is fully drained (its
         /// writer dropped).
         ///
-        /// Fails only for operational reasons (`error.other`, e.g. an
-        /// external keystore backing this key that cannot complete the
-        /// operation) — never for misuse, which is unrepresentable.
+        /// Fails only for operational reasons (`error.other`).
         sign: async func(data: stream<u8>) -> result<list<u8>, error>;
 
         /// Verify `tag` against the tag computed over an entire byte stream
-        /// keyed by this key, in constant time. Like `sign`, resolves only
-        /// after the stream is fully drained — even when verification fails,
-        /// so a caller feeding the stream concurrently never observes its
-        /// writer failing instead of the error.
+        /// keyed by this key, in constant time. Resolves only after the
+        /// stream is fully drained, even when verification fails.
         ///
         /// Fails with `error.authentication-failed` if the tag does not
-        /// verify (the same fail-closed shape as `aead-key.open`, and
-        /// deliberately not a `bool`: an ignored boolean fails open, a
-        /// dropped `result` does not).
+        /// verify. Returns a `result`, not a `bool`: an ignored boolean
+        /// fails open, a dropped `result` does not.
         verify: async func(data: stream<u8>, tag: list<u8>) -> result<_, error>;
 
         /// The registry name of the algorithm family this key is bound to,
-        /// e.g. `"HMAC"` (WebCrypto's `KeyAlgorithm.name`, spelled as the
-        /// W3C Web Cryptography API algorithm registry spells it).
-        ///
-        /// The algorithm's parameters are separate getters
-        /// (`algorithm-hash`, `algorithm-length`), so future parameters are
-        /// new getters rather than changes to a shared type.
+        /// e.g. `"HMAC"` (WebCrypto's `KeyAlgorithm.name`). The algorithm's
+        /// parameters are separate getters (`algorithm-hash`,
+        /// `algorithm-length`), so future parameters are new getters rather
+        /// than changes to a shared type.
         algorithm-name: func() -> string;
 
         /// The registry name of the digest this key's algorithm is
-        /// parameterized over, if any — e.g. `"SHA-256"` for HMAC-SHA-256
+        /// parameterized over, if any: e.g. `"SHA-256"` for HMAC-SHA-256
         /// (WebCrypto's `HmacKeyAlgorithm.hash`). `none` for MAC algorithms
         /// not built on a digest.
         algorithm-hash: func() -> option<string>;
 
-        /// The key length in bits (WebCrypto's `HmacKeyAlgorithm.length`:
-        /// the length of the key material).
+        /// The key length in bits (WebCrypto's `HmacKeyAlgorithm.length`).
         algorithm-length: func() -> u32;
 
         /// Whether the key material may be exported.
         extractable: func() -> bool;
 
-        /// Whether this key permits `sign` — the usage recorded at mint
-        /// (or carried by a platform keystore key). A refused operation
-        /// fails `error.not-permitted`.
+        /// Whether this key permits `sign`. A refused operation fails
+        /// `error.not-permitted`.
         can-sign: func() -> bool;
 
         /// Whether this key permits `verify`. See `can-sign`.
@@ -245,29 +153,8 @@ interface mac {
         export-key: async func() -> result<list<u8>, error>;
 
         /// The key as an RFC 7517 JSON Web Key, behind the same
-        /// extractability gate as `export-key`.
-        ///
-        /// Package-wide JWK contract (every `*-jwk` function in this
-        /// package follows it; the minting interfaces' `import-key-jwk`
-        /// docs name their algorithm-specific `alg` values):
-        ///
-        /// - A JWK travels as JSON text. The implementation owns the
-        ///   parse: duplicate members resolve **last-wins** (ECMA-404
-        ///   engines' `JSON.parse` semantics, pinned so implementations
-        ///   cannot diverge on adversarial input), and `k` is strict
-        ///   unpadded base64url (RFC 7515: padding, non-alphabet bytes,
-        ///   and non-zero trailing bits are all `error.invalid-key`).
-        /// - Import validates the material-bearing fields — `kty`, `k`,
-        ///   `alg` against the declared variant, and `ext` against the
-        ///   requested extractability — failing `error.invalid-key`.
-        ///   `use` and `key_ops` are **ignored**: this package has no
-        ///   usage model, so they are the consumer's policy to check.
-        /// - Export returns exactly the material-bearing members —
-        ///   `kty`, `k`, `alg` — and nothing else; metadata this package
-        ///   does not model (`key_ops`, `ext`, `use`) is the consumer's
-        ///   to stamp. Member order is not contract.
-        /// - Algorithms without a registered JWK `alg` fail
-        ///   `error.unsupported`.
+        /// extractability gate as `export-key`. See `README.md`,
+        /// "JWK contract".
         export-key-jwk: async func() -> result<string, error>;
     }
 }
@@ -277,24 +164,21 @@ interface mac {
 ///
 /// This is deliberately a *single-message* primitive, mirroring
 /// `crypto.subtle.encrypt`/`decrypt`: one nonce, one tag, and memory
-/// proportional to the message somewhere in the implementation. Streaming
-/// *transport* is still used for the bulk data paths — which lets the
-/// plaintext or ciphertext live outside the caller's linear memory — but
-/// `open` never releases unverified plaintext, so it necessarily buffers the
-/// whole message internally before its result resolves. Content too large
-/// for that contract belongs to a future segmented `stream-aead` primitive
-/// kind, not to a relaxation of this one.
+/// proportional to the message somewhere in the implementation. The bulk
+/// data paths use streaming transport, but `open` never releases unverified
+/// plaintext, so it buffers the whole message internally before its result
+/// resolves. Content too large for that contract belongs to a future
+/// segmented `stream-aead` primitive kind, not to a relaxation of this one.
 ///
-/// `seal`/`open` are stateless per call, so there is no separate computation
-/// resource: the key resource carries the operations directly.
+/// `seal` and `open` are stateless per call; the key resource carries the
+/// operations directly.
 interface aead {
     use types.{error};
 
-    /// Mint-time policy for an `aead-key` (see `mac.mac-key-options` for
-    /// the package-wide options contract). `wrap`/`unwrap` are vocabulary
-    /// ahead of operations: WebCrypto AES-GCM keys carry `wrapKey`/
-    /// `unwrapKey`, and the bits must be mintable (and platform-storable)
-    /// before this package grows wrap operations.
+    /// Mint-time policy for an `aead-key`. Grants nothing by default; see
+    /// `README.md`, "Key-options contract". `wrap`/`unwrap` are vocabulary
+    /// ahead of operations: the usage bits must be mintable (and
+    /// platform-storable) before this package grows wrap operations.
     resource aead-key-options {
         constructor();
         /// Whether the minted key may `seal`. Disabled by default.
@@ -314,70 +198,63 @@ interface aead {
     }
 
     /// An AEAD key: an unforgeable capability, bound to one algorithm at
-    /// creation. See `mac-key` for the capability, extractability,
-    /// truncating-producer and making-progress notes, which apply
-    /// identically here.
+    /// creation. The streaming, extractability, and getter contracts in
+    /// `README.md` apply.
     resource aead-key {
         /// Encrypt and authenticate `plaintext` under `nonce` with the
-        /// associated data `aad`, producing a tag of `tag-size` bytes —
-        /// `none` means the algorithm's default (the `tag-size` getter).
+        /// associated data `aad`. The returned stream carries the
+        /// ciphertext followed by the authentication tag (the
+        /// `crypto.subtle.encrypt` wire format).
+        ///
+        /// Security:
+        /// - The caller owns nonce uniqueness per key. Nonce reuse defeats
+        ///   the algorithm's guarantees.
+        /// - Short tags weaken the forgery bound. They are opt-in: a
+        ///   `tag-size` of `none` selects the algorithm's default (the
+        ///   `tag-size` getter).
+        /// - The streamed output is not atomic: a producer that fails
+        ///   after the stream is returned ends it early, and a closed
+        ///   stream carries no verdict. A consumer that cannot bound the
+        ///   expected length from its own knowledge of the plaintext must
+        ///   convey completeness in-band. See `README.md`, "Streaming
+        ///   contract".
         ///
         /// The algorithm defines which nonce lengths and tag sizes it
-        /// accepts (its minting interface documents both; the getters'
-        /// defaults are always accepted). A nonce of an unaccepted length
+        /// accepts; its minting interface documents both, and the getters'
+        /// values are always accepted. A nonce of an unaccepted length
         /// fails `error.invalid-nonce`; a tag size outside the algorithm's
-        /// set — or one an implementation's security policy declines —
-        /// fails `error.unsupported`. Callers wanting the algorithm's
-        /// standard behavior pass the getters' sizes and `none`, and never
-        /// need to match on `algorithm-name`.
+        /// set, or one an implementation's security policy declines, fails
+        /// `error.unsupported`. Callers wanting the standard behavior pass
+        /// the getters' sizes and `none`, and never need to match on
+        /// `algorithm-name`.
         ///
-        /// The returned stream carries the ciphertext followed by the
-        /// authentication tag (the `crypto.subtle.encrypt` wire format).
-        /// Implementations may produce it incrementally (tag last) or buffer
-        /// and emit it whole; `async` here only *allows* blocking before the
-        /// stream is returned. A caller must therefore drain the returned
-        /// stream concurrently with feeding `plaintext` (see `mac-key`'s
-        /// making-progress note): an incremental producer may block on the
-        /// unread output before it has taken the whole input.
-        ///
-        /// The caller is responsible for nonce uniqueness per key; nonce
-        /// misuse defeats the algorithm's guarantees. Short tags weaken the
-        /// forgery bound and are opt-in by construction: they exist only
-        /// behind an explicit `tag-size`.
-        ///
-        /// Unlike `crypto.subtle.encrypt`, which returns whole buffers,
-        /// the streamed output is not atomic: a producer that fails after
-        /// the stream is returned ends it early, and per the
-        /// truncating-producer note a closed stream carries no verdict.
-        /// A consumer that cannot bound the expected length from its own
-        /// knowledge of the plaintext must convey completeness in-band.
+        /// Implementations may produce the output incrementally (tag last)
+        /// or buffer and emit it whole. Drain the returned stream
+        /// concurrently with feeding `plaintext`: an incremental producer
+        /// may block on unread output before it has taken the whole input.
         ///
         /// The plaintext stream is fully drained even when the result is an
-        /// error, so a caller feeding the stream concurrently never observes
-        /// its writer failing instead of the error.
+        /// error.
         seal: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
 
         /// Decrypt and verify `ciphertext` (ciphertext followed by a
         /// `tag-size`-byte tag, as produced by `seal`) under `nonce` and
-        /// `aad`. See `seal` for the `nonce` and `tag-size` contracts,
-        /// which apply identically here.
+        /// `aad`. See `seal` for the `nonce` and `tag-size` contracts.
         ///
-        /// Resolves only after the ciphertext stream is fully drained and the
-        /// tag verified: `ok(stream)` *is* the authentication statement, and
-        /// unverified plaintext is never observable. Fails with
-        /// `error.authentication-failed` if verification fails.
+        /// Security:
+        /// - Resolves only after the ciphertext stream is fully drained
+        ///   and the tag verified: `ok(stream)` *is* the authentication
+        ///   statement, and unverified plaintext is never observable.
+        /// - Fails with `error.authentication-failed` if verification
+        ///   fails.
         ///
-        /// Like `seal`, the ciphertext stream is fully drained even when the
-        /// result is an error.
+        /// The ciphertext stream is fully drained even when the result is
+        /// an error.
         open: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
         /// The registry name of the algorithm family this key is bound to,
-        /// e.g. `"AES-GCM"` (WebCrypto's `KeyAlgorithm.name`, spelled as
-        /// the W3C Web Cryptography API algorithm registry spells it).
-        ///
-        /// The algorithm's parameters are separate getters (each kind
-        /// exposes only the ones its algorithms define), so future
-        /// parameters are new getters rather than changes to a shared type.
+        /// e.g. `"AES-GCM"` (WebCrypto's `KeyAlgorithm.name`). Parameters
+        /// are separate getters, as for `mac-key.algorithm-name`.
         algorithm-name: func() -> string;
 
         /// The key length in bits, e.g. `256` for AES-256-GCM (WebCrypto's
@@ -385,26 +262,24 @@ interface aead {
         algorithm-length: func() -> u32;
 
         /// The algorithm's standard nonce size in bytes, e.g. `12` for
-        /// AES-GCM — always accepted by this key's `seal`/`open`, so a
+        /// AES-GCM. This key's `seal`/`open` always accept it, so a
         /// component granted only the key handle can construct nonces
         /// without matching on `algorithm-name`. Whether *other* lengths
         /// are accepted is the algorithm's contract, documented by its
-        /// minting interface (GCM accepts any non-empty nonce; the ChaCha
-        /// constructions accept exactly this size).
+        /// minting interface.
         nonce-size: func() -> u32;
 
-        /// The algorithm's default tag size in bytes, e.g. `16` — what a
+        /// The algorithm's default tag size in bytes, e.g. `16`: what a
         /// `tag-size` of `none` selects, and the framing arithmetic for
         /// default-tag messages (sealed length = plaintext length +
         /// `tag-size`).
         tag-size: func() -> u32;
 
-        /// Whether the key material may be exported. See `mac-key`.
+        /// Whether the key material may be exported.
         extractable: func() -> bool;
 
-        /// Whether this key permits `seal` — the usage recorded at mint
-        /// (or carried by a platform keystore key). A refused operation
-        /// fails `error.not-permitted`.
+        /// Whether this key permits `seal`. A refused operation fails
+        /// `error.not-permitted`.
         can-seal: func() -> bool;
 
         /// Whether this key permits `open`. See `can-seal`.
@@ -422,10 +297,9 @@ interface aead {
         export-key: async func() -> result<list<u8>, error>;
 
         /// The key as an RFC 7517 JSON Web Key, behind the same
-        /// extractability gate as `export-key`. See `mac-key.export-key-jwk`
-        /// for the package-wide JWK contract; algorithms without a
-        /// registered JWK `alg` (the ChaCha constructions) fail
-        /// `error.unsupported`.
+        /// extractability gate as `export-key`. See `README.md`,
+        /// "JWK contract"; algorithms without a registered JWK `alg` (the
+        /// ChaCha constructions) fail `error.unsupported`.
         export-key-jwk: async func() -> result<string, error>;
     }
 }
@@ -436,10 +310,9 @@ interface aead {
 ///
 /// This is the misuse-resistant counterpart of `aead`: the nonce never
 /// appears in the API, so nonce reuse — the most common catastrophic AEAD
-/// failure — is unrepresentable rather than merely discouraged. Each `seal`
-/// draws a fresh nonce via a construction that guarantees per-key
-/// uniqueness and carries it in the sealed output, making every sealed
-/// message self-contained.
+/// failure — is unrepresentable. Each `seal` draws a fresh nonce that is
+/// unique per key and carries it in the sealed output, so every sealed
+/// message is self-contained.
 ///
 /// Keys are a distinct resource from `aead.aead-key`, minted by separate
 /// per-algorithm interfaces: the nonce discipline is part of the key
@@ -450,17 +323,16 @@ interface aead {
 /// nonce-budget notes).
 ///
 /// Like `aead`, this is a single-message primitive: `open` buffers and
-/// verifies before releasing any plaintext, and both operations fully drain
-/// their input streams even when the result is an error. See `mac-key` for
-/// the capability, extractability, truncating-producer and making-progress
-/// notes, which apply identically here.
+/// verifies before it releases any plaintext, and both operations fully
+/// drain their input streams even on error. The streaming, extractability,
+/// and getter contracts in `README.md` apply.
 interface aead-internal-nonce {
     use types.{error};
 
-    /// Mint-time policy for an `internal-nonce-key` (see
-    /// `mac.mac-key-options` for the package-wide options contract). The
-    /// vocabulary is seal/open only: this kind has no WebCrypto mapping,
-    /// so no platform usage vocabulary reaches beyond its own operations.
+    /// Mint-time policy for an `internal-nonce-key`. Grants nothing by
+    /// default; see `README.md`, "Key-options contract". The vocabulary is
+    /// seal/open only: this kind has no WebCrypto mapping, so no platform
+    /// usage vocabulary reaches beyond its own operations.
     resource internal-nonce-key-options {
         constructor();
         /// Whether the minted key may `seal`. Disabled by default.
@@ -479,12 +351,10 @@ interface aead-internal-nonce {
         /// implementation-generated nonce with the associated data `aad`.
         ///
         /// The returned stream is a self-contained sealed message:
-        /// everything `open` needs besides the key and `aad` is carried
-        /// in-band. The wire format is documented by the key's minting
-        /// interface. As with `aead-key.seal`, implementations may produce
-        /// it incrementally or buffer and emit it whole, so a caller must
-        /// drain the returned stream concurrently with feeding `plaintext`
-        /// (see `mac-key`'s making-progress note).
+        /// everything `open` needs besides the key and `aad` travels
+        /// in-band. The key's minting interface documents the wire format.
+        /// Drain the returned stream concurrently with feeding `plaintext`
+        /// (see `README.md`, "Streaming contract").
         ///
         /// Fails with `error.key-exhausted` once the implementation can no
         /// longer guarantee nonce uniqueness for this key.
@@ -493,11 +363,13 @@ interface aead-internal-nonce {
         /// Decrypt and verify a sealed message, as produced by `seal` under
         /// the same algorithm, with the associated data `aad`.
         ///
-        /// Resolves only after the stream is fully drained and the tag
-        /// verified: `ok(stream)` *is* the authentication statement, and
-        /// unverified plaintext is never observable. Any failure — a bad
-        /// tag, wrong associated data, or input too short to carry the wire
-        /// format — reports `error.authentication-failed` with no detail.
+        /// Security:
+        /// - Resolves only after the stream is fully drained and the tag
+        ///   verified: `ok(stream)` *is* the authentication statement, and
+        ///   unverified plaintext is never observable.
+        /// - Any failure — a bad tag, wrong associated data, or input too
+        ///   short to carry the wire format — reports
+        ///   `error.authentication-failed` with no detail.
         open: async func(aad: list<u8>, sealed: stream<u8>) -> result<stream<u8>, error>;
 
         /// The registry name of the algorithm family this key is bound to,
@@ -508,12 +380,12 @@ interface aead-internal-nonce {
         algorithm-length: func() -> u32;
 
         /// The number of further `seal` invocations this key's nonce budget
-        /// permits, or `none` when the implementation enforces no budget.
-        /// A hint for key-rotation scheduling: monotonically non-increasing,
-        /// and `some(0)` means the next `seal` fails `error.key-exhausted` —
-        /// but implementations MAY decrement faster than one per seal (a
-        /// policy or accounting choice), so it is not an exact invocation
-        /// count.
+        /// (see `README.md`, "Terminology") permits, or `none` when the
+        /// implementation enforces no budget. A hint for key-rotation
+        /// scheduling: monotonically non-increasing, and `some(0)` means
+        /// the next `seal` fails `error.key-exhausted`. Implementations
+        /// MAY decrement faster than one per seal (a policy or accounting
+        /// choice), so it is not an exact invocation count.
         ///
         /// There are deliberately no wire-layout getters here (nonce or tag
         /// size): the sealed message's layout is the minting interface's
@@ -521,11 +393,11 @@ interface aead-internal-nonce {
         /// interface's documented constants.
         seals-remaining: func() -> option<u64>;
 
-        /// Whether the key material may be exported. See `mac-key`.
+        /// Whether the key material may be exported.
         extractable: func() -> bool;
 
-        /// Whether this key permits `seal` — the usage recorded at mint.
-        /// A refused operation fails `error.not-permitted`.
+        /// Whether this key permits `seal`. A refused operation fails
+        /// `error.not-permitted`.
         can-seal: func() -> bool;
 
         /// Whether this key permits `open`. See `can-seal`.
@@ -533,7 +405,7 @@ interface aead-internal-nonce {
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true. The nonce budget
-        /// does not travel with the material — see the minting interfaces'
+        /// does not travel with the material; see the minting interfaces'
         /// import docs.
         export-key: async func() -> result<list<u8>, error>;
     }
@@ -552,24 +424,21 @@ interface digest {
     /// A digest algorithm, bound at creation.
     ///
     /// `compute` is one-shot and stateless per call (the resource is
-    /// reusable), mirroring `crypto.subtle.digest`: there is deliberately no
-    /// incremental computation resource, so misuse of in-progress state is
-    /// unrepresentable. The byte `stream` is the only ingestion path and
-    /// also the incremental one; the result is chunking-invariant. See
-    /// `mac-key` for the truncating-producer note, which applies here too.
+    /// reusable), mirroring `crypto.subtle.digest`. The byte `stream` is
+    /// the only ingestion path; the result is chunking-invariant. The
+    /// streaming contract in `README.md` applies.
     ///
-    /// A digest authenticates nothing by itself. There is deliberately no
-    /// `verify` here: checking untrusted data against a known digest is an
-    /// *integrity* comparison, done with `bytes.constant-time-equal` on
-    /// `compute`'s result — when authenticity is needed, use a `mac-key`.
+    /// Security:
+    /// - A digest authenticates nothing by itself. There is deliberately
+    ///   no `verify` here: checking untrusted data against a known digest
+    ///   is an *integrity* comparison, done with
+    ///   `bytes.constant-time-equal` on `compute`'s result. When
+    ///   authenticity is needed, use a `mac-key`.
     resource digest {
         /// Digest an entire byte stream. Resolves once the stream is fully
         /// drained (its writer dropped).
         ///
-        /// Fails only for operational reasons (`error.other`, e.g. an
-        /// external digest engine backing this resource that cannot
-        /// complete the operation) — never for misuse, which is
-        /// unrepresentable.
+        /// Fails only for operational reasons (`error.other`).
         compute: async func(data: stream<u8>) -> result<list<u8>, error>;
 
         /// The registry name of the algorithm this resource is bound to,
@@ -588,52 +457,41 @@ interface bytes {
     /// without creating a timing oracle.
     ///
     /// Returns a `bool`, not a `result`: unlike `mac-key.verify`, a byte
-    /// comparison is not an authentication statement, and the caller decides
-    /// what equality means.
+    /// comparison is not an authentication statement, and the caller
+    /// decides what equality means.
     constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
 }
 
 /// The `signature` primitive kind: asymmetric signing and verification.
 ///
-/// This interface is algorithm-agnostic. Keys are minted by per-algorithm
-/// interfaces and returned bound to their algorithm at creation; every
-/// operation hangs off a key resource, so a key can never be used with the
-/// wrong algorithm.
+/// This interface is algorithm-agnostic. Per-algorithm interfaces mint keys
+/// bound to their algorithm; every operation hangs off a key resource.
 ///
 /// The public and private halves are distinct resource types, split by
 /// secrecy: a component holding only a `verifying-key` provably cannot
 /// sign. Minting is likewise split into per-algorithm `-verify` and `-sign`
 /// interfaces, so a provider can serve verification for an algorithm whose
-/// signing it declines to host — verification is secret-free, while signing
-/// may be excluded by the in-guest provider's timing-channel policy (see
-/// guest-impl/README.md, class D) at `wac plug` time.
+/// signing it declines to host (see `README.md`, "Timing-channel policy").
 ///
 /// There is deliberately no way to derive a `verifying-key` from a
-/// `signing-key`: the public half is available where it is guaranteed to
-/// exist — `generate-key` returns the pair — and importers supply it via
-/// `import-verifying-key`. A provider may hold a private key whose public
-/// half it cannot recompute (browser WebCrypto has no derive operation and
-/// engines diverge on recovering the point from private-only imports;
-/// keystore-resident non-extractable keys can sign but yield nothing
-/// else), so a derive contract here would make such keys unservable.
+/// `signing-key`: `generate-key` returns the pair, and importers supply the
+/// public half via `import-verifying-key`. See `README.md`, "Design notes".
 ///
-/// See `mac-key` for the truncating-producer and making-progress notes,
-/// which apply to `sign` and `verify` here too.
+/// The streaming contract in `README.md` applies to `sign` and `verify`.
 interface signature {
     use types.{error};
 
-    /// Mint-time policy for a `signing-key` (see `mac.mac-key-options`
-    /// for the package-wide options contract). The vocabulary is
-    /// degenerate — the public/private resource split already separates
-    /// sign from verify structurally — but the resource exists for
-    /// uniformity, to carry `extractable`, and to receive future
-    /// private-key usages (derive) additively.
+    /// Mint-time policy for a `signing-key`. Grants nothing by default;
+    /// see `README.md`, "Key-options contract". `can-sign` is the sole
+    /// usage today (the public/private resource split already separates
+    /// sign from verify structurally); the resource carries `extractable`
+    /// and receives future private-key usages additively.
     resource signing-key-options {
         constructor();
-        /// Whether the minted key may `sign`. Disabled by default — and,
-        /// being the sole usage, it must be enabled for the mint to
+        /// Whether the minted key may `sign`. Disabled by default, and it
+        /// is the sole usage, so it must be enabled for the mint to
         /// succeed (an untouched options resource fails
-        /// `error.not-permitted`, per the options contract).
+        /// `error.not-permitted`).
         can-sign: func(allowed: bool);
         /// Whether the minted key's material may be exported (by future
         /// format-specific exports; there is no export operation today).
@@ -646,13 +504,14 @@ interface signature {
         /// Verify `sig` over an entire byte stream. Like `mac-key.verify`,
         /// resolves only after the stream is fully drained — even when
         /// verification fails — and fails closed with
-        /// `error.authentication-failed` (deliberately not a `bool`: an
-        /// ignored boolean fails open, a dropped `result` does not).
+        /// `error.authentication-failed` (a `result`, not a `bool`: an
+        /// ignored boolean fails open).
         ///
-        /// Signature verification is a *policy*, not a bit-exact predicate:
-        /// the precise criterion — which degenerate keys and signatures
-        /// must be rejected — is defined by the key's minting interface,
-        /// exactly like the wire format.
+        /// Security:
+        /// - Signature verification is a *policy*, not a bit-exact
+        ///   predicate: the key's minting interface defines the precise
+        ///   criterion — which degenerate keys and signatures must be
+        ///   rejected — exactly as it defines the wire format.
         verify: async func(data: stream<u8>, sig: list<u8>) -> result<_, error>;
 
         /// The registry name of the algorithm family this key is bound to,
@@ -674,26 +533,20 @@ interface signature {
         /// There is no extractability gate on this resource, so
         /// `error.not-extractable` never occurs here. Export is still
         /// fallible: a provider may hold the key as a handle it can *use*
-        /// but not *read* — verifying with it succeeds while recovering its
-        /// encoding fails with `error.other`. Browser WebCrypto draws the
-        /// same line, giving every export operation a "key material cannot
-        /// be accessed" failure that sign and verify do not have.
+        /// but not *read* — verifying with it succeeds while recovering
+        /// its encoding fails with `error.other` (see `README.md`,
+        /// "Extractability").
         export-key: async func() -> result<list<u8>, error>;
     }
 
     /// A private key. `sign` is one-shot on the immutable key, mirroring
-    /// `mac-key.sign`; there is no incremental computation resource.
-    ///
-    /// Note on extractability: `extractable` is an API property, not a
-    /// physical one — see `mac-key`.
+    /// `mac-key.sign`. The extractability contract in `README.md` applies.
     resource signing-key {
         /// Sign an entire byte stream. Resolves once the stream is fully
-        /// drained (its writer dropped). The signature's wire format is
-        /// documented by the minting interface.
+        /// drained (its writer dropped). The minting interface documents
+        /// the signature's wire format.
         ///
-        /// Fails only for operational reasons (`error.other`, e.g. an
-        /// external keystore backing this key that cannot complete the
-        /// operation) — never for misuse, which is unrepresentable.
+        /// Fails only for operational reasons (`error.other`).
         sign: async func(data: stream<u8>) -> result<list<u8>, error>;
 
         /// See `verifying-key.algorithm-name`.
@@ -705,20 +558,14 @@ interface signature {
         /// See `verifying-key.algorithm-hash`.
         algorithm-hash: func() -> option<string>;
 
-        /// Whether the private key material may be exported.
-        ///
-        /// There is currently no export operation on this resource —
-        /// signing keys are generate-only, and private-key export returns
-        /// with the format-specific work (PKCS#8/JWK). The getter stays:
-        /// extractability is mint-time recorded policy that those future
-        /// exports and platform-backed key storage honor, so it must be
-        /// captured and interrogable now.
+        /// Whether the private key material may be exported. There is no
+        /// export operation on this resource today; the getter records
+        /// mint-time policy that future format-specific exports and
+        /// platform-backed key storage honor.
         extractable: func() -> bool;
 
-        /// Whether this key permits `sign` — the usage recorded at mint
-        /// (or carried by a platform keystore key). A refused operation
-        /// fails `error.not-permitted`.
+        /// Whether this key permits `sign`. A refused operation fails
+        /// `error.not-permitted`.
         can-sign: func() -> bool;
     }
 }
-

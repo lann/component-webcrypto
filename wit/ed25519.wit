@@ -5,19 +5,24 @@ package lann:webcrypto@0.1.0;
 /// Ed25519 has no parameters: 32-byte public keys, 64-byte signatures.
 /// Keys report `algorithm-name` `"Ed25519"` and `none` for curve and hash.
 ///
-/// Verification criterion (RFC 8032 leaves edge cases open and real
-/// implementations disagree on them, so this interface pins one policy —
-/// divergent verify results across providers is a vulnerability class):
-/// keys minted here verify with the *cofactorless* equation
-/// (`[S]B = R + [k]A`) and MUST reject signatures with a non-canonical
-/// scalar (`S ≥ L`), a non-canonically-encoded or small-order `R`, and
-/// keys with a non-canonically-encoded or small-order `A` — the strict
-/// semantics of ed25519-dalek's `verify_strict`. Whether a degenerate `A`
-/// is rejected at import (`error.invalid-key`) or at verification
-/// (`error.authentication-failed`) is implementation-defined; the
-/// guarantee is that no signature ever verifies under one. Inputs with
-/// *mixed-order* (torsion-component, not small-order) `A` or `R` are the
-/// remaining freedom: they verify iff the cofactorless equation holds.
+/// Security — the verification criterion. RFC 8032 leaves edge cases open
+/// and real implementations disagree on them; divergent verify results
+/// across providers is a vulnerability class, so this interface pins one
+/// policy:
+/// - Keys minted here verify with the *cofactorless* equation
+///   (`[S]B = R + [k]A`).
+/// - Implementations MUST reject signatures with a non-canonical scalar
+///   (`S ≥ L`), a non-canonically-encoded or small-order `R`, and keys
+///   with a non-canonically-encoded or small-order `A` — the strict
+///   semantics of ed25519-dalek's `verify_strict`.
+/// - Whether a degenerate `A` is rejected at import
+///   (`error.invalid-key`) or at verification
+///   (`error.authentication-failed`) is implementation-defined; the
+///   guarantee is that no signature ever verifies under one.
+/// - Inputs with *mixed-order* (torsion-component, not small-order) `A`
+///   or `R` are the remaining freedom: they verify iff the cofactorless
+///   equation holds.
+///
 /// None of the rejected inputs can be produced by an honest RFC 8032
 /// signer, so this strictness costs no interoperability.
 interface ed25519-verify {
@@ -33,16 +38,13 @@ interface ed25519-verify {
 
 /// Ed25519 signing-key minting (RFC 8032).
 ///
-/// Split from `ed25519-verify` so a provider can serve verification alone;
-/// the in-guest provider exports both — Ed25519 signing is constant-time by
-/// construction (no per-signature secret nonce, complete addition laws).
+/// Split from `ed25519-verify` so a provider can serve verification alone.
+/// Ed25519 signing is constant-time by construction (no per-signature
+/// secret nonce, complete addition laws), so providers in shared timing
+/// domains can serve it (see `README.md`, "Timing-channel policy").
 ///
-/// Signing keys are generate-only for now: raw seed import/export was
-/// removed alongside ECDSA's raw scalar for symmetry, though its risk
-/// profile is clean (the RFC 8032 seed is real interchange, and RFC 8410
-/// PKCS#8 carries exactly the seed, so platform import is specified) — the
-/// repository's reconsider issue records both profiles, and re-adding the
-/// seed path is a compatible change if a consumer need appears.
+/// Signing keys are generate-only for now; seed import is a compatible
+/// addition if a consumer need appears (see `README.md`, "Design notes").
 interface ed25519-sign {
     use types.{error};
     use signature.{signing-key, signing-key-options, verifying-key};

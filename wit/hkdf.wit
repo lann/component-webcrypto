@@ -8,14 +8,13 @@ package lann:webcrypto@0.1.0;
 /// consume (`aes-gcm.derive-key`, `hmac-sha2.derive-key`), and which yield
 /// raw output through `derivation.derive-input.derive-bits`.
 ///
-/// The pre-image lives here as the `ikm` resource: input keying material a
-/// caller imports once and parameterizes many times, held in the
-/// implementation's memory for the resource's construction-to-drop
-/// lifetime. That window is the secret's exposure to memory side channels
-/// — import late, drop early; dropping releases (and, in the in-guest
-/// provider, scrubs) it. No operation returns an `ikm`'s bytes, under any
-/// grant: WebCrypto's forced non-extractability on HKDF base keys, made
-/// structural.
+/// Security:
+/// - No operation returns an `ikm`'s bytes, under any grant: WebCrypto's
+///   forced non-extractability on HKDF base keys, made structural.
+/// - The implementation holds imported IKM in memory for the resource's
+///   construction-to-drop lifetime; that window is the secret's exposure
+///   to memory side channels. Import late, drop early. Dropping releases
+///   (and, in scrubbing implementations, zeroizes) it.
 interface hkdf {
     use types.{error};
     use sha2.{sha2-variant};
@@ -50,7 +49,7 @@ interface hkdf {
     /// — the chaining step (a future agreement's shared secret fed to
     /// HKDF without transiting the caller).
     ///
-    /// The upstream input is realized at its natural output length, which
+    /// The upstream derivation runs at its natural output length, which
     /// requires it to have one: chaining from another KDF's input fails
     /// `error.other`, exactly as the platform's `deriveKey(… → "HKDF")`
     /// does (`get key length` for a KDF target is null, and a KDF's

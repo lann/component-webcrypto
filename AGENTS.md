@@ -315,6 +315,43 @@ impossible does not thereby remove a redundant copy — and adopting it can
 preserve the copy untouched while appearing to answer the complaint. Name which
 property the change actually buys.
 
+## WIT doc comments
+
+Every WIT comment is a doc comment: bindings generators project it into
+library documentation, so its audience is the package's *consumers* — from
+experienced cryptographic engineers to junior general software engineers —
+not this repository's contributors.
+
+- **Package-wide contracts live in [`wit/README.md`](wit/README.md)**, not
+  in doc comments: the streaming contract, the key-options contract,
+  extractability, getter conventions, the JWK contract, the error
+  contract, the timing-channel policy, design notes, and the terminology
+  glossary. A doc comment states what is specific to its item and links to
+  the README section by name (e.g. ``see `README.md`, "Streaming
+  contract"``) for the rest. Never restate a shared contract in full at a
+  use site; never let a package-wide contract live only inside one item's
+  doc.
+- **Order within a doc comment**: basic usage first; then the
+  crypto-safety-critical contracts (as a `Security:` bulleted block when
+  there is more than one point — the bullets themselves visually bracket
+  the section); then other details. The highest-impact caveat (nonce
+  uniqueness, verify semantics, unverified-plaintext rules) must never
+  sit mid-paragraph behind mechanics.
+- **Use Simplified Technical English as guidance**: short sentences,
+  active voice, one instruction per sentence, consistent terms. Dense
+  security terminology buries the contract it is meant to convey.
+- **Terminology** (mint, capability, unrepresentable, IKM, …) is defined
+  once in `wit/README.md`'s glossary — brief descriptions linking to
+  authoritative web sources (Wikipedia, RFCs, the W3C spec) — and doc
+  comments rely on it rather than re-explaining terms inline.
+- **No repository-internal content on the package surface**: doc comments
+  must not name this repository's implementations, shims, test harnesses,
+  issues, or design history. Implementation-specific facts are phrased
+  neutrally ("providers in attacker-observable timing domains…"); design
+  rationale goes to `wit/README.md`'s "Design notes" or the issue tracker.
+  The "answers to an objection" rule below applies with extra force here:
+  a consumer never saw the review that prompted the sentence.
+
 ## Code comments and docs
 
 Code comments describe **what** something is or does, not the process by which
