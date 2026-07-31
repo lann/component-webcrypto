@@ -40,6 +40,9 @@ chacha20poly1305 = "0.10"
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
 # guest-impl's README timing-channel classification).
 ed25519-dalek = "2"
+# X25519 agreement; static_secrets because imported/held secret keys are the
+# point of the key-agreement kind (dalek gates non-ephemeral use behind it).
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
 p384 = { version = "0.13", features = ["ecdsa"] }
 # Key and nonce generation (native OS entropy, or the target's WASI random

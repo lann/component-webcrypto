@@ -932,18 +932,19 @@ export class Ikm {
 
 /**
  * The `derivation.derive-input` resource: the spec's (baseKey, params)
- * pair as an object — the platform `CryptoKey` plus the HKDF parameters,
- * with the grants copied from the base secret at `prepare`.
+ * pair as an object — the platform `CryptoKey` plus the derivation
+ * parameters (HKDF/PBKDF2, or an agreement's `{ name, public }`), with the
+ * grants copied from the base secret at `prepare`/`agree`.
  *
  * The derivation runs lazily here, which keeps no base-secret bytes in
- * memory: the IKM lives behind the platform `CryptoKey`, and this class
- * holds no raw copy of anything secret.
+ * memory: the base secret lives behind the platform `CryptoKey`, and this
+ * class holds no raw copy of anything secret.
  */
 export class DeriveInput {
   /**
    * @param {symbol} token
    * @param {CryptoKey} key
-   * @param {HkdfParams | Pbkdf2Params} params
+   * @param {HkdfParams | Pbkdf2Params | EcdhKeyDeriveParams} params
    * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
    */
   constructor(token, key, params, policy) {
@@ -960,11 +961,13 @@ export class DeriveInput {
   }
 
   /**
-   * The derived bits at `length` (bits, a non-zero multiple of 8 — a KDF's
-   * output length is a caller choice, so `undefined` fails, the platform's
-   * own null-length behavior for HKDF). Fails `not-permitted` without the
-   * grant; the RFC 5869 output bound surfaces from the platform as
-   * `{ tag: 'other' }`.
+   * The derived bits at `length` (bits, a non-zero multiple of 8).
+   * `undefined` means the source's natural output length: the whole shared
+   * secret for an agreement input (the platform's own null-length X25519
+   * behavior), and a failure for a KDF input, whose output length is a
+   * caller choice. Fails `not-permitted` without the grant; the RFC 5869
+   * output bound and the agreed secret's own length bound surface from the
+   * platform as `{ tag: 'other' }`.
    * @param {number | undefined} length
    * @returns {Promise<Uint8Array>}
    */
@@ -972,9 +975,15 @@ export class DeriveInput {
     const state = inputOf(this);
     if (!state.policy.deriveBits) throw notPermitted("derive-bits");
     if (length === undefined) {
-      throw errOther(
-        "a KDF's output length is a caller choice: derive-bits from an HKDF input requires an explicit length",
+      if (!isAgreementParams(state.params)) {
+        throw errOther(
+          "a KDF's output length is a caller choice: it has no natural output length, which only agreement sources define",
+        );
+      }
+      const secret = await platformCall("agreement derive", () =>
+        subtle.deriveBits(state.params, state.key, null),
       );
+      return new Uint8Array(secret);
     }
     if (length === 0 || length % 8 !== 0) {
       throw errOther(`derive length must be a non-zero multiple of 8 bits, got ${length}`);
@@ -1013,7 +1022,7 @@ async function deriveKeyFrom(input, derived, extractable, usages) {
 }
 
 /**
- * @type {WeakMap<DeriveInput, { key: CryptoKey, params: HkdfParams | Pbkdf2Params, policy: { deriveBits: boolean, deriveKey: boolean } }>}
+ * @type {WeakMap<DeriveInput, { key: CryptoKey, params: HkdfParams | Pbkdf2Params | EcdhKeyDeriveParams, policy: { deriveBits: boolean, deriveKey: boolean } }>}
  */
 const inputState = new WeakMap();
 
@@ -1024,6 +1033,17 @@ function inputOf(input) {
     throw errOther("derive-input minted by another provider");
   }
   return state;
+}
+
+/**
+ * Whether a derive-input's params are an agreement's (a `{ name, public }`
+ * pair) rather than a KDF's — the discriminant for natural-output-length
+ * behavior.
+ * @param {HkdfParams | Pbkdf2Params | EcdhKeyDeriveParams} params
+ * @returns {params is EcdhKeyDeriveParams}
+ */
+function isAgreementParams(params) {
+  return "public" in params;
 }
 
 
@@ -1072,9 +1092,11 @@ async function prepare(variant, input, salt, info) {
 
 /**
  * Chain from another derivation's output (the `hkdf.prepare-from`
- * contract). Every input this host can hold today is a KDF's, which has
- * no natural output length, so this fails exactly as the platform's
- * `deriveKey(… → "HKDF")` does; agreement sources make it succeed.
+ * contract): the upstream runs at its natural output length, which only
+ * agreement inputs have — the platform's `deriveKey(X25519 → "HKDF")`
+ * turns the shared secret into an HKDF base key without the bytes
+ * transiting this host. A KDF input has no natural length, so it fails
+ * exactly as the platform's `deriveKey(… → "HKDF")` does.
  * @param {string} variant
  * @param {DeriveInput} input
  * @param {Uint8Array} salt
@@ -1082,13 +1104,25 @@ async function prepare(variant, input, salt, info) {
  * @returns {Promise<DeriveInput>}
  */
 async function prepareFrom(variant, input, salt, info) {
-  sha2Variant(variant);
-  void salt;
-  void info;
-  if (!inputOf(input).policy.deriveKey) throw notPermitted("derive-key");
-  throw errOther(
-    "a KDF input has no natural output length: chaining realizes the upstream at its natural length, which only agreement sources define",
+  const { hash } = sha2Variant(variant);
+  const state = inputOf(input);
+  if (!state.policy.deriveKey) throw notPermitted("derive-key");
+  if (!isAgreementParams(state.params)) {
+    throw errOther(
+      "a KDF's output length is a caller choice: it has no natural output length, which only agreement sources define",
+    );
+  }
+  const upstream = state.params;
+  const baseKey = await platformCall("agreement chaining", () =>
+    subtle.deriveKey(upstream, state.key, "HKDF", false, deriveUsages(state.policy)),
   );
+  const params = {
+    name: "HKDF",
+    hash,
+    salt: asBufferSource(salt.slice()),
+    info: asBufferSource(info.slice()),
+  };
+  return new DeriveInput(MINT, baseKey, params, { ...state.policy });
 }
 
 /** The `lann:webcrypto/derivation` interface: its resource classes. */
@@ -1180,6 +1214,278 @@ async function preparePbkdf2(variant, input, salt, iterations) {
 
 /** The `lann:webcrypto/pbkdf2` interface. */
 export const pbkdf2 = { Password, importPassword, prepare: preparePbkdf2 };
+
+/** @type {WeakMap<AgreementKeyOptions, { deriveBits: boolean, deriveKey: boolean, extractable: boolean }>} */
+const agreementPolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {AgreementKeyOptions} options
+ */
+function agreementPolicy(options) {
+  const policy = agreementPolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("agreement-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class AgreementKeyOptions {
+  constructor() {
+    agreementPolicies.set(this, { deriveBits: false, deriveKey: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canDeriveBits(allowed) {
+    agreementPolicy(this).deriveBits = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canDeriveKey(allowed) {
+    agreementPolicy(this).deriveKey = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    agreementPolicy(this).extractable = allowed;
+  }
+}
+
+/** @type {WeakMap<AgreementPublicKey, { key: CryptoKey }>} */
+const agreementPublicState = new WeakMap();
+
+/** @param {AgreementPublicKey} publicKey */
+function agreementPublicOf(publicKey) {
+  const state = agreementPublicState.get(publicKey);
+  if (state === undefined) {
+    throw errOther("public-key minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * The `key-agreement.public-key` resource: public material behind a
+ * platform `CryptoKey` (always imported extractable — public keys have no
+ * extractability gate; the WIT fallibility of the exports covers platform
+ * keys that are handles). Like `ikm`, state lives in a WeakMap: the
+ * resource appears as a parameter of `agree`.
+ */
+export class AgreementPublicKey {
+  /**
+   * @param {symbol} token
+   * @param {CryptoKey} key
+   */
+  constructor(token, key) {
+    if (token !== MINT) throw new TypeError("public-key is minted by import or generate");
+    agreementPublicState.set(this, { key });
+  }
+
+  algorithmName() {
+    return agreementPublicOf(this).key.algorithm.name;
+  }
+
+  /**
+   * The raw u-coordinate (the minting interface's public format).
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKey() {
+    const { key } = agreementPublicOf(this);
+    return new Uint8Array(
+      await platformCall("raw public-key export", () => subtle.exportKey("raw", key)),
+    );
+  }
+
+  /**
+   * The key as an OKP public JWK, per the WIT contract: exactly the
+   * material-bearing members (`kty`, `crv`, `x`).
+   */
+  async exportKeyJwk() {
+    const { key } = agreementPublicOf(this);
+    const jwk = await platformCall("jwk public-key export", () => subtle.exportKey("jwk", key));
+    return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x });
+  }
+}
+
+/** @type {WeakMap<AgreementSecretKey, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean, extractable: boolean } }>} */
+const agreementSecretState = new WeakMap();
+
+/** @param {AgreementSecretKey} secretKey */
+function agreementSecretOf(secretKey) {
+  const state = agreementSecretState.get(secretKey);
+  if (state === undefined) {
+    throw errOther("secret-key minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * The usages every platform agreement secret key is minted with. Unlike
+ * the KDF base secrets, the WIT grants do not ride the platform usages:
+ * `agree`'s contributory probe is a platform `deriveBits` call and
+ * `prepare-from`'s chaining is a platform `deriveKey` call, and either
+ * must work whichever single grant the mint carried. The grants are
+ * enforced host-side instead (`derive-input`'s own checks).
+ * @type {KeyUsage[]}
+ */
+const AGREEMENT_PLATFORM_USAGES = ["deriveBits", "deriveKey"];
+
+/**
+ * The `key-agreement.secret-key` resource: a platform `CryptoKey` plus the
+ * mint policy its agreed inputs inherit.
+ */
+export class AgreementSecretKey {
+  /**
+   * @param {symbol} token
+   * @param {CryptoKey} key
+   * @param {{ deriveBits: boolean, deriveKey: boolean, extractable: boolean }} policy
+   */
+  constructor(token, key, policy) {
+    if (token !== MINT) throw new TypeError("secret-key is minted by import or generate");
+    agreementSecretState.set(this, { key, policy });
+  }
+
+  /**
+   * The shared secret with `peer` as a `derive-input` (the
+   * `secret-key.agree` contract). The input holds the (secret key, peer)
+   * pair and derives lazily through the platform, so no secret bytes live
+   * in this host; the WIT pins the contributory check *here*, so the
+   * platform derivation runs once now as a probe — its all-zero check is
+   * the W3C API's own — and its output is discarded. An algorithm-mismatched
+   * peer surfaces from the same probe (`InvalidAccessError`).
+   * @param {AgreementPublicKey} peer
+   * @returns {Promise<DeriveInput>}
+   */
+  async agree(peer) {
+    const state = agreementSecretOf(this);
+    /** @type {EcdhKeyDeriveParams} */
+    const params = { name: state.key.algorithm.name, public: agreementPublicOf(peer).key };
+    try {
+      await subtle.deriveBits(params, state.key, null);
+    } catch (err) {
+      const failure = asPlatformError(err);
+      if (failure.name === "OperationError") {
+        throw errInvalidKey(
+          "the shared secret is all-zero: the peer public key is a small-order point",
+        );
+      }
+      if (failure.name === "InvalidAccessError") {
+        throw errInvalidKey(`peer key is not usable with this key: ${failure.detail}`);
+      }
+      throw errOther(`agreement failed: ${failure.detail}`);
+    }
+    const { deriveBits, deriveKey } = state.policy;
+    return new DeriveInput(MINT, state.key, params, { deriveBits, deriveKey });
+  }
+
+  algorithmName() {
+    return agreementSecretOf(this).key.algorithm.name;
+  }
+
+  canDeriveBits() {
+    return agreementSecretOf(this).policy.deriveBits;
+  }
+
+  canDeriveKey() {
+    return agreementSecretOf(this).policy.deriveKey;
+  }
+
+  extractable() {
+    return agreementSecretOf(this).policy.extractable;
+  }
+}
+
+/**
+ * Require at least one derive grant (the package-wide options contract),
+ * without projecting the grants onto platform usages (see
+ * `AGREEMENT_PLATFORM_USAGES`).
+ * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+ */
+function requireAgreementGrant(policy) {
+  if (!policy.deriveBits && !policy.deriveKey) {
+    throw errNotPermitted("a key with no enabled usage cannot be minted");
+  }
+}
+
+/**
+ * Import a raw 32-byte u-coordinate (the `x25519.import-public-key`
+ * contract): deliberately permissive, as the platform's is — degenerate
+ * keys surface at `agree`; a wrong length fails here.
+ * @param {Uint8Array} raw
+ */
+async function importX25519PublicKey(raw) {
+  let key;
+  try {
+    key = await subtle.importKey("raw", asBufferSource(raw), "X25519", true, []);
+  } catch (err) {
+    invalidKey(err, "X25519 public key");
+  }
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an RFC 8037 OKP private JWK (the `x25519.import-secret-key-jwk`
+ * contract). The parse and validation are the platform's (`kty`, `crv`,
+ * `d` presence, `ext` against extractability); `use`/`key_ops` are
+ * stripped as the JWK contract requires, and strictness of the base64url
+ * members is pinned host-side. This host cannot check `x` against `d`
+ * (the WIT MAY) — the platform's import steps do not mandate it — and
+ * per the MUST NOT it never trusts `x`: the platform derives operations
+ * from `d`.
+ * @param {string} jwkText
+ * @param {AgreementKeyOptions} options
+ */
+async function importX25519SecretKeyJwk(jwkText, options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.d);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      "X25519",
+      policy.extractable,
+      AGREEMENT_PLATFORM_USAGES,
+    );
+  } catch (err) {
+    invalidKey(err, "X25519 private JWK");
+  }
+  if (key.type !== "private") {
+    throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
+  }
+  return new AgreementSecretKey(MINT, key, { ...policy });
+}
+
+/**
+ * Generate a fresh X25519 key pair, returning `[secret, public]`.
+ * @param {AgreementKeyOptions} options
+ * @returns {Promise<[AgreementSecretKey, AgreementPublicKey]>}
+ */
+async function generateX25519Key(options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const pair = /** @type {CryptoKeyPair} */ (
+    await platformCall("X25519 key generation", () =>
+      subtle.generateKey("X25519", policy.extractable, AGREEMENT_PLATFORM_USAGES),
+    )
+  );
+  return [
+    new AgreementSecretKey(MINT, pair.privateKey, { ...policy }),
+    new AgreementPublicKey(MINT, pair.publicKey),
+  ];
+}
+
+/** The `lann:webcrypto/key-agreement` interface: its resource classes. */
+export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey, SecretKey: AgreementSecretKey };
+
+/** The `lann:webcrypto/x25519` interface. */
+export const x25519 = {
+  importPublicKey: importX25519PublicKey,
+  importSecretKeyJwk: importX25519SecretKeyJwk,
+  generateKey: generateX25519Key,
+};
 
 /**
  * The `digest` resource: a digest algorithm bound at creation. Holds only

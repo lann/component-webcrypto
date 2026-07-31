@@ -54,6 +54,7 @@
 //! receives it and keeps nothing.
 
 mod aead;
+mod agreement;
 mod gcm;
 mod hash;
 mod jwk;
@@ -63,13 +64,15 @@ mod policy;
 mod sig;
 
 pub use aead::AeadKeyMaterial;
+pub use agreement::{AgreementPublicMaterial, AgreementSecretMaterial};
 pub use hash::{served_sha2, Sha2};
 pub use kdf::{
     derive_aes_gcm_key, derive_mac_key, DeriveInputMaterial, IkmMaterial, PasswordMaterial,
 };
 pub use mac::MacKeyMaterial;
 pub use policy::{
-    not_permitted, AeadPolicy, DerivePolicy, InternalNoncePolicy, MacPolicy, SigningPolicy,
+    not_permitted, AeadPolicy, AgreementPolicy, DerivePolicy, InternalNoncePolicy, MacPolicy,
+    SigningPolicy,
 };
 pub use sig::{SigPublic, SigningKeyMaterial};
 
@@ -241,6 +244,12 @@ pub(crate) fn random_bytes(len: usize) -> Result<Vec<u8>, RngError> {
     let mut raw = vec![0u8; len];
     getrandom::fill(&mut raw)?;
     Ok(raw)
+}
+
+/// Fill a caller-owned (typically already-zeroizing) buffer with fresh
+/// randomness.
+pub(crate) fn fill_random(buf: &mut [u8]) -> Result<(), RngError> {
+    getrandom::fill(buf)
 }
 
 #[cfg(test)]

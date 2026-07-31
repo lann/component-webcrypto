@@ -31,6 +31,7 @@ use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
     AeadCase, HkdfCase, HmacCase, InternalNonceCase, Pbkdf2Case, Sha2Case, SigCase, SpeccheckCase,
+    X25519Case,
 };
 
 /// Validate a `missing-features` declaration against
@@ -62,6 +63,7 @@ enum CaseKind {
     Sha2(Sha2Case),
     Sig(SigCase),
     Speccheck(SpeccheckCase),
+    X25519(X25519Case),
     Contract(&'static contract::AeadFamily, contract::AeadArea),
     Probe(usize),
 }
@@ -101,6 +103,7 @@ impl GuestTestCase for Case {
                 CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
                 CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
+                CaseKind::X25519(case) => vectors::run_x25519_case(case).await,
                 CaseKind::Contract(family, area) => contract::run(family, *area).await,
                 CaseKind::Probe(index) => {
                     conformance_harness::run_probe(probes::PROBES, *index).await
@@ -201,6 +204,14 @@ impl Guest for Component {
                 case.features(),
                 &missing,
                 CaseKind::Speccheck(case),
+            ));
+        }
+        for case in translate::x25519_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::X25519(case),
             ));
         }
         for family in contract::AEAD_FAMILIES {

@@ -29,6 +29,10 @@ use crate::bindings::webcrypto::derivation::{
 };
 use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::hkdf::{self as hkdf_iface, HostIkm, HostIkmWithStore};
+use crate::bindings::webcrypto::key_agreement::{
+    self as key_agreement_iface, HostAgreementKeyOptions, HostAgreementKeyOptionsWithStore,
+    HostPublicKey, HostPublicKeyWithStore, HostSecretKey, HostSecretKeyWithStore,
+};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::pbkdf2::{
     self as pbkdf2_iface, HostPassword, HostPasswordWithStore,
@@ -39,14 +43,14 @@ use crate::bindings::webcrypto::{
     chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
     ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
     ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
-    signature as signature_iface, xchacha20_poly1305 as xchacha_iface,
+    signature as signature_iface, x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::admit_input;
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
-    AeadKey, DeriveInput, Digest, Ikm, InternalNonceKey, MacKey, Password, SigningKey,
-    VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
+    AeadKey, AgreementPublicKey, AgreementSecretKey, DeriveInput, Digest, Ikm, InternalNonceKey,
+    MacKey, Password, SigningKey, VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -603,6 +607,168 @@ impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
         })
         .await?;
         mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+}
+
+// --- key-agreement -------------------------------------------------------------
+
+impl key_agreement_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostAgreementKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::AgreementKeyOptions>> {
+        Ok(self.table.push(crate::AgreementKeyOptions::default())?)
+    }
+
+    fn can_derive_bits(
+        &mut self,
+        self_: Resource<crate::AgreementKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.derive_bits = allowed;
+        Ok(())
+    }
+
+    fn can_derive_key(
+        &mut self,
+        self_: Resource<crate::AgreementKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.derive_key = allowed;
+        Ok(())
+    }
+
+    fn extractable(
+        &mut self,
+        self_: Resource<crate::AgreementKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> HostAgreementKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(
+        accessor: &Accessor<T, Self>,
+        rep: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl HostPublicKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<AgreementPublicKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.material.name().to_string())
+    }
+}
+
+impl<T: Send> HostPublicKeyWithStore<T> for WasiWebcrypto {
+    async fn export_key(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementPublicKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.material.export())).await
+    }
+
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementPublicKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.material.export_jwk())).await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<AgreementPublicKey>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl HostSecretKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<AgreementSecretKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.material.name().to_string())
+    }
+
+    fn can_derive_bits(&mut self, self_: Resource<AgreementSecretKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_bits)
+    }
+
+    fn can_derive_key(&mut self, self_: Resource<AgreementSecretKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_key)
+    }
+
+    fn extractable(&mut self, self_: Resource<AgreementSecretKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().extractable)
+    }
+}
+
+impl<T: Send> HostSecretKeyWithStore<T> for WasiWebcrypto {
+    async fn agree(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementSecretKey>,
+        peer: Resource<AgreementPublicKey>,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = accessor.with(|mut access| -> Result<_> {
+            let view = access.get();
+            let secret = view.table.get(&self_)?;
+            let peer = view.table.get(&peer)?;
+            Ok(secret.material.agree(&peer.material))
+        })?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<AgreementSecretKey>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+// --- x25519 (key minting) --------------------------------------------------------
+
+impl x25519_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_public_key(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import(&raw);
+        mint(
+            accessor,
+            material.map(|material| AgreementPublicKey { material }),
+        )
+        .await
+    }
+
+    async fn import_secret_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = webcrypto_impl_core::AgreementSecretMaterial::import_jwk(&jwk, policy);
+        mint(
+            accessor,
+            material.map(|material| AgreementSecretKey { material }),
+        )
+        .await
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<
+        std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
+    > {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = webcrypto_impl_core::AgreementSecretMaterial::generate(policy)
+            .map_err(rng_trap("random key generation"))?;
+        match material {
+            Ok((secret, public)) => accessor.with(|mut access| {
+                let view = access.get();
+                let secret = view.table.push(AgreementSecretKey { material: secret })?;
+                let public = view.table.push(AgreementPublicKey { material: public })?;
+                Ok(Ok((secret, public)))
+            }),
+            Err(err) => Ok(Err(err.into())),
+        }
     }
 }
 

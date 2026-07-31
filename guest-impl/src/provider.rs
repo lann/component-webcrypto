@@ -13,8 +13,8 @@
 use std::cell::Cell;
 
 use webcrypto_impl_core::{
-    served_sha2, AeadKeyMaterial, AeadPolicy, InternalNoncePolicy, MacKeyMaterial, MacPolicy,
-    SigPublic, SigningKeyMaterial, SigningPolicy, HMAC_NAME,
+    served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, InternalNoncePolicy, MacKeyMaterial,
+    MacPolicy, SigPublic, SigningKeyMaterial, SigningPolicy, HMAC_NAME,
 };
 
 use crate::exports::lann::webcrypto::aead::{
@@ -39,6 +39,10 @@ use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
 use crate::exports::lann::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
+use crate::exports::lann::webcrypto::key_agreement::{
+    self as key_agreement_iface, Guest as KeyAgreementGuest, GuestAgreementKeyOptions,
+    GuestPublicKey, GuestSecretKey,
+};
 use crate::exports::lann::webcrypto::mac::{
     self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
 };
@@ -50,6 +54,7 @@ use crate::exports::lann::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
     GuestVerifyingKey,
 };
+use crate::exports::lann::webcrypto::x25519::Guest as X25519Guest;
 use crate::exports::lann::webcrypto::xchacha20_poly1305::Guest as XChaChaPoly1305Guest;
 use crate::exports::lann::webcrypto::xchacha20_poly1305_internal_nonce::Guest as XChachaInternalNonceGuest;
 use crate::lann::webcrypto::types::Error;
@@ -587,6 +592,141 @@ impl GuestPassword for Password {
 
     fn can_derive_key(&self) -> bool {
         self.material.policy().derive_key
+    }
+}
+
+// --- key-agreement & x25519 ------------------------------------------------------
+
+impl KeyAgreementGuest for Component {
+    type AgreementKeyOptions = AgreementKeyOptions;
+    type PublicKey = AgreementPublicKey;
+    type SecretKey = AgreementSecretKey;
+}
+
+/// An exported `agreement-key-options`. See [`MacKeyOptions`].
+pub struct AgreementKeyOptions {
+    policy: Cell<AgreementPolicy>,
+}
+
+impl GuestAgreementKeyOptions for AgreementKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(AgreementPolicy::default()),
+        }
+    }
+
+    fn can_derive_bits(&self, allowed: bool) {
+        self.policy.set(AgreementPolicy {
+            derive_bits: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_derive_key(&self, allowed: bool) {
+        self.policy.set(AgreementPolicy {
+            derive_key: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(AgreementPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
+}
+
+/// An exported `key-agreement.public-key`: public material only.
+pub struct AgreementPublicKey {
+    material: webcrypto_impl_core::AgreementPublicMaterial,
+}
+
+impl GuestPublicKey for AgreementPublicKey {
+    fn algorithm_name(&self) -> String {
+        self.material.name().to_string()
+    }
+
+    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export())
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk())
+    }
+}
+
+/// An exported `key-agreement.secret-key`: the shared core's X25519 secret
+/// (dalek's constant-time Montgomery ladder — class B; see the README's
+/// classification table).
+pub struct AgreementSecretKey {
+    material: webcrypto_impl_core::AgreementSecretMaterial,
+}
+
+impl GuestSecretKey for AgreementSecretKey {
+    async fn agree(
+        &self,
+        peer: key_agreement_iface::PublicKeyBorrow<'_>,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = self
+            .material
+            .agree(&peer.get::<AgreementPublicKey>().material)?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.material.name().to_string()
+    }
+
+    fn can_derive_bits(&self) -> bool {
+        self.material.policy().derive_bits
+    }
+
+    fn can_derive_key(&self) -> bool {
+        self.material.policy().derive_key
+    }
+
+    fn extractable(&self) -> bool {
+        self.material.policy().extractable
+    }
+}
+
+impl X25519Guest for Component {
+    async fn import_public_key(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import(&raw)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_secret_key_jwk(
+        jwk: String,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = webcrypto_impl_core::AgreementSecretMaterial::import_jwk(&jwk, policy)?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+
+    async fn generate_key(
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<
+        (
+            key_agreement_iface::SecretKey,
+            key_agreement_iface::PublicKey,
+        ),
+        Error,
+    > {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let (secret, public) = rng_infallible(
+            webcrypto_impl_core::AgreementSecretMaterial::generate(policy),
+        )?;
+        Ok((
+            key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
+            key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
+        ))
     }
 }
 

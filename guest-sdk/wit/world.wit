@@ -23,6 +23,8 @@ world imports {
     import lann:webcrypto/derivation@0.1.0;
     import lann:webcrypto/hkdf@0.1.0;
     import lann:webcrypto/pbkdf2@0.1.0;
+    import lann:webcrypto/key-agreement@0.1.0;
+    import lann:webcrypto/x25519@0.1.0;
     import lann:webcrypto/signature@0.1.0;
     import lann:webcrypto/ed25519-verify@0.1.0;
     import lann:webcrypto/ed25519-sign@0.1.0;

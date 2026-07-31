@@ -399,6 +399,13 @@ const SIG_VECTORS: [(SigAlg, &str); 3] = [
     ),
 ];
 
+const X25519_VECTORS: &str = include_str!("../../vectors/x25519_test.json");
+/// The derived companion mapping each XDH vector's `tcId` to its private
+/// key's public coordinate (see `conformance/vectors/README.md`): the
+/// vectors carry raw scalars, but the package's only secret-key import is
+/// the OKP JWK, whose `x` is mandatory.
+const X25519_PUBLIC_KEYS: &str = include_str!("../../vectors/x25519_test_public_keys.json");
+
 /// A served HKDF parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy)]
 pub enum HkdfAlg {
@@ -690,6 +697,102 @@ fn is_valid(field: &str, result: &str) -> bool {
         "invalid" => false,
         other => panic!("vector {field} has unknown result {other:?}"),
     }
+}
+
+/// One Wycheproof X25519 vector: agree the imported secret key (built as
+/// an OKP JWK from the raw scalar plus the derived companion's public
+/// coordinate) with the imported peer, then check the shared secret — or,
+/// for the `ZeroSharedSecret` (small-order peer) vectors, expect `agree`
+/// to fail `invalid-key`. No chunking schedules: agreement carries no
+/// streams.
+pub struct X25519Case {
+    pub tc_id: u64,
+    /// The peer's raw u-coordinate.
+    pub public: Vec<u8>,
+    /// The secret key's raw scalar (the JWK `d`).
+    pub private: Vec<u8>,
+    /// The secret key's public coordinate (the JWK `x`, from the derived
+    /// companion).
+    pub private_public: Vec<u8>,
+    /// The expected shared secret (`zero_shared` cases never reach it).
+    pub shared: Vec<u8>,
+    /// `true`: `agree` must fail `invalid-key` (the contributory check).
+    /// `false`: `agree` must succeed and derive `shared` — Wycheproof's
+    /// `acceptable` twist and non-canonical cases included, since RFC
+    /// 7748's masking accepts both.
+    pub zero_shared: bool,
+}
+
+impl X25519Case {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    pub fn case_id(&self) -> String {
+        format!("x25519/wycheproof/tc{}", self.tc_id)
+    }
+
+    /// The features this case exercises beyond the baseline surface.
+    pub fn features(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+#[derive(Deserialize)]
+struct XdhGroup {
+    tests: Vec<XdhTest>,
+}
+
+#[derive(Deserialize)]
+struct XdhTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    flags: Vec<String>,
+    public: String,
+    private: String,
+    shared: String,
+    result: String,
+}
+
+/// Translate the X25519 vector file. Every vector runs: `acceptable` is
+/// upstream's marker for policy-divergent cases (twist points,
+/// non-canonical encodings, small-order peers), and the WIT pins one
+/// policy — RFC 7748 masking with the contributory all-zero check at
+/// `agree` — so each maps to a definite expectation by its
+/// `ZeroSharedSecret` flag.
+pub fn x25519_cases() -> Vec<X25519Case> {
+    let file: VectorFile<XdhGroup> = serde_json::from_str(X25519_VECTORS)
+        .unwrap_or_else(|err| panic!("parsing x25519 vectors: {err}"));
+    let public_keys: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(X25519_PUBLIC_KEYS)
+            .unwrap_or_else(|err| panic!("parsing the x25519 public-key companion: {err}"));
+    let mut cases = Vec::new();
+    for group in &file.test_groups {
+        for test in &group.tests {
+            let field = format!("x25519 tc{}", test.tc_id);
+            match test.result.as_str() {
+                "valid" | "acceptable" => {}
+                other => panic!("vector {field} has unknown result {other:?}"),
+            }
+            let zero_shared = test.flags.iter().any(|flag| flag == "ZeroSharedSecret");
+            let shared = unhex(&field, &test.shared);
+            assert_eq!(
+                zero_shared,
+                shared.iter().all(|&b| b == 0),
+                "vector {field}: ZeroSharedSecret flag disagrees with its shared value"
+            );
+            let private_public = public_keys
+                .get(&test.tc_id.to_string())
+                .unwrap_or_else(|| panic!("vector {field} missing from the public-key companion"));
+            cases.push(X25519Case {
+                tc_id: test.tc_id,
+                public: unhex(&field, &test.public),
+                private: unhex(&field, &test.private),
+                private_public: unhex(&field, private_public),
+                shared,
+                zero_shared,
+            });
+        }
+    }
+    cases
 }
 
 /// The normalized HMAC cases: every full-length-tag vector of every

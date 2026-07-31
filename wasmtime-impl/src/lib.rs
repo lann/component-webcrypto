@@ -210,6 +210,27 @@ pub struct DeriveOptions {
     pub(crate) policy: webcrypto_impl_core::DerivePolicy,
 }
 
+/// An `agreement-key-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct AgreementKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::AgreementPolicy,
+}
+
+/// Backing type for the `key-agreement.public-key` resource: public
+/// material only, exchangeable and secret-free.
+#[derive(Debug)]
+pub struct AgreementPublicKey {
+    pub(crate) material: webcrypto_impl_core::AgreementPublicMaterial,
+}
+
+/// Backing type for the `key-agreement.secret-key` resource. `agree` is
+/// one-shot and stateless per call; the derivation state lives in the
+/// `derive-input` it mints.
+#[derive(Debug)]
+pub struct AgreementSecretKey {
+    pub(crate) material: webcrypto_impl_core::AgreementSecretMaterial,
+}
+
 /// Backing type for the `hkdf.ikm` resource: input keying material, never
 /// readable through the API under any grant.
 #[derive(Debug)]
@@ -355,6 +376,8 @@ where
     )?;
     bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::derivation::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::key_agreement::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::x25519::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hkdf::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::pbkdf2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;

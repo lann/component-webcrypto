@@ -13,13 +13,16 @@ use lann_webcrypto_guest::bindings::aead_internal_nonce::{
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
 use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
+use lann_webcrypto_guest::bindings::key_agreement::{
+    AgreementKeyOptions, PublicKey as AgreementPublicKey, SecretKey as AgreementSecretKey,
+};
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
 use lann_webcrypto_guest::bindings::pbkdf2::{self, Password};
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha2,
+    aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha2, x25519,
     xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
 };
 
@@ -160,4 +163,61 @@ pub async fn generate_xchacha_internal_nonce_key(
 
 pub async fn generate_ed25519_key(extractable: bool) -> Result<(SigningKey, VerifyingKey), Error> {
     ed25519_sign::generate_key(signing_options(extractable)).await
+}
+
+/// An `agreement-key-options` with the given grants.
+pub fn agreement_options(bits: bool, key: bool, extractable: bool) -> AgreementKeyOptions {
+    let options = AgreementKeyOptions::new();
+    options.can_derive_bits(bits);
+    options.can_derive_key(key);
+    options.extractable(extractable);
+    options
+}
+
+/// Unpadded base64url, for building the OKP JWKs the X25519 import takes.
+pub fn b64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        for i in 0..=chunk.len() {
+            out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+/// The RFC 8037 OKP private JWK for an X25519 (`x`, `d`) pair.
+pub fn x25519_secret_jwk(x: &[u8], d: &[u8]) -> String {
+    format!(
+        r#"{{"kty":"OKP","crv":"X25519","x":"{}","d":"{}"}}"#,
+        b64url(x),
+        b64url(d),
+    )
+}
+
+pub async fn import_x25519_public_key(raw: Vec<u8>) -> Result<AgreementPublicKey, Error> {
+    x25519::import_public_key(raw).await
+}
+
+pub async fn import_x25519_secret_key(
+    x: &[u8],
+    d: &[u8],
+    bits: bool,
+    key: bool,
+) -> Result<AgreementSecretKey, Error> {
+    x25519::import_secret_key_jwk(x25519_secret_jwk(x, d), agreement_options(bits, key, false))
+        .await
+}
+
+pub async fn generate_x25519_key(
+    bits: bool,
+    key: bool,
+) -> Result<(AgreementSecretKey, AgreementPublicKey), Error> {
+    x25519::generate_key(agreement_options(bits, key, false)).await
 }
