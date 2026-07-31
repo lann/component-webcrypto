@@ -145,6 +145,10 @@ impl GuestMacKey for MacKey {
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
 }
 
 // --- aead --------------------------------------------------------------------
@@ -210,6 +214,10 @@ impl GuestAeadKey for AeadKey {
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
 }
 
 // --- digest --------------------------------------------------------------------
@@ -270,6 +278,15 @@ impl HmacSha2Guest for Component {
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
+    async fn import_key_jwk(
+        variant: Sha2Variant,
+        jwk: String,
+        extractable: bool,
+    ) -> Result<mac::MacKey, Error> {
+        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, extractable)?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
     async fn generate_key(
         variant: Sha2Variant,
         length: Option<u32>,
@@ -293,6 +310,15 @@ impl AesGcmGuest for Component {
         extractable: bool,
     ) -> Result<ExportedAeadKey, Error> {
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable)?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn import_key_jwk(
+        variant: AesVariant,
+        jwk: String,
+        extractable: bool,
+    ) -> Result<ExportedAeadKey, Error> {
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, extractable)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 

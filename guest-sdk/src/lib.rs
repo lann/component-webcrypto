@@ -604,6 +604,12 @@ impl Mac {
     pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await.map_err(Error::from)
     }
+
+    /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
+    /// same extractability gate as [`export_key`](Self::export_key).
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
 }
 
 /// An `aead.aead-key`: caller-nonce authenticated encryption with
@@ -732,6 +738,14 @@ impl Aead {
     /// see [`Mac::export_key`]).
     pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
         self.0.export_key().await.map_err(Error::from)
+    }
+
+    /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
+    /// same extractability gate as [`export_key`](Self::export_key);
+    /// algorithms without a registered JWK `alg` (the ChaCha
+    /// constructions) fail [`Error::Unsupported`].
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
     }
 }
 

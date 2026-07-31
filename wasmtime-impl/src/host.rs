@@ -214,6 +214,16 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<MacKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<MacKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -290,6 +300,16 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AeadKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<AeadKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -358,6 +378,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         mint(accessor, material.map(|material| MacKey { material })).await
     }
 
+    async fn import_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: hmac_sha2_iface::Sha2Variant,
+        jwk: String,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, extractable);
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
+
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
@@ -382,6 +412,16 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         extractable: bool,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable);
+        mint(accessor, material.map(|material| AeadKey { material })).await
+    }
+
+    async fn import_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
+        jwk: String,
+        extractable: bool,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, extractable);
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 

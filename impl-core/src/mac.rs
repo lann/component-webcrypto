@@ -38,6 +38,32 @@ impl MacKeyMaterial {
         })
     }
 
+    /// Import an RFC 7517 `oct` JWK as an HMAC key over the declared
+    /// variant, per the `hmac-sha2.import-key-jwk` contract: the JWK's
+    /// material-bearing fields are validated (`alg` against the variant's
+    /// `HS*` name), then the decoded material is subject to
+    /// [`import`](Self::import)'s contract.
+    pub fn import_jwk(variant: Sha2Variant, jwk: &str, extractable: bool) -> Result<Self, Error> {
+        let alg = match served_sha2(variant)? {
+            Sha2::Sha256 => "HS256",
+            Sha2::Sha384 => "HS384",
+            Sha2::Sha512 => "HS512",
+        };
+        let raw = crate::jwk::parse_oct(jwk, alg, extractable)?;
+        Self::import(variant, raw, extractable)
+    }
+
+    /// The key as an `oct` JWK (the `mac-key.export-key-jwk` contract):
+    /// the same extractability gate as [`export`](Self::export).
+    pub fn export_jwk(&self) -> Result<String, Error> {
+        let alg = match self.variant {
+            Sha2::Sha256 => "HS256",
+            Sha2::Sha384 => "HS384",
+            Sha2::Sha512 => "HS512",
+        };
+        Ok(crate::jwk::build_oct(&self.export()?, alg))
+    }
+
     /// Generate a fresh random HMAC key over the declared variant, per the
     /// `hmac-sha2.generate-key` contract: `length` is the key length in
     /// bits, `None` meaning the underlying hash's block size (WebCrypto's

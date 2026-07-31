@@ -17,6 +17,19 @@ pub async fn import_key(
     ))
 }
 
+/// Import an RFC 7517 `oct` JSON Web Key (as JSON text) as an AES-GCM key
+/// of the declared variant. See the WIT `mac-key.export-key-jwk` doc for
+/// the package-wide JWK contract.
+pub async fn import_key_jwk(
+    variant: AesVariant,
+    jwk: impl Into<String>,
+    extractable: bool,
+) -> Result<Aead, Error> {
+    Ok(Aead::from_raw(
+        bindings::aes_gcm::import_key_jwk(variant, jwk.into(), extractable).await?,
+    ))
+}
+
 /// Generate a fresh random key of the declared AES variant.
 pub async fn generate_key(variant: AesVariant, extractable: bool) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
