@@ -100,10 +100,11 @@ interface aes-gcm {
 /// Sealed messages are `iv ‖ ciphertext ‖ tag` (12-byte IV, 16-byte tag).
 ///
 /// Security:
-/// - A key's nonce budget is 2^32 `seal` invocations (§8.2.2's
-///   repeat-probability bound). Implementations SHOULD enforce it with
-///   `error.key-exhausted`; a FIPS 140-3 profile MUST. For workloads that
-///   could approach the bound, prefer `xchacha20-poly1305-internal-nonce`.
+/// - A key's nonce budget (see `README.md`, "Terminology") is 2^32 `seal`
+///   invocations (§8.2.2's repeat-probability bound). Implementations
+///   SHOULD enforce it with `error.key-exhausted`; a FIPS 140-3 profile
+///   MUST. For workloads that could approach the bound, prefer
+///   `xchacha20-poly1305-internal-nonce`.
 ///
 /// This interface is deliberately separate from `aes-gcm` (caller-nonce
 /// minting) so a security profile can serve one nonce discipline without

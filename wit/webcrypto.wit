@@ -48,11 +48,11 @@ interface types {
         /// serves the operation; this key refuses it) and never a verdict
         /// on the input.
         not-permitted(string),
-        /// The key's nonce budget is exhausted: the implementation can no
-        /// longer guarantee nonce uniqueness for this key (for example, an
-        /// AES-GCM internal-nonce key reaching SP 800-38D's
-        /// 2^32-invocation bound). The key remains valid for `open`; mint
-        /// a fresh key to continue sealing.
+        /// The key's nonce budget (see `README.md`, "Terminology") is
+        /// exhausted: the implementation can no longer guarantee nonce
+        /// uniqueness for this key (for example, an AES-GCM internal-nonce
+        /// key reaching SP 800-38D's 2^32-invocation bound). The key
+        /// remains valid for `open`; mint a fresh key to continue sealing.
         key-exhausted,
         /// An implementation-specific operational failure: for example, an
         /// external keystore that cannot complete the operation now, or an
@@ -380,12 +380,12 @@ interface aead-internal-nonce {
         algorithm-length: func() -> u32;
 
         /// The number of further `seal` invocations this key's nonce budget
-        /// permits, or `none` when the implementation enforces no budget.
-        /// A hint for key-rotation scheduling: monotonically
-        /// non-increasing, and `some(0)` means the next `seal` fails
-        /// `error.key-exhausted`. Implementations MAY decrement faster than
-        /// one per seal (a policy or accounting choice), so it is not an
-        /// exact invocation count.
+        /// (see `README.md`, "Terminology") permits, or `none` when the
+        /// implementation enforces no budget. A hint for key-rotation
+        /// scheduling: monotonically non-increasing, and `some(0)` means
+        /// the next `seal` fails `error.key-exhausted`. Implementations
+        /// MAY decrement faster than one per seal (a policy or accounting
+        /// choice), so it is not an exact invocation count.
         ///
         /// There are deliberately no wire-layout getters here (nonce or tag
         /// size): the sealed message's layout is the minting interface's

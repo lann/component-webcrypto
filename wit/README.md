@@ -223,6 +223,11 @@ Brief definitions; follow the links for depth.
 - **nonce** — a number used once; AEAD's per-message input. Reuse with the
   same key is catastrophic for GCM- and ChaCha-family algorithms.
   [Wikipedia](https://en.wikipedia.org/wiki/Cryptographic_nonce).
+- **nonce budget** — the number of `seal` invocations an internal-nonce key
+  can serve before the implementation can no longer guarantee that a fresh
+  nonce is unique for that key (for random nonces, a bound on the
+  collision probability, e.g. [SP 800-38D](https://csrc.nist.gov/pubs/sp/800/38/d/final)
+  §8.2.2's 2^32 bound for AES-GCM). Reaching it fails `error.key-exhausted`.
 - **AAD** — associated data: authenticated but not encrypted AEAD input.
 - **tag** — the authentication value a MAC or AEAD produces.
 - **digest** — the output of a cryptographic hash function.
