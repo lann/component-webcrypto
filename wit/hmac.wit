@@ -51,7 +51,7 @@ interface hmac-sha2 {
     /// - an unserved variant fails `error.unsupported`.
     generate-key: async func(%variant: sha2-variant, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
 
-    /// Mint a key from a parameterized derivation: the input is realized
+    /// Mint a key from a parameterized derivation: the derivation runs
     /// at `length` bits and the result is subject to `import-key`'s
     /// contract.
     ///

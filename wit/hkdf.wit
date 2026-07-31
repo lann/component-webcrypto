@@ -49,7 +49,7 @@ interface hkdf {
     /// — the chaining step (a future agreement's shared secret fed to
     /// HKDF without transiting the caller).
     ///
-    /// The upstream input is realized at its natural output length, which
+    /// The upstream derivation runs at its natural output length, which
     /// requires it to have one: chaining from another KDF's input fails
     /// `error.other`, exactly as the platform's `deriveKey(… → "HKDF")`
     /// does (`get key length` for a KDF target is null, and a KDF's

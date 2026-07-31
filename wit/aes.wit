@@ -83,7 +83,7 @@ interface aes-gcm {
     /// variant.
     generate-key: async func(%variant: aes-variant, options: aead-key-options) -> result<aead-key, error>;
 
-    /// Mint a key from a parameterized derivation: the input is realized
+    /// Mint a key from a parameterized derivation: the derivation runs
     /// at the variant's key length (WebCrypto's `deriveKey` chain — get
     /// key length, derive bits, import) and the result is subject to
     /// `import-key`'s contract.

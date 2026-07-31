@@ -61,10 +61,10 @@ interface pbkdf2 {
     /// implementation not serving the variant fails `error.unsupported`
     /// (the truncated SHA-2 variants are unserved package-wide).
     ///
-    /// Unlike `hkdf.prepare`, realization cannot shed the base secret
-    /// entirely: PBKDF2 has no extract step, so the input retains
-    /// password-derived keyed state (the PRF's key schedule) for its
-    /// lifetime — equivalent in sensitivity to HKDF's retained PRK, and
-    /// still not the raw password bytes.
+    /// Unlike `hkdf.prepare`, running the derivation early cannot discard
+    /// the base secret entirely: PBKDF2 has no extract step, so the input
+    /// retains password-derived keyed state (the PRF's key schedule) for
+    /// its lifetime — equivalent in sensitivity to HKDF's retained PRK,
+    /// and still not the raw password bytes.
     prepare: async func(%variant: sha2-variant, input: borrow<password>, salt: list<u8>, iterations: u32) -> result<derive-input, error>;
 }

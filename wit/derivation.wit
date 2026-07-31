@@ -9,8 +9,8 @@ package lann:webcrypto@0.1.0;
 /// spec never names: the base key plus the normalized algorithm parameters
 /// (IKM + salt/info; password + salt/iterations; private key + peer
 /// public). `derive-input` is that pair as a resource — a fully
-/// parameterized derivation, pending or realized, lacking only the output
-/// length, which the platform too supplies per use.
+/// parameterized derivation, lacking only the output length, which the
+/// platform too supplies per use.
 ///
 /// Sources construct it on their own interfaces (`hkdf.prepare`, a future
 /// `pbkdf2.prepare`, a future agreement's `agree`); targets consume it
@@ -42,19 +42,22 @@ interface derivation {
         can-derive-key: func(allowed: bool);
     }
 
-    /// A fully parameterized derivation, pending or realized.
+    /// A fully parameterized derivation. The output may already be
+    /// computed, or the computation may still be pending.
     ///
     /// Grants are copied from the base secret (or upstream input) at
     /// construction; parameterization neither grants nor revokes.
     ///
     /// Security:
-    /// - An implementation may realize the derivation eagerly or hold it
-    ///   pending. A pending input holds its own copy of the base secret,
-    ///   so a secret stays in memory as long as any resource derived from
-    ///   it. Implementations SHOULD NOT keep a base secret in memory
-    ///   longer than the resources that denote it, and SHOULD realize
-    ///   eagerly where that shortens the window (for HKDF, the extract
-    ///   step at `prepare` retains only the PRK and drops the IKM copy).
+    /// - An implementation may run the derivation as soon as the input is
+    ///   constructed, or wait until the input is used. While the
+    ///   computation is pending, the input holds its own copy of the base
+    ///   secret, so a secret stays in memory as long as any resource
+    ///   derived from it. Implementations SHOULD NOT keep a base secret in
+    ///   memory longer than the resources that denote it, and SHOULD
+    ///   compute early where that shortens the window (for HKDF, the
+    ///   extract step at `prepare` retains only the PRK and drops the IKM
+    ///   copy).
     resource derive-input {
         /// Whether `derive-bits` (and minting extractable keys) is
         /// permitted. See `derive-options.can-derive-bits`.
