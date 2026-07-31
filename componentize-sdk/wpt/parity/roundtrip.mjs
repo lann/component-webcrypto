@@ -13,8 +13,8 @@ import { demo } from "./generated/parity-runner.js";
 /**
  * Unwrap jco's representation of a WIT `result<string, string>` returned
  * by an exported function — a convention, not documented API (validated
- * against jco 1.26.x; see examples/jco-demo/src/run.mjs, where the same
- * convention is anchored). The ok value is returned; the err case thrown.
+ * against jco-transpile 0.5.x; see examples/jco-demo/src/run.mjs, where the
+ * same convention is anchored). The ok value is returned; the err case thrown.
  * @param {() => Promise<unknown>} call
  */
 async function unwrapResult(call) {

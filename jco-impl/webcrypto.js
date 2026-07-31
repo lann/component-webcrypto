@@ -21,9 +21,8 @@
 //
 // Three aspects of the jco runtime's host-facing surface are conventions
 // rather than documented API, so they are isolated and version-anchored
-// here. Validated against jco 1.26.1 / jco-transpile 0.5.2 (the versions
-// pinned by this repo's npm consumers); revalidate when bumping either
-// package.
+// here. Validated against jco-transpile 0.5.2 (the version pinned by this
+// repo's npm consumers); revalidate when bumping it.
 //
 // - **Error lifting** (`witError`, and every throw site through it): a WIT
 //   `result<_, error>` err case is produced by throwing the variant's

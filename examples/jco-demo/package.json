@@ -6,11 +6,11 @@
   "description": "crypto-demo driver for the jco host (jco-impl/webcrypto.js): transpiles the guest with jco and runs it on Node 24+.",
   "scripts": {
     "build:component": "cd ../.. && just build-component",
-    "transpile": "jco transpile ../crypto-demo/build/crypto-demo.component.wasm --name crypto-demo --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../jco-impl/webcrypto.js#*' -o generated",
+    "transpile": "node ../../scripts/jco-transpile.mjs transpile ../crypto-demo/build/crypto-demo.component.wasm --name crypto-demo --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../jco-impl/webcrypto.js#*' -o generated",
     "start": "node --experimental-wasm-jspi src/run.mjs",
     "test": "node --experimental-wasm-jspi src/run.mjs"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "^1.26.0"
+    "@bytecodealliance/jco-transpile": "^0.5.2"
   }
 }
