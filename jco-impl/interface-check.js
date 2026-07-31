@@ -14,9 +14,10 @@
 // two types are related in either direction, which would accept a host
 // missing half the interface.
 //
-// The grouping mirrors the `jco transpile --map` flags this host is wired in
-// with — resource-bearing interfaces map to the module itself, minting and
-// utility interfaces to named exports.
+// The grouping mirrors the wildcard `--map` convention this host is wired
+// in with — every interface is a camelCased named export; the
+// resource-bearing interfaces export objects holding their resource
+// classes, asserted here on the instance types.
 
 import {
   AeadKey,
@@ -36,7 +37,7 @@ import {
   hmacSha2,
   sha2,
   xchacha20Poly1305,
-  xchachaInternalNonce,
+  xchacha20Poly1305InternalNonce,
 } from "./webcrypto.js";
 
 /** @import * as Mac from "./generated/interfaces/lann-webcrypto-mac.js" */
@@ -94,7 +95,7 @@ const chacha20Poly1305Interface = chacha20Poly1305;
 const xchacha20Poly1305Interface = xchacha20Poly1305;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-xchacha20-poly1305-internal-nonce.js")} */
-const xchachaInternalNonceInterface = xchachaInternalNonce;
+const xchacha20Poly1305InternalNonceInterface = xchacha20Poly1305InternalNonce;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-ed25519-verify.js")} */
 const ed25519VerifyInterface = ed25519Verify;
@@ -122,7 +123,7 @@ export const checked = {
   aesGcmInternalNonceInterface,
   chacha20Poly1305Interface,
   xchacha20Poly1305Interface,
-  xchachaInternalNonceInterface,
+  xchacha20Poly1305InternalNonceInterface,
   ed25519VerifyInterface,
   ed25519SignInterface,
   ecdsaVerifyInterface,

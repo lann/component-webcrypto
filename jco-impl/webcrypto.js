@@ -9,20 +9,22 @@
 // browser. No `node:crypto` imports and no Node-only APIs are used; Node
 // provides the same globals natively.
 //
-// `jco --map` wires this module in as the component's imports: the `mac`,
-// `aead`, and `digest` resource interfaces map to the module itself (the
-// `MacKey`, `AeadKey`, and `Digest` class exports), while the minting and
-// utility interfaces map to named exports (`--map '…=./webcrypto.js#hmacSha2'`,
-// `#aesGcm`, `#chacha20Poly1305`, `#sha2`, `#bytes`) since the minting names
-// would otherwise collide.
+// `jco --map` wires this module in as the component's imports with one
+// wildcard — `--map 'lann:webcrypto/*@0.1.0=./webcrypto.js#*'` — so the
+// export convention is fixed: every interface is served by the named export
+// spelling its name in camelCase (`hmacSha2`, `aesGcm`, …), and the
+// resource-bearing interfaces (`mac`, `aead`, `aead-internal-nonce`,
+// `digest`, `signature`) export objects holding their resource classes.
+// Adding an interface to the host means adding its camelCased export here;
+// no transpile flags change.
 //
 // ## jco conventions this host relies on
 //
-// Two aspects of the jco runtime's host-facing surface are conventions
-// rather than documented API, so they are isolated behind single functions
-// and version-anchored here. Validated against jco 1.26.1 /
-// jco-transpile 0.5.2 (the versions pinned by this repo's npm consumers);
-// revalidate both functions when bumping either package.
+// Three aspects of the jco runtime's host-facing surface are conventions
+// rather than documented API, so they are isolated and version-anchored
+// here. Validated against jco 1.26.1 / jco-transpile 0.5.2 (the versions
+// pinned by this repo's npm consumers); revalidate when bumping either
+// package.
 //
 // - **Error lifting** (`witError`, and every throw site through it): a WIT
 //   `result<_, error>` err case is produced by throwing the variant's
@@ -37,6 +39,15 @@
 //   chunks are copied (`toByteChunk`) rather than retained by reference.
 //   Host-returned `stream<u8>` values are web `ReadableStream`s of
 //   `Uint8Array`.
+// - **Async detection**: which imports and exports are async is read from
+//   the component itself (the WIT's `async func` markers and the async
+//   canonical options wit-bindgen lowers them with), so the transpile
+//   invocations pass `--async-mode jspi` — the generated code requires
+//   JSPI — but no per-function `--async-imports`/`--async-exports`
+//   enumerations. Verified against js-component-bindgen's `is_async_fn`
+//   (`canon_opts.async_ || func.kind.is_async()`); the per-function flags
+//   feed only the legacy `manuallyAsync` path for sync-ABI functions
+//   forced async, which nothing here uses.
 
 const subtle = globalThis.crypto.subtle;
 
@@ -782,7 +793,10 @@ async function importHmacKeyJwk(variant, jwk, options) {
   return new MacKey(key, jwkKeyBytes(material.k) * 8, hash);
 }
 
-/** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
+/** The `lann:webcrypto/mac` interface: its resource classes. */
+export const mac = { MacKey, MacKeyOptions };
+
+/** The `lann:webcrypto/hmac-sha2` interface. */
 export const hmacSha2 = {
   importKey: importHmacKey,
   importKeyJwk: importHmacKeyJwk,
@@ -833,7 +847,10 @@ function makeDigest(variant) {
   return new Digest(sha2Variant(variant).hash);
 }
 
-/** The `lann:webcrypto/sha2` interface (`--map '…#sha2'`). */
+/** The `lann:webcrypto/digest` interface: its resource class. */
+export const digest = { Digest };
+
+/** The `lann:webcrypto/sha2` interface. */
 export const sha2 = { makeDigest };
 
 /**
@@ -853,7 +870,7 @@ function constantTimeEqual(a, b) {
   return diff === 0;
 }
 
-/** The `lann:webcrypto/bytes` interface (`--map '…#bytes'`). */
+/** The `lann:webcrypto/bytes` interface. */
 export const bytes = { constantTimeEqual };
 
 /**
@@ -989,7 +1006,10 @@ async function importAesKeyJwk(variant, jwk, options) {
   return new AeadKey(key, lengthBits);
 }
 
-/** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
+/** The `lann:webcrypto/aead` interface: its resource classes. */
+export const aead = { AeadKey, AeadKeyOptions };
+
+/** The `lann:webcrypto/aes-gcm` interface. */
 export const aesGcm = {
   ...aesMinting(AeadKey, aeadPolicy),
   importKeyJwk: importAesKeyJwk,
@@ -1012,20 +1032,20 @@ function unsupportedChacha(name) {
   throw errUnsupported(`${name} is not served by this implementation`);
 }
 
-/** The `lann:webcrypto/chacha20-poly1305` interface (`--map '…#chacha20Poly1305'`). */
+/** The `lann:webcrypto/chacha20-poly1305` interface. */
 export const chacha20Poly1305 = {
   importKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
 };
 
-/** The `lann:webcrypto/xchacha20-poly1305` interface (`--map '…#xchacha20Poly1305'`). */
+/** The `lann:webcrypto/xchacha20-poly1305` interface. */
 export const xchacha20Poly1305 = {
   importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
 
-/** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface (`--map '…#xchachaInternalNonce'`). */
-export const xchachaInternalNonce = {
+/** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface. */
+export const xchacha20Poly1305InternalNonce = {
   importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
@@ -1209,7 +1229,10 @@ export class InternalNonceKey {
   }
 }
 
-/** The `lann:webcrypto/aes-gcm-internal-nonce` interface (`--map '…#aesGcmInternalNonce'`). */
+/** The `lann:webcrypto/aead-internal-nonce` interface: its resource classes. */
+export const aeadInternalNonce = { InternalNonceKey, InternalNonceKeyOptions };
+
+/** The `lann:webcrypto/aes-gcm-internal-nonce` interface. */
 export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePolicy);
 
 /**
@@ -2041,7 +2064,10 @@ async function importEd25519VerifyingKey(raw) {
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
-/** The `lann:webcrypto/ed25519-verify` interface (`--map '…#ed25519Verify'`). */
+/** The `lann:webcrypto/signature` interface: its resource classes. */
+export const signature = { VerifyingKey, SigningKey, SigningKeyOptions };
+
+/** The `lann:webcrypto/ed25519-verify` interface. */
 export const ed25519Verify = { importVerifyingKey: importEd25519VerifyingKey };
 
 /**
@@ -2063,7 +2089,7 @@ async function generateEd25519Key(options) {
   ];
 }
 
-/** The `lann:webcrypto/ed25519-sign` interface (`--map '…#ed25519Sign'`). */
+/** The `lann:webcrypto/ed25519-sign` interface. */
 export const ed25519Sign = { generateKey: generateEd25519Key };
 
 /**
@@ -2093,7 +2119,7 @@ async function importEcdsaVerifyingKey(variant, raw) {
   return new VerifyingKey(key, entry);
 }
 
-/** The `lann:webcrypto/ecdsa-verify` interface (`--map '…#ecdsaVerify'`). */
+/** The `lann:webcrypto/ecdsa-verify` interface. */
 export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
 
 /**
@@ -2116,5 +2142,5 @@ async function generateEcdsaKey(variant, options) {
   return [new SigningKey(pair.privateKey, entry), new VerifyingKey(pair.publicKey, entry)];
 }
 
-/** The `lann:webcrypto/ecdsa-sign` interface (`--map '…#ecdsaSign'`). */
+/** The `lann:webcrypto/ecdsa-sign` interface. */
 export const ecdsaSign = { generateKey: generateEcdsaKey };
