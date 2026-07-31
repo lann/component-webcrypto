@@ -5,14 +5,14 @@
   "type": "module",
   "description": "jco conformance adapters (Node + headless browser) for lann:webcrypto: transpile the shared conformance guest against the browser-first host (jco-impl/webcrypto.js) and emit the per-target results JSON the conformance runner consumes.",
   "scripts": {
-    "transpile": "jco transpile ../../guest/build/conformance-guest.component.wasm --name conformance-guest --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated",
+    "transpile": "node ../../../scripts/jco-transpile.mjs transpile ../../guest/build/conformance-guest.component.wasm --name conformance-guest --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated",
     "run:node": "node --experimental-wasm-jspi src/run-node.mjs",
     "run:browser": "node src/run-browser.mjs",
-    "transpile:signing": "jco transpile ../../signing-guest/build/conformance-signing-guest.component.wasm --name conformance-signing-guest --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated-signing",
+    "transpile:signing": "node ../../../scripts/jco-transpile.mjs transpile ../../signing-guest/build/conformance-signing-guest.component.wasm --name conformance-signing-guest --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated-signing",
     "run:node-signing": "node --experimental-wasm-jspi src/run-node.mjs --signing"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "^1.26.0",
+    "@bytecodealliance/jco-transpile": "^0.5.2",
     "playwright-core": "^1.61.1",
     "smol-toml": "^1.7.1"
   }

@@ -5,12 +5,12 @@
   "type": "module",
   "description": "WPT parity gate: the vendored WebCryptoAPI suites run directly against the platform's crypto.subtle (baseline) and through the componentized shim transpiled by jco against jco-impl (round trip); compare.mjs holds the round trip to the baseline's pass set.",
   "scripts": {
-    "transpile": "jco transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated",
+    "transpile": "node ../../../scripts/jco-transpile.mjs transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../jco-impl/webcrypto.js#*' -o generated",
     "baseline": "node baseline.mjs",
     "roundtrip": "node --experimental-wasm-jspi roundtrip.mjs",
     "compare": "node compare.mjs"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "^1.26.0"
+    "@bytecodealliance/jco-transpile": "^0.5.2"
   }
 }

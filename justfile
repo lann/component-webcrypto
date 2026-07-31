@@ -103,9 +103,9 @@ test-node: transpile
 test-jco-host:
     cd jco-impl && npm test
 
-# Type-check the jco host against the interface definitions jco derives from
-# `wit/`. The definitions are generated on demand, so there is no checked-in
-# copy to go stale.
+# Type-check the jco host against the interface definitions jco-transpile
+# derives from `wit/`. The definitions are generated on demand, so there is
+# no checked-in copy to go stale.
 typecheck-jco:
     cd jco-impl && npm run typecheck
 

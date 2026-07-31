@@ -7,10 +7,10 @@ import { demo } from "../generated/crypto-demo.js";
 /**
  * Unwrap jco's representation of a WIT `result<string, string>` returned by
  * an exported function — a convention, not documented API, so it is
- * isolated here and version-anchored: validated against jco 1.26.1 /
- * jco-transpile 0.5.2. The ok value is returned directly and the err case
+ * isolated here and version-anchored: validated against jco-transpile
+ * 0.5.2. The ok value is returned directly and the err case
  * thrown (with a `{ tag, val }` result object tolerated too); revalidate
- * when bumping jco.
+ * when bumping jco-transpile.
  * @param {() => Promise<unknown>} call
  */
 async function unwrapResult(call) {
