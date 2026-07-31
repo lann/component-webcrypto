@@ -81,8 +81,8 @@ examples/
   wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker
                         #   + the integration test (tests/demo.rs)
   jco-demo/             # Node 24+ driver for the jco host: transpiles
-                        #   crypto-demo with jco (the --async-*/--map flags
-                        #   live in its package.json) and runs it against
+                        #   crypto-demo with jco (one wildcard --map; async
+                        #   is read from the component) and runs it against
                         #   jco-impl/webcrypto.js
   componentize-demo/    # JS guest (componentize-js) exercising the
                         #   componentize-sdk library; exports the same demo
@@ -180,8 +180,10 @@ string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`wasmtime-impl/src/bindings.rs`,
 `examples/wasmtime-demo/src/lib.rs`), the in-guest provider world and bindings
 (`guest-impl/`), the driver's inline world
-(`examples/demo-driver/src/lib.rs`), and the `jco transpile`
-`--async-exports`/`--async-imports`/`--map` flags in `examples/jco-demo/package.json`.
+(`examples/demo-driver/src/lib.rs`), and the camelCased named export in
+`jco-impl/webcrypto.js` (the transpile invocations carry one wildcard
+`--map` and enumerate nothing per interface; async-ness is read from the
+component — see the conventions note in that file's header).
 
 ### The in-guest provider's timing-channel policy
 
