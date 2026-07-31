@@ -214,6 +214,11 @@ cases are here: vendor the vectors, extend the translation policy in
 new cases with a feature name if any target legitimately cannot serve them
 (declaring it missing in `targets.toml` for those targets), and run
 `just update-conformance-lock` so the change lands as a reviewable
-lockfile diff. An algorithm the in-guest provider deliberately does not
+lockfile diff. An algorithm of a kind with a contract battery
+(`guest/src/contract.rs`) also adds its table row there, inheriting the
+kind's standard cases — getters, extractability, key-material rejection,
+usage policy, round trip — as `<interface>/contract/…` lockfile entries;
+only behavior specific to the algorithm needs a hand-written probe. An
+algorithm the in-guest provider deliberately does not
 export lives in the signing suite, which the composed target never runs —
 that is absence, not failure.

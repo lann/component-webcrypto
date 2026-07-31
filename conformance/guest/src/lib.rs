@@ -1,9 +1,10 @@
 //! `conformance-guest`: the shared conformance component.
 //!
 //! One guest binary carries the whole suite — the Wycheproof-derived vector
-//! cases (translated per `conformance/vectors/README.md` in [`translate`])
-//! plus the hand-written API-contract [`probes`] — as self-describing
-//! `test-case` resources. Each case declares the [`features`] it exercises;
+//! cases (translated per `conformance/vectors/README.md` in [`translate`]),
+//! the per-kind [`contract`] batteries (the standard cases every minting
+//! family inherits from one table row), and the hand-written API-contract
+//! [`probes`] — as self-describing `test-case` resources. Each case declares the [`features`] it exercises;
 //! `all(missing)` materializes the suite for a target missing those
 //! features, and a case whose feature is missing asserts the correct
 //! decline (reporting `skipped`) instead of exercising its subject.
@@ -18,6 +19,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+mod contract;
 mod mint;
 mod probes;
 mod translate;
@@ -56,6 +58,7 @@ enum CaseKind {
     Sha2(Sha2Case),
     Sig(SigCase),
     Speccheck(SpeccheckCase),
+    Contract(&'static contract::AeadFamily, contract::AeadArea),
     Probe(usize),
 }
 
@@ -92,6 +95,7 @@ impl GuestTestCase for Case {
                 CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
                 CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
+                CaseKind::Contract(family, area) => contract::run(family, *area).await,
                 CaseKind::Probe(index) => {
                     conformance_harness::run_probe(probes::PROBES, *index).await
                 }
@@ -107,7 +111,9 @@ impl GuestTestCase for Case {
             // serve a feature it declares missing); vector cases skip
             // without re-asserting it thousands of times.
             let asserted = match &self.kind {
-                CaseKind::Probe(_) => probes::run_declined(self.features).await,
+                CaseKind::Contract(..) | CaseKind::Probe(_) => {
+                    probes::run_declined(self.features).await
+                }
                 _ => Ok(format!(
                     "feature {} declared missing by the target",
                     self.features.join("+")
@@ -174,6 +180,16 @@ impl Guest for Component {
                 &missing,
                 CaseKind::Speccheck(case),
             ));
+        }
+        for family in contract::AEAD_FAMILIES {
+            for &area in contract::AeadArea::ALL {
+                cases.push(materialize(
+                    contract::case_id(family, area),
+                    family.features,
+                    &missing,
+                    CaseKind::Contract(family, area),
+                ));
+            }
         }
         for (index, probe) in probes::PROBES.iter().enumerate() {
             cases.push(materialize(
