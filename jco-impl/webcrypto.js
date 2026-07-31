@@ -348,6 +348,14 @@ export class MacKey {
   async exportKey() {
     return exportRawGated(this.#key);
   }
+
+  /**
+   * The key as an `oct` JWK (JSON text; the `mac-key.export-key-jwk`
+   * contract), behind the same extractability gate as `exportKey`.
+   */
+  async exportKeyJwk() {
+    return exportJwkGated(this.#key);
+  }
 }
 
 /**
@@ -490,6 +498,15 @@ export class AeadKey {
   async exportKey() {
     return exportRawGated(this.#key);
   }
+
+  /**
+   * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
+   * the package-wide contract), behind the same extractability gate as
+   * `exportKey`.
+   */
+  async exportKeyJwk() {
+    return exportJwkGated(this.#key);
+  }
 }
 
 /**
@@ -542,8 +559,40 @@ async function generateHmacKey(variant, length, extractable) {
   return new MacKey(key, bits, hash);
 }
 
+/**
+ * Import an `oct` JWK as an HMAC key over the declared SHA-2 variant (the
+ * `hmac-sha2.import-key-jwk` contract). The platform owns the JWK
+ * validation: `kty`, strict base64url `k`, `alg` against the requested
+ * hash, and `ext` against `extractable` all fail there and map to
+ * `{ tag: 'invalid-key', val }`.
+ * @param {string} variant
+ * @param {string} jwk
+ * @param {boolean} extractable
+ */
+async function importHmacKeyJwk(variant, jwk, extractable) {
+  const { hash } = sha2Variant(variant);
+  const material = jwkMaterial(jwk);
+  requireStrictBase64url(material.k);
+  let key;
+  try {
+    key = await subtle.importKey("jwk", material, { name: "HMAC", hash }, extractable, [
+      "sign",
+      "verify",
+    ]);
+  } catch (err) {
+    invalidKey(err, "HMAC JWK");
+  }
+  // Length comes from `k`, not `key.algorithm.length`, which an engine may
+  // omit for an imported key (see `MacKey`'s field doc).
+  return new MacKey(key, jwkKeyBytes(material.k) * 8, hash);
+}
+
 /** The `lann:webcrypto/hmac-sha2` interface (`--map '…#hmacSha2'`). */
-export const hmacSha2 = { importKey: importHmacKey, generateKey: generateHmacKey };
+export const hmacSha2 = {
+  importKey: importHmacKey,
+  importKeyJwk: importHmacKeyJwk,
+  generateKey: generateHmacKey,
+};
 
 /**
  * The `digest` resource: a digest algorithm bound at creation. Holds only
@@ -680,8 +729,42 @@ function aesMinting(Ctor) {
   };
 }
 
+/**
+ * Import an `oct` JWK as an AES-GCM key of the declared variant (the
+ * `aes-gcm.import-key-jwk` contract). The platform validates the JWK's
+ * internal consistency (`kty`, strict base64url `k`, `alg` against `k`'s
+ * length, `ext` against `extractable`); the variant check is against the
+ * imported key's platform-computed length, since the platform cannot know
+ * the declared variant.
+ * @param {string} variant
+ * @param {string} jwk
+ * @param {boolean} extractable
+ */
+async function importAesKeyJwk(variant, jwk, extractable) {
+  const lengthBits = aesVariantByteLength(variant) * 8;
+  const material = jwkMaterial(jwk);
+  requireStrictBase64url(material.k);
+  let key;
+  try {
+    key = await subtle.importKey("jwk", material, { name: "AES-GCM" }, extractable, [
+      "encrypt",
+      "decrypt",
+    ]);
+  } catch (err) {
+    invalidKey(err, `${variant} JWK`);
+  }
+  // The variant check derives from `k` (exact once the platform accepted
+  // the encoding), not `key.algorithm.length`, which an engine may omit
+  // for an imported key (see `MacKey`'s field doc).
+  const gotBits = jwkKeyBytes(material.k) * 8;
+  if (gotBits !== lengthBits) {
+    throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
+  }
+  return new AeadKey(key, lengthBits);
+}
+
 /** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
-export const aesGcm = aesMinting(AeadKey);
+export const aesGcm = { ...aesMinting(AeadKey), importKeyJwk: importAesKeyJwk };
 
 /**
  * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
@@ -1100,6 +1183,88 @@ async function exportRawGated(key) {
   return new Uint8Array(
     await platformCall("raw key export", () => subtle.exportKey("raw", key)),
   );
+}
+
+/**
+ * The key as an `oct` JWK, per the WIT contract: exactly the
+ * material-bearing members (`kty`, `k`, `alg`) — the platform's `key_ops`/
+ * `ext` are the consumer's to stamp, so they are dropped here.
+ * @param {CryptoKey} key
+ */
+async function exportJwkGated(key) {
+  if (!key.extractable) throw errNotExtractable();
+  const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", key));
+  return JSON.stringify({ kty: jwk.kty, k: jwk.k, alg: jwk.alg });
+}
+
+/**
+ * Parse JWK JSON text and strip the members the WIT contract ignores.
+ * `use`/`key_ops` are consumer policy — they must not reach the platform,
+ * whose import would otherwise enforce them against the usages this host
+ * passes. `ext` stays: the platform validates it against `extractable`,
+ * which the WIT does model. Malformed JSON throws
+ * `{ tag: 'invalid-key', val }`.
+ * @param {string} jwkText
+ * @returns {Record<string, unknown>}
+ */
+/**
+ * The decoded byte length of a valid unpadded-base64url string — exact:
+ * `floor(chars * 3 / 4)`. Only meaningful after the platform accepted the
+ * JWK (which validates the encoding).
+ * @param {unknown} k
+ */
+function jwkKeyBytes(k) {
+  return typeof k === "string" ? Math.floor((k.length * 3) / 4) : 0;
+}
+
+const B64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * Enforce the contract's strict unpadded base64url on a JWK `k` before the
+ * platform sees it: some platforms are lenient here (Node accepts padding),
+ * and the WIT contract pins strictness so implementations cannot diverge
+ * on adversarial input. Non-string `k` passes through — the platform
+ * rejects it with the right error shape.
+ * @param {unknown} k
+ */
+function requireStrictBase64url(k) {
+  if (typeof k !== "string") return;
+  if (k.length % 4 === 1) {
+    throw errInvalidKey("JWK `k` has an impossible base64url length");
+  }
+  for (const ch of k) {
+    if (!B64URL_ALPHABET.includes(ch)) {
+      throw errInvalidKey("JWK `k` is not unpadded base64url");
+    }
+  }
+  const rem = k.length % 4;
+  if (rem !== 0) {
+    const last = B64URL_ALPHABET.indexOf(k[k.length - 1]);
+    const mask = rem === 2 ? 0b1111 : 0b11;
+    if ((last & mask) !== 0) {
+      throw errInvalidKey("JWK `k` has non-zero trailing bits");
+    }
+  }
+}
+
+/**
+ * @param {string} jwkText
+ * @returns {Record<string, unknown>}
+ */
+function jwkMaterial(jwkText) {
+  let jwk;
+  try {
+    jwk = JSON.parse(jwkText);
+  } catch (err) {
+    throw errInvalidKey(`JWK is not valid JSON: ${err}`);
+  }
+  if (typeof jwk !== "object" || jwk === null || Array.isArray(jwk)) {
+    throw errInvalidKey("JWK must be a JSON object");
+  }
+  const { use, key_ops, ...material } = /** @type {Record<string, unknown>} */ (jwk);
+  void use;
+  void key_ops;
+  return material;
 }
 
 /**

@@ -11,7 +11,9 @@ use conformance_harness::{
     FEATURE_GCM_ANY_IV,
 };
 use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVariant};
+use lann_webcrypto_guest::bindings::aes_gcm::{
+    generate_key, import_key, import_key_jwk as import_aes_key_jwk, AesVariant,
+};
 use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::{
     generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
 };
@@ -28,6 +30,7 @@ use lann_webcrypto_guest::bindings::ed25519_sign::{
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
+    import_key_jwk as import_hmac_key_jwk,
 };
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
@@ -87,6 +90,10 @@ probes! {
     gcm_full_parameters,
     gcm_any_iv(gcm_any_iv),
     chacha_tag_size_fixed(chacha),
+    jwk_roundtrip,
+    jwk_rejections,
+    jwk_semantics,
+    chacha_jwk_unsupported(chacha),
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -1460,4 +1467,169 @@ async fn gcm_any_iv() -> Result<(), String> {
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
+}
+
+/// The WPT symmetric fixtures' key bytes (1..=32), as the JWK `k` those
+/// fixtures encode.
+const JWK_K_32: &str = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+
+/// JWK import and export round-trip on both oct algorithms: imported JWKs
+/// yield the expected raw material, and an extractable key's exported JWK
+/// re-imports to the same key.
+async fn jwk_roundtrip() -> Result<(), String> {
+    let raw: Vec<u8> = (1..=32).collect();
+
+    let hmac = import_hmac_key_jwk(
+        Sha2Variant::Sha256,
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"HS256"}}"#),
+        true,
+    )
+    .await
+    .map_err(|e| describe("hmac import-key-jwk", &e))?;
+    let exported = hmac
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    expect_bytes(&exported, &raw, "hmac material from JWK")?;
+    let jwk = hmac
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    let reimported = import_hmac_key_jwk(Sha2Variant::Sha256, jwk, true)
+        .await
+        .map_err(|e| describe("re-import of exported JWK", &e))?;
+    let exported = reimported
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    expect_bytes(&exported, &raw, "hmac material after JWK round trip")?;
+
+    let aes = import_aes_key_jwk(
+        AesVariant::Aes256,
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A256GCM"}}"#),
+        true,
+    )
+    .await
+    .map_err(|e| describe("aes import-key-jwk", &e))?;
+    let jwk = aes
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    if !jwk.contains(JWK_K_32) || !jwk.contains("A256GCM") || !jwk.contains("\"oct\"") {
+        return Err(format!("exported AES JWK missing material members: {jwk}"));
+    }
+    Ok(())
+}
+
+/// Malformed and mismatched JWKs fail `invalid-key` on every path the
+/// contract names: JSON garbage, a wrong `kty`, an `alg` disagreeing with
+/// the declared variant, padded (non-strict) base64url, an `ext: false`
+/// conflict, and material whose length disagrees with the AES variant.
+async fn jwk_rejections() -> Result<(), String> {
+    let cases: &[(&str, String)] = &[
+        ("json garbage", "{".to_string()),
+        ("non-object", "[]".to_string()),
+        ("wrong kty", format!(r#"{{"kty":"EC","k":"{JWK_K_32}"}}"#)),
+        (
+            "alg mismatch",
+            format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"HS384"}}"#),
+        ),
+        (
+            "padded base64url",
+            r#"{"kty":"oct","k":"AQI="}"#.to_string(),
+        ),
+    ];
+    for (what, jwk) in cases {
+        match import_hmac_key_jwk(Sha2Variant::Sha256, jwk.clone(), false).await {
+            Err(Error::InvalidKey(_)) => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("hmac import-key-jwk ({what}): expected invalid-key, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("hmac import-key-jwk ({what}) minted a key")),
+        }
+    }
+
+    match import_hmac_key_jwk(
+        Sha2Variant::Sha256,
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","ext":false}}"#),
+        true,
+    )
+    .await
+    {
+        Err(Error::InvalidKey(_)) => {}
+        Err(other) => {
+            return Err(describe(
+                "ext:false imported extractable: expected invalid-key, got",
+                &other,
+            ))
+        }
+        Ok(_) => return Err("ext:false JWK imported extractable".into()),
+    }
+
+    // 32 bytes of material under the aes128 variant declaration.
+    match import_aes_key_jwk(
+        AesVariant::Aes128,
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A128GCM"}}"#),
+        false,
+    )
+    .await
+    {
+        Err(Error::InvalidKey(_)) => Ok(()),
+        Err(other) => Err(describe(
+            "32-byte JWK as aes128: expected invalid-key, got",
+            &other,
+        )),
+        Ok(_) => Err("32-byte JWK minted an aes128 key".into()),
+    }
+}
+
+/// The contract's parsing semantics, pinned cross-target: duplicate JSON
+/// members resolve last-wins, `use`/`key_ops` are ignored (consumer
+/// policy), and an `ext: false` JWK imports fine non-extractable.
+async fn jwk_semantics() -> Result<(), String> {
+    let raw: Vec<u8> = (1..=32).collect();
+
+    // Two `k` members: the second (the fixture bytes) must win.
+    let dup = format!(r#"{{"kty":"oct","k":"AAAA","k":"{JWK_K_32}","alg":"HS256"}}"#);
+    let key = import_hmac_key_jwk(Sha2Variant::Sha256, dup, true)
+        .await
+        .map_err(|e| describe("duplicate-member import", &e))?;
+    let exported = key
+        .export_key()
+        .await
+        .map_err(|e| describe("export-key", &e))?;
+    expect_bytes(&exported, &raw, "last-wins material")?;
+
+    let policy = format!(
+        r#"{{"kty":"oct","k":"{JWK_K_32}","use":"enc","key_ops":["encrypt"],"ext":false}}"#
+    );
+    let key = import_hmac_key_jwk(Sha2Variant::Sha256, policy, false)
+        .await
+        .map_err(|e| describe("use/key_ops-carrying import", &e))?;
+    let (tag, fed) = sign(&key, b"jwk-semantics", Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    if tag.len() != 32 {
+        return Err(format!("tag length {} from JWK-imported key", tag.len()));
+    }
+    Ok(())
+}
+
+/// ChaCha keys have no registered JWK `alg`: `export-key-jwk` declines
+/// `unsupported` (and the extractability gate still applies first on
+/// non-extractable keys).
+async fn chacha_jwk_unsupported() -> Result<(), String> {
+    let key = import_chacha_key(vec![0x42u8; 32], true)
+        .await
+        .map_err(|e| describe("chacha import-key", &e))?;
+    match key.export_key_jwk().await {
+        Err(Error::Unsupported(_)) => Ok(()),
+        Err(other) => Err(describe(
+            "export-key-jwk: expected unsupported, got",
+            &other,
+        )),
+        Ok(_) => Err("ChaCha20-Poly1305 exported a JWK".into()),
+    }
 }

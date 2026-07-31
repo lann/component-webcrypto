@@ -6387,4 +6387,8 @@ cases = [
     { name = "probe/gcm-full-parameters" },
     { name = "probe/gcm-any-iv", features = ["aes-gcm-any-iv"] },
     { name = "probe/chacha-tag-size-fixed", features = ["chacha20-poly1305"] },
+    { name = "probe/jwk-roundtrip" },
+    { name = "probe/jwk-rejections" },
+    { name = "probe/jwk-semantics" },
+    { name = "probe/chacha-jwk-unsupported", features = ["chacha20-poly1305"] },
 ]

@@ -57,12 +57,13 @@ function gcmInSubset(name) {
 }
 
 /**
- * import_export/symmetric_importKey: "raw" format only; HMAC-SHA-256 at any
- * key size, AES-GCM at 256 bits. Empty-usages tests are in for any
- * parameters (usages are validated before key material either way).
+ * import_export/symmetric_importKey: the "raw" and "jwk" formats;
+ * HMAC-SHA-256 at any key size, AES-GCM at 256 bits. Empty-usages tests
+ * are in for any parameters (usages are validated before key material
+ * either way).
  */
 function importKeyInSubset(name) {
-  if (!name.includes("(raw, ")) {
+  if (!name.includes("(raw, ") && !name.includes("(jwk, ")) {
     return false;
   }
   if (name.startsWith("Empty Usages:")) {
@@ -78,17 +79,15 @@ function importKeyInSubset(name) {
 }
 
 /**
- * generateKey/successes: non-extractable only (the extractable cases export
- * JWK, which the library does not serve), without wrap/unwrap usages;
- * HMAC-SHA-256 with the default length, AES-GCM at 256 bits. Algorithm-name
- * case variants are in (names are case-insensitive).
+ * generateKey/successes: HMAC-SHA-256 (default or explicit length) and
+ * AES-GCM at 256 bits, extractable or not (extractable cases export raw
+ * and JWK), at every legal usage combination (wrap/unwrap usages are key
+ * metadata). Algorithm-name case variants are in (names are
+ * case-insensitive).
  */
 function generateKeyInSubset(name) {
-  if (!name.includes(", false, [") || /wrapKey|unwrapKey/.test(name)) {
-    return false;
-  }
   if (/name: hmac/i.test(name)) {
-    return name.includes("hash: SHA-256") && !name.includes("length:");
+    return name.includes("hash: SHA-256");
   }
   if (/name: aes-gcm/i.test(name)) {
     return name.includes("length: 256");

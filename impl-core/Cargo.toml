@@ -26,6 +26,13 @@ aes = { version = "0.8", features = ["zeroize"] }
 # fixsliced `aes` — so the timing-channel classification is unchanged.
 ghash = "0.5"
 ctr = "0.9"
+# The JWK carrier (import-key-jwk / export-key-jwk): JSON via `serde_json`'s
+# Value (duplicate members resolve last-wins, matching the engines'
+# JSON.parse semantics the WIT contract pins) and strict unpadded base64url
+# via `base64` (rejects padding, non-alphabet bytes, and non-zero trailing
+# bits, per RFC 7515).
+serde_json = "1"
+base64 = "0.22"
 chacha20poly1305 = "0.10"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see

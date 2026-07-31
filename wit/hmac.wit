@@ -20,6 +20,16 @@ interface hmac-sha2 {
     /// the variant fails with `error.unsupported`.
     import-key: async func(%variant: sha2-variant, raw: list<u8>, extractable: bool) -> result<mac-key, error>;
 
+    /// Import an RFC 7517 JSON Web Key as an HMAC key over the declared
+    /// SHA-2 variant.
+    ///
+    /// `jwk` is the JWK as JSON text; the implementation owns the parse
+    /// (see `mac.mac-key.export-key-jwk` for the package-wide JWK
+    /// contract). The key must be an `oct` key whose `alg`, if present,
+    /// names the declared variant (`"HS256"`/`"HS384"`/`"HS512"`); the
+    /// decoded material is then subject to `import-key`'s contract.
+    import-key-jwk: async func(%variant: sha2-variant, jwk: string, extractable: bool) -> result<mac-key, error>;
+
     /// Generate a fresh random HMAC key over the declared SHA-2 variant.
     ///
     /// `length` is the key length in bits (WebCrypto's

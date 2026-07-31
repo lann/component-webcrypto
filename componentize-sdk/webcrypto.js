@@ -25,11 +25,8 @@
 //
 //   - Unserved: only HMAC-SHA-256 and AES-256-GCM are served; other
 //     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
-//   - Unserved: only the `"raw"` key format is served; others throw
-//     `NotSupportedError`.
-//   - Unserved: HMAC's `length` parameter must be omitted or name the
-//     key's exact bit length; WebCrypto's sub-byte truncation is not
-//     supported.
+//   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
+//     others throw `NotSupportedError`.
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
@@ -426,7 +423,10 @@ function normalizeHash(hash) {
 /** @type {Readonly<Record<string, readonly KeyUsage[] | undefined>>} */
 const USAGES = {
   HMAC: ["sign", "verify"],
-  "AES-GCM": ["encrypt", "decrypt"],
+  // `wrapKey`/`unwrapKey` are recognized AES-GCM usages a key may carry
+  // even though this library exposes no wrap operations yet: usages are
+  // key metadata, validated at use.
+  "AES-GCM": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
 };
 
 /**
@@ -483,30 +483,88 @@ function requireKeyAlgorithm(key, name) {
   }
 }
 
+// --- JWK ----------------------------------------------------------------------------
+//
+// The material-bearing JWK work — JSON parsing, strict base64url, `kty`/
+// `alg`/`ext` validation, and building on export — lives behind the WIT
+// (`import-key-jwk`/`export-key-jwk`; the contract is on
+// `mac-key.export-key-jwk`). What remains here is the policy the WIT
+// deliberately does not model: `use`/`key_ops` against the requested
+// usages, and stamping `key_ops`/`ext` onto exported JWKs.
+
+/**
+ * The spec's `use`/`key_ops` checks — consumer policy over the usages
+ * model, which the WIT does not carry. The material fields go down as-is.
+ * @param {unknown} keyData
+ * @param {string} use the expected JWK `use` (`"sig"` or `"enc"`)
+ * @param {readonly KeyUsage[]} usages
+ * @returns {string} the JWK as JSON text, for the WIT import
+ */
+function jwkForImport(keyData, use, usages) {
+  if (typeof keyData !== "object" || keyData === null) {
+    throw new TypeError("JWK key data must be an object");
+  }
+  const jwk = /** @type {JsonWebKey} */ (keyData);
+  if (jwk.use !== undefined && usages.length !== 0 && jwk.use !== use) {
+    throw dom("DataError", `JWK use is ${jwk.use}, not ${use}`);
+  }
+  if (jwk.key_ops !== undefined) {
+    if (!Array.isArray(jwk.key_ops)) {
+      throw dom("DataError", "JWK key_ops must be an array");
+    }
+    for (const usage of usages) {
+      if (!jwk.key_ops.includes(usage)) {
+        throw dom("DataError", `JWK key_ops does not permit ${usage}`);
+      }
+    }
+  }
+  return JSON.stringify(jwk);
+}
+
+/**
+ * An exported JWK: the WIT returns the material-bearing members; the
+ * metadata the interface does not model is this library's to stamp.
+ * @param {string} jwkText
+ * @param {globalThis.CryptoKey} key
+ * @returns {JsonWebKey}
+ */
+function jwkForExport(jwkText, key) {
+  const jwk = /** @type {JsonWebKey} */ (JSON.parse(jwkText));
+  jwk.key_ops = [...key.usages];
+  jwk.ext = key.extractable;
+  return jwk;
+}
+
 // --- minting ------------------------------------------------------------------------
 
 /**
  * @param {() => unknown} start
- * @param {NormalizedAlgorithm} algorithm
+ * @param {number | undefined} requestedLength the `HmacKeyAlgorithm.length`
+ *   to project, validated against the handle's material bits per the
+ *   spec's shave window; `undefined` projects the handle's own length
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-async function mintHmacKey(start, algorithm, extractable, usages) {
+async function mintHmacKey(start, requestedLength, extractable, usages) {
   const handle = await callImport(start());
+  const dataBits = /** @type {number} */ (handle.algorithmLength());
+  let length = dataBits;
+  if (requestedLength !== undefined) {
+    // The spec's HMAC length window: `length` may shave up to 7 trailing
+    // bits off the material's bit length. The WIT key holds the material
+    // unchanged (HMAC zero-pads keys to the block size, so the shave
+    // cannot change a tag); the shaved length is CryptoKey metadata.
+    if (!(requestedLength > dataBits - 8 && requestedLength <= dataBits)) {
+      throw dom("DataError", `HMAC length ${requestedLength} does not fit ${dataBits} bits of key`);
+    }
+    length = requestedLength;
+  }
   /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
     hash: Object.freeze({ name: "SHA-256" }),
-    length: handle.algorithmLength(),
+    length,
   };
-  // `length`, when supplied, must name the key's exact bit length (see the
-  // deviations note above).
-  if (algorithm.length !== undefined && algorithm.length !== projected.length) {
-    throw dom(
-      "NotSupportedError",
-      `HMAC length ${algorithm.length} does not match the key's ${projected.length} bits`,
-    );
-  }
   return mintKey(handle, projected, extractable, usages);
 }
 
@@ -533,18 +591,22 @@ async function mintAesGcmKey(start, extractable, usages) {
  * @returns {Promise<CryptoKey>}
  */
 async function importKey(format, keyData, algorithm, extractable, keyUsages) {
-  if (format !== "raw") {
-    throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
+  if (format !== "raw" && format !== "jwk") {
+    throw dom(
+      "NotSupportedError",
+      `unsupported key format ${format}; only "raw" and "jwk" are served`,
+    );
   }
   const alg = normalizeAlgorithm(algorithm);
   const usages = normalizeUsages(keyUsages, alg.name);
-  const raw = bytesOf(keyData, "keyData");
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
     return await mintHmacKey(
-      () => hmacSha2.importKey("sha256", raw, !!extractable),
-      alg,
+      format === "jwk"
+        ? () => hmacSha2.importKeyJwk("sha256", jwkForImport(keyData, "sig", usages), !!extractable)
+        : () => hmacSha2.importKey("sha256", bytesOf(keyData, "keyData"), !!extractable),
+      alg.length === undefined ? undefined : Number(alg.length),
       !!extractable,
       usages,
     );
@@ -553,7 +615,9 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     // as the aes256 variant; other lengths fail with `DataError` (from the
     // WIT contract's `invalid-key`).
     return await mintAesGcmKey(
-      () => aesGcm.importKey("aes256", raw, !!extractable),
+      format === "jwk"
+        ? () => aesGcm.importKeyJwk("aes256", jwkForImport(keyData, "enc", usages), !!extractable)
+        : () => aesGcm.importKey("aes256", bytesOf(keyData, "keyData"), !!extractable),
       !!extractable,
       usages,
     );
@@ -572,17 +636,15 @@ async function generateKey(algorithm, extractable, keyUsages) {
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
-    // The backing `generate-key` mints WebCrypto's default HMAC-SHA-256 key
-    // length (the hash's 512-bit block size).
-    if (alg.length !== undefined && alg.length !== 512) {
-      throw dom(
-        "NotSupportedError",
-        `unsupported HMAC length ${alg.length}; only the default 512 is served`,
-      );
+    // The spec's get-key-length: absent means the hash's block size (the
+    // WIT default); zero is an `OperationError` before any key exists.
+    if (alg.length === 0) {
+      throw dom("OperationError", "HMAC length cannot be 0");
     }
+    const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
-      () => hmacSha2.generateKey("sha256", undefined, !!extractable),
-      alg,
+      () => hmacSha2.generateKey("sha256", length, !!extractable),
+      undefined,
       !!extractable,
       usages,
     );
@@ -599,13 +661,28 @@ async function generateKey(algorithm, extractable, keyUsages) {
 }
 
 /**
+ * @overload
+ * @param {"jwk"} format
+ * @param {globalThis.CryptoKey} key
+ * @returns {Promise<JsonWebKey>}
+ */
+/**
+ * @overload
  * @param {Exclude<KeyFormat, "jwk">} format
  * @param {globalThis.CryptoKey} key
  * @returns {Promise<ArrayBuffer>}
  */
+/**
+ * @param {KeyFormat} format
+ * @param {globalThis.CryptoKey} key
+ * @returns {Promise<ArrayBuffer | JsonWebKey>}
+ */
 async function exportKey(format, key) {
-  if (format !== "raw") {
-    throw dom("NotSupportedError", `unsupported key format ${format}; only "raw" is served`);
+  if (format !== "raw" && format !== "jwk") {
+    throw dom(
+      "NotSupportedError",
+      `unsupported key format ${format}; only "raw" and "jwk" are served`,
+    );
   }
   if (!(key instanceof CryptoKey)) {
     throw new TypeError("key must be a CryptoKey");
@@ -613,7 +690,11 @@ async function exportKey(format, key) {
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
   }
-  return toArrayBuffer(await callImport(handleOf(key).exportKey()));
+  if (format === "jwk") {
+    const jwkText = /** @type {string} */ (await callImport(handleOf(key).exportKeyJwk()));
+    return jwkForExport(jwkText, key);
+  }
+  return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKey())));
 }
 
 /**

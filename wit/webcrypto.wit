@@ -183,6 +183,32 @@ interface mac {
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
+
+        /// The key as an RFC 7517 JSON Web Key, behind the same
+        /// extractability gate as `export-key`.
+        ///
+        /// Package-wide JWK contract (every `*-jwk` function in this
+        /// package follows it; the minting interfaces' `import-key-jwk`
+        /// docs name their algorithm-specific `alg` values):
+        ///
+        /// - A JWK travels as JSON text. The implementation owns the
+        ///   parse: duplicate members resolve **last-wins** (ECMA-404
+        ///   engines' `JSON.parse` semantics, pinned so implementations
+        ///   cannot diverge on adversarial input), and `k` is strict
+        ///   unpadded base64url (RFC 7515: padding, non-alphabet bytes,
+        ///   and non-zero trailing bits are all `error.invalid-key`).
+        /// - Import validates the material-bearing fields — `kty`, `k`,
+        ///   `alg` against the declared variant, and `ext` against the
+        ///   requested extractability — failing `error.invalid-key`.
+        ///   `use` and `key_ops` are **ignored**: this package has no
+        ///   usage model, so they are the consumer's policy to check.
+        /// - Export returns exactly the material-bearing members —
+        ///   `kty`, `k`, `alg` — and nothing else; metadata this package
+        ///   does not model (`key_ops`, `ext`, `use`) is the consumer's
+        ///   to stamp. Member order is not contract.
+        /// - Algorithms without a registered JWK `alg` fail
+        ///   `error.unsupported`.
+        export-key-jwk: async func() -> result<string, error>;
     }
 }
 
@@ -289,6 +315,13 @@ interface aead {
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
+
+        /// The key as an RFC 7517 JSON Web Key, behind the same
+        /// extractability gate as `export-key`. See `mac-key.export-key-jwk`
+        /// for the package-wide JWK contract; algorithms without a
+        /// registered JWK `alg` (the ChaCha constructions) fail
+        /// `error.unsupported`.
+        export-key-jwk: async func() -> result<string, error>;
     }
 }
 

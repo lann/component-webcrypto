@@ -48,13 +48,16 @@ const cryptoServesWebCrypto = crypto;
 const generateKeyServesSecretKeyOverload = subtle.generateKey;
 
 /**
- * `exportKey` also declares the `"jwk"` form returning a `JsonWebKey`, and
- * satisfying every overload would mean claiming a return type that is an
- * `ArrayBuffer` and a `JsonWebKey` at once. This library declines every
- * non-`"raw"` format at runtime.
+ * `exportKey`'s TS declaration is overloaded — `"jwk"` returns a
+ * `JsonWebKey`, the buffer formats an `ArrayBuffer` — and the library's
+ * implementation declares matching `@overload`s, so each shape is asserted
+ * as a plain assignment.
  * @type {(format: Exclude<KeyFormat, "jwk">, key: globalThis.CryptoKey) => Promise<ArrayBuffer>}
  */
 const exportKeyServesRawOverload = subtle.exportKey;
+/** @type {(format: "jwk", key: globalThis.CryptoKey) => Promise<JsonWebKey>} */
+const exportKeyServesJwkOverload = subtle.exportKey;
+void exportKeyServesJwkOverload;
 
 /**
  * Every key this library mints is a `CryptoKey` in the platform's sense.

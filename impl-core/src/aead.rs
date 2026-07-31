@@ -146,6 +146,43 @@ impl AeadKeyMaterial {
         })
     }
 
+    /// Import an RFC 7517 `oct` JWK as an AES-GCM key of the declared
+    /// variant, per the `aes-gcm.import-key-jwk` contract: the JWK's
+    /// material-bearing fields are validated (`alg` against the variant's
+    /// `A*GCM` name), then the decoded material is subject to
+    /// [`import_aes_gcm`](Self::import_aes_gcm)'s contract.
+    pub fn import_aes_gcm_jwk(
+        variant: AesVariant,
+        jwk: &str,
+        extractable: bool,
+    ) -> Result<Self, Error> {
+        let alg = match variant {
+            AesVariant::Aes128 => "A128GCM",
+            AesVariant::Aes192 => return Err(aes192_unsupported()),
+            AesVariant::Aes256 => "A256GCM",
+        };
+        let raw = crate::jwk::parse_oct(jwk, alg, extractable)?;
+        Self::import_aes_gcm(variant, raw, extractable)
+    }
+
+    /// The key as an `oct` JWK (the `aead-key.export-key-jwk` contract):
+    /// the same extractability gate as [`export`](Self::export), and
+    /// `unsupported` for the ChaCha constructions, which have no
+    /// registered JWK `alg`.
+    pub fn export_jwk(&self) -> Result<String, Error> {
+        let alg = match &self.cipher {
+            AeadCipher::Aes128Gcm(_) => "A128GCM",
+            AeadCipher::Aes256Gcm(_) => "A256GCM",
+            AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => {
+                return Err(Error::Unsupported(format!(
+                    "{} has no registered JWK algorithm",
+                    self.name()
+                )))
+            }
+        };
+        Ok(crate::jwk::build_oct(&self.export()?, alg))
+    }
+
     /// Generate a fresh random key of the declared AES-GCM variant. The
     /// inner error is `unsupported` for AES-192; the outer channel is
     /// entropy failure.
