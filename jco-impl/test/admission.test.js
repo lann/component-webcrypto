@@ -1,8 +1,6 @@
-// Tests for the input-buffering admission subsystem.
-//
-// #76 recorded that none of this was exercised by any gate: the conformance
-// adapter runs cases strictly sequentially, so no test here had ever seen two
-// operations in flight at once. These run the host directly — no component, no
+// Tests for the input-buffering admission subsystem — the only gate that
+// sees two operations in flight at once (the conformance adapter runs cases
+// strictly sequentially). These run the host directly — no component, no
 // jco — because the subsystem is reached through the same class methods a
 // transpiled component calls.
 //

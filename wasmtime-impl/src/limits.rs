@@ -20,11 +20,10 @@
 //! cancellation.
 //!
 //! The primitive itself is [`mea::semaphore`] rather than a hand-written
-//! queue. What that buys is not lines of code but the parts that are easy to
-//! get wrong and hard to test: waking a parked waiter without holding the
-//! lock the waker may re-enter, deciding after a release whether the *front*
-//! waiter fits, and unwinding a cancelled waiter out of the queue. An earlier
-//! implementation here got each of those wrong.
+//! queue: the hard-to-test parts — waking a parked waiter without holding
+//! the lock the waker may re-enter, deciding after a release whether the
+//! *front* waiter fits, unwinding a cancelled waiter out of the queue —
+//! live in the vetted crate.
 
 use std::sync::Arc;
 

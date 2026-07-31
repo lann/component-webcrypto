@@ -1,5 +1,6 @@
-// The WPT parity runner guest: the measuring half of the parity gate (see
-// parity/README.md). It runs the same vendored WPT groups as runner.js
+// The WPT parity runner guest: the measuring half of the parity gate
+// (see ../README.md, "The parity gate"). It runs the same vendored WPT
+// groups as runner.js
 // against the same `componentize-sdk/webcrypto.js` shim, but asserts
 // nothing in-guest: every result is reported, and the judgment — which
 // losses relative to the platform baseline are known, which are new — is
