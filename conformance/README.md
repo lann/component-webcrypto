@@ -51,8 +51,11 @@ its name while weakening what it checks — `Err(_)` where it demanded
 does an edit to a vector's own `result` or `tag` field. Both are caught the
 same way anything else in a checked-in file is: the change appears in the
 diff and someone reads it. Discriminating a specific error variant rather
-than any error is the property that makes these cases worth running, and
-review is what protects it.
+than any error is the property that makes these cases worth running;
+review protects it change by change, and the weekly mutation run
+(`just mutants`) measures it empirically — a mutant of the crypto core or
+the Wasmtime host that neither the unit tests nor these suites distinguish
+fails that job.
 
 What review cannot establish on its own is whether a vendored vector is
 what upstream published. `vectors/README.md` records the upstream revision

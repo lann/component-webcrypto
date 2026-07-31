@@ -255,9 +255,10 @@ npm install).
 
 The [`justfile`](justfile) is the single entry point; run `just` to list
 recipes. `.github/workflows/ci.yml` runs the same recipes.
-`.github/workflows/timing-lab.yml` runs the timing lab weekly — schedule-only,
-because a statistical experiment cannot gate pull requests (see
-timing-lab/README.md, "Automation").
+`.github/workflows/timing-lab.yml` runs the weekly lab — the timing lab and
+the mutation run (`just mutants`) — schedule-only, because a statistical
+experiment cannot gate pull requests (see timing-lab/README.md,
+"Automation") and a full mutation run costs hours.
 
 ### Checks to run before committing
 

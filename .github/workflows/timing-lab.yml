@@ -1,13 +1,17 @@
-name: Timing lab
+name: Weekly lab
 
-# The dudect-style timing lab (timing-lab/README.md) measured against the
-# composed in-guest provider.
+# The weekly analyses that are too expensive or too statistical to gate pull
+# requests: the dudect-style timing lab (timing-lab/README.md) measured
+# against the composed in-guest provider, and mutation testing of the shared
+# crypto core and Wasmtime host (`just mutants`) against the unit tests plus
+# both conformance suites.
 #
 # Deliberately schedule-only: the lab is a statistical experiment on a shared
-# runner, so it cannot gate pull requests without flaking them. It runs on its
-# own cadence instead, and a scheduled run that fails notifies rather than
-# blocking. `continue-on-error` would be the wrong shape here — a job nobody
-# is told about is a job that rots, which is the state this replaces.
+# runner, so it cannot gate pull requests without flaking them, and a full
+# mutation run costs hours. They run on their own cadence instead, and a
+# scheduled run that fails notifies rather than blocking.
+# `continue-on-error` would be the wrong shape here — a job nobody is told
+# about is a job that rots, which is the state this replaces.
 on:
   schedule:
     # Mondays, 06:00 UTC.
@@ -23,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: timing-lab
+  group: weekly-lab
   cancel-in-progress: false
 
 jobs:
@@ -59,3 +63,69 @@ jobs:
         run: just timing-lab-scheduled
         env:
           TIMING_LAB_SAMPLES: ${{ inputs.samples || '2000' }}
+
+  # Mutation testing: cargo-mutants over impl-core and wasmtime-impl, oracle =
+  # their unit tests + both conformance suites through the wasmtime adapter's
+  # env-gated oracle test. A missed mutant fails the job: it is a change to
+  # the crypto that no suite distinguishes — exactly the assertion-strength
+  # gap the lockfiles cannot pin (they pin the case inventory, not what the
+  # cases check).
+  mutants:
+    if: github.repository == 'lann/component-webcrypto'
+    runs-on: ubuntu-latest
+    # A full run measured ~20 s/mutant (~4 h for the current ~700 mutants);
+    # the `just mutants <k/n>` shard argument is the escape hatch if growth
+    # ever pushes this against the 6-hour job cap.
+    timeout-minutes: 350
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutants
+          cache-all-crates: true
+
+      - name: Install dependencies
+        # wasm-tools for the guest-component builds; nothing here touches Node.
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SKIP_NODE: "1"
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Run mutation testing
+        run: just mutants
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "### Mutation testing"
+            echo
+            if [ -f mutants.out/missed.txt ] && [ -s mutants.out/missed.txt ]; then
+              echo "**Missed mutants (changes to the crypto no suite distinguishes):**"
+              echo
+              echo '```'
+              cat mutants.out/missed.txt
+              echo '```'
+            elif [ -f mutants.out/missed.txt ]; then
+              echo "No missed mutants."
+            else
+              echo "The run did not produce mutants.out (it failed before testing)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out
+          path: mutants.out/
+          if-no-files-found: ignore

@@ -12,3 +12,4 @@ conformance/adapters/jco/generated/
 conformance/adapters/jco/generated-signing/
 conformance/results/
 conformance/matrix.md
+/mutants.out*
