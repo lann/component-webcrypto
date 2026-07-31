@@ -30,6 +30,9 @@ use crate::bindings::webcrypto::derivation::{
 use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::hkdf::{self as hkdf_iface, HostIkm, HostIkmWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
+use crate::bindings::webcrypto::pbkdf2::{
+    self as pbkdf2_iface, HostPassword, HostPasswordWithStore,
+};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
     aes_gcm as aes_gcm_iface, aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
@@ -42,8 +45,8 @@ use crate::bindings::webcrypto::{
 use crate::limits::admit_input;
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
-    AeadKey, DeriveInput, Digest, Ikm, InternalNonceKey, MacKey, SigningKey, VerifyingKey,
-    WasiWebcrypto, WasiWebcryptoCtxView,
+    AeadKey, DeriveInput, Digest, Ikm, InternalNonceKey, MacKey, Password, SigningKey,
+    VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -545,6 +548,57 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
                 &upstream.material,
                 &salt,
                 info,
+            )
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+}
+
+// --- pbkdf2 --------------------------------------------------------------------
+
+impl pbkdf2_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostPassword for WasiWebcryptoCtxView<'_> {
+    fn can_derive_bits(&mut self, self_: Resource<Password>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_bits)
+    }
+
+    fn can_derive_key(&mut self, self_: Resource<Password>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_key)
+    }
+}
+
+impl<T: Send> HostPasswordWithStore<T> for WasiWebcrypto {
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<Password>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_password(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+        options: Resource<crate::DeriveOptions>,
+    ) -> Result<std::result::Result<Resource<Password>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = webcrypto_impl_core::PasswordMaterial::import(raw, policy);
+        mint(accessor, material.map(|material| Password { material })).await
+    }
+
+    async fn prepare(
+        accessor: &Accessor<T, Self>,
+        variant: pbkdf2_iface::Sha2Variant,
+        input: Resource<Password>,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |password| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare_pbkdf2(
+                variant.into(),
+                &password.material,
+                salt,
+                iterations,
             )
         })
         .await?;

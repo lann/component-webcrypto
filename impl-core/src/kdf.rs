@@ -1,15 +1,19 @@
-//! HKDF (RFC 5869): the shared derivation core behind the `derivation` and
-//! `hkdf` interfaces.
+//! The KDFs (HKDF, RFC 5869; PBKDF2, RFC 8018): the shared derivation core
+//! behind the `derivation`, `hkdf`, and `pbkdf2` interfaces.
 //!
-//! The `derive-input` resource's semantics — a parameterized derivation,
-//! realized eagerly — are implemented here as [`DeriveInputMaterial`]:
-//! `prepare` runs HKDF-Extract immediately, so the input retains the PRK
-//! and the bound `info`, and the IKM is never copied out of its own
-//! resource. That is the eager-realization guidance from the WIT made
-//! concrete: an input's existence does not extend the pre-image's
-//! residency.
+//! The `derive-input` resource's semantics — a parameterized derivation —
+//! are implemented here as [`DeriveInputMaterial`], realized as eagerly as
+//! each KDF's structure permits. HKDF's `prepare` runs HKDF-Extract
+//! immediately, so the input retains the PRK and the bound `info`, never
+//! the IKM. PBKDF2 has no extract step — its whole cost is per-block and
+//! length-dependent — so the most its `prepare` can shed is the raw
+//! password: the input retains the PRF's *keyed state* (the HMAC key
+//! schedule), which is password-equivalent in sensitivity, like the PRK,
+//! but is not the password bytes. Either way, an input's existence does
+//! not extend the pre-image resource's raw-byte residency.
 
 use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use sha2::{Sha256, Sha384, Sha512};
 use zeroize::Zeroizing;
 
@@ -46,6 +50,32 @@ impl IkmMaterial {
     }
 }
 
+/// The `pbkdf2.password` resource's material: bytes that no operation
+/// returns.
+#[derive(Debug)]
+pub struct PasswordMaterial {
+    raw: Zeroizing<Vec<u8>>,
+    policy: DerivePolicy,
+}
+
+impl PasswordMaterial {
+    /// Import a password, per the `pbkdf2.import-password` contract:
+    /// empty passwords are accepted (deliberately asymmetric with
+    /// [`IkmMaterial::import`] — see the WIT doc), a grantless policy is
+    /// `not-permitted`.
+    pub fn import(raw: Vec<u8>, policy: DerivePolicy) -> Result<Self, Error> {
+        policy.check_useful()?;
+        Ok(Self {
+            raw: Zeroizing::new(raw),
+            policy,
+        })
+    }
+
+    pub fn policy(&self) -> DerivePolicy {
+        self.policy
+    }
+}
+
 /// The extracted PRK, held per hash so `expand` needs no re-dispatch.
 enum Prk {
     Sha256(Hkdf<Sha256>),
@@ -64,13 +94,45 @@ impl std::fmt::Debug for Prk {
     }
 }
 
-/// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from`:
-/// the PRK (extract already run), the bound `info`, and the grants copied
-/// from the pre-image.
+/// The PBKDF2 PRF: HMAC keyed by the password (the key schedule computed
+/// at `prepare`, the raw password dropped), held per hash.
+enum PbkdfPrf {
+    Sha256(Hmac<Sha256>),
+    Sha384(Hmac<Sha384>),
+    Sha512(Hmac<Sha512>),
+}
+
+impl std::fmt::Debug for PbkdfPrf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hash = match self {
+            PbkdfPrf::Sha256(_) => "SHA-256",
+            PbkdfPrf::Sha384(_) => "SHA-384",
+            PbkdfPrf::Sha512(_) => "SHA-512",
+        };
+        f.debug_struct("PbkdfPrf").field("hash", &hash).finish()
+    }
+}
+
+/// A parameterized derivation, realized as far as its KDF's structure
+/// permits (see the module doc).
+#[derive(Debug)]
+enum Realized {
+    /// HKDF after extract: the PRK and the `info` bound for expand.
+    Hkdf { prk: Prk, info: Vec<u8> },
+    /// PBKDF2 after the PRF key schedule: the keyed HMAC, the salt, and
+    /// the iteration count.
+    Pbkdf2 {
+        prf: PbkdfPrf,
+        salt: Vec<u8>,
+        iterations: u32,
+    },
+}
+
+/// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from` or
+/// `pbkdf2.prepare`, with the grants copied from the pre-image.
 #[derive(Debug)]
 pub struct DeriveInputMaterial {
-    prk: Prk,
-    info: Vec<u8>,
+    realized: Realized,
     policy: DerivePolicy,
 }
 
@@ -84,9 +146,44 @@ impl DeriveInputMaterial {
         info: Vec<u8>,
     ) -> Result<Self, Error> {
         Ok(Self {
-            prk: extract(variant, salt, &ikm.raw)?,
-            info,
+            realized: Realized::Hkdf {
+                prk: extract(variant, salt, &ikm.raw)?,
+                info,
+            },
             policy: ikm.policy,
+        })
+    }
+
+    /// Parameterize a PBKDF2 derivation (`pbkdf2.prepare`): the PRF's key
+    /// schedule runs now (the input retains keyed state, not the
+    /// password), salt and iteration count are bound, and a zero
+    /// iteration count fails `error.other` — the platform's
+    /// `OperationError`, checked here so a misparameterized input cannot
+    /// mint.
+    pub fn prepare_pbkdf2(
+        variant: Sha2Variant,
+        password: &PasswordMaterial,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<Self, Error> {
+        if iterations == 0 {
+            return Err(Error::Other(
+                "PBKDF2 requires a positive iteration count".into(),
+            ));
+        }
+        let keyed = "HMAC accepts any key length";
+        let prf = match served_sha2(variant)? {
+            Sha2::Sha256 => PbkdfPrf::Sha256(Hmac::new_from_slice(&password.raw).expect(keyed)),
+            Sha2::Sha384 => PbkdfPrf::Sha384(Hmac::new_from_slice(&password.raw).expect(keyed)),
+            Sha2::Sha512 => PbkdfPrf::Sha512(Hmac::new_from_slice(&password.raw).expect(keyed)),
+        };
+        Ok(Self {
+            realized: Realized::Pbkdf2 {
+                prf,
+                salt,
+                iterations,
+            },
+            policy: password.policy,
         })
     }
 
@@ -107,8 +204,10 @@ impl DeriveInputMaterial {
         }
         let ikm = upstream.natural_output()?;
         Ok(Self {
-            prk: extract(variant, salt, &ikm)?,
-            info,
+            realized: Realized::Hkdf {
+                prk: extract(variant, salt, &ikm)?,
+                info,
+            },
             policy: upstream.policy,
         })
     }
@@ -126,7 +225,7 @@ impl DeriveInputMaterial {
         }
         let Some(bits) = length_bits else {
             return Err(Error::Other(
-                "a KDF's output length is a caller choice: derive-bits from an HKDF \
+                "a KDF's output length is a caller choice: derive-bits from a KDF \
                  input requires an explicit length"
                     .into(),
             ));
@@ -165,17 +264,30 @@ impl DeriveInputMaterial {
             )));
         }
         let mut okm = Zeroizing::new(vec![0u8; (bits / 8) as usize]);
-        let expanded = match &self.prk {
-            Prk::Sha256(hk) => hk.expand(&self.info, &mut okm),
-            Prk::Sha384(hk) => hk.expand(&self.info, &mut okm),
-            Prk::Sha512(hk) => hk.expand(&self.info, &mut okm),
-        };
-        expanded.map_err(|_| {
-            Error::Other(format!(
-                "HKDF output length {} exceeds RFC 5869's 255 blocks of the hash",
-                bits / 8
-            ))
-        })?;
+        match &self.realized {
+            Realized::Hkdf { prk, info } => {
+                let expanded = match prk {
+                    Prk::Sha256(hk) => hk.expand(info, &mut okm),
+                    Prk::Sha384(hk) => hk.expand(info, &mut okm),
+                    Prk::Sha512(hk) => hk.expand(info, &mut okm),
+                };
+                expanded.map_err(|_| {
+                    Error::Other(format!(
+                        "HKDF output length {} exceeds RFC 5869's 255 blocks of the hash",
+                        bits / 8
+                    ))
+                })?;
+            }
+            Realized::Pbkdf2 {
+                prf,
+                salt,
+                iterations,
+            } => match prf {
+                PbkdfPrf::Sha256(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                PbkdfPrf::Sha384(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                PbkdfPrf::Sha512(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+            },
+        }
         Ok(okm)
     }
 
@@ -222,6 +334,31 @@ pub fn derive_aes_gcm_key(
     };
     let okm = input.derive_for_key(bits, policy.extractable)?;
     crate::AeadKeyMaterial::import_aes_gcm(variant, okm.to_vec(), policy)
+}
+
+/// RFC 8018 §5.2: fill `out` with PBKDF2 blocks
+/// `T_i = U_1 ^ … ^ U_c`, `U_1 = PRF(P, S ‖ INT(i))`, `U_j = PRF(P, U_{j-1})`,
+/// using the already-keyed PRF (cloning it per invocation reuses the key
+/// schedule; the password itself is not retained).
+fn pbkdf2_blocks<M: Mac + Clone>(prf: &M, salt: &[u8], iterations: u32, out: &mut [u8]) {
+    let hash_len = M::output_size();
+    for (index, chunk) in out.chunks_mut(hash_len).enumerate() {
+        let block = (index as u32) + 1;
+        let mut mac = prf.clone();
+        mac.update(salt);
+        mac.update(&block.to_be_bytes());
+        let mut u = mac.finalize().into_bytes();
+        let mut t = u.clone();
+        for _ in 1..iterations {
+            let mut mac = prf.clone();
+            mac.update(&u);
+            u = mac.finalize().into_bytes();
+            for (t_byte, u_byte) in t.iter_mut().zip(u.iter()) {
+                *t_byte ^= u_byte;
+            }
+        }
+        chunk.copy_from_slice(&t[..chunk.len()]);
+    }
 }
 
 /// HKDF-Extract with `salt` over `ikm`, per the declared variant.
@@ -325,6 +462,67 @@ mod tests {
             matches!(input.derive_for_key(256, true), Err(Error::NotPermitted(_))),
             "an extractable key from a bits-less input is the laundering the cap rule closes"
         );
+    }
+
+    /// RFC 7914 §11: PBKDF2-HMAC-SHA-256 known answers (c = 1 and a
+    /// two-block output, exercising the block loop and the XOR fold).
+    #[test]
+    fn rfc7914_pbkdf2_vectors() {
+        let password = PasswordMaterial::import(b"passwd".to_vec(), policy_both()).unwrap();
+        let input = DeriveInputMaterial::prepare_pbkdf2(
+            Sha2Variant::Sha256,
+            &password,
+            b"salt".to_vec(),
+            1,
+        )
+        .unwrap();
+        let okm = input.derive_bits(Some(64 * 8)).unwrap();
+        assert_eq!(
+            okm.as_slice(),
+            unhex(
+                "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc\
+                 49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
+            )
+            .as_slice()
+        );
+    }
+
+    /// PBKDF2 contract errors: zero iterations at prepare, empty password
+    /// accepted (the documented asymmetry with IKM), grantless refused,
+    /// and KDF-from-KDF chaining fails for PBKDF2 inputs too.
+    #[test]
+    fn pbkdf2_contract() {
+        assert!(matches!(
+            PasswordMaterial::import(vec![1], DerivePolicy::default()),
+            Err(Error::NotPermitted(_))
+        ));
+        let empty = PasswordMaterial::import(Vec::new(), policy_both()).unwrap();
+        let input = DeriveInputMaterial::prepare_pbkdf2(
+            Sha2Variant::Sha256,
+            &empty,
+            vec![1, 2, 3, 4],
+            4096,
+        )
+        .unwrap();
+        assert!(input.derive_bits(Some(256)).is_ok());
+
+        let password = PasswordMaterial::import(b"p".to_vec(), policy_both()).unwrap();
+        assert!(matches!(
+            DeriveInputMaterial::prepare_pbkdf2(Sha2Variant::Sha256, &password, Vec::new(), 0),
+            Err(Error::Other(_))
+        ));
+        assert!(matches!(
+            DeriveInputMaterial::prepare_pbkdf2(Sha2Variant::Sha224, &password, Vec::new(), 1),
+            Err(Error::Unsupported(_))
+        ));
+
+        let input =
+            DeriveInputMaterial::prepare_pbkdf2(Sha2Variant::Sha256, &password, Vec::new(), 1)
+                .unwrap();
+        assert!(matches!(
+            DeriveInputMaterial::prepare_from(Sha2Variant::Sha256, &input, &[], Vec::new()),
+            Err(Error::Other(_))
+        ));
     }
 
     /// The contract's parameter errors: no length for a KDF input, sub-byte

@@ -27,6 +27,7 @@ import {
   Ikm,
   InternalNonceKey,
   MacKey,
+  Password,
   SigningKey,
   VerifyingKey,
   aesGcm,
@@ -38,6 +39,7 @@ import {
   ed25519Sign,
   ed25519Verify,
   hkdf,
+  pbkdf2,
   hmacSha2,
   sha2,
   xchacha20Poly1305,
@@ -51,6 +53,7 @@ import {
 /** @import * as Signature from "./generated/interfaces/lann-webcrypto-signature.js" */
 /** @import * as Derivation from "./generated/interfaces/lann-webcrypto-derivation.js" */
 /** @import * as Hkdf from "./generated/interfaces/lann-webcrypto-hkdf.js" */
+/** @import * as Pbkdf2 from "./generated/interfaces/lann-webcrypto-pbkdf2.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
 //
@@ -98,6 +101,12 @@ const ikmServesHkdf = (ikm) => ikm;
 /** @type {(ikm: Hkdf.Ikm) => Ikm} */
 const hkdfServesIkm = (ikm) => ikm;
 
+/** @type {(password: Password) => Pbkdf2.Password} */
+const passwordServesPbkdf2 = (password) => password;
+
+/** @type {(password: Pbkdf2.Password) => Password} */
+const pbkdf2ServesPassword = (password) => password;
+
 // --- minting and utility interfaces ----------------------------------------
 
 /**
@@ -108,6 +117,13 @@ const hkdfServesIkm = (ikm) => ikm;
  * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-hkdf.js"), "Ikm">}
  */
 const hkdfInterface = hkdf;
+
+/**
+ * See `hkdfInterface`: the resource class is carried by the instance
+ * assertions above.
+ * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-pbkdf2.js"), "Password">}
+ */
+const pbkdf2Interface = pbkdf2;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha2.js")} */
 const hmacSha2Interface = hmacSha2;
@@ -158,6 +174,9 @@ export const checked = {
   ikmServesHkdf,
   hkdfServesIkm,
   hkdfInterface,
+  pbkdf2Interface,
+  passwordServesPbkdf2,
+  pbkdf2ServesPassword,
   hmacSha2Interface,
   sha2Interface,
   bytesInterface,

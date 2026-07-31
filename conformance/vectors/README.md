@@ -16,6 +16,12 @@ commit
 
 - `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
   — HMAC MAC vectors for every served SHA-2 parameterization.
+- `pbkdf2_hmacsha256_test.json`, `pbkdf2_hmacsha384_test.json`,
+  `pbkdf2_hmacsha512_test.json` — PBKDF2 derivation vectors for every
+  served SHA-2 parameterization. Every vector runs and every one is
+  `valid` upstream, including the empty-password cases — which is why
+  `pbkdf2.import-password` accepts empty material where `hkdf.import-ikm`
+  does not.
 - `hkdf_sha256_test.json`, `hkdf_sha384_test.json`, `hkdf_sha512_test.json`
   — HKDF derivation vectors for every served SHA-2 parameterization. Every
   vector runs: the WIT surface carries the full (ikm, salt, info, size)

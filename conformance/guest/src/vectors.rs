@@ -3,12 +3,12 @@
 
 use crate::mint::{
     import_chacha_key, import_hmac_key, import_ikm,
-    import_internal_nonce_key as import_gcm_internal_key, import_key,
+    import_internal_nonce_key as import_gcm_internal_key, import_key, import_password,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, HkdfAlg, HkdfCase, HmacAlg, HmacCase, InternalNonceAlg,
-    InternalNonceCase, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
+    InternalNonceCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
 };
 use conformance_harness::stream::{
     compute, in_open, in_seal, open, seal, sig_verify, sign, verify, Schedule,
@@ -22,6 +22,7 @@ use lann_webcrypto_guest::bindings::ecdsa_verify::{
 };
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hkdf;
+use lann_webcrypto_guest::bindings::pbkdf2;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -107,6 +108,34 @@ pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
     } else {
         expect_err(
             "derive-bits past the RFC 5869 output bound",
+            ErrKind::Other,
+            derived,
+            "derivation succeeded",
+        )?;
+    }
+    Ok(())
+}
+
+/// Run one PBKDF2 vector: derive the declared size and compare.
+pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
+    let variant = match case.alg {
+        Pbkdf2Alg::Sha256 => Sha2Variant::Sha256,
+        Pbkdf2Alg::Sha384 => Sha2Variant::Sha384,
+        Pbkdf2Alg::Sha512 => Sha2Variant::Sha512,
+    };
+    let password = import_password(case.password.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-password", &e))?;
+    let input = pbkdf2::prepare(variant, &password, case.salt.clone(), case.iterations)
+        .await
+        .map_err(|e| describe("prepare", &e))?;
+    let derived = input.derive_bits(Some(case.dk_len * 8)).await;
+    if case.valid {
+        let dk = derived.map_err(|e| describe("derive-bits", &e))?;
+        expect_bytes(&dk, &case.dk, "derived key")?;
+    } else {
+        expect_err(
+            "derive-bits of an invalid vector",
             ErrKind::Other,
             derived,
             "derivation succeeded",

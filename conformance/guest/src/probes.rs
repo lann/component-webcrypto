@@ -7,7 +7,7 @@ use crate::mint::{
     derive_options, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
     generate_key, generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key,
     import_hmac_key, import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key,
-    import_xchacha_internal_nonce_key,
+    import_password, import_xchacha_internal_nonce_key,
 };
 use conformance_harness::stream::{
     compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, try_sign, verify,
@@ -83,6 +83,7 @@ probes! {
     signing_usage_policy,
     hkdf_derive_key_equivalence,
     hkdf_grants_and_chaining,
+    pbkdf2_contract,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -1916,4 +1917,119 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
     // must not have leaked grants anywhere. A fresh zero-grant options fails.
     let _ = derive_options(true, true); // constructed and dropped: no effect on anything
     Ok(())
+}
+
+/// The PBKDF2 contract the vectors cannot express: an empty password is
+/// accepted (the documented asymmetry with `import-ikm` — the platform and
+/// the upstream vectors treat it as valid), a zero iteration count fails at
+/// `prepare` with the platform's error, grants copy from the password, the
+/// §14.3.7 equivalence holds for a PBKDF2 input, and chaining from a
+/// PBKDF2 input fails exactly as from an HKDF one — there is deliberately
+/// no `pbkdf2.prepare-from` at all, and `hkdf.prepare-from` refuses KDF
+/// upstreams of either flavor.
+async fn pbkdf2_contract() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm;
+    use lann_webcrypto_guest::bindings::hkdf;
+    use lann_webcrypto_guest::bindings::pbkdf2;
+
+    expect_err(
+        "zero-grant import-password",
+        ErrKind::NotPermitted,
+        import_password(vec![1; 8], false, false).await,
+        "minted a password with no enabled grant",
+    )?;
+
+    // RFC 7914 §11 known answer (c = 1), through the full WIT surface.
+    let password = import_password(b"passwd".to_vec(), true, true)
+        .await
+        .map_err(|e| describe("import-password", &e))?;
+    let input = pbkdf2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 1)
+        .await
+        .map_err(|e| describe("prepare", &e))?;
+    let dk = input
+        .derive_bits(Some(64 * 8))
+        .await
+        .map_err(|e| describe("derive-bits", &e))?;
+    expect_bytes(
+        &dk,
+        &unhex(
+            "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc\
+             49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783",
+        ),
+        "RFC 7914 derived key",
+    )?;
+
+    // The §14.3.7 equivalence, from a PBKDF2 source.
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    options.extractable(true);
+    let derived = aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options)
+        .await
+        .map_err(|e| describe("derive-key", &e))?;
+    let exported = derived
+        .export_key()
+        .await
+        .map_err(|e| describe("export of derived key", &e))?;
+    expect_bytes(
+        &exported,
+        &dk[..32],
+        "derive-key equals truncated derive-bits",
+    )?;
+
+    expect_err(
+        "zero iteration count",
+        ErrKind::Other,
+        pbkdf2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 0).await,
+        "prepared with zero iterations",
+    )?;
+    expect_err(
+        "prepare on a truncated variant",
+        ErrKind::Unsupported,
+        pbkdf2::prepare(Sha2Variant::Sha512224, &password, b"salt".to_vec(), 1).await,
+        "prepared over an unserved variant",
+    )?;
+
+    // Empty passwords mint and derive (unlike empty IKM).
+    let empty = import_password(Vec::new(), true, true)
+        .await
+        .map_err(|e| describe("empty import-password", &e))?;
+    let input = pbkdf2::prepare(Sha2Variant::Sha256, &empty, vec![1, 2, 3, 4], 2)
+        .await
+        .map_err(|e| describe("prepare (empty password)", &e))?;
+    input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (empty password)", &e))?;
+
+    // Grants copy; chaining from a PBKDF2 input refuses like any KDF's.
+    let key_only = import_password(b"key-only".to_vec(), false, true)
+        .await
+        .map_err(|e| describe("key-only import-password", &e))?;
+    expect(
+        key_only.can_derive_bits(),
+        false,
+        "password can-derive-bits",
+    )?;
+    expect(key_only.can_derive_key(), true, "password can-derive-key")?;
+    let input = pbkdf2::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), 1)
+        .await
+        .map_err(|e| describe("prepare (key-only)", &e))?;
+    expect(
+        input.can_derive_bits(),
+        false,
+        "input copies can-derive-bits",
+    )?;
+    expect_err(
+        "derive-bits without the grant",
+        ErrKind::NotPermitted,
+        input.derive_bits(Some(128)).await,
+        "derived bits from a bits-less input",
+    )?;
+    expect_err(
+        "chaining from a PBKDF2 input",
+        ErrKind::Other,
+        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        "chained from a KDF input",
+    )
 }
