@@ -64,7 +64,9 @@ mod sig;
 
 pub use aead::AeadKeyMaterial;
 pub use hash::{served_sha2, Sha2};
-pub use kdf::{derive_aes_gcm_key, derive_mac_key, DeriveInputMaterial, IkmMaterial};
+pub use kdf::{
+    derive_aes_gcm_key, derive_mac_key, DeriveInputMaterial, IkmMaterial, PasswordMaterial,
+};
 pub use mac::MacKeyMaterial;
 pub use policy::{
     not_permitted, AeadPolicy, DerivePolicy, InternalNoncePolicy, MacPolicy, SigningPolicy,

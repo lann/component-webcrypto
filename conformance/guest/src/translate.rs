@@ -353,6 +353,20 @@ const HKDF_VECTORS: [(HkdfAlg, &str); 3] = [
         include_str!("../../vectors/hkdf_sha512_test.json"),
     ),
 ];
+const PBKDF2_VECTORS: [(Pbkdf2Alg, &str); 3] = [
+    (
+        Pbkdf2Alg::Sha256,
+        include_str!("../../vectors/pbkdf2_hmacsha256_test.json"),
+    ),
+    (
+        Pbkdf2Alg::Sha384,
+        include_str!("../../vectors/pbkdf2_hmacsha384_test.json"),
+    ),
+    (
+        Pbkdf2Alg::Sha512,
+        include_str!("../../vectors/pbkdf2_hmacsha512_test.json"),
+    ),
+];
 const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
     (
         Sha2Alg::Sha256,
@@ -468,6 +482,100 @@ pub fn hkdf_cases() -> Vec<HkdfCase> {
                     info: unhex(&field, &test.info),
                     size: test.size,
                     okm: unhex(&field, &test.okm),
+                    valid: is_valid(&field, &test.result),
+                });
+            }
+        }
+    }
+    cases
+}
+
+/// A served PBKDF2 parameterization, as named in derivation vector ids.
+#[derive(Clone, Copy)]
+pub enum Pbkdf2Alg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl Pbkdf2Alg {
+    /// The algorithm name used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pbkdf2Alg::Sha256 => "pbkdf2-sha256",
+            Pbkdf2Alg::Sha384 => "pbkdf2-sha384",
+            Pbkdf2Alg::Sha512 => "pbkdf2-sha512",
+        }
+    }
+}
+
+/// One Wycheproof PBKDF2 vector: derive `dk_len` bytes from
+/// (`password`, `salt`, `iterations`) and compare with `dk`. Every
+/// upstream vector is `valid` (the file has no invalid cases), including
+/// the empty-password ones — which is why `import-password` accepts empty
+/// material.
+pub struct Pbkdf2Case {
+    pub alg: Pbkdf2Alg,
+    pub tc_id: u64,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub iterations: u32,
+    /// Output size in bytes.
+    pub dk_len: u32,
+    pub dk: Vec<u8>,
+    pub valid: bool,
+}
+
+impl Pbkdf2Case {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    pub fn case_id(&self) -> String {
+        format!("{}/wycheproof/tc{}", self.alg.name(), self.tc_id)
+    }
+
+    /// The features this case exercises beyond the baseline surface.
+    pub fn features(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+#[derive(Deserialize)]
+struct Pbkdf2Group {
+    tests: Vec<Pbkdf2Test>,
+}
+
+#[derive(Deserialize)]
+struct Pbkdf2Test {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    password: String,
+    salt: String,
+    #[serde(rename = "iterationCount")]
+    iterations: u32,
+    #[serde(rename = "dkLen")]
+    dk_len: u32,
+    dk: String,
+    result: String,
+}
+
+/// Translate the PBKDF2 vector files. Every vector runs: the WIT surface
+/// carries the full (password, salt, iterations, dkLen) parameter space.
+pub fn pbkdf2_cases() -> Vec<Pbkdf2Case> {
+    let mut cases = Vec::new();
+    for (alg, text) in PBKDF2_VECTORS {
+        let file: VectorFile<Pbkdf2Group> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        for group in &file.test_groups {
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                cases.push(Pbkdf2Case {
+                    alg,
+                    tc_id: test.tc_id,
+                    password: unhex(&field, &test.password),
+                    salt: unhex(&field, &test.salt),
+                    iterations: test.iterations,
+                    dk_len: test.dk_len,
+                    dk: unhex(&field, &test.dk),
                     valid: is_valid(&field, &test.result),
                 });
             }
