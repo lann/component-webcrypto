@@ -25,4 +25,6 @@ export const EXPECTED = {
   "import_export/okp_importKey (X25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 54 },
   "import_export/okp_importKey_failures (X25519)": { inPassed: 0, inFailed: 0, outPassed: 4, outFailed: 450 },
   "generateKey/successes (X25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 32 },
+  "derive_bits_keys/hkdf": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 3660 },
+  "derive_bits_keys/pbkdf2": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 8631 },
 };

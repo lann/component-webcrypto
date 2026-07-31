@@ -171,6 +171,10 @@ JS
     echo 'export { runTests };' >> "$B"/group-okp-import-key.js
     cat "$V"/helpers.js "$V"/okp_importKey_failures_fixtures.js "$V"/importKey_failures.js > "$B"/group-okp-import-key-failures.js
     echo 'export { run_test };' >> "$B"/group-okp-import-key-failures.js
+    cat "$V"/helpers.js "$V"/hkdf_vectors.js "$V"/hkdf.js > "$B"/group-hkdf-derive.js
+    echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
+    cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js
+    echo 'export { define_tests };' >> "$B"/group-pbkdf2-derive.js
 }
 
 case "${1:-}" in

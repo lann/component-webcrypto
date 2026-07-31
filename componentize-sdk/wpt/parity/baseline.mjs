@@ -22,6 +22,8 @@ import { define_tests_25519 as defineCfrgBits } from "../build/group-cfrg-bits.j
 import { define_tests_25519 as defineCfrgKeys } from "../build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "../build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "../build/group-okp-import-key-failures.js";
+import { define_tests as defineHkdf } from "../build/group-hkdf-derive.js";
+import { define_tests as definePbkdf2 } from "../build/group-pbkdf2-derive.js";
 
 const GROUPS = [
   ["sign_verify/hmac", () => runHmac()],
@@ -45,6 +47,8 @@ const GROUPS = [
   ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519")],
   ["import_export/okp_importKey_failures (X25519)", () => runOkpImportKeyFailures(["X25519"])],
   ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"])],
+  ["derive_bits_keys/hkdf", () => promise_test(defineHkdf, "setup - define tests")],
+  ["derive_bits_keys/pbkdf2", () => promise_test(definePbkdf2, "setup - define tests")],
 ];
 
 const records = [];

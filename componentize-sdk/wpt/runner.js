@@ -32,6 +32,8 @@ import { define_tests_25519 as defineCfrgBits } from "./componentize-sdk/wpt/bui
 import { define_tests_25519 as defineCfrgKeys } from "./componentize-sdk/wpt/build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "./componentize-sdk/wpt/build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "./componentize-sdk/wpt/build/group-okp-import-key-failures.js";
+import { define_tests as defineHkdf } from "./componentize-sdk/wpt/build/group-hkdf-derive.js";
+import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group-pbkdf2-derive.js";
 
 // --- the subset definition, one classifier per group ---------------------------
 
@@ -96,14 +98,15 @@ function generateKeyInSubset(name) {
 }
 
 /**
- * The X25519 groups (derive_bits_keys/cfrg_curves_*, import_export/okp_*,
- * generateKey/successes_X25519): the library serves no X25519 at all —
- * the WIT carries it (`lann:webcrypto/x25519` and `key-agreement`), but
- * `deriveBits`/`deriveKey` and OKP key formats are unserved shim surface
- * (see the header's deviations list) — so the subset is empty and every
- * test is an out-of-subset expected failure until the shim grows.
+ * The derive-operation groups (derive_bits_keys/{hkdf,pbkdf2,cfrg_curves_*},
+ * import_export/okp_*, generateKey/successes_X25519): the library serves
+ * none of it — the WIT carries all of it (`derivation`, `hkdf`, `pbkdf2`,
+ * `key-agreement`, `x25519`), but `deriveBits`/`deriveKey` and the
+ * algorithms reached only through them are unserved shim surface (see the
+ * header's deviations list) — so the subset is empty and every test is an
+ * out-of-subset expected failure until the shim grows.
  */
-function x25519InSubset() {
+function deriveInSubset() {
   return false;
 }
 
@@ -133,20 +136,30 @@ export const GROUPS = [
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",
     () => promise_test(defineCfrgBits, "setup - define tests"),
-    x25519InSubset,
+    deriveInSubset,
   ],
   [
     "derive_bits_keys/cfrg_curves_keys (X25519)",
     () => promise_test(defineCfrgKeys, "setup - define tests"),
-    x25519InSubset,
+    deriveInSubset,
   ],
-  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), x25519InSubset],
+  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), deriveInSubset],
   [
     "import_export/okp_importKey_failures (X25519)",
     () => runOkpImportKeyFailures(["X25519"]),
-    x25519InSubset,
+    deriveInSubset,
   ],
-  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), x25519InSubset],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), deriveInSubset],
+  [
+    "derive_bits_keys/hkdf",
+    () => promise_test(defineHkdf, "setup - define tests"),
+    deriveInSubset,
+  ],
+  [
+    "derive_bits_keys/pbkdf2",
+    () => promise_test(definePbkdf2, "setup - define tests"),
+    deriveInSubset,
+  ],
 ];
 
 export const demoWebcryptoDemoDemo010 = {
