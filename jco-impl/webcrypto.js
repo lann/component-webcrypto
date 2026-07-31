@@ -933,10 +933,10 @@ export class Ikm {
 /**
  * The `derivation.derive-input` resource: the spec's (baseKey, params)
  * pair as an object — the platform `CryptoKey` plus the HKDF parameters,
- * with the grants copied from the pre-image at `prepare`.
+ * with the grants copied from the base secret at `prepare`.
  *
- * Realization is deferred here, which on this host extends no pre-image
- * residency: the IKM lives behind the platform `CryptoKey`, and this class
+ * The derivation runs lazily here, which keeps no base-secret bytes in
+ * memory: the IKM lives behind the platform `CryptoKey`, and this class
  * holds no raw copy of anything secret.
  */
 export class DeriveInput {

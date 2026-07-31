@@ -186,7 +186,7 @@ crypto conformance tests *functions against mathematics*.
   permissive-key-policy feature). Bugs get fixed, not declared.
 - **The tests avoid platform-unspecified ground**: the signing probes
   exercise generated keys, never imported private ones — browser hosts can
-  only realize `import-signing-key` via private-only PKCS#8, whose
+  only serve `import-signing-key` via private-only PKCS#8, whose
   `importKey` behavior is unspecified and inconsistent across engines
   (w3c/webcrypto#356). The private-import known answers (RFC 6979
   determinism, scalar export identity, known-point derivation, scalar

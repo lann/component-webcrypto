@@ -7,7 +7,7 @@
 //! host-backed targets (wasmtime, jco).
 //!
 //! This suite is probes only, and deliberately exercises **generated
-//! keys, never imported private ones**: browser hosts can only realize
+//! keys, never imported private ones**: browser hosts can only serve
 //! `import-signing-key` by importing private-only PKCS#8, whose platform
 //! behavior is unspecified and inconsistent across engines
 //! (w3c/webcrypto#356) — a portability hazard, not a conformance subject.
