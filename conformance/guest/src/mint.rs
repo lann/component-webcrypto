@@ -11,6 +11,8 @@ use lann_webcrypto_guest::bindings::aead_internal_nonce::{
     InternalNonceKey, InternalNonceKeyOptions,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
+use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
@@ -55,6 +57,19 @@ pub fn signing_options(extractable: bool) -> SigningKeyOptions {
     options.can_sign(true);
     options.extractable(extractable);
     options
+}
+
+/// A `derive-options` with the given grants.
+pub fn derive_options(bits: bool, key: bool) -> DeriveOptions {
+    let options = DeriveOptions::new();
+    options.can_derive_bits(bits);
+    options.can_derive_key(key);
+    options
+}
+
+/// Import HKDF input keying material with the given grants.
+pub async fn import_ikm(raw: Vec<u8>, bits: bool, key: bool) -> Result<Ikm, Error> {
+    hkdf::import_ikm(raw, derive_options(bits, key)).await
 }
 
 pub async fn import_hmac_key(

@@ -21,7 +21,10 @@
 
 import {
   AeadKey,
+  DeriveInput,
+  DeriveOptions,
   Digest,
+  Ikm,
   InternalNonceKey,
   MacKey,
   SigningKey,
@@ -34,6 +37,7 @@ import {
   ecdsaVerify,
   ed25519Sign,
   ed25519Verify,
+  hkdf,
   hmacSha2,
   sha2,
   xchacha20Poly1305,
@@ -45,6 +49,8 @@ import {
 /** @import * as AeadInternalNonce from "./generated/interfaces/lann-webcrypto-aead-internal-nonce.js" */
 /** @import * as DigestInterface from "./generated/interfaces/lann-webcrypto-digest.js" */
 /** @import * as Signature from "./generated/interfaces/lann-webcrypto-signature.js" */
+/** @import * as Derivation from "./generated/interfaces/lann-webcrypto-derivation.js" */
+/** @import * as Hkdf from "./generated/interfaces/lann-webcrypto-hkdf.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
 //
@@ -71,7 +77,37 @@ const verifyingKeyServesSignature = (key) => key;
 /** @type {(key: SigningKey) => Signature.SigningKey} */
 const signingKeyServesSignature = (key) => key;
 
+/** @type {(options: DeriveOptions) => Derivation.DeriveOptions} */
+const deriveOptionsServeDerivation = (options) => options;
+
+/**
+ * Both directions, deliberately: `derive-input` and `ikm` appear as
+ * *parameters* of other interfaces' functions, so the generated instances
+ * must be assignable to this host's classes too (which is why their state
+ * lives in WeakMaps rather than private fields).
+ * @type {(input: DeriveInput) => Derivation.DeriveInput}
+ */
+const deriveInputServesDerivation = (input) => input;
+
+/** @type {(input: Derivation.DeriveInput) => DeriveInput} */
+const derivationServesDeriveInput = (input) => input;
+
+/** @type {(ikm: Ikm) => Hkdf.Ikm} */
+const ikmServesHkdf = (ikm) => ikm;
+
+/** @type {(ikm: Hkdf.Ikm) => Ikm} */
+const hkdfServesIkm = (ikm) => ikm;
+
 // --- minting and utility interfaces ----------------------------------------
+
+/**
+ * `Omit` of the resource class, like the instance-type assertions above:
+ * the generated `ikm` declares a private constructor that this host's
+ * mint-token constructor cannot match, and the instance assertions carry
+ * the class. The functions are what a namespace assertion buys here.
+ * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-hkdf.js"), "Ikm">}
+ */
+const hkdfInterface = hkdf;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha2.js")} */
 const hmacSha2Interface = hmacSha2;
@@ -116,6 +152,12 @@ export const checked = {
   digestServesDigest,
   verifyingKeyServesSignature,
   signingKeyServesSignature,
+  deriveOptionsServeDerivation,
+  deriveInputServesDerivation,
+  derivationServesDeriveInput,
+  ikmServesHkdf,
+  hkdfServesIkm,
+  hkdfInterface,
   hmacSha2Interface,
   sha2Interface,
   bytesInterface,

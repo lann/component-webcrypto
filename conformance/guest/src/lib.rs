@@ -29,7 +29,9 @@ use std::collections::BTreeSet;
 
 use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
-use translate::{AeadCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase};
+use translate::{
+    AeadCase, HkdfCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase,
+};
 
 /// Validate a `missing-features` declaration against
 /// [`KNOWN_FEATURES`], returning the set. Panics (traps) on unknown names.
@@ -52,6 +54,7 @@ pub struct Case {
 }
 
 enum CaseKind {
+    Hkdf(HkdfCase),
     Hmac(HmacCase),
     Aead(AeadCase),
     InternalNonce(InternalNonceCase),
@@ -89,6 +92,7 @@ impl GuestTestCase for Case {
     async fn run(&self) -> Outcome {
         if self.provided {
             let outcome = match &self.kind {
+                CaseKind::Hkdf(case) => vectors::run_hkdf_case(case).await,
                 CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
                 CaseKind::Aead(case) => vectors::run_aead_case(case).await,
                 CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
@@ -133,6 +137,14 @@ impl Guest for Component {
     fn all(missing_features: Vec<String>) -> Vec<TestCase> {
         let missing = missing_set(&missing_features);
         let mut cases = Vec::new();
+        for case in translate::hkdf_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Hkdf(case),
+            ));
+        }
         for case in translate::hmac_cases() {
             cases.push(materialize(
                 case.case_id(),

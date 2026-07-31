@@ -82,23 +82,13 @@ impl MacKeyMaterial {
         if let Err(err) = policy.check_useful() {
             return Ok(Err(err));
         }
+        let byte_len = match hmac_length_bits(variant, length) {
+            Ok(bits) => bits as usize / 8,
+            Err(err) => return Ok(Err(err)),
+        };
         let variant = match served_sha2(variant) {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err)),
-        };
-        let byte_len = match length {
-            None => variant.block_len(),
-            Some(0) => {
-                return Ok(Err(Error::InvalidKey(
-                    "HMAC key length must be non-zero".into(),
-                )))
-            }
-            Some(bits) if bits % 8 != 0 => {
-                return Ok(Err(Error::Unsupported(format!(
-                "HMAC key length {bits} is not a multiple of 8; sub-byte lengths are not served",
-            ))))
-            }
-            Some(bits) => bits as usize / 8,
         };
         Ok(Ok(Self {
             raw: Zeroizing::new(random_bytes(byte_len)?),
@@ -183,6 +173,22 @@ impl std::fmt::Debug for MacKeyMaterial {
             .field("policy", &self.policy)
             .field("raw", &"<redacted>")
             .finish()
+    }
+}
+
+/// The effective HMAC key length in bits for a `length` parameter, per the
+/// `hmac-sha2.generate-key` contract that `derive-key` shares (WebCrypto's
+/// `get key length`, §31.6.6): `none` is the hash's block size, zero is
+/// `invalid-key`, sub-byte lengths are declined.
+pub fn hmac_length_bits(variant: Sha2Variant, length: Option<u32>) -> Result<u32, Error> {
+    let served = served_sha2(variant)?;
+    match length {
+        None => Ok((served.block_len() * 8) as u32),
+        Some(0) => Err(Error::InvalidKey("HMAC key length must be non-zero".into())),
+        Some(bits) if bits % 8 != 0 => Err(Error::Unsupported(format!(
+            "HMAC key length {bits} is not a multiple of 8; sub-byte lengths are not served",
+        ))),
+        Some(bits) => Ok(bits),
     }
 }
 

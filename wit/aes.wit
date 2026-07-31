@@ -53,6 +53,7 @@ interface aes-gcm {
     use types.{error};
     use aead.{aead-key, aead-key-options};
     use aes.{aes-variant};
+    use derivation.{derive-input};
 
     /// Import raw key material as the declared AES variant.
     ///
@@ -78,6 +79,20 @@ interface aes-gcm {
     /// `error.unsupported` if this implementation does not serve the
     /// variant.
     generate-key: async func(%variant: aes-variant, options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from a parameterized derivation: the input is realized
+    /// at the variant's key length (WebCrypto's `deriveKey` chain — get
+    /// key length, derive bits, import) and the result is subject to
+    /// `import-key`'s contract.
+    ///
+    /// Requires `can-derive-key` on the input, else `error.not-permitted`.
+    /// Requesting an *extractable* key requires `can-derive-bits` too — an
+    /// exportable key is bits disclosure by other means, so the grant
+    /// distinction would otherwise be theater (WebCrypto accepts this
+    /// laundering; this package closes it, and the shim never requests
+    /// extractable derived keys on a bits-less input, so nothing
+    /// observable through `crypto.subtle` changes).
+    derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the

@@ -35,6 +35,8 @@ world provider {
     export lann:webcrypto/xchacha20-poly1305@0.1.0;
     export lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
     export lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
+    export lann:webcrypto/derivation@0.1.0;
+    export lann:webcrypto/hkdf@0.1.0;
     export lann:webcrypto/signature@0.1.0;
     export lann:webcrypto/ed25519-verify@0.1.0;
     export lann:webcrypto/ed25519-sign@0.1.0;
