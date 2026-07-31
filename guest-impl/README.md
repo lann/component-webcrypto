@@ -120,3 +120,52 @@ ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
 constant time by construction rather than by countermeasure, it is the
 cipher designed for exactly this situation. AES-GCM's class C is a heroic
 implementation working against the algorithm's nature.
+
+### Sources
+
+The classes are this provider's names for distinctions documented in the
+constant-time-implementation literature; the letters, the four-way cut,
+and the export-policy column are this repository's contract. The criteria
+anchor as follows.
+
+- The primary text is [Pornin, *Constant-Time Crypto*
+  (BearSSL)](https://bearssl.org/constanttime.html), which covers all four
+  rows: hashes, HMAC, and ChaCha20 as "naturally" constant-time (class A);
+  Poly1305 and GHASH as constant-time "only as long as the underlying
+  multiplication opcodes are constant-time" (class B's trust assumption —
+  its [companion page](https://bearssl.org/ctmul.html) catalogues CPUs
+  where they are not); AES as fast-but-leaky tables versus bitsliced
+  constant-time variants at a several-fold cost, with benchmarks
+  (class C); and the RSA/EC bignum hazards (class D).
+- Class A's criterion — no secret-dependent branches or memory indices —
+  is the "avoid branchings controlled by secret data" and "avoid table
+  look-ups indexed by secret data" rules of the [Cryptography Coding
+  Standard](https://github.com/veorq/cryptocoding).
+- Class B's wasm-specific axis, the two-compiler problem: [Watt et al.,
+  *CT-Wasm: Type-Driven Secure Cryptography for the Web Ecosystem* (POPL
+  2019)](https://arxiv.org/abs/1808.01348) on wasm's missing
+  constant-time guarantee and JIT lowering of secret-dependent `select`;
+  [Simon, Chisnall, and Anderson, *What You Get is What You C* (EuroS&P
+  2018)](https://www.cl.cam.ac.uk/~rja14/Papers/whatyouc.pdf) on
+  compilers breaking source-level constant-time discipline.
+- Class C's empirical basis — table-based AES leaks in practice:
+  [Bernstein, *Cache-timing attacks on AES*
+  (2005)](https://cr.yp.to/antiforgery/cachetiming-20050414.pdf); [Osvik,
+  Shamir, and Tromer, *Cache Attacks and Countermeasures: the Case of
+  AES* (CT-RSA 2006)](https://eprint.iacr.org/2005/271). The constant-time
+  variant this provider ships is the fixsliced construction: [Adomnicai
+  and Peyrin, *Fixslicing AES-like Ciphers* (TCHES
+  2021)](https://eprint.iacr.org/2020/1123).
+- Class D's blast radius — small leaks are key-recovering, with a
+  remote-exploitation history: [Kocher (CRYPTO
+  '96)](https://paulkocher.com/doc/TimingAttacks.pdf) opened the field on
+  RSA/DH/DSS; [Brumley and Boneh, *Remote Timing Attacks are Practical*
+  (USENIX Security
+  2003)](https://crypto.stanford.edu/~dabo/papers/ssl-timing.pdf)
+  extracted RSA keys over a network; [Brumley and Tuveri (ESORICS
+  2011)](https://eprint.iacr.org/2011/232) did the same to ECDSA. For the
+  nonce-bits-to-key-recovery lattice step specifically: Howgrave-Graham
+  and Smart, *Lattice Attacks on Digital Signature Schemes* (Designs,
+  Codes and Cryptography, 2001); [Minerva (TCHES
+  2020)](https://minerva.crocs.fi.muni.cz/); [TPM-FAIL (USENIX Security
+  2020)](https://tpm.fail/).
