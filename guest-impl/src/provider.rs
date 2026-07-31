@@ -10,16 +10,21 @@
 //! contract for `seal`/`open`), and outgoing streams are fed from a detached
 //! task (`wit_bindgen::spawn`) after the export returns.
 
+use std::cell::Cell;
+
 use webcrypto_impl_core::{
-    served_sha2, AeadKeyMaterial, MacKeyMaterial, SigPublic, SigningKeyMaterial, HMAC_NAME,
+    served_sha2, AeadKeyMaterial, AeadPolicy, InternalNoncePolicy, MacKeyMaterial, MacPolicy,
+    SigPublic, SigningKeyMaterial, SigningPolicy, HMAC_NAME,
 };
 
 use crate::exports::lann::webcrypto::aead::{
-    AeadKey as ExportedAeadKey, Guest as AeadGuest, GuestAeadKey,
+    AeadKey as ExportedAeadKey, AeadKeyOptions as ExportedAeadKeyOptions, Guest as AeadGuest,
+    GuestAeadKey, GuestAeadKeyOptions,
 };
 use crate::exports::lann::webcrypto::aead_internal_nonce::{
-    Guest as AeadInternalNonceGuest, GuestInternalNonceKey,
+    Guest as AeadInternalNonceGuest, GuestInternalNonceKey, GuestInternalNonceKeyOptions,
     InternalNonceKey as ExportedInternalNonceKey,
+    InternalNonceKeyOptions as ExportedInternalNonceKeyOptions,
 };
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
@@ -30,10 +35,13 @@ use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as Ecdsa
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
-use crate::exports::lann::webcrypto::mac::{self, Guest as MacGuest, GuestMacKey};
+use crate::exports::lann::webcrypto::mac::{
+    self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
+};
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
-    self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestVerifyingKey,
+    self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
+    GuestVerifyingKey,
 };
 use crate::exports::lann::webcrypto::xchacha20_poly1305::Guest as XChaChaPoly1305Guest;
 use crate::exports::lann::webcrypto::xchacha20_poly1305_internal_nonce::Guest as XChachaInternalNonceGuest;
@@ -103,6 +111,43 @@ fn stream_of(bytes: Vec<u8>) -> wit_bindgen::StreamReader<u8> {
 
 impl MacGuest for Component {
     type MacKey = MacKey;
+    type MacKeyOptions = MacKeyOptions;
+}
+
+/// An exported `mac-key-options`: mint-time policy under construction. The
+/// policy sits in a `Cell` because the setters take `&self` (wasm is
+/// single-threaded).
+pub struct MacKeyOptions {
+    policy: Cell<MacPolicy>,
+}
+
+impl GuestMacKeyOptions for MacKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(MacPolicy::default()),
+        }
+    }
+
+    fn can_sign(&self, allowed: bool) {
+        self.policy.set(MacPolicy {
+            sign: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_verify(&self, allowed: bool) {
+        self.policy.set(MacPolicy {
+            verify: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(MacPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
 }
 
 /// An exported `mac-key`: the shared core's HMAC key material.
@@ -114,11 +159,8 @@ impl GuestMacKey for MacKey {
     async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
-        //
-        // The key material is held in-process, so the only operational
-        // failure is the buffering itself.
         let bytes = drain_stream(data).await?;
-        Ok(self.material.sign(&bytes))
+        Ok(self.material.sign(&bytes)?)
     }
 
     async fn verify(&self, data: wit_bindgen::StreamReader<u8>, tag: Vec<u8>) -> Result<(), Error> {
@@ -142,6 +184,14 @@ impl GuestMacKey for MacKey {
         self.material.extractable()
     }
 
+    fn can_sign(&self) -> bool {
+        self.material.can_sign()
+    }
+
+    fn can_verify(&self) -> bool {
+        self.material.can_verify()
+    }
+
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -155,6 +205,55 @@ impl GuestMacKey for MacKey {
 
 impl AeadGuest for Component {
     type AeadKey = AeadKey;
+    type AeadKeyOptions = AeadKeyOptions;
+}
+
+/// An exported `aead-key-options`. See [`MacKeyOptions`].
+pub struct AeadKeyOptions {
+    policy: Cell<AeadPolicy>,
+}
+
+impl GuestAeadKeyOptions for AeadKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(AeadPolicy::default()),
+        }
+    }
+
+    fn can_seal(&self, allowed: bool) {
+        self.policy.set(AeadPolicy {
+            seal: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_open(&self, allowed: bool) {
+        self.policy.set(AeadPolicy {
+            open: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_wrap(&self, allowed: bool) {
+        self.policy.set(AeadPolicy {
+            wrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_unwrap(&self, allowed: bool) {
+        self.policy.set(AeadPolicy {
+            unwrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(AeadPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
 }
 
 /// An exported `aead-key`: the shared core's AEAD key material.
@@ -209,6 +308,22 @@ impl GuestAeadKey for AeadKey {
 
     fn extractable(&self) -> bool {
         self.material.extractable()
+    }
+
+    fn can_seal(&self) -> bool {
+        self.material.can_seal()
+    }
+
+    fn can_open(&self) -> bool {
+        self.material.can_open()
+    }
+
+    fn can_wrap(&self) -> bool {
+        self.material.can_wrap()
+    }
+
+    fn can_unwrap(&self) -> bool {
+        self.material.can_unwrap()
     }
 
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
@@ -272,31 +387,30 @@ impl HmacSha2Guest for Component {
     async fn import_key(
         variant: Sha2Variant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
-        let material = MacKeyMaterial::import(variant.into(), raw, extractable)?;
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = MacKeyMaterial::import(variant.into(), raw, policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
     async fn import_key_jwk(
         variant: Sha2Variant,
         jwk: String,
-        extractable: bool,
+        options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
-        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, extractable)?;
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
     async fn generate_key(
         variant: Sha2Variant,
         length: Option<u32>,
-        extractable: bool,
+        options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
-        let material = rng_infallible(MacKeyMaterial::generate(
-            variant.into(),
-            length,
-            extractable,
-        ))?;
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = rng_infallible(MacKeyMaterial::generate(variant.into(), length, policy))?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 }
@@ -307,29 +421,29 @@ impl AesGcmGuest for Component {
     async fn import_key(
         variant: AesVariant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable)?;
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
     async fn import_key_jwk(
         variant: AesVariant,
         jwk: String,
-        extractable: bool,
+        options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
-        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, extractable)?;
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
     async fn generate_key(
         variant: AesVariant,
-        extractable: bool,
+        options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
-        let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(
-            variant.into(),
-            extractable,
-        ))?;
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(variant.into(), policy))?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
@@ -337,25 +451,35 @@ impl AesGcmGuest for Component {
 // --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 
 impl ChaChaPoly1305Guest for Component {
-    async fn import_key(raw: Vec<u8>, extractable: bool) -> Result<ExportedAeadKey, Error> {
-        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, extractable)?;
+    async fn import_key(
+        raw: Vec<u8>,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, policy)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
-    async fn generate_key(extractable: bool) -> Result<ExportedAeadKey, Error> {
-        let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(extractable));
+    async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(policy))?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
 
 impl XChaChaPoly1305Guest for Component {
-    async fn import_key(raw: Vec<u8>, extractable: bool) -> Result<ExportedAeadKey, Error> {
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable)?;
+    async fn import_key(
+        raw: Vec<u8>,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
-    async fn generate_key(extractable: bool) -> Result<ExportedAeadKey, Error> {
-        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(extractable));
+    async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy))?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
@@ -364,6 +488,41 @@ impl XChaChaPoly1305Guest for Component {
 
 impl AeadInternalNonceGuest for Component {
     type InternalNonceKey = InternalNonceKey;
+    type InternalNonceKeyOptions = InternalNonceKeyOptions;
+}
+
+/// An exported `internal-nonce-key-options`. See [`MacKeyOptions`].
+pub struct InternalNonceKeyOptions {
+    policy: Cell<InternalNoncePolicy>,
+}
+
+impl GuestInternalNonceKeyOptions for InternalNonceKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(InternalNoncePolicy::default()),
+        }
+    }
+
+    fn can_seal(&self, allowed: bool) {
+        self.policy.set(InternalNoncePolicy {
+            seal: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_open(&self, allowed: bool) {
+        self.policy.set(InternalNoncePolicy {
+            open: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(InternalNoncePolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
 }
 
 /// An exported `internal-nonce-key`: the shared core's AEAD key material
@@ -431,6 +590,14 @@ impl GuestInternalNonceKey for InternalNonceKey {
         self.material.extractable()
     }
 
+    fn can_seal(&self) -> bool {
+        self.material.can_seal()
+    }
+
+    fn can_open(&self) -> bool {
+        self.material.can_open()
+    }
+
     async fn export_key(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -442,9 +609,10 @@ impl AesGcmInternalNonceGuest for Component {
     async fn import_key(
         variant: AesVariant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: ExportedInternalNonceKeyOptions,
     ) -> Result<ExportedInternalNonceKey, Error> {
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable)?;
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into())?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
         )))
@@ -452,11 +620,12 @@ impl AesGcmInternalNonceGuest for Component {
 
     async fn generate_key(
         variant: AesVariant,
-        extractable: bool,
+        options: ExportedInternalNonceKeyOptions,
     ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
         let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(
             variant.into(),
-            extractable,
+            policy.into(),
         ))?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
@@ -469,16 +638,20 @@ impl AesGcmInternalNonceGuest for Component {
 impl XChachaInternalNonceGuest for Component {
     async fn import_key(
         raw: Vec<u8>,
-        extractable: bool,
+        options: ExportedInternalNonceKeyOptions,
     ) -> Result<ExportedInternalNonceKey, Error> {
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable)?;
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy.into())?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
         )))
     }
 
-    async fn generate_key(extractable: bool) -> Result<ExportedInternalNonceKey, Error> {
-        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(extractable));
+    async fn generate_key(
+        options: ExportedInternalNonceKeyOptions,
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy.into()))?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
         )))
@@ -490,6 +663,34 @@ impl XChachaInternalNonceGuest for Component {
 impl SignatureGuest for Component {
     type VerifyingKey = VerifyingKey;
     type SigningKey = SigningKey;
+    type SigningKeyOptions = SigningKeyOptions;
+}
+
+/// An exported `signing-key-options`. See [`MacKeyOptions`].
+pub struct SigningKeyOptions {
+    policy: Cell<SigningPolicy>,
+}
+
+impl GuestSigningKeyOptions for SigningKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(SigningPolicy::default()),
+        }
+    }
+
+    fn can_sign(&self, allowed: bool) {
+        self.policy.set(SigningPolicy {
+            sign: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(SigningPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
 }
 
 /// An exported `verifying-key`: public material bound to its algorithm
@@ -538,10 +739,8 @@ pub struct SigningKey {
 
 impl GuestSigningKey for SigningKey {
     async fn sign(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
-        // The key material is held in-process, so the only operational
-        // failure is the buffering itself.
         let bytes = drain_stream(data).await?;
-        Ok(self.material.sign(&bytes))
+        Ok(self.material.sign(&bytes)?)
     }
 
     fn algorithm_name(&self) -> String {
@@ -559,6 +758,10 @@ impl GuestSigningKey for SigningKey {
     fn extractable(&self) -> bool {
         self.material.extractable()
     }
+
+    fn can_sign(&self) -> bool {
+        self.material.can_sign()
+    }
 }
 
 // --- ed25519 (key minting) -----------------------------------------------------
@@ -572,9 +775,10 @@ impl Ed25519VerifyGuest for Component {
 
 impl Ed25519SignGuest for Component {
     async fn generate_key(
-        extractable: bool,
+        options: signature_iface::SigningKeyOptions,
     ) -> Result<(signature_iface::SigningKey, signature_iface::VerifyingKey), Error> {
-        let material = rng_infallible(SigningKeyMaterial::generate_ed25519(extractable));
+        let policy = options.get::<SigningKeyOptions>().policy.get();
+        let material = rng_infallible(SigningKeyMaterial::generate_ed25519(policy))?;
         let public = material.public();
         Ok((
             signature_iface::SigningKey::new(SigningKey { material }),

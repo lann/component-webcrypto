@@ -1,6 +1,6 @@
 //! `aes-gcm-internal-nonce` key creation.
 
-use crate::{bindings, AeadInternalNonce, Error};
+use crate::{bindings, AeadInternalNonce, Error, InternalNonceKeyOptions};
 
 pub use crate::bindings::aes_gcm::AesVariant;
 
@@ -8,19 +8,20 @@ pub use crate::bindings::aes_gcm::AesVariant;
 pub async fn import_key(
     variant: AesVariant,
     raw_material: Vec<u8>,
-    extractable: bool,
+    options: InternalNonceKeyOptions,
 ) -> Result<AeadInternalNonce, Error> {
     Ok(AeadInternalNonce::from_raw(
-        bindings::aes_gcm_internal_nonce::import_key(variant, raw_material, extractable).await?,
+        bindings::aes_gcm_internal_nonce::import_key(variant, raw_material, options.lower())
+            .await?,
     ))
 }
 
 /// Generate a fresh random internal-nonce AES-GCM key.
 pub async fn generate_key(
     variant: AesVariant,
-    extractable: bool,
+    options: InternalNonceKeyOptions,
 ) -> Result<AeadInternalNonce, Error> {
     Ok(AeadInternalNonce::from_raw(
-        bindings::aes_gcm_internal_nonce::generate_key(variant, extractable).await?,
+        bindings::aes_gcm_internal_nonce::generate_key(variant, options.lower()).await?,
     ))
 }

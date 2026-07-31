@@ -242,6 +242,7 @@ pub fn describe(context: &str, error: &Error) -> String {
         Error::AuthenticationFailed => "authentication-failed".to_string(),
         Error::NotExtractable => "not-extractable".to_string(),
         Error::Unsupported(detail) => format!("unsupported: {detail}"),
+        Error::NotPermitted(detail) => format!("not-permitted: {detail}"),
         Error::KeyExhausted => "key-exhausted".to_string(),
         Error::Other(detail) => format!("other: {detail}"),
     };
@@ -262,6 +263,8 @@ pub enum ErrKind {
     NotExtractable,
     /// `unsupported`.
     Unsupported,
+    /// `not-permitted`.
+    NotPermitted,
     /// `key-exhausted`.
     KeyExhausted,
     /// `other`.
@@ -277,6 +280,7 @@ impl ErrKind {
             ErrKind::AuthenticationFailed => "authentication-failed",
             ErrKind::NotExtractable => "not-extractable",
             ErrKind::Unsupported => "unsupported",
+            ErrKind::NotPermitted => "not-permitted",
             ErrKind::KeyExhausted => "key-exhausted",
             ErrKind::Other => "other",
         }
@@ -291,6 +295,7 @@ impl ErrKind {
                 | (ErrKind::AuthenticationFailed, Error::AuthenticationFailed)
                 | (ErrKind::NotExtractable, Error::NotExtractable)
                 | (ErrKind::Unsupported, Error::Unsupported(_))
+                | (ErrKind::NotPermitted, Error::NotPermitted(_))
                 | (ErrKind::KeyExhausted, Error::KeyExhausted)
                 | (ErrKind::Other, Error::Other(_))
         )

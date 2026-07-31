@@ -4,7 +4,9 @@
 
 use zeroize::Zeroizing;
 
-use crate::{EcdsaVariant, Error, RngError, ECDSA_NAME, ED25519_NAME};
+use crate::{
+    not_permitted, EcdsaVariant, Error, RngError, SigningPolicy, ECDSA_NAME, ED25519_NAME,
+};
 
 /// The P-521 decline every ECDSA minting path renders (see the WIT
 /// `ecdsa-variant` doc: declared, served by no implementation here).
@@ -200,13 +202,13 @@ impl SigPrivate {
 pub struct SigningKeyMaterial {
     private: SigPrivate,
     /// Whether `export-key` may return the private material.
-    extractable: bool,
+    policy: SigningPolicy,
 }
 
 impl SigningKeyMaterial {
     /// Import a 32-byte RFC 8032 seed, rendering `invalid-key` for wrong
     /// lengths (the `ed25519-sign.import-signing-key` contract).
-    pub fn import_ed25519_seed(raw: &[u8], extractable: bool) -> Result<Self, Error> {
+    pub fn import_ed25519_seed(raw: &[u8], policy: SigningPolicy) -> Result<Self, Error> {
         let seed: &[u8; 32] = raw.try_into().map_err(|_| {
             Error::InvalidKey(format!(
                 "Ed25519 private keys are 32-byte seeds, got {} bytes",
@@ -215,18 +217,21 @@ impl SigningKeyMaterial {
         })?;
         Ok(Self {
             private: SigPrivate::Ed25519(ed25519_dalek::SigningKey::from_bytes(seed)),
-            extractable,
+            policy,
         })
     }
 
     /// Generate a fresh random Ed25519 signing key.
-    pub fn generate_ed25519(extractable: bool) -> Result<Self, RngError> {
+    pub fn generate_ed25519(policy: SigningPolicy) -> Result<Result<Self, Error>, RngError> {
+        if let Err(err) = policy.check_useful() {
+            return Ok(Err(err));
+        }
         let mut seed = Zeroizing::new([0u8; 32]);
         getrandom::fill(seed.as_mut())?;
-        Ok(Self {
+        Ok(Ok(Self {
             private: SigPrivate::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)),
-            extractable,
-        })
+            policy,
+        }))
     }
 
     /// Import a raw big-endian scalar for the declared variant, rendering
@@ -236,7 +241,7 @@ impl SigningKeyMaterial {
     pub fn import_ecdsa_scalar(
         variant: EcdsaVariant,
         raw: &[u8],
-        extractable: bool,
+        policy: SigningPolicy,
     ) -> Result<Self, Error> {
         let private = match variant {
             EcdsaVariant::P256Sha256 => p256::ecdsa::SigningKey::from_slice(raw)
@@ -247,10 +252,7 @@ impl SigningKeyMaterial {
                 .map_err(|err| Error::InvalidKey(format!("invalid P-384 private key: {err}")))?,
             EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
         };
-        Ok(Self {
-            private,
-            extractable,
-        })
+        Ok(Self { private, policy })
     }
 
     /// Generate a fresh random ECDSA signing key of the declared variant by
@@ -259,8 +261,11 @@ impl SigningKeyMaterial {
     #[cfg(not(target_family = "wasm"))]
     pub fn generate_ecdsa(
         variant: EcdsaVariant,
-        extractable: bool,
+        policy: SigningPolicy,
     ) -> Result<Result<Self, Error>, RngError> {
+        if let Err(err) = policy.check_useful() {
+            return Ok(Err(err));
+        }
         let scalar_len = match variant {
             EcdsaVariant::P256Sha256 => 32,
             EcdsaVariant::P384Sha384 => 48,
@@ -279,7 +284,7 @@ impl SigningKeyMaterial {
         for _ in 0..ATTEMPTS {
             let mut raw = Zeroizing::new(vec![0u8; scalar_len]);
             getrandom::fill(&mut raw)?;
-            if let Ok(key) = Self::import_ecdsa_scalar(variant, &raw, extractable) {
+            if let Ok(key) = Self::import_ecdsa_scalar(variant, &raw, policy) {
                 return Ok(Ok(key));
             }
         }
@@ -292,8 +297,11 @@ impl SigningKeyMaterial {
     /// One-shot signature over `data` (the `signing-key.sign` contract):
     /// 64 bytes for Ed25519 (RFC 8032), fixed-width `r ‖ s` (IEEE P1363,
     /// RFC 6979 deterministic) for ECDSA.
-    pub fn sign(&self, data: &[u8]) -> Vec<u8> {
-        match &self.private {
+    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.policy.sign {
+            return Err(not_permitted("sign"));
+        }
+        Ok(match &self.private {
             SigPrivate::Ed25519(key) => {
                 use ed25519_dalek::Signer as _;
                 key.sign(data).to_bytes().to_vec()
@@ -310,7 +318,7 @@ impl SigningKeyMaterial {
                 let sig: p384::ecdsa::Signature = key.sign(data);
                 sig.to_bytes().to_vec()
             }
-        }
+        })
     }
 
     /// The corresponding [`SigPublic`]. There is no WIT derive contract —
@@ -342,21 +350,26 @@ impl SigningKeyMaterial {
         self.private.alg().hash()
     }
 
-    /// Whether `export-key` may return the private material
-    /// (`signing-key.extractable`).
+    /// Whether the private material may be exported — mint-time recorded
+    /// policy for future format exports (`signing-key.extractable`).
     pub fn extractable(&self) -> bool {
-        self.extractable
+        self.policy.extractable
     }
 
-    /// The private key material in the minting interface's documented form
-    /// — the 32-byte RFC 8032 seed for Ed25519, the raw big-endian scalar
-    /// for ECDSA — or `not-extractable` (the `signing-key.export-key`
-    /// contract).
+    /// Whether the key permits `sign` (`signing-key.can-sign`).
+    pub fn can_sign(&self) -> bool {
+        self.policy.sign
+    }
+
+    /// The private key material — the 32-byte RFC 8032 seed for Ed25519,
+    /// the raw big-endian scalar for ECDSA — or `not-extractable`. No WIT
+    /// operation reaches this today (signing keys have no export); it
+    /// stays for the unit tests that pin the known answers.
     ///
     /// The copy returned is *not* protected: see the note on
     /// [`crate`](crate#exported-material).
     pub fn export(&self) -> Result<Vec<u8>, Error> {
-        if !self.extractable {
+        if !self.policy.extractable {
             return Err(Error::NotExtractable);
         }
         Ok(match &self.private {
@@ -376,7 +389,7 @@ impl std::fmt::Debug for SigningKeyMaterial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SigningKeyMaterial")
             .field("algorithm", &self.name())
-            .field("extractable", &self.extractable)
+            .field("policy", &self.policy)
             .field("private", &"<redacted>")
             .finish()
     }
@@ -386,17 +399,33 @@ impl std::fmt::Debug for SigningKeyMaterial {
 mod tests {
     use super::*;
 
+    /// A signing grant, non-extractable.
+    fn sp() -> SigningPolicy {
+        SigningPolicy {
+            sign: true,
+            extractable: false,
+        }
+    }
+
+    /// A signing grant, extractable.
+    fn xp() -> SigningPolicy {
+        SigningPolicy {
+            extractable: true,
+            ..sp()
+        }
+    }
+
     /// Pins seed import, public derivation, signing determinism (RFC 8032),
     /// verification, and seed-form export together.
     #[test]
     fn ed25519_sign_verify_round_trip() {
         let seed = [0x42u8; 32];
-        let key = SigningKeyMaterial::import_ed25519_seed(&seed, true).unwrap();
-        let sig = key.sign(b"message");
+        let key = SigningKeyMaterial::import_ed25519_seed(&seed, xp()).unwrap();
+        let sig = key.sign(b"message").unwrap();
         assert_eq!(sig.len(), 64);
         assert_eq!(
             sig,
-            key.sign(b"message"),
+            key.sign(b"message").unwrap(),
             "Ed25519 signing is deterministic"
         );
         let public = key.public();
@@ -410,7 +439,7 @@ mod tests {
 
     #[test]
     fn ed25519_seed_length_is_validated() {
-        match SigningKeyMaterial::import_ed25519_seed(&[0; 16], true) {
+        match SigningKeyMaterial::import_ed25519_seed(&[0; 16], xp()) {
             Err(Error::InvalidKey(msg)) => {
                 assert_eq!(msg, "Ed25519 private keys are 32-byte seeds, got 16 bytes")
             }
@@ -422,11 +451,11 @@ mod tests {
     #[test]
     fn ecdsa_sign_verify_round_trip() {
         for variant in [EcdsaVariant::P256Sha256, EcdsaVariant::P384Sha384] {
-            let key = SigningKeyMaterial::generate_ecdsa(variant, false)
+            let key = SigningKeyMaterial::generate_ecdsa(variant, sp())
                 .unwrap()
                 .unwrap();
             assert_eq!(key.export(), Err(Error::NotExtractable));
-            let sig = key.sign(b"message");
+            let sig = key.sign(b"message").unwrap();
             let public = key.public();
             assert!(public.verify(b"message", &sig).is_ok());
             assert_eq!(
@@ -449,7 +478,7 @@ mod tests {
         use hex_literal::hex;
 
         let scalar = hex!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
-        let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &scalar, true)
+        let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &scalar, xp())
             .unwrap();
 
         // Deterministic signature: exact r ‖ s reproduction.
@@ -457,7 +486,7 @@ mod tests {
             "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716"
             "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
         );
-        assert_eq!(key.sign(b"sample"), expected);
+        assert_eq!(key.sign(b"sample").unwrap(), expected);
 
         // Scalar export identity.
         assert_eq!(key.export().unwrap(), scalar);
@@ -475,7 +504,7 @@ mod tests {
     #[test]
     fn ecdsa_scalar_range_is_validated() {
         // Zero and the curve order are out of [1, n-1].
-        match SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &[0; 32], true) {
+        match SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &[0; 32], xp()) {
             Err(Error::InvalidKey(_)) => {}
             _ => panic!("expected invalid-key for the zero scalar"),
         }
@@ -483,7 +512,7 @@ mod tests {
 
     #[test]
     fn debug_redacts_private_material() {
-        let key = SigningKeyMaterial::import_ed25519_seed(&[0xAB; 32], true).unwrap();
+        let key = SigningKeyMaterial::import_ed25519_seed(&[0xAB; 32], xp()).unwrap();
         let rendered = format!("{key:?}");
         assert!(rendered.contains("<redacted>"), "{rendered}");
         assert!(!rendered.contains("171"), "{rendered}"); // 0xAB

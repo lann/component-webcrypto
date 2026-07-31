@@ -127,6 +127,10 @@ pub enum Error {
     /// The request was well-formed, but the implementation does not serve
     /// the requested algorithm parameters. The string is human-readable.
     Unsupported(String),
+    /// The key does not permit the requested operation: it was minted (or
+    /// arrived from a platform keystore) with the operation's usage
+    /// disabled. The string names the refused operation.
+    NotPermitted(String),
     /// The key's nonce budget is exhausted: the implementation can no longer
     /// guarantee nonce uniqueness for this key. The key remains valid for
     /// `open`; mint a fresh key to continue sealing.
@@ -150,6 +154,7 @@ impl From<bindings::types::Error> for Error {
             Raw::AuthenticationFailed => Error::AuthenticationFailed,
             Raw::NotExtractable => Error::NotExtractable,
             Raw::Unsupported(detail) => Error::Unsupported(detail),
+            Raw::NotPermitted(detail) => Error::NotPermitted(detail),
             Raw::KeyExhausted => Error::KeyExhausted,
             Raw::Other(detail) => Error::Other(detail),
         }
@@ -166,6 +171,7 @@ impl fmt::Display for Error {
             Error::AuthenticationFailed => write!(f, "authentication-failed"),
             Error::NotExtractable => write!(f, "not-extractable"),
             Error::Unsupported(detail) => write!(f, "unsupported: {detail}"),
+            Error::NotPermitted(detail) => write!(f, "not-permitted: {detail}"),
             Error::KeyExhausted => write!(f, "key-exhausted"),
             Error::Other(detail) => write!(f, "other: {detail}"),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
@@ -498,6 +504,111 @@ fn seal_and_collect<'a>(
     })
 }
 
+// --- key options ----------------------------------------------------------------
+
+/// Mint-time policy for a [`Mac`] key: the plain-data counterpart of the
+/// WIT `mac.mac-key-options` resource, which the minting functions
+/// construct from it per call.
+///
+/// Follows the package-wide options contract: the default grants nothing,
+/// every field is opt-in, and a mint with no usage enabled fails
+/// [`Error::NotPermitted`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MacKeyOptions {
+    /// Whether the minted key may `sign`.
+    pub sign: bool,
+    /// Whether the minted key may `verify`.
+    pub verify: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl MacKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::mac::MacKeyOptions {
+        let options = bindings::mac::MacKeyOptions::new();
+        options.can_sign(self.sign);
+        options.can_verify(self.verify);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
+/// Mint-time policy for an [`Aead`] key. See [`MacKeyOptions`] for the
+/// options contract; `wrap`/`unwrap` are recorded ahead of operations (the
+/// package has no wrap operation yet).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AeadKeyOptions {
+    /// Whether the minted key may `seal`.
+    pub seal: bool,
+    /// Whether the minted key may `open`.
+    pub open: bool,
+    /// Whether the minted key may wrap keys.
+    pub wrap: bool,
+    /// Whether the minted key may unwrap keys.
+    pub unwrap: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl AeadKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::aead::AeadKeyOptions {
+        let options = bindings::aead::AeadKeyOptions::new();
+        options.can_seal(self.seal);
+        options.can_open(self.open);
+        options.can_wrap(self.wrap);
+        options.can_unwrap(self.unwrap);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
+/// Mint-time policy for an [`AeadInternalNonce`] key. See [`MacKeyOptions`]
+/// for the options contract.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InternalNonceKeyOptions {
+    /// Whether the minted key may `seal`.
+    pub seal: bool,
+    /// Whether the minted key may `open`.
+    pub open: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl InternalNonceKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::aead_internal_nonce::InternalNonceKeyOptions {
+        let options = bindings::aead_internal_nonce::InternalNonceKeyOptions::new();
+        options.can_seal(self.seal);
+        options.can_open(self.open);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
+/// Mint-time policy for a [`SigningKey`]. See [`MacKeyOptions`] for the
+/// options contract; `sign` is the sole usage, so it must be enabled for a
+/// mint to succeed.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SigningKeyOptions {
+    /// Whether the minted key may `sign`.
+    pub sign: bool,
+    /// Whether the minted key's material may be exported (by future
+    /// format-specific exports; there is no export operation today).
+    pub extractable: bool,
+}
+
+impl SigningKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::signature::SigningKeyOptions {
+        let options = bindings::signature::SigningKeyOptions::new();
+        options.can_sign(self.sign);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
 // --- newtypes ------------------------------------------------------------------
 
 /// Generate the shared newtype plumbing: constructors, raw accessors, and
@@ -595,6 +706,18 @@ impl Mac {
     /// material whenever the answer is yes.
     pub fn extractable(&self) -> bool {
         self.0.extractable()
+    }
+
+    /// Whether the key permits [`sign`](Self::sign) — the usage recorded
+    /// at mint. A refused operation fails [`Error::NotPermitted`].
+    pub fn can_sign(&self) -> bool {
+        self.0.can_sign()
+    }
+
+    /// Whether the key permits [`verify`](Self::verify). See
+    /// [`can_sign`](Self::can_sign).
+    pub fn can_verify(&self) -> bool {
+        self.0.can_verify()
     }
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
@@ -733,6 +856,29 @@ impl Aead {
         self.0.extractable()
     }
 
+    /// Whether the key permits [`seal`](Self::seal) — the usage recorded
+    /// at mint. A refused operation fails [`Error::NotPermitted`].
+    pub fn can_seal(&self) -> bool {
+        self.0.can_seal()
+    }
+
+    /// Whether the key permits [`open`](Self::open). See
+    /// [`can_seal`](Self::can_seal).
+    pub fn can_open(&self) -> bool {
+        self.0.can_open()
+    }
+
+    /// Whether the key may wrap keys — recorded and enforced ahead of
+    /// operations (the package has no wrap operation yet).
+    pub fn can_wrap(&self) -> bool {
+        self.0.can_wrap()
+    }
+
+    /// Whether the key may unwrap keys. See [`can_wrap`](Self::can_wrap).
+    pub fn can_unwrap(&self) -> bool {
+        self.0.can_unwrap()
+    }
+
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
     /// key was minted extractable (an API property, not a physical one —
     /// see [`Mac::export_key`]).
@@ -826,6 +972,18 @@ impl AeadInternalNonce {
     /// (see [`Mac::extractable`]).
     pub fn extractable(&self) -> bool {
         self.0.extractable()
+    }
+
+    /// Whether the key permits [`seal`](Self::seal) — the usage recorded
+    /// at mint. A refused operation fails [`Error::NotPermitted`].
+    pub fn can_seal(&self) -> bool {
+        self.0.can_seal()
+    }
+
+    /// Whether the key permits [`open`](Self::open). See
+    /// [`can_seal`](Self::can_seal).
+    pub fn can_open(&self) -> bool {
+        self.0.can_open()
     }
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
@@ -961,6 +1119,13 @@ impl SigningKey {
     /// `signing-key.extractable` doc).
     pub fn extractable(&self) -> bool {
         self.0.extractable()
+    }
+
+    /// Whether the key permits [`sign`](Self::sign) — the usage recorded
+    /// at mint (or carried by a platform keystore key). A refused
+    /// operation fails [`Error::NotPermitted`].
+    pub fn can_sign(&self) -> bool {
+        self.0.can_sign()
     }
 }
 

@@ -22,14 +22,14 @@ package lann:webcrypto@0.1.0;
 /// missing one fails at `wac plug` time rather than at minting.
 interface chacha20-poly1305 {
     use types.{error};
-    use aead.{aead-key};
+    use aead.{aead-key, aead-key-options};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
-    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+    import-key: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
-    generate-key: async func(extractable: bool) -> result<aead-key, error>;
+    generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// XChaCha20-Poly1305 key minting (draft-irtf-cfrg-xchacha, as deployed
@@ -44,14 +44,14 @@ interface chacha20-poly1305 {
 /// enum.
 interface xchacha20-poly1305 {
     use types.{error};
-    use aead.{aead-key};
+    use aead.{aead-key, aead-key-options};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
-    import-key: async func(raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+    import-key: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
-    generate-key: async func(extractable: bool) -> result<aead-key, error>;
+    generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// XChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce`
@@ -70,14 +70,14 @@ interface xchacha20-poly1305 {
 /// interface or `aes-gcm-internal-nonce`.
 interface xchacha20-poly1305-internal-nonce {
     use types.{error};
-    use aead-internal-nonce.{internal-nonce-key};
+    use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
 
     /// Import exactly 32 bytes of raw key material as an internal-nonce
     /// key; anything else fails with `error.invalid-key`. See
     /// `aes-gcm-internal-nonce.import-key` for the shared-material caveat
     /// and policy-rejection allowance, which apply identically here.
-    import-key: async func(raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+    import-key: async func(raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce key.
-    generate-key: async func(extractable: bool) -> result<internal-nonce-key, error>;
+    generate-key: async func(options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }

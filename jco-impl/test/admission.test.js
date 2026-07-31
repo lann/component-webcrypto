@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
-import { aesGcm, configure } from "../webcrypto.js";
+import { aesGcm, AeadKeyOptions, configure } from "../webcrypto.js";
 
 /** Restore the shipped defaults, whatever a test set. */
 const resetLimits = () =>
@@ -66,7 +66,12 @@ const drain = async (stream) => {
   }
 };
 
-const key = () => aesGcm.generateKey("aes256", false);
+const key = () => {
+  const options = new AeadKeyOptions();
+  options.canSeal(true);
+  options.canOpen(true);
+  return aesGcm.generateKey("aes256", options);
+};
 const NONCE = new Uint8Array(12);
 const NO_AAD = new Uint8Array(0);
 

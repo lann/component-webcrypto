@@ -25,8 +25,22 @@ wit_bindgen::generate!({
 
 use conformance_harness::stream::{sig_sign, sig_verify, Schedule};
 use conformance_harness::{describe, expect, expect_err, export_probe_suite, probes, ErrKind};
-use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key;
+use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
+use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
+use lann_webcrypto_guest::bindings::types::Error;
+
+/// Generate a signing key with `sign` granted, carrying only the
+/// `extractable` choice (the probes' subject is ECDSA, not usage policy).
+async fn generate_key(
+    variant: EcdsaVariant,
+    extractable: bool,
+) -> Result<(SigningKey, VerifyingKey), Error> {
+    let options = SigningKeyOptions::new();
+    options.can_sign(true);
+    options.extractable(extractable);
+    raw_generate_key(variant, options).await
+}
 
 probes! {
     ecdsa_p256_sign_roundtrip,

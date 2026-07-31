@@ -8,8 +8,8 @@ use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use zeroize::Zeroizing;
 
 use crate::{
-    random_bytes, AesVariant, Error, RngError, AES_GCM_NAME, CHACHA20_POLY1305_NAME,
-    XCHACHA20_POLY1305_NAME,
+    not_permitted, random_bytes, AeadPolicy, AesVariant, Error, RngError, AES_GCM_NAME,
+    CHACHA20_POLY1305_NAME, XCHACHA20_POLY1305_NAME,
 };
 
 /// The length in bytes of a ChaCha20-Poly1305 key (either construction).
@@ -75,8 +75,9 @@ pub struct AeadKeyMaterial {
     /// The raw key material, retained for `export-key` on extractable keys;
     /// zeroized on drop.
     raw: Zeroizing<Vec<u8>>,
-    /// Whether `export-key` may return the raw material.
-    extractable: bool,
+    /// The mint-time policy: usages and extractability (internal-nonce
+    /// mintings widen their narrower vocabulary into this one).
+    policy: AeadPolicy,
 }
 
 /// Validate ChaCha key material (32 bytes for either construction),
@@ -103,14 +104,15 @@ fn import_chacha_like<C: KeyInit>(
     name: &'static str,
     wrap: fn(C) -> AeadCipher,
     raw: Vec<u8>,
-    extractable: bool,
+    policy: AeadPolicy,
 ) -> Result<AeadKeyMaterial, Error> {
+    policy.check_useful()?;
     check_chacha_key(name, &raw)?;
     let cipher = wrap(C::new_from_slice(&raw).expect("length checked"));
     Ok(AeadKeyMaterial {
         cipher,
         raw: Zeroizing::new(raw),
-        extractable,
+        policy,
     })
 }
 
@@ -121,8 +123,9 @@ impl AeadKeyMaterial {
     pub fn import_aes_gcm(
         variant: AesVariant,
         raw: Vec<u8>,
-        extractable: bool,
+        policy: AeadPolicy,
     ) -> Result<Self, Error> {
+        policy.check_useful()?;
         type Make = fn(&[u8]) -> AeadCipher;
         let (expected, make): (usize, Make) = match variant {
             AesVariant::Aes128 => (16, |raw| {
@@ -142,7 +145,7 @@ impl AeadKeyMaterial {
         Ok(Self {
             cipher: make(&raw),
             raw: Zeroizing::new(raw),
-            extractable,
+            policy,
         })
     }
 
@@ -154,15 +157,15 @@ impl AeadKeyMaterial {
     pub fn import_aes_gcm_jwk(
         variant: AesVariant,
         jwk: &str,
-        extractable: bool,
+        policy: AeadPolicy,
     ) -> Result<Self, Error> {
         let alg = match variant {
             AesVariant::Aes128 => "A128GCM",
             AesVariant::Aes192 => return Err(aes192_unsupported()),
             AesVariant::Aes256 => "A256GCM",
         };
-        let raw = crate::jwk::parse_oct(jwk, alg, extractable)?;
-        Self::import_aes_gcm(variant, raw, extractable)
+        let raw = crate::jwk::parse_oct(jwk, alg, policy.extractable)?;
+        Self::import_aes_gcm(variant, raw, policy)
     }
 
     /// The key as an `oct` JWK (the `aead-key.export-key-jwk` contract):
@@ -188,8 +191,11 @@ impl AeadKeyMaterial {
     /// entropy failure.
     pub fn generate_aes_gcm(
         variant: AesVariant,
-        extractable: bool,
+        policy: AeadPolicy,
     ) -> Result<Result<Self, Error>, RngError> {
+        if let Err(err) = policy.check_useful() {
+            return Ok(Err(err));
+        }
         let len = match variant {
             AesVariant::Aes128 => 16,
             AesVariant::Aes192 => return Ok(Err(aes192_unsupported())),
@@ -198,47 +204,57 @@ impl AeadKeyMaterial {
         Ok(Ok(Self::import_aes_gcm(
             variant,
             random_bytes(len)?,
-            extractable,
+            policy,
         )
         .expect("generated key material always matches the variant")))
     }
 
     /// Import raw key material as an IETF ChaCha20-Poly1305 key (exactly 32
     /// bytes; anything else is `invalid-key`).
-    pub fn import_chacha20_poly1305(raw: Vec<u8>, extractable: bool) -> Result<Self, Error> {
+    pub fn import_chacha20_poly1305(raw: Vec<u8>, policy: AeadPolicy) -> Result<Self, Error> {
         import_chacha_like(
             CHACHA20_POLY1305_NAME,
             AeadCipher::ChaCha20Poly1305,
             raw,
-            extractable,
+            policy,
         )
     }
 
     /// Generate a fresh random IETF ChaCha20-Poly1305 key.
-    pub fn generate_chacha20_poly1305(extractable: bool) -> Result<Self, RngError> {
-        Ok(
-            Self::import_chacha20_poly1305(random_bytes(CHACHA_KEY_LEN)?, extractable)
-                .expect("generated key material is always 32 bytes"),
+    pub fn generate_chacha20_poly1305(policy: AeadPolicy) -> Result<Result<Self, Error>, RngError> {
+        if let Err(err) = policy.check_useful() {
+            return Ok(Err(err));
+        }
+        Ok(Ok(Self::import_chacha20_poly1305(
+            random_bytes(CHACHA_KEY_LEN)?,
+            policy,
         )
+        .expect("generated key material is always 32 bytes")))
     }
 
     /// Import raw key material as an XChaCha20-Poly1305 key (exactly 32
     /// bytes; anything else is `invalid-key`).
-    pub fn import_xchacha20_poly1305(raw: Vec<u8>, extractable: bool) -> Result<Self, Error> {
+    pub fn import_xchacha20_poly1305(raw: Vec<u8>, policy: AeadPolicy) -> Result<Self, Error> {
         import_chacha_like(
             XCHACHA20_POLY1305_NAME,
             AeadCipher::XChaCha20Poly1305,
             raw,
-            extractable,
+            policy,
         )
     }
 
     /// Generate a fresh random XChaCha20-Poly1305 key.
-    pub fn generate_xchacha20_poly1305(extractable: bool) -> Result<Self, RngError> {
-        Ok(
-            Self::import_xchacha20_poly1305(random_bytes(CHACHA_KEY_LEN)?, extractable)
-                .expect("generated key material is always 32 bytes"),
+    pub fn generate_xchacha20_poly1305(
+        policy: AeadPolicy,
+    ) -> Result<Result<Self, Error>, RngError> {
+        if let Err(err) = policy.check_useful() {
+            return Ok(Err(err));
+        }
+        Ok(Ok(Self::import_xchacha20_poly1305(
+            random_bytes(CHACHA_KEY_LEN)?,
+            policy,
         )
+        .expect("generated key material is always 32 bytes")))
     }
 
     /// The algorithm name (`algorithm-name` on either key resource).
@@ -384,6 +400,9 @@ impl AeadKeyMaterial {
         tag_size: Option<u8>,
         msg: &[u8],
     ) -> Result<Vec<u8>, Error> {
+        if !self.policy.seal {
+            return Err(not_permitted("seal"));
+        }
         self.check_nonce(nonce)?;
         let tag_len = self.check_tag_size(tag_size)?;
         if self.is_standard_point(nonce, tag_len) {
@@ -408,6 +427,9 @@ impl AeadKeyMaterial {
         tag_size: Option<u8>,
         msg: &[u8],
     ) -> Result<Vec<u8>, Error> {
+        if !self.policy.open {
+            return Err(not_permitted("open"));
+        }
         self.check_nonce(nonce)?;
         let tag_len = self.check_tag_size(tag_size)?;
         if self.is_standard_point(nonce, tag_len) {
@@ -431,6 +453,9 @@ impl AeadKeyMaterial {
         aad: &[u8],
         msg: &[u8],
     ) -> Result<Result<Vec<u8>, Error>, RngError> {
+        if !self.policy.seal {
+            return Ok(Err(not_permitted("seal")));
+        }
         let mut sealed = vec![0u8; self.nonce_len()];
         getrandom::fill(&mut sealed)?;
         let body = match self.cipher.encrypt(&sealed, Payload { msg, aad }) {
@@ -452,6 +477,9 @@ impl AeadKeyMaterial {
     /// a bad tag, wrong key, wrong associated data — reports
     /// `authentication-failed` with no detail, per the WIT contract.
     pub fn open_internal(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.policy.open {
+            return Err(not_permitted("open"));
+        }
         if sealed.len() < self.nonce_len() {
             return Err(Error::AuthenticationFailed);
         }
@@ -464,7 +492,28 @@ impl AeadKeyMaterial {
     /// Whether the key material may be exported (the `extractable` getter
     /// on either key resource).
     pub fn extractable(&self) -> bool {
-        self.extractable
+        self.policy.extractable
+    }
+
+    /// Whether the key permits `seal` (`can-seal` on either key resource).
+    pub fn can_seal(&self) -> bool {
+        self.policy.seal
+    }
+
+    /// Whether the key permits `open` (`can-open`).
+    pub fn can_open(&self) -> bool {
+        self.policy.open
+    }
+
+    /// Whether the key permits wrapping (`aead-key.can-wrap`; recorded
+    /// vocabulary, no operation yet).
+    pub fn can_wrap(&self) -> bool {
+        self.policy.wrap
+    }
+
+    /// Whether the key permits unwrapping (`aead-key.can-unwrap`).
+    pub fn can_unwrap(&self) -> bool {
+        self.policy.unwrap
     }
 
     /// The raw material, or `not-extractable` (the `export-key` contract on
@@ -473,7 +522,7 @@ impl AeadKeyMaterial {
     /// The copy returned is *not* protected: see the note on
     /// [`crate`](crate#exported-material).
     pub fn export(&self) -> Result<Vec<u8>, Error> {
-        if self.extractable {
+        if self.policy.extractable {
             Ok(self.raw.to_vec())
         } else {
             Err(Error::NotExtractable)
@@ -488,7 +537,7 @@ impl std::fmt::Debug for AeadKeyMaterial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AeadKeyMaterial")
             .field("algorithm", &self.name())
-            .field("extractable", &self.extractable)
+            .field("policy", &self.policy)
             .field("raw", &"<redacted>")
             .finish()
     }
@@ -498,13 +547,33 @@ impl std::fmt::Debug for AeadKeyMaterial {
 mod tests {
     use super::*;
 
+    /// An extractable default policy.
+    /// A full grant, non-extractable.
+    fn ap() -> AeadPolicy {
+        AeadPolicy {
+            seal: true,
+            open: true,
+            wrap: true,
+            unwrap: true,
+            extractable: false,
+        }
+    }
+
+    /// A full grant, extractable.
+    fn xp() -> AeadPolicy {
+        AeadPolicy {
+            extractable: true,
+            ..ap()
+        }
+    }
+
     #[test]
     fn aes_import_validates_variant_and_length() {
-        match AeadKeyMaterial::import_aes_gcm(AesVariant::Aes192, vec![0; 24], true) {
+        match AeadKeyMaterial::import_aes_gcm(AesVariant::Aes192, vec![0; 24], xp()) {
             Err(Error::Unsupported(_)) => {}
             _ => panic!("expected unsupported"),
         }
-        match AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![0; 16], true) {
+        match AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![0; 16], xp()) {
             Err(Error::InvalidKey(msg)) => assert_eq!(
                 msg,
                 "Aes256 requires 32 bytes of key material, got 16 bytes"
@@ -515,7 +584,7 @@ mod tests {
 
     #[test]
     fn caller_nonce_round_trip_and_failures() {
-        let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], false).unwrap();
+        let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], ap()).unwrap();
         let nonce = [2u8; 12];
         let sealed = key.seal(&nonce, b"aad", None, b"plaintext").unwrap();
         assert_eq!(sealed.len(), b"plaintext".len() + key.tag_len());
@@ -542,7 +611,7 @@ mod tests {
     /// sizes are declined. ChaCha keys stay bound to the standard point.
     #[test]
     fn full_parameter_space_on_one_key() {
-        let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], false).unwrap();
+        let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], ap()).unwrap();
         let sealed = key.seal(&[7u8; 16], b"aad", None, b"msg").unwrap();
         assert_eq!(key.open(&[7u8; 16], b"aad", None, &sealed).unwrap(), b"msg");
         assert_eq!(
@@ -565,7 +634,9 @@ mod tests {
             Err(Error::Unsupported(_))
         ));
 
-        let chacha = AeadKeyMaterial::generate_chacha20_poly1305(false).unwrap();
+        let chacha = AeadKeyMaterial::generate_chacha20_poly1305(ap())
+            .unwrap()
+            .unwrap();
         assert!(chacha.seal(&[0u8; 12], b"", Some(16), b"x").is_ok());
         assert!(matches!(
             chacha.seal(&[0u8; 12], b"", Some(12), b"x"),
@@ -579,7 +650,9 @@ mod tests {
 
     #[test]
     fn internal_nonce_round_trip_and_wire_format() {
-        let key = AeadKeyMaterial::generate_xchacha20_poly1305(true).unwrap();
+        let key = AeadKeyMaterial::generate_xchacha20_poly1305(xp())
+            .unwrap()
+            .unwrap();
         assert_eq!(key.nonce_len(), 24);
         assert_eq!(key.nonce_budget(), None);
         let sealed = key.seal_internal(b"aad", b"msg").unwrap().unwrap();
@@ -594,9 +667,11 @@ mod tests {
 
     #[test]
     fn twelve_byte_nonce_algorithms_carry_the_budget() {
-        let key = AeadKeyMaterial::generate_chacha20_poly1305(true).unwrap();
+        let key = AeadKeyMaterial::generate_chacha20_poly1305(xp())
+            .unwrap()
+            .unwrap();
         assert_eq!(key.nonce_budget(), Some(1 << 32));
-        let key = AeadKeyMaterial::generate_aes_gcm(AesVariant::Aes128, true)
+        let key = AeadKeyMaterial::generate_aes_gcm(AesVariant::Aes128, xp())
             .unwrap()
             .unwrap();
         assert_eq!(key.nonce_budget(), Some(1 << 32));
@@ -608,14 +683,18 @@ mod tests {
     /// not.
     #[test]
     fn budget_decisions_follow_the_seal_count() {
-        let budgeted = AeadKeyMaterial::generate_chacha20_poly1305(true).unwrap();
+        let budgeted = AeadKeyMaterial::generate_chacha20_poly1305(xp())
+            .unwrap()
+            .unwrap();
         assert_eq!(budgeted.check_budget(0), Ok(()));
         assert_eq!(budgeted.check_budget((1 << 32) - 1), Ok(()));
         assert_eq!(budgeted.check_budget(1 << 32), Err(Error::KeyExhausted));
         assert_eq!(budgeted.seals_remaining(1), Some((1 << 32) - 1));
         assert_eq!(budgeted.seals_remaining(u64::MAX), Some(0));
 
-        let unbudgeted = AeadKeyMaterial::generate_xchacha20_poly1305(true).unwrap();
+        let unbudgeted = AeadKeyMaterial::generate_xchacha20_poly1305(xp())
+            .unwrap()
+            .unwrap();
         assert_eq!(unbudgeted.check_budget(u64::MAX), Ok(()));
         assert_eq!(unbudgeted.seals_remaining(u64::MAX), None);
     }

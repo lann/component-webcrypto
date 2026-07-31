@@ -51,6 +51,12 @@ interface types {
         /// size the platform's crypto API declines). The string is
         /// human-readable.
         unsupported(string),
+        /// The key does not permit the requested operation: it was minted
+        /// (or arrived from a platform keystore) with the operation's
+        /// usage disabled. The string names the refused operation. Distinct
+        /// from `unsupported` (the implementation serves the operation;
+        /// this key refuses it) and never a verdict on the input.
+        not-permitted(string),
         /// The key's nonce budget is exhausted: the implementation can no
         /// longer guarantee nonce uniqueness for this key (for example, an
         /// AES-GCM internal-nonce key reaching SP 800-38D's
@@ -83,6 +89,38 @@ interface types {
 /// Key handles are therefore capabilities.
 interface mac {
     use types.{error};
+
+    /// Mint-time policy for a `mac-key`, consumed by the minting
+    /// interfaces' functions (single-use: mutating it after a mint is
+    /// unrepresentable because the mint took ownership).
+    ///
+    /// Package-wide options contract (every `*-key-options` resource
+    /// follows it): **the constructor grants nothing** — every usage and
+    /// extractability are opt-in, so a mint names exactly what the key is
+    /// for. At least one usage must be enabled at mint; an untouched
+    /// options resource therefore cannot mint, failing
+    /// `error.not-permitted` (the same statement WebCrypto makes by
+    /// refusing zero-usage secret-key mints). The vocabulary covers the
+    /// algorithm family's WebCrypto usages even where this package has no
+    /// operation yet: usages are write-once enforcement bits on
+    /// platform-backed keys (structured clone carries them into storage),
+    /// so a grant absent at mint is unrecoverable for a non-extractable
+    /// key — the vocabulary must be complete before the operations are.
+    /// Deny-by-default also covers evolution: future usages arrive
+    /// ungranted for every existing caller, so growth can never silently
+    /// widen a grant. An options resource cannot cross providers
+    /// (resource types are per-instance); construct it from the same
+    /// import the mint comes from.
+    resource mac-key-options {
+        constructor();
+        /// Whether the minted key may `sign`. Disabled by default.
+        can-sign: func(allowed: bool);
+        /// Whether the minted key may `verify`. Disabled by default.
+        can-verify: func(allowed: bool);
+        /// Whether the minted key's material may be exported. Disabled by
+        /// default.
+        extractable: func(allowed: bool);
+    }
 
     /// A MAC key: an unforgeable capability, bound to one algorithm at
     /// creation.
@@ -194,6 +232,14 @@ interface mac {
         /// Whether the key material may be exported.
         extractable: func() -> bool;
 
+        /// Whether this key permits `sign` — the usage recorded at mint
+        /// (or carried by a platform keystore key). A refused operation
+        /// fails `error.not-permitted`.
+        can-sign: func() -> bool;
+
+        /// Whether this key permits `verify`. See `can-sign`.
+        can-verify: func() -> bool;
+
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
@@ -243,6 +289,29 @@ interface mac {
 /// resource: the key resource carries the operations directly.
 interface aead {
     use types.{error};
+
+    /// Mint-time policy for an `aead-key` (see `mac.mac-key-options` for
+    /// the package-wide options contract). `wrap`/`unwrap` are vocabulary
+    /// ahead of operations: WebCrypto AES-GCM keys carry `wrapKey`/
+    /// `unwrapKey`, and the bits must be mintable (and platform-storable)
+    /// before this package grows wrap operations.
+    resource aead-key-options {
+        constructor();
+        /// Whether the minted key may `seal`. Disabled by default.
+        can-seal: func(allowed: bool);
+        /// Whether the minted key may `open`. Disabled by default.
+        can-open: func(allowed: bool);
+        /// Whether the minted key may wrap keys (no operation yet; the
+        /// usage is recorded and enforced by platform backends). Disabled
+        /// by default.
+        can-wrap: func(allowed: bool);
+        /// Whether the minted key may unwrap keys (see `can-wrap`).
+        /// Disabled by default.
+        can-unwrap: func(allowed: bool);
+        /// Whether the minted key's material may be exported. Disabled by
+        /// default.
+        extractable: func(allowed: bool);
+    }
 
     /// An AEAD key: an unforgeable capability, bound to one algorithm at
     /// creation. See `mac-key` for the capability, extractability,
@@ -333,6 +402,21 @@ interface aead {
         /// Whether the key material may be exported. See `mac-key`.
         extractable: func() -> bool;
 
+        /// Whether this key permits `seal` — the usage recorded at mint
+        /// (or carried by a platform keystore key). A refused operation
+        /// fails `error.not-permitted`.
+        can-seal: func() -> bool;
+
+        /// Whether this key permits `open`. See `can-seal`.
+        can-open: func() -> bool;
+
+        /// Whether this key permits wrapping keys — recorded usage; no
+        /// operation in this package yet. See `aead-key-options.can-wrap`.
+        can-wrap: func() -> bool;
+
+        /// Whether this key permits unwrapping keys. See `can-wrap`.
+        can-unwrap: func() -> bool;
+
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
         export-key: async func() -> result<list<u8>, error>;
@@ -372,6 +456,21 @@ interface aead {
 /// notes, which apply identically here.
 interface aead-internal-nonce {
     use types.{error};
+
+    /// Mint-time policy for an `internal-nonce-key` (see
+    /// `mac.mac-key-options` for the package-wide options contract). The
+    /// vocabulary is seal/open only: this kind has no WebCrypto mapping,
+    /// so no platform usage vocabulary reaches beyond its own operations.
+    resource internal-nonce-key-options {
+        constructor();
+        /// Whether the minted key may `seal`. Disabled by default.
+        can-seal: func(allowed: bool);
+        /// Whether the minted key may `open`. Disabled by default.
+        can-open: func(allowed: bool);
+        /// Whether the minted key's material may be exported. Disabled by
+        /// default.
+        extractable: func(allowed: bool);
+    }
 
     /// An internal-nonce AEAD key: an unforgeable capability, bound to one
     /// algorithm at creation.
@@ -424,6 +523,13 @@ interface aead-internal-nonce {
 
         /// Whether the key material may be exported. See `mac-key`.
         extractable: func() -> bool;
+
+        /// Whether this key permits `seal` — the usage recorded at mint.
+        /// A refused operation fails `error.not-permitted`.
+        can-seal: func() -> bool;
+
+        /// Whether this key permits `open`. See `can-seal`.
+        can-open: func() -> bool;
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true. The nonce budget
@@ -516,6 +622,25 @@ interface bytes {
 interface signature {
     use types.{error};
 
+    /// Mint-time policy for a `signing-key` (see `mac.mac-key-options`
+    /// for the package-wide options contract). The vocabulary is
+    /// degenerate — the public/private resource split already separates
+    /// sign from verify structurally — but the resource exists for
+    /// uniformity, to carry `extractable`, and to receive future
+    /// private-key usages (derive) additively.
+    resource signing-key-options {
+        constructor();
+        /// Whether the minted key may `sign`. Disabled by default — and,
+        /// being the sole usage, it must be enabled for the mint to
+        /// succeed (an untouched options resource fails
+        /// `error.not-permitted`, per the options contract).
+        can-sign: func(allowed: bool);
+        /// Whether the minted key's material may be exported (by future
+        /// format-specific exports; there is no export operation today).
+        /// Disabled by default.
+        extractable: func(allowed: bool);
+    }
+
     /// A public key: verification only, secret-free.
     resource verifying-key {
         /// Verify `sig` over an entire byte stream. Like `mac-key.verify`,
@@ -589,6 +714,11 @@ interface signature {
         /// exports and platform-backed key storage honor, so it must be
         /// captured and interrogable now.
         extractable: func() -> bool;
+
+        /// Whether this key permits `sign` — the usage recorded at mint
+        /// (or carried by a platform keystore key). A refused operation
+        /// fails `error.not-permitted`.
+        can-sign: func() -> bool;
     }
 }
 

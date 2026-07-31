@@ -59,6 +59,15 @@ fn rng_trap(what: &str) -> impl Fn(webcrypto_impl_core::RngError) -> wasmtime::E
 
 // --- shared operation shapes ---------------------------------------------------
 
+/// Consume a `*-key-options` resource (the mint took ownership), yielding
+/// its accumulated state.
+async fn take_options<T: Send, O: Send + 'static>(
+    accessor: &Accessor<T, WasiWebcrypto>,
+    options: Resource<O>,
+) -> Result<O> {
+    accessor.with(|mut access| Ok(access.get().table.delete(options)?))
+}
+
 /// Push a mint's outcome into the store's table: a successful mint becomes
 /// a resource handle, a WIT error flows to the caller.
 async fn mint<T: Send, R: Send + 'static>(
@@ -173,6 +182,41 @@ impl HostMacKey for WasiWebcryptoCtxView<'_> {
     fn extractable(&mut self, self_: Resource<MacKey>) -> Result<bool> {
         Ok(self.table.get(&self_)?.material.extractable())
     }
+
+    fn can_sign(&mut self, self_: Resource<MacKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_sign())
+    }
+
+    fn can_verify(&mut self, self_: Resource<MacKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_verify())
+    }
+}
+
+impl mac::HostMacKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::MacKeyOptions>> {
+        Ok(self.table.push(crate::MacKeyOptions::default())?)
+    }
+
+    fn can_sign(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.sign = allowed;
+        Ok(())
+    }
+
+    fn can_verify(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.verify = allowed;
+        Ok(())
+    }
+
+    fn extractable(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> mac::HostMacKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<crate::MacKeyOptions>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
 }
 
 impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
@@ -183,11 +227,8 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
         // Buffer the whole stream, then fold it into the HMAC state; the
         // result is chunking-invariant either way.
-        //
-        // The WIT `err` case exists for operational keystore failures; this
-        // implementation holds the material in-process, so it never errs.
         drain_then(accessor, self_, data, |key, bytes| {
-            Ok(key.material.sign(bytes))
+            key.material.sign(bytes).map_err(Error::from)
         })
         .await
     }
@@ -252,6 +293,62 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
 
     fn extractable(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
         Ok(self.table.get(&self_)?.material.extractable())
+    }
+
+    fn can_seal(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_seal())
+    }
+
+    fn can_open(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_open())
+    }
+
+    fn can_wrap(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_wrap())
+    }
+
+    fn can_unwrap(&mut self, self_: Resource<AeadKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_unwrap())
+    }
+}
+
+impl aead::HostAeadKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::AeadKeyOptions>> {
+        Ok(self.table.push(crate::AeadKeyOptions::default())?)
+    }
+
+    fn can_seal(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.seal = allowed;
+        Ok(())
+    }
+
+    fn can_open(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.open = allowed;
+        Ok(())
+    }
+
+    fn can_wrap(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.wrap = allowed;
+        Ok(())
+    }
+
+    fn can_unwrap(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.unwrap = allowed;
+        Ok(())
+    }
+
+    fn extractable(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> aead::HostAeadKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(
+        accessor: &Accessor<T, Self>,
+        rep: Resource<crate::AeadKeyOptions>,
+    ) -> Result<()> {
+        drop_resource(accessor, rep).await
     }
 }
 
@@ -372,9 +469,10 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::MacKeyOptions>,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let material = MacKeyMaterial::import(variant.into(), raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::import(variant.into(), raw, policy);
         mint(accessor, material.map(|material| MacKey { material })).await
     }
 
@@ -382,9 +480,10 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
         jwk: String,
-        extractable: bool,
+        options: Resource<crate::MacKeyOptions>,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, policy);
         mint(accessor, material.map(|material| MacKey { material })).await
     }
 
@@ -392,9 +491,10 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
         length: Option<u32>,
-        extractable: bool,
+        options: Resource<crate::MacKeyOptions>,
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
-        let material = MacKeyMaterial::generate(variant.into(), length, extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::generate(variant.into(), length, policy)
             .map_err(rng_trap("random key generation"))?;
         mint(accessor, material.map(|material| MacKey { material })).await
     }
@@ -409,9 +509,10 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy);
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 
@@ -419,18 +520,20 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
         jwk: String,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy);
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), policy)
             .map_err(rng_trap("random key generation"))?;
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
@@ -445,19 +548,21 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
     async fn import_key(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, policy);
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::generate_chacha20_poly1305(extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::generate_chacha20_poly1305(policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, Ok(AeadKey { material })).await
+        mint(accessor, material.map(|material| AeadKey { material })).await
     }
 }
 
@@ -465,19 +570,21 @@ impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
     async fn import_key(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy);
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        extractable: bool,
+        options: Resource<crate::AeadKeyOptions>,
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let material = AeadKeyMaterial::generate_xchacha20_poly1305(extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::generate_xchacha20_poly1305(policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, Ok(AeadKey { material })).await
+        mint(accessor, material.map(|material| AeadKey { material })).await
     }
 }
 
@@ -501,6 +608,56 @@ impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
 
     fn extractable(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
         Ok(self.table.get(&self_)?.material.extractable())
+    }
+
+    fn can_seal(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_seal())
+    }
+
+    fn can_open(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_open())
+    }
+}
+
+impl aead_internal_nonce::HostInternalNonceKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::InternalNonceKeyOptions>> {
+        Ok(self.table.push(crate::InternalNonceKeyOptions::default())?)
+    }
+
+    fn can_seal(
+        &mut self,
+        self_: Resource<crate::InternalNonceKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.seal = allowed;
+        Ok(())
+    }
+
+    fn can_open(
+        &mut self,
+        self_: Resource<crate::InternalNonceKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.open = allowed;
+        Ok(())
+    }
+
+    fn extractable(
+        &mut self,
+        self_: Resource<crate::InternalNonceKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> aead_internal_nonce::HostInternalNonceKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(
+        accessor: &Accessor<T, Self>,
+        rep: Resource<crate::InternalNonceKeyOptions>,
+    ) -> Result<()> {
+        drop_resource(accessor, rep).await
     }
 }
 
@@ -563,9 +720,10 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::InternalNonceKeyOptions>,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into());
         mint(
             accessor,
             material.map(|material| InternalNonceKey {
@@ -579,9 +737,10 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
-        extractable: bool,
+        options: Resource<crate::InternalNonceKeyOptions>,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), policy.into())
             .map_err(rng_trap("random key generation"))?;
         mint(
             accessor,
@@ -602,9 +761,10 @@ impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
     async fn import_key(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
-        extractable: bool,
+        options: Resource<crate::InternalNonceKeyOptions>,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, extractable);
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy.into());
         mint(
             accessor,
             material.map(|material| InternalNonceKey {
@@ -617,13 +777,14 @@ impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
 
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        extractable: bool,
+        options: Resource<crate::InternalNonceKeyOptions>,
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let material = AeadKeyMaterial::generate_xchacha20_poly1305(extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::generate_xchacha20_poly1305(policy.into())
             .map_err(rng_trap("random key generation"))?;
         mint(
             accessor,
-            Ok(InternalNonceKey {
+            material.map(|material| InternalNonceKey {
                 material,
                 sealed: 0,
             }),
@@ -694,6 +855,39 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
     fn extractable(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
         Ok(self.table.get(&self_)?.material.extractable())
     }
+
+    fn can_sign(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_sign())
+    }
+}
+
+impl signature_iface::HostSigningKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::SigningKeyOptions>> {
+        Ok(self.table.push(crate::SigningKeyOptions::default())?)
+    }
+
+    fn can_sign(&mut self, self_: Resource<crate::SigningKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.sign = allowed;
+        Ok(())
+    }
+
+    fn extractable(
+        &mut self,
+        self_: Resource<crate::SigningKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> signature_iface::HostSigningKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(
+        accessor: &Accessor<T, Self>,
+        rep: Resource<crate::SigningKeyOptions>,
+    ) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
 }
 
 impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
@@ -702,10 +896,8 @@ impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
         self_: Resource<SigningKey>,
         data: StreamReader<u8>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        // The WIT `err` case exists for operational keystore failures; this
-        // implementation holds the material in-process, so it never errs.
         drain_then(accessor, self_, data, |key, bytes| {
-            Ok(key.material.sign(bytes))
+            key.material.sign(bytes).map_err(Error::from)
         })
         .await
     }
@@ -733,10 +925,15 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
 impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     async fn generate_key(
         accessor: &Accessor<T, Self>,
-        extractable: bool,
+        options: Resource<crate::SigningKeyOptions>,
     ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
-        let material = SigningKeyMaterial::generate_ed25519(extractable)
-            .map_err(rng_trap("random key generation"))?;
+        let policy = take_options(accessor, options).await?.policy;
+        let material = match SigningKeyMaterial::generate_ed25519(policy)
+            .map_err(rng_trap("random key generation"))?
+        {
+            Ok(material) => material,
+            Err(err) => return Ok(Err(err.into())),
+        };
         mint_key_pair(accessor, material).await
     }
 }
@@ -775,9 +972,10 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: ecdsa_verify_iface::EcdsaVariant,
-        extractable: bool,
+        options: Resource<crate::SigningKeyOptions>,
     ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
-        let material = match SigningKeyMaterial::generate_ecdsa(variant.into(), extractable)
+        let policy = take_options(accessor, options).await?.policy;
+        let material = match SigningKeyMaterial::generate_ecdsa(variant.into(), policy)
             .map_err(rng_trap("random key generation"))?
         {
             Ok(material) => material,
@@ -790,7 +988,7 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
 #[cfg(test)]
 mod tests {
     use crate::MacKey;
-    use webcrypto_impl_core::{MacKeyMaterial, Sha2Variant};
+    use webcrypto_impl_core::{MacKeyMaterial, MacPolicy, Sha2Variant};
 
     /// `Debug` on key-holding types never prints key material: the bytes
     /// are redacted (in the shared core's material types, which these
@@ -798,8 +996,13 @@ mod tests {
     /// leak.
     #[test]
     fn debug_redacts_key_material() {
+        let policy = MacPolicy {
+            sign: true,
+            verify: true,
+            extractable: true,
+        };
         let key = MacKey {
-            material: MacKeyMaterial::import(Sha2Variant::Sha256, vec![0xAB; 32], true).unwrap(),
+            material: MacKeyMaterial::import(Sha2Variant::Sha256, vec![0xAB; 32], policy).unwrap(),
         };
         let rendered = format!("{key:?}");
         assert!(rendered.contains("<redacted>"), "{rendered}");

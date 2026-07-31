@@ -73,11 +73,11 @@ interface ecdsa-verify {
 /// produce different bytes for the same input.
 interface ecdsa-sign {
     use types.{error};
-    use signature.{signing-key, verifying-key};
+    use signature.{signing-key, signing-key-options, verifying-key};
     use ecdsa-verify.{ecdsa-variant};
 
     /// Generate a fresh random signing key of the declared variant,
     /// returning both halves — the only point at which every provider is
     /// guaranteed to have the public key on hand.
-    generate-key: async func(%variant: ecdsa-variant, extractable: bool) -> result<tuple<signing-key, verifying-key>, error>;
+    generate-key: async func(%variant: ecdsa-variant, options: signing-key-options) -> result<tuple<signing-key, verifying-key>, error>;
 }
