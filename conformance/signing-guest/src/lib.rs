@@ -31,8 +31,8 @@ use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVa
 probes! {
     ecdsa_p256_sign_roundtrip,
     ecdsa_p384_generate_roundtrip,
-    ecdsa_sign_key_export,
-    ecdsa_sign_invalid_scalar,
+    ecdsa_sign_extractable_getter,
+    ecdsa_p521_unsupported,
 }
 
 export_probe_suite!(PROBES);
@@ -140,12 +140,12 @@ async fn ecdsa_p384_generate_roundtrip() -> Result<(), String> {
     )
 }
 
-/// An extractable generated key exports a 32-byte scalar, stably; a
-/// non-extractable one fails `not-extractable`. (Export *identity* against
-/// a known scalar needs private-key import, which is deliberately out of
-/// this suite — impl-core's unit tests pin it for the Rust
-/// implementations.)
-async fn ecdsa_sign_key_export() -> Result<(), String> {
+/// The `extractable` getter reads correctly in both directions on
+/// generated signing keys (a hardcoded `true` must not pass). There is no
+/// export operation to cross-check against — extractability is mint-time
+/// recorded policy for future format-specific exports and platform key
+/// storage.
+async fn ecdsa_sign_extractable_getter() -> Result<(), String> {
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
         .map_err(|e| describe("generate-key", &e))?;
@@ -154,52 +154,29 @@ async fn ecdsa_sign_key_export() -> Result<(), String> {
         true,
         "extractable generated key's extractable getter",
     )?;
-    let exported = key.export_key().await.map_err(|e| describe("export", &e))?;
-    expect(exported.len(), 32, "exported P-256 scalar length")?;
-    let again = key
-        .export_key()
-        .await
-        .map_err(|e| describe("second export", &e))?;
-    if again != exported {
-        return Err("two exports of the same key differ".into());
-    }
-
     let (key, _public) = generate_key(EcdsaVariant::P256Sha256, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    // Read the getter in its `false` direction: asserting only `true`
-    // elsewhere leaves a hardcoded `true` passing the suite.
     expect(
         key.extractable(),
         false,
         "non-extractable generated key's extractable getter",
-    )?;
-    expect_err(
-        "export-key",
-        ErrKind::NotExtractable,
-        key.export_key().await,
-        "non-extractable key exported",
     )
 }
 
-/// Wrong-length scalars fail `invalid-key` at import. Only the length
-/// cases run here — every implementation validates length before touching
-/// a platform — while *range* validation (zero, ≥ the group order) rides
-/// the unspecified private-only PKCS#8 import path on browser hosts
-/// (w3c/webcrypto#356) and is pinned by impl-core's unit tests instead.
-async fn ecdsa_sign_invalid_scalar() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdsa_sign::import_signing_key;
-
+/// The declared-but-unserved P-521 variant declines `unsupported` on both
+/// minting paths (the `ecdsa-variant` contract; the `aes192` pattern).
+async fn ecdsa_p521_unsupported() -> Result<(), String> {
     expect_err(
-        "short scalar",
-        ErrKind::InvalidKey,
-        import_signing_key(EcdsaVariant::P256Sha256, vec![0x01; 16], false).await,
-        "malformed scalar was accepted",
+        "generate-key",
+        ErrKind::Unsupported,
+        generate_key(EcdsaVariant::P521Sha512, false).await,
+        "P-521 key generated",
     )?;
     expect_err(
-        "p384 scalar for p256",
-        ErrKind::InvalidKey,
-        import_signing_key(EcdsaVariant::P256Sha256, vec![0x01; 48], false).await,
-        "malformed scalar was accepted",
+        "import-verifying-key",
+        ErrKind::Unsupported,
+        import_verifying_key(EcdsaVariant::P521Sha512, vec![0x04; 133]).await,
+        "P-521 public key imported",
     )
 }

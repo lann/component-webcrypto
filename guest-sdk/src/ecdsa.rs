@@ -14,19 +14,6 @@ pub async fn import_verifying_key(
     ))
 }
 
-/// Import a raw scalar as a signing key of the declared variant. Yields
-/// only the private half; mint the public key from its point via
-/// [`import_verifying_key`].
-pub async fn import_signing_key(
-    variant: EcdsaVariant,
-    raw_material: Vec<u8>,
-    extractable: bool,
-) -> Result<SigningKey, Error> {
-    Ok(SigningKey::from_raw(
-        bindings::ecdsa_sign::import_signing_key(variant, raw_material, extractable).await?,
-    ))
-}
-
 /// Generate a fresh random signing key of the declared variant, returning
 /// both halves.
 pub async fn generate_key(

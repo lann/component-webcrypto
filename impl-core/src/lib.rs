@@ -151,6 +151,7 @@ macro_rules! impl_conversions {
                 match variant {
                     <$ecdsa>::P256Sha256 => Self::P256Sha256,
                     <$ecdsa>::P384Sha384 => Self::P384Sha384,
+                    <$ecdsa>::P521Sha512 => Self::P521Sha512,
                 }
             }
         }
@@ -184,6 +185,10 @@ pub enum AesVariant {
 pub enum EcdsaVariant {
     P256Sha256,
     P384Sha384,
+    /// Declared in the WIT, served by no implementation of this package
+    /// (see the `ecdsa-variant` doc): every minting path declines it
+    /// `unsupported`.
+    P521Sha512,
 }
 
 /// The `algorithm-name` reported by HMAC keys (WebCrypto's

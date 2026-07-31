@@ -35,7 +35,15 @@ interface aes {
 ///   algorithm's set is 4, 8, 12, 13, 14, 15, or 16 bytes (the registry's
 ///   32–128-bit set). Short tags weaken the forgery bound (SP 800-38D
 ///   Appendix C); implementations MAY decline sizes their security policy
-///   does not serve with `error.unsupported`.
+///   does not serve with `error.unsupported`. (WebCrypto's spec admits no
+///   such decline, so a consumer projecting its error vocabulary sees
+///   `NotSupportedError` where the platform would have served the call —
+///   the cost of permitting security profiles at this boundary.)
+/// - **Bounds**: GCM defines a maximum plaintext of 2^39 − 256 bits
+///   (~64 GiB) per invocation and an AAD bound of 2^64 − 1 bits.
+///   Implementations reaching them fail rather than wrap, but their
+///   buffering limits (`error.other`) are reached far earlier in
+///   practice.
 ///
 /// For nonce-misuse resistance prefer `aes-gcm-internal-nonce`, which keeps
 /// the nonce out of the API entirely. A FIPS 140-3 approved-mode provider

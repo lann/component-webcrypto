@@ -36,18 +36,16 @@ interface ed25519-verify {
 /// Split from `ed25519-verify` so a provider can serve verification alone;
 /// the in-guest provider exports both — Ed25519 signing is constant-time by
 /// construction (no per-signature secret nonce, complete addition laws).
+///
+/// Signing keys are generate-only for now: raw seed import/export was
+/// removed alongside ECDSA's raw scalar for symmetry, though its risk
+/// profile is clean (the RFC 8032 seed is real interchange, and RFC 8410
+/// PKCS#8 carries exactly the seed, so platform import is specified) — the
+/// repository's reconsider issue records both profiles, and re-adding the
+/// seed path is a compatible change if a consumer need appears.
 interface ed25519-sign {
     use types.{error};
     use signature.{signing-key, verifying-key};
-
-    /// Import a 32-byte raw private key (the RFC 8032 seed). Anything else
-    /// fails with `error.invalid-key`. `signing-key.export-key` returns this
-    /// same 32-byte seed form.
-    ///
-    /// Import yields only the private half; callers holding the public key
-    /// mint it via `ed25519-verify.import-verifying-key` (see the
-    /// `signature` interface for why there is no derive).
-    import-signing-key: async func(raw: list<u8>, extractable: bool) -> result<signing-key, error>;
 
     /// Generate a fresh random signing key, returning both halves — the
     /// only point at which every provider is guaranteed to have the public

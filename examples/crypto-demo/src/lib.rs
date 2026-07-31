@@ -40,9 +40,7 @@ use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_sign::{
-    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
-};
+use lann_webcrypto_guest::bindings::ed25519_sign::generate_key as generate_ed25519_key;
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
@@ -89,7 +87,6 @@ const GCM_TAG: &str = "76fc6ece0f4e1768cddf8853bb2d551b";
 
 // --- RFC 8032 §7.1 test 2 (Ed25519) ------------------------------------------
 
-const ED25519_SEED: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
 const ED25519_PUBLIC: &str = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
 const ED25519_MESSAGE: &[u8] = &[0x72];
 const ED25519_SIG: &str = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
@@ -135,10 +132,8 @@ impl Guest for Component {
         check("gcm-internal-nonce", gcm_internal_nonce().await).await?;
         check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
         check("concurrent-seal-open", concurrent_seal_open().await).await?;
-        check("ed25519-known-answer", ed25519_known_answer().await).await?;
         check("ed25519-verify", ed25519_verify_check().await).await?;
         check("ed25519-generated-key", ed25519_generated_key().await).await?;
-        check("ed25519-key-export", ed25519_key_export().await).await?;
         check(
             "ecdsa-verify-known-answer",
             ecdsa_verify_known_answer().await,
@@ -824,45 +819,6 @@ async fn sig_verify(key: &VerifyingKey, data: &[u8], sig: Vec<u8>) -> Result<Res
     run_chunked(data, usize::MAX, |rx| key.verify(rx, sig)).await
 }
 
-/// The RFC 8032 known answer: importing the seed reproduces the vector's
-/// signature (Ed25519 is deterministic), the getters report the algorithm,
-/// and the vector's public key verifies the result.
-async fn ed25519_known_answer() -> Result<()> {
-    let key = import_ed25519_signing_key(unhex(ED25519_SEED), false)
-        .await
-        .context("import-signing-key")?;
-    ensure!(
-        key.algorithm_name() == "Ed25519",
-        "signing-key.algorithm-name: got {}",
-        key.algorithm_name()
-    );
-    ensure!(
-        key.algorithm_curve().is_none(),
-        "signing-key.algorithm-curve: got {:?}",
-        key.algorithm_curve()
-    );
-    ensure!(
-        key.algorithm_hash().is_none(),
-        "signing-key.algorithm-hash: got {:?}",
-        key.algorithm_hash()
-    );
-
-    let sig = sig_sign(&key, ED25519_MESSAGE).await?;
-    ensure!(
-        hex(&sig) == ED25519_SIG.replace(char::is_whitespace, ""),
-        "signature: got {}",
-        hex(&sig)
-    );
-
-    let public = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
-        .await
-        .context("import-verifying-key")?;
-    sig_verify(&public, ED25519_MESSAGE, sig)
-        .await?
-        .context("known-answer signature did not verify")?;
-    Ok(())
-}
-
 /// An imported public key verifies the vector's signature and rejects a
 /// corrupted one with `authentication-failed`.
 async fn ed25519_verify_check() -> Result<()> {
@@ -905,31 +861,7 @@ async fn ed25519_generated_key() -> Result<()> {
     );
     sig_verify(&public, b"payload", sig)
         .await?
-        .context("round-trip signature did not verify")?;
-
-    expect_error!(
-        key.export_key().await,
-        Error::NotExtractable,
-        "non-extractable key exported",
-    )
-}
-
-/// An extractable imported key exports the seed it was imported from.
-async fn ed25519_key_export() -> Result<()> {
-    let key = import_ed25519_signing_key(unhex(ED25519_SEED), true)
-        .await
-        .context("import-signing-key")?;
-    ensure!(
-        key.extractable(),
-        "extractable signing key reports non-extractable"
-    );
-    let exported = key.export_key().await.context("export")?;
-    ensure!(
-        hex(&exported) == ED25519_SEED,
-        "exported seed: got {}",
-        hex(&exported)
-    );
-    Ok(())
+        .context("round-trip signature did not verify")
 }
 
 /// The RFC 6979 known answer: an imported P-256 public key reports its

@@ -4,8 +4,16 @@ package lann:webcrypto@0.1.0;
 ///
 /// The variant binds curve and digest together at mint — unlike WebCrypto,
 /// where the hash is a per-operation parameter — so a granted key cannot be
-/// used with a weaker digest than its minter chose. Keys report
-/// `algorithm-name` `"ECDSA"` plus the variant's curve and hash.
+/// used with a weaker digest than its minter chose. The fusion is a
+/// standing ruling, re-examined against the platform's per-operation
+/// contract: unlike key usages, the platform enforces nothing this binding
+/// contradicts — the hash bound here is this package's own policy applied
+/// at its own mint, and loading a platform-stored key is a minting path
+/// that binds a variant at load — so a stricter-than-platform binding
+/// stays honest. If vendored WPT ever observes one key across multiple
+/// hashes, the componentize shim records the deviation as WIT-forced
+/// rather than this binding relaxing. Keys report `algorithm-name`
+/// `"ECDSA"` plus the variant's curve and hash.
 ///
 /// Signatures are fixed-width `r ‖ s` (IEEE P1363, WebCrypto's format):
 /// 64 bytes for P-256, 96 bytes for P-384. ASN.1 DER signatures are not
@@ -26,6 +34,12 @@ interface ecdsa-verify {
         p256-sha256,
         /// NIST P-384 (secp384r1) with SHA-384.
         p384-sha384,
+        /// NIST P-521 (secp521r1) with SHA-512. Declared because the
+        /// WebCrypto registry serves it and enum growth is breaking; no
+        /// current implementation of this package serves it — expect
+        /// `error.unsupported` unless composed with a provider that
+        /// specifically offers it.
+        p521-sha512,
     }
 
     /// Import a public key as an uncompressed SEC1 point (`04 ‖ x ‖ y`;
@@ -37,6 +51,16 @@ interface ecdsa-verify {
 }
 
 /// ECDSA signing-key minting (FIPS 186-5).
+///
+/// Signing keys are generate-only: there is deliberately no raw-scalar
+/// import (or export — `signing-key` has no raw export). A bare scalar
+/// forces platform-backed hosts onto private-only PKCS#8 import, the one
+/// EC import shape whose platform behavior is unspecified and inconsistent
+/// across engines (w3c/webcrypto#356), and bare scalars are not real
+/// interchange. Private-key import returns with the PKCS#8/JWK format
+/// work, whose inputs carry the public point and stay on specified
+/// platform paths (the risk profiles are recorded in the repository's
+/// reconsider issue).
 ///
 /// Split from `ecdsa-verify` because ECDSA signing handles a per-signature
 /// secret nonce whose timing leakage is key-recovering — class D in the
@@ -51,15 +75,6 @@ interface ecdsa-sign {
     use types.{error};
     use signature.{signing-key, verifying-key};
     use ecdsa-verify.{ecdsa-variant};
-
-    /// Import a private key as the raw big-endian scalar (32 bytes for
-    /// P-256, 48 for P-384). Out-of-range or wrong-length scalars fail with
-    /// `error.invalid-key`. `signing-key.export-key` returns this same form.
-    ///
-    /// Import yields only the private half; callers holding the public
-    /// point mint it via `ecdsa-verify.import-verifying-key` (see the
-    /// `signature` interface for why there is no derive).
-    import-signing-key: async func(%variant: ecdsa-variant, raw: list<u8>, extractable: bool) -> result<signing-key, error>;
 
     /// Generate a fresh random signing key of the declared variant,
     /// returning both halves — the only point at which every provider is

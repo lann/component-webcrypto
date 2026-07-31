@@ -710,16 +710,6 @@ impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
-    async fn export_key(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<SigningKey>,
-    ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        with_resource(accessor, self_, |key| {
-            key.material.export().map_err(Error::from)
-        })
-        .await
-    }
-
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<SigningKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -741,15 +731,6 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
 }
 
 impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_signing_key(
-        accessor: &Accessor<T, Self>,
-        raw: Vec<u8>,
-        extractable: bool,
-    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
-        let material = SigningKeyMaterial::import_ed25519_seed(&raw, extractable);
-        mint(accessor, material.map(|material| SigningKey { material })).await
-    }
-
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         extractable: bool,
@@ -791,23 +772,17 @@ impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
 }
 
 impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_signing_key(
-        accessor: &Accessor<T, Self>,
-        variant: ecdsa_verify_iface::EcdsaVariant,
-        raw: Vec<u8>,
-        extractable: bool,
-    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
-        let material = SigningKeyMaterial::import_ecdsa_scalar(variant.into(), &raw, extractable);
-        mint(accessor, material.map(|material| SigningKey { material })).await
-    }
-
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         variant: ecdsa_verify_iface::EcdsaVariant,
         extractable: bool,
     ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
-        let material = SigningKeyMaterial::generate_ecdsa(variant.into(), extractable)
-            .map_err(rng_trap("random key generation"))?;
+        let material = match SigningKeyMaterial::generate_ecdsa(variant.into(), extractable)
+            .map_err(rng_trap("random key generation"))?
+        {
+            Ok(material) => material,
+            Err(err) => return Ok(Err(err.into())),
+        };
         mint_key_pair(accessor, material).await
     }
 }
