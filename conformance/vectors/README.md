@@ -36,6 +36,15 @@ commit
   with fixed-width `r ‖ s` (IEEE P1363) signatures, this package's wire
   format (the ASN.1-DER variants of these files are deliberately not
   vendored: DER signatures are unrepresentable in the WIT contract).
+- `x25519_test.json` — X25519 key-agreement vectors, including the twist,
+  non-canonical, and small-order public keys that discriminate agreement
+  policies. The vectors carry each private key as a raw scalar, but the
+  package's only secret-key import is the RFC 8037 OKP private JWK, whose
+  public coordinate `x` is mandatory — so the derived companion
+  `x25519_test_public_keys.json` maps each `tcId` to its private key's
+  public coordinate. It is generated, not vendored: regenerate it with
+  `derive_x25519_public_keys.py` (a plain RFC 7748 ladder, self-checked
+  against the §6.1 key pairs) after refreshing the vector file.
 
 Vendored from
 [novifinancial/ed25519-speccheck](https://github.com/novifinancial/ed25519-speccheck)
@@ -103,6 +112,8 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |
 | ed25519-speccheck, every other case | rejected at import (`invalid-key`) or verification (`authentication-failed`), per the `ed25519-verify` criterion; where the rejection lands is implementation-defined. |
 | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
+| X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
+| X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT

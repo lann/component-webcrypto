@@ -4,11 +4,13 @@
 use crate::mint::{
     import_chacha_key, import_hmac_key, import_ikm,
     import_internal_nonce_key as import_gcm_internal_key, import_key, import_password,
+    import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, HkdfAlg, HkdfCase, HmacAlg, HmacCase, InternalNonceAlg,
     InternalNonceCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
+    X25519Case,
 };
 use conformance_harness::stream::{
     compute, in_open, in_seal, open, seal, sig_verify, sign, verify, Schedule,
@@ -113,6 +115,40 @@ pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
             "derivation succeeded",
         )?;
     }
+    Ok(())
+}
+
+/// Run one X25519 vector: import the peer's raw public key and the OKP
+/// JWK secret key, `agree`, and check the derived shared secret at its
+/// natural length (and a truncated prefix) — or, for the small-order
+/// (`ZeroSharedSecret`) vectors, expect `agree` to fail `invalid-key`.
+pub async fn run_x25519_case(case: &X25519Case) -> Result<(), String> {
+    let peer = import_x25519_public_key(case.public.clone())
+        .await
+        .map_err(|e| describe("import-public-key", &e))?;
+    let secret = import_x25519_secret_key(&case.private_public, &case.private, true, true)
+        .await
+        .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    let agreed = secret.agree(&peer).await;
+    if case.zero_shared {
+        return expect_err(
+            "agree with a small-order peer",
+            ErrKind::InvalidKey,
+            agreed,
+            "agreement produced the all-zero shared secret",
+        );
+    }
+    let input = agreed.map_err(|e| describe("agree", &e))?;
+    let shared = input
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (natural length)", &e))?;
+    expect_bytes(&shared, &case.shared, "shared secret")?;
+    let prefix = input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (truncated)", &e))?;
+    expect_bytes(&prefix, &case.shared[..16], "truncated shared secret")?;
     Ok(())
 }
 

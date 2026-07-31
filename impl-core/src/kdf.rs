@@ -1,5 +1,7 @@
 //! The KDFs (HKDF, RFC 5869; PBKDF2, RFC 8018): the shared derivation core
-//! behind the `derivation`, `hkdf`, and `pbkdf2` interfaces.
+//! behind the `derivation`, `hkdf`, and `pbkdf2` interfaces — and the home
+//! of [`DeriveInputMaterial`], which `key-agreement.secret-key.agree` also
+//! mints (see [`crate::agreement`]).
 //!
 //! The `derive-input` resource's semantics — a parameterized derivation —
 //! are implemented here as [`DeriveInputMaterial`], which runs each
@@ -126,10 +128,15 @@ enum Realized {
         salt: Vec<u8>,
         iterations: u32,
     },
+    /// A key agreement's shared secret, already computed at `agree` (the
+    /// contributory check ran there). The one source with a *natural*
+    /// output length: the secret's own.
+    Agreed { secret: Zeroizing<Vec<u8>> },
 }
 
-/// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from` or
-/// `pbkdf2.prepare`, with the grants copied from the base secret.
+/// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from`,
+/// `pbkdf2.prepare`, or `key-agreement.secret-key.agree`, with the grants
+/// copied from the base secret.
 #[derive(Debug)]
 pub struct DeriveInputMaterial {
     realized: Realized,
@@ -187,12 +194,21 @@ impl DeriveInputMaterial {
         })
     }
 
+    /// Wrap an agreement's already-computed shared secret
+    /// (`key-agreement.secret-key.agree`) with the grants the secret key's
+    /// mint options carry.
+    pub fn agreed(secret: Zeroizing<Vec<u8>>, policy: DerivePolicy) -> Self {
+        Self {
+            realized: Realized::Agreed { secret },
+            policy,
+        }
+    }
+
     /// Parameterize a derivation over another derivation's output
-    /// (`hkdf.prepare-from`): the upstream derivation runs at its
-    /// natural length — which, this core serving only KDF sources today,
-    /// no upstream has, so this fails `error.other` exactly as the
-    /// platform's `deriveKey(… → "HKDF")` does. The signature is the
-    /// chaining contract; agreement sources make it succeed.
+    /// (`hkdf.prepare-from`): the upstream derivation runs at its natural
+    /// length — an agreement's full shared secret; KDF sources have none,
+    /// so they fail `error.other` exactly as the platform's
+    /// `deriveKey(… → "HKDF")` does.
     pub fn prepare_from(
         variant: Sha2Variant,
         upstream: &DeriveInputMaterial,
@@ -217,20 +233,17 @@ impl DeriveInputMaterial {
     }
 
     /// The derived bits at `length_bits` (the `derive-input.derive-bits`
-    /// contract): requires the `derive-bits` grant, a multiple of 8, and —
-    /// this input being a KDF's — an explicit length.
+    /// contract): requires the `derive-bits` grant and a multiple of 8;
+    /// `none` means the source's natural output length, which only agreed
+    /// inputs have.
     pub fn derive_bits(&self, length_bits: Option<u32>) -> Result<Zeroizing<Vec<u8>>, Error> {
         if !self.policy.derive_bits {
             return Err(not_permitted("derive-bits"));
         }
-        let Some(bits) = length_bits else {
-            return Err(Error::Other(
-                "a KDF's output length is a caller choice: derive-bits from a KDF \
-                 input requires an explicit length"
-                    .into(),
-            ));
-        };
-        self.output(bits)
+        match length_bits {
+            Some(bits) => self.output(bits),
+            None => self.natural_output(),
+        }
     }
 
     /// The derived bits for a `derive-key` mint: grant-checked for
@@ -255,16 +268,29 @@ impl DeriveInputMaterial {
         self.output(length_bits)
     }
 
-    /// HKDF-Expand at `bits`, enforcing the byte-multiple rule and RFC
-    /// 5869's 255·HashLen bound (which `expand` reports).
+    /// HKDF-Expand or PBKDF2 at `bits` — or, for an agreed input, the
+    /// shared secret truncated to `bits` — enforcing the byte-multiple
+    /// rule, RFC 5869's 255·HashLen bound (which `expand` reports), and
+    /// the agreed secret's own length as its upper bound (the platform's
+    /// `OperationError` for an over-long agreement `deriveBits`).
     fn output(&self, bits: u32) -> Result<Zeroizing<Vec<u8>>, Error> {
         if bits == 0 || !bits.is_multiple_of(8) {
             return Err(Error::Other(format!(
                 "derive length must be a non-zero multiple of 8 bits, got {bits}"
             )));
         }
-        let mut okm = Zeroizing::new(vec![0u8; (bits / 8) as usize]);
+        let len = (bits / 8) as usize;
+        let mut okm = Zeroizing::new(vec![0u8; len]);
         match &self.realized {
+            Realized::Agreed { secret } => {
+                if len > secret.len() {
+                    return Err(Error::Other(format!(
+                        "derive length {bits} bits exceeds the agreement's {}-byte shared secret",
+                        secret.len()
+                    )));
+                }
+                okm.copy_from_slice(&secret[..len]);
+            }
             Realized::Hkdf { prk, info } => {
                 let expanded = match prk {
                     Prk::Sha256(hk) => hk.expand(info, &mut okm),
@@ -291,15 +317,20 @@ impl DeriveInputMaterial {
         Ok(okm)
     }
 
-    /// The natural output length, in bits, of the source this input was
-    /// parameterized from. A KDF has none: its output length is a caller
-    /// choice, per the WIT `derive-bits` doc.
+    /// The source's natural output — the full shared secret for an agreed
+    /// input. A KDF has none: its output length is a caller choice, per
+    /// the WIT `derive-bits` doc, so KDF inputs fail `error.other` here
+    /// (both the null-length `derive-bits` and the chaining
+    /// `prepare-from` paths).
     fn natural_output(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
-        Err(Error::Other(
-            "a KDF input has no natural output length: chaining realizes the upstream \
-             at its natural length, which only agreement sources define"
-                .into(),
-        ))
+        match &self.realized {
+            Realized::Agreed { secret } => Ok(secret.clone()),
+            Realized::Hkdf { .. } | Realized::Pbkdf2 { .. } => Err(Error::Other(
+                "a KDF's output length is a caller choice: it has no natural output \
+                 length, which only agreement sources define"
+                    .into(),
+            )),
+        }
     }
 }
 

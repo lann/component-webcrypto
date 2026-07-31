@@ -4,10 +4,12 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::mint::{
-    derive_options, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
-    generate_key, generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key,
-    import_hmac_key, import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key,
-    import_password, import_xchacha_internal_nonce_key,
+    agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
+    generate_internal_nonce_key, generate_key, generate_x25519_key,
+    generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key, import_hmac_key,
+    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key, import_password,
+    import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
+    x25519_secret_jwk,
 };
 use conformance_harness::stream::{
     compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, try_sign, verify,
@@ -84,6 +86,9 @@ probes! {
     hkdf_derive_key_equivalence,
     hkdf_grants_and_chaining,
     pbkdf2_contract,
+    x25519_key_contract,
+    x25519_agree_contract,
+    x25519_grants_and_chaining,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -2032,4 +2037,319 @@ async fn pbkdf2_contract() -> Result<(), String> {
         hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
         "chained from a KDF input",
     )
+}
+
+/// RFC 7748 §6.1: Alice's and Bob's key pairs. The published private
+/// scalars, public coordinates, and shared secret pin the whole
+/// import-JWK → agree → derive path against a known answer.
+const RFC7748_ALICE_D: &str = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
+const RFC7748_ALICE_X: &str = "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a";
+const RFC7748_BOB_D: &str = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
+const RFC7748_BOB_X: &str = "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f";
+const RFC7748_SHARED: &str = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
+
+/// The X25519 key surface: metadata getters, public-key export round
+/// trips, the OKP JWK import contract's rejections, and the zero-grant
+/// mint refusals.
+async fn x25519_key_contract() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::x25519;
+
+    let (secret, public) = generate_x25519_key(true, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect(
+        secret.algorithm_name(),
+        "X25519".to_string(),
+        "secret-key algorithm-name",
+    )?;
+    expect(
+        public.algorithm_name(),
+        "X25519".to_string(),
+        "public-key algorithm-name",
+    )?;
+    expect(secret.can_derive_bits(), true, "secret-key can-derive-bits")?;
+    expect(secret.can_derive_key(), true, "secret-key can-derive-key")?;
+    expect(
+        secret.extractable(),
+        false,
+        "secret-key extractable (mint default)",
+    )?;
+
+    // A generated public key exports as the raw 32-byte u-coordinate and
+    // re-imports to an equivalent key: both peers derive the same secret.
+    let raw = public
+        .export_key()
+        .await
+        .map_err(|e| describe("public-key export-key", &e))?;
+    expect(raw.len(), 32, "exported public-key length")?;
+    let reimported = import_x25519_public_key(raw.clone())
+        .await
+        .map_err(|e| describe("re-import of exported public key", &e))?;
+    let direct = secret
+        .agree(&public)
+        .await
+        .map_err(|e| describe("agree (original public)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (original public)", &e))?;
+    let via_reimport = secret
+        .agree(&reimported)
+        .await
+        .map_err(|e| describe("agree (re-imported public)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (re-imported public)", &e))?;
+    expect_bytes(&via_reimport, &direct, "agreement after raw round trip")?;
+
+    // The public JWK export carries the OKP material members.
+    let jwk = public
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("public-key export-key-jwk", &e))?;
+    let x = crate::mint::b64url(&raw);
+    if !jwk.contains("\"OKP\"") || !jwk.contains("\"X25519\"") || !jwk.contains(&x) {
+        return Err(format!(
+            "exported public JWK missing material members: {jwk}"
+        ));
+    }
+
+    // Import rejections: a wrong-length public key, and OKP JWKs with the
+    // wrong curve or without the private scalar.
+    expect_err(
+        "31-byte public key",
+        ErrKind::InvalidKey,
+        import_x25519_public_key(vec![1; 31]).await,
+        "imported a wrong-length u-coordinate",
+    )?;
+    let alice_x = unhex(RFC7748_ALICE_X);
+    let alice_d = unhex(RFC7748_ALICE_D);
+    expect_err(
+        "wrong-curve OKP JWK",
+        ErrKind::InvalidKey,
+        x25519::import_secret_key_jwk(
+            x25519_secret_jwk(&alice_x, &alice_d).replace("X25519", "Ed25519"),
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported an Ed25519 JWK as X25519",
+    )?;
+    expect_err(
+        "public-only OKP JWK",
+        ErrKind::InvalidKey,
+        x25519::import_secret_key_jwk(
+            format!(
+                r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
+                crate::mint::b64url(&alice_x)
+            ),
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported a d-less JWK as a secret key",
+    )?;
+
+    // The zero-usage mint check, on both minting paths that take options.
+    expect_err(
+        "zero-grant import",
+        ErrKind::NotPermitted,
+        import_x25519_secret_key(&alice_x, &alice_d, false, false).await,
+        "minted a secret key with no enabled grant",
+    )?;
+    expect_err(
+        "zero-grant generate",
+        ErrKind::NotPermitted,
+        generate_x25519_key(false, false).await,
+        "generated a key with no enabled grant",
+    )
+}
+
+/// The agreement operation itself: the RFC 7748 §6.1 known answer in both
+/// directions, the agreed input's natural-length semantics (`none` is the
+/// whole 32-byte secret, truncation takes a prefix), and its parameter
+/// errors (zero, sub-byte, and over-length requests).
+async fn x25519_agree_contract() -> Result<(), String> {
+    let shared = unhex(RFC7748_SHARED);
+    let alice =
+        import_x25519_secret_key(&unhex(RFC7748_ALICE_X), &unhex(RFC7748_ALICE_D), true, true)
+            .await
+            .map_err(|e| describe("import Alice", &e))?;
+    let bob = import_x25519_secret_key(&unhex(RFC7748_BOB_X), &unhex(RFC7748_BOB_D), true, true)
+        .await
+        .map_err(|e| describe("import Bob", &e))?;
+    let alice_public = import_x25519_public_key(unhex(RFC7748_ALICE_X))
+        .await
+        .map_err(|e| describe("import Alice's public key", &e))?;
+    let bob_public = import_x25519_public_key(unhex(RFC7748_BOB_X))
+        .await
+        .map_err(|e| describe("import Bob's public key", &e))?;
+
+    let input = alice
+        .agree(&bob_public)
+        .await
+        .map_err(|e| describe("agree (Alice with Bob)", &e))?;
+    expect(
+        input.can_derive_bits(),
+        true,
+        "input copies can-derive-bits",
+    )?;
+    expect(input.can_derive_key(), true, "input copies can-derive-key")?;
+    let derived = input
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (natural length)", &e))?;
+    expect_bytes(&derived, &shared, "RFC 7748 shared secret")?;
+
+    let other = bob
+        .agree(&alice_public)
+        .await
+        .map_err(|e| describe("agree (Bob with Alice)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (Bob's direction)", &e))?;
+    expect_bytes(&other, &shared, "agreement commutes")?;
+
+    let prefix = input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (truncated)", &e))?;
+    expect_bytes(&prefix, &shared[..16], "truncation takes a prefix")?;
+    expect_err(
+        "zero-length derive",
+        ErrKind::Other,
+        input.derive_bits(Some(0)).await,
+        "derived a zero-length secret",
+    )?;
+    expect_err(
+        "sub-byte derive length",
+        ErrKind::Other,
+        input.derive_bits(Some(12)).await,
+        "derived a sub-byte length",
+    )?;
+    expect_err(
+        "derive past the shared secret's length",
+        ErrKind::Other,
+        input.derive_bits(Some(264)).await,
+        "derived more bits than the agreement produced",
+    )
+}
+
+/// The derive grants an agreed input inherits gate exactly their
+/// operations (including the cap rule), and — the property no KDF source
+/// has — `hkdf.prepare-from` chains from an agreement: the spec's own
+/// X25519 → HKDF → AES-GCM example, checked against HKDF over the same
+/// shared secret imported as IKM.
+async fn x25519_grants_and_chaining() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm;
+    use lann_webcrypto_guest::bindings::hkdf;
+
+    let shared = unhex(RFC7748_SHARED);
+    let alice =
+        import_x25519_secret_key(&unhex(RFC7748_ALICE_X), &unhex(RFC7748_ALICE_D), true, true)
+            .await
+            .map_err(|e| describe("import Alice", &e))?;
+    let bob_public = import_x25519_public_key(unhex(RFC7748_BOB_X))
+        .await
+        .map_err(|e| describe("import Bob's public key", &e))?;
+
+    // Chaining equivalence: prepare-from over the agreed input equals
+    // hkdf.prepare over the same shared secret imported as IKM.
+    let input = alice
+        .agree(&bob_public)
+        .await
+        .map_err(|e| describe("agree", &e))?;
+    let chained = hkdf::prepare_from(
+        Sha2Variant::Sha256,
+        &input,
+        b"chain salt".to_vec(),
+        b"chain info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare-from", &e))?;
+    let via_chain = chained
+        .derive_bits(Some(256))
+        .await
+        .map_err(|e| describe("derive-bits (chained)", &e))?;
+    let ikm = import_ikm(shared.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-ikm (shared secret)", &e))?;
+    let direct = hkdf::prepare(
+        Sha2Variant::Sha256,
+        &ikm,
+        b"chain salt".to_vec(),
+        b"chain info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare (imported shared secret)", &e))?
+    .derive_bits(Some(256))
+    .await
+    .map_err(|e| describe("derive-bits (direct HKDF)", &e))?;
+    expect_bytes(&via_chain, &direct, "chaining equals HKDF over the secret")?;
+
+    // Bits-only: derive-bits works, derive-key and chaining are refused.
+    let bits_only = import_x25519_secret_key(
+        &unhex(RFC7748_ALICE_X),
+        &unhex(RFC7748_ALICE_D),
+        true,
+        false,
+    )
+    .await
+    .map_err(|e| describe("bits-only import", &e))?;
+    let input = bits_only
+        .agree(&bob_public)
+        .await
+        .map_err(|e| describe("agree (bits-only)", &e))?;
+    input
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (bits-only)", &e))?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    expect_err(
+        "derive-key without the grant",
+        ErrKind::NotPermitted,
+        aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options).await,
+        "minted a key from a key-less input",
+    )?;
+    expect_err(
+        "chaining without the derive-key grant",
+        ErrKind::NotPermitted,
+        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        "chained from a key-less input",
+    )?;
+
+    // Key-only: derive-bits is refused, the cap rule holds, and a
+    // non-extractable derived key minting succeeds.
+    let key_only = import_x25519_secret_key(
+        &unhex(RFC7748_ALICE_X),
+        &unhex(RFC7748_ALICE_D),
+        false,
+        true,
+    )
+    .await
+    .map_err(|e| describe("key-only import", &e))?;
+    let input = key_only
+        .agree(&bob_public)
+        .await
+        .map_err(|e| describe("agree (key-only)", &e))?;
+    expect_err(
+        "derive-bits without the grant",
+        ErrKind::NotPermitted,
+        input.derive_bits(None).await,
+        "derived bits from a bits-less input",
+    )?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    options.extractable(true);
+    expect_err(
+        "extractable key from a bits-less input (the cap rule)",
+        ErrKind::NotPermitted,
+        aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options).await,
+        "laundered bits through an extractable derived key",
+    )?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    let key = aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options)
+        .await
+        .map_err(|e| describe("non-extractable derive-key", &e))?;
+    expect(key.extractable(), false, "derived key extractability")
 }

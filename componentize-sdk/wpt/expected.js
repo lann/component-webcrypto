@@ -20,4 +20,9 @@ export const EXPECTED = {
   "encrypt_decrypt/aes_gcm (96-bit iv)": { inPassed: 179, inFailed: 0, outPassed: 0, outFailed: 398 },
   "import_export/symmetric_importKey (HMAC, AES-GCM)": { inPassed: 140, inFailed: 0, outPassed: 0, outFailed: 220 },
   "generateKey/successes (HMAC, AES-GCM)": { inPassed: 144, inFailed: 0, outPassed: 0, outFailed: 336 },
+  "derive_bits_keys/cfrg_curves_bits (X25519)": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 18 },
+  "derive_bits_keys/cfrg_curves_keys (X25519)": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 16 },
+  "import_export/okp_importKey (X25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 54 },
+  "import_export/okp_importKey_failures (X25519)": { inPassed: 0, inFailed: 0, outPassed: 4, outFailed: 450 },
+  "generateKey/successes (X25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 32 },
 };

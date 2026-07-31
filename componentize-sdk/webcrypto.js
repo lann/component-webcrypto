@@ -27,6 +27,13 @@
 //     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
 //   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
 //     others throw `NotSupportedError`.
+//   - Unserved: the derive operations (`deriveBits`, `deriveKey`) and the
+//     algorithms reached only through them (X25519, HKDF, PBKDF2) are
+//     absent from the `subtle` subset entirely — calling them is a
+//     `TypeError` on a missing property, not a thrown `DOMException`. The
+//     WIT carries all of it (`derivation`, `key-agreement`, `hkdf`,
+//     `pbkdf2`, `x25519`); the vendored X25519 WPT groups meter this gap
+//     (see wpt/README.md, "What is vendored").
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values

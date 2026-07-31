@@ -21,6 +21,9 @@
 
 import {
   AeadKey,
+  AgreementKeyOptions,
+  AgreementPublicKey,
+  AgreementSecretKey,
   DeriveInput,
   DeriveOptions,
   Digest,
@@ -42,6 +45,7 @@ import {
   pbkdf2,
   hmacSha2,
   sha2,
+  x25519,
   xchacha20Poly1305,
   xchacha20Poly1305InternalNonce,
 } from "./webcrypto.js";
@@ -54,6 +58,7 @@ import {
 /** @import * as Derivation from "./generated/interfaces/lann-webcrypto-derivation.js" */
 /** @import * as Hkdf from "./generated/interfaces/lann-webcrypto-hkdf.js" */
 /** @import * as Pbkdf2 from "./generated/interfaces/lann-webcrypto-pbkdf2.js" */
+/** @import * as KeyAgreement from "./generated/interfaces/lann-webcrypto-key-agreement.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
 //
@@ -106,6 +111,23 @@ const passwordServesPbkdf2 = (password) => password;
 
 /** @type {(password: Pbkdf2.Password) => Password} */
 const pbkdf2ServesPassword = (password) => password;
+
+/** @type {(options: AgreementKeyOptions) => KeyAgreement.AgreementKeyOptions} */
+const agreementKeyOptionsServeKeyAgreement = (options) => options;
+
+/**
+ * Both directions, like `derive-input`: `public-key` appears as a
+ * *parameter* (`agree`'s peer), so the generated instances must be
+ * assignable to this host's class too.
+ * @type {(key: AgreementPublicKey) => KeyAgreement.PublicKey}
+ */
+const agreementPublicKeyServesKeyAgreement = (key) => key;
+
+/** @type {(key: KeyAgreement.PublicKey) => AgreementPublicKey} */
+const keyAgreementServesAgreementPublicKey = (key) => key;
+
+/** @type {(key: AgreementSecretKey) => KeyAgreement.SecretKey} */
+const agreementSecretKeyServesKeyAgreement = (key) => key;
 
 // --- minting and utility interfaces ----------------------------------------
 
@@ -161,6 +183,9 @@ const ecdsaVerifyInterface = ecdsaVerify;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdsa-sign.js")} */
 const ecdsaSignInterface = ecdsaSign;
 
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
+const x25519Interface = x25519;
+
 export const checked = {
   macKeyServesMac,
   aeadKeyServesAead,
@@ -177,6 +202,10 @@ export const checked = {
   pbkdf2Interface,
   passwordServesPbkdf2,
   pbkdf2ServesPassword,
+  agreementKeyOptionsServeKeyAgreement,
+  agreementPublicKeyServesKeyAgreement,
+  keyAgreementServesAgreementPublicKey,
+  agreementSecretKeyServesKeyAgreement,
   hmacSha2Interface,
   sha2Interface,
   bytesInterface,
@@ -189,4 +218,5 @@ export const checked = {
   ed25519SignInterface,
   ecdsaVerifyInterface,
   ecdsaSignInterface,
+  x25519Interface,
 };

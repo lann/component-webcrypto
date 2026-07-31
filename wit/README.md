@@ -10,13 +10,14 @@ item; everything shared lives here.
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
 - **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`) own the algorithm-agnostic resources.
+  `digest`, `signature`, `derivation`, `key-agreement`) own the
+  algorithm-agnostic resources.
   Operations hang off key resources. Adding an algorithm does not change
   these interfaces.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
-  `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`) only mint keys, bound to their
-  algorithm at creation. A key can therefore never be used with the wrong
-  algorithm.
+  `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`) only mint keys, bound
+  to their algorithm at creation. A key can therefore never be used with
+  the wrong algorithm.
 
 A component whose world imports only a primitive-kind interface can *use*
 any key handle it is granted, but cannot mint or import keys. Key handles
@@ -176,12 +177,27 @@ short:
   variant carries no misuse cases. The goal informs every surface change;
   it is not a claim that no misuse of the package is possible (nonce
   reuse under the caller-nonce `aead` kind is the standing example).
+  Where an operation combines *two* key capabilities, misuse is checked
+  rather than unrepresentable: `key-agreement.secret-key.agree` fails
+  `error.invalid-key` on an algorithm-mismatched peer, the W3C Web
+  Cryptography API's own derive-time check.
 
-- **No derive from `signing-key` to `verifying-key`.** A provider may hold
+- **No derive from a secret key to its public half.** A provider may hold
   a private key whose public half it cannot recompute (browser WebCrypto
   has no derive operation, and keystore-resident non-extractable keys sign
   but yield nothing else). `generate-key` returns the pair; importers use
-  `import-verifying-key`.
+  the public-key import. This holds for `signature` (no `signing-key` →
+  `verifying-key`) and for `key-agreement` (no `secret-key` →
+  `public-key`) alike; an agreement secret imported as an OKP JWK carries
+  its public coordinate in the JWK itself, where RFC 8037 makes it
+  mandatory.
+- **Format admission: every key format is one a platform-backed host
+  passes to the platform verbatim.** An import format the platform cannot
+  ingest directly would force such a host to parse or transform key
+  material itself — exactly the code a thin host should not carry — so
+  formats without a platform door (bare X25519 secret scalars, for
+  example) are not formats here. The admitted set per algorithm lives on
+  its minting interface.
 - **ECDSA binds curve and hash at mint** (unlike WebCrypto's per-operation
   hash). A granted key cannot be used with a weaker digest than its minter
   chose.
@@ -234,6 +250,14 @@ Brief definitions; follow the links for depth.
   [Wikipedia](https://en.wikipedia.org/wiki/Cryptographic_hash_function).
 - **KDF** — key derivation function.
   [Wikipedia](https://en.wikipedia.org/wiki/Key_derivation_function).
+- **key agreement** — a protocol in which two parties each combine their
+  own secret key with the other's public key and arrive at the same shared
+  secret (Diffie–Hellman).
+  [Wikipedia](https://en.wikipedia.org/wiki/Key-agreement_protocol).
+- **contributory check** — the rejection of an agreement whose shared
+  secret one party forced regardless of the other's key. For X25519 the
+  degenerate case is the all-zero shared secret, produced exactly by
+  small-order peer points ([RFC 7748 §7](https://www.rfc-editor.org/rfc/rfc7748#section-7)).
 - **IKM** — input keying material: the secret a KDF starts from
   ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)).
 - **JWK** — JSON Web Key ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)).

@@ -1,0 +1,53 @@
+package lann:webcrypto@0.1.0;
+
+/// X25519 key agreement (RFC 7748), as the Web Cryptography API serves it.
+///
+/// Keys returned here drive `key-agreement.secret-key.agree`, whose
+/// `derive-input` output feeds `derive-bits`, the key-minting interfaces'
+/// `derive-key`, and `hkdf.prepare-from` — the spec's own worked example
+/// (X25519 → HKDF → AES-GCM) runs entirely through handles.
+///
+/// Formats follow the format-admission rule (see `README.md`, "Design
+/// notes"): every format is one a platform-backed host passes to the
+/// platform verbatim. The public key travels as the raw 32-byte RFC 7748
+/// u-coordinate (the platform's public-only `raw` format); the secret key
+/// travels only as an RFC 8037 OKP private JWK (the platform's `jwk`
+/// format — its sole non-ASN.1 private form). Bare secret scalars have no
+/// platform door and are not a format here.
+interface x25519 {
+    use types.{error};
+    use key-agreement.{public-key, secret-key, agreement-key-options};
+
+    /// Import a raw 32-byte RFC 7748 u-coordinate as a public key.
+    ///
+    /// Import is deliberately permissive, as the platform's is: any
+    /// 32-byte string is accepted (the high bit is masked at use, per RFC
+    /// 7748), and degenerate keys — small-order points, non-canonical
+    /// encodings, points on the twist — are not rejected here. A
+    /// small-order key surfaces at `agree` as `error.invalid-key` (the
+    /// all-zero check); material of any other length fails
+    /// `error.invalid-key` at import.
+    import-public-key: async func(raw: list<u8>) -> result<public-key, error>;
+
+    /// Import a static secret key as an RFC 8037 OKP private JWK
+    /// (`kty: "OKP"`, `crv: "X25519"`, with `x` and `d` both required —
+    /// RFC 8037 makes the public coordinate mandatory, so this is
+    /// inherently the public+private form).
+    ///
+    /// `jwk` is the JWK as JSON text; the implementation owns the parse
+    /// (see `mac-key.export-key-jwk` for the package-wide JWK contract,
+    /// including `ext` validation against the options' extractability).
+    /// `d` is the 32-byte scalar, clamped at use per RFC 7748.
+    ///
+    /// Security:
+    /// - Implementations MAY reject a JWK whose `x` is not the public key
+    ///   of `d` with `error.invalid-key`, and MUST NOT trust `x` for any
+    ///   operation: the imported key's identity is `d`'s. (The W3C Web
+    ///   Cryptography API's import steps do not mandate the consistency
+    ///   check, and engines differ, so a platform-backed host cannot
+    ///   promise it.)
+    import-secret-key-jwk: async func(jwk: string, options: agreement-key-options) -> result<secret-key, error>;
+
+    /// Generate a fresh X25519 key pair.
+    generate-key: async func(options: agreement-key-options) -> result<tuple<secret-key, public-key>, error>;
+}

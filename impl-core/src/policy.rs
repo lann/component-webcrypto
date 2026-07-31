@@ -84,6 +84,23 @@ impl SigningPolicy {
     }
 }
 
+/// `key-agreement.agreement-key-options`: the derive pair that flows to
+/// every `derive-input` the key's `agree` mints, plus mint-time recorded
+/// extractability.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AgreementPolicy {
+    pub derive_bits: bool,
+    pub derive_key: bool,
+    pub extractable: bool,
+}
+
+impl AgreementPolicy {
+    /// The at-least-one-usage mint check (the options contract).
+    pub fn check_useful(&self) -> Result<(), Error> {
+        useful(self.derive_bits || self.derive_key)
+    }
+}
+
 /// `derivation.derive-options`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DerivePolicy {
