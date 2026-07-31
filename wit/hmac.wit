@@ -9,6 +9,7 @@ interface hmac-sha2 {
     use types.{error};
     use mac.{mac-key, mac-key-options};
     use sha2.{sha2-variant};
+    use derivation.{derive-input};
 
     /// Import raw key material as an HMAC key over the declared SHA-2
     /// variant. Empty keys are rejected with `error.invalid-key`.
@@ -45,4 +46,19 @@ interface hmac-sha2 {
     /// `error.unsupported` if this implementation does not serve the
     /// variant.
     generate-key: async func(%variant: sha2-variant, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from a parameterized derivation: the input is realized
+    /// at `length` bits and the result is subject to `import-key`'s
+    /// contract.
+    ///
+    /// `length` follows `generate-key`'s contract exactly — `none` means
+    /// the hash's block size, zero fails `error.invalid-key`, sub-byte
+    /// lengths may be declined `error.unsupported` — because WebCrypto's
+    /// `deriveKey` computes the derived length by the same `get key
+    /// length` step `generateKey` uses (§31.6.6).
+    ///
+    /// Requires `can-derive-key` on the input, else `error.not-permitted`;
+    /// requesting an extractable key additionally requires
+    /// `can-derive-bits` (see `aes-gcm.derive-key`).
+    derive-key: async func(%variant: sha2-variant, input: borrow<derive-input>, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
 }

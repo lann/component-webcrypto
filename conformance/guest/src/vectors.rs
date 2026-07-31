@@ -2,13 +2,13 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::mint::{
-    import_chacha_key, import_hmac_key, import_internal_nonce_key as import_gcm_internal_key,
-    import_key, import_xchacha_internal_nonce_key as import_xchacha_internal_key,
-    import_xchacha_key,
+    import_chacha_key, import_hmac_key, import_ikm,
+    import_internal_nonce_key as import_gcm_internal_key, import_key,
+    import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
 };
 use crate::translate::{
-    AeadAlg, AeadCase, AeadExpectation, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase,
-    Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
+    AeadAlg, AeadCase, AeadExpectation, HkdfAlg, HkdfCase, HmacAlg, HmacCase, InternalNonceAlg,
+    InternalNonceCase, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
 };
 use conformance_harness::stream::{
     compute, in_open, in_seal, open, seal, sig_verify, sign, verify, Schedule,
@@ -21,6 +21,7 @@ use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::hkdf;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -79,6 +80,36 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
             ErrKind::AuthenticationFailed,
             verified,
             "verify(tag) succeeded",
+        )?;
+    }
+    Ok(())
+}
+
+/// Run one HKDF vector: derive the declared size and compare, or — for the
+/// invalid (`SizeTooLarge`) vectors — expect the RFC 5869 output bound to
+/// fail with `error.other`.
+pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
+    let variant = match case.alg {
+        HkdfAlg::Sha256 => Sha2Variant::Sha256,
+        HkdfAlg::Sha384 => Sha2Variant::Sha384,
+        HkdfAlg::Sha512 => Sha2Variant::Sha512,
+    };
+    let ikm = import_ikm(case.ikm.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-ikm", &e))?;
+    let input = hkdf::prepare(variant, &ikm, case.salt.clone(), case.info.clone())
+        .await
+        .map_err(|e| describe("prepare", &e))?;
+    let derived = input.derive_bits(Some(case.size * 8)).await;
+    if case.valid {
+        let okm = derived.map_err(|e| describe("derive-bits", &e))?;
+        expect_bytes(&okm, &case.okm, "output keying material")?;
+    } else {
+        expect_err(
+            "derive-bits past the RFC 5869 output bound",
+            ErrKind::Other,
+            derived,
+            "derivation succeeded",
         )?;
     }
     Ok(())

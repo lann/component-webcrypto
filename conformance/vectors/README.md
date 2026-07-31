@@ -16,6 +16,11 @@ commit
 
 - `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
   — HMAC MAC vectors for every served SHA-2 parameterization.
+- `hkdf_sha256_test.json`, `hkdf_sha384_test.json`, `hkdf_sha512_test.json`
+  — HKDF derivation vectors for every served SHA-2 parameterization. Every
+  vector runs: the WIT surface carries the full (ikm, salt, info, size)
+  parameter space, and the invalid vectors (`SizeTooLarge`) map onto the
+  RFC 5869 output bound, reported as `error.other`.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
 - `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
   ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.

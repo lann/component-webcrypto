@@ -339,6 +339,20 @@ const AEAD_VECTORS: [(AeadAlg, &str); 3] = [
         include_str!("../../vectors/xchacha20_poly1305_test.json"),
     ),
 ];
+const HKDF_VECTORS: [(HkdfAlg, &str); 3] = [
+    (
+        HkdfAlg::Sha256,
+        include_str!("../../vectors/hkdf_sha256_test.json"),
+    ),
+    (
+        HkdfAlg::Sha384,
+        include_str!("../../vectors/hkdf_sha384_test.json"),
+    ),
+    (
+        HkdfAlg::Sha512,
+        include_str!("../../vectors/hkdf_sha512_test.json"),
+    ),
+];
 const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
     (
         Sha2Alg::Sha256,
@@ -368,6 +382,99 @@ const SIG_VECTORS: [(SigAlg, &str); 3] = [
         include_str!("../../vectors/ecdsa_secp384r1_sha384_p1363_test.json"),
     ),
 ];
+
+/// A served HKDF parameterization, as named in derivation vector ids.
+#[derive(Clone, Copy)]
+pub enum HkdfAlg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl HkdfAlg {
+    /// The algorithm name used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            HkdfAlg::Sha256 => "hkdf-sha256",
+            HkdfAlg::Sha384 => "hkdf-sha384",
+            HkdfAlg::Sha512 => "hkdf-sha512",
+        }
+    }
+}
+
+/// One Wycheproof HKDF vector: derive `size` bytes of output keying
+/// material from (`ikm`, `salt`, `info`) and compare with `okm` — or, for
+/// the `SizeTooLarge` vectors, expect the RFC 5869 output bound to fail
+/// the derivation.
+pub struct HkdfCase {
+    pub alg: HkdfAlg,
+    pub tc_id: u64,
+    pub ikm: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub info: Vec<u8>,
+    /// Output size in bytes.
+    pub size: u32,
+    pub okm: Vec<u8>,
+    pub valid: bool,
+}
+
+impl HkdfCase {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    pub fn case_id(&self) -> String {
+        format!("{}/wycheproof/tc{}", self.alg.name(), self.tc_id)
+    }
+
+    /// The features this case exercises beyond the baseline surface.
+    pub fn features(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+#[derive(Deserialize)]
+struct HkdfGroup {
+    tests: Vec<HkdfTest>,
+}
+
+#[derive(Deserialize)]
+struct HkdfTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    ikm: String,
+    salt: String,
+    info: String,
+    size: u32,
+    okm: String,
+    result: String,
+}
+
+/// Translate the HKDF vector files. Every vector runs: the WIT surface
+/// carries the full (ikm, salt, info, size) parameter space, and the
+/// invalid vectors (`SizeTooLarge`) map onto the RFC 5869 output bound the
+/// `derive-bits` contract reports as `error.other`.
+pub fn hkdf_cases() -> Vec<HkdfCase> {
+    let mut cases = Vec::new();
+    for (alg, text) in HKDF_VECTORS {
+        let file: VectorFile<HkdfGroup> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        for group in &file.test_groups {
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                cases.push(HkdfCase {
+                    alg,
+                    tc_id: test.tc_id,
+                    ikm: unhex(&field, &test.ikm),
+                    salt: unhex(&field, &test.salt),
+                    info: unhex(&field, &test.info),
+                    size: test.size,
+                    okm: unhex(&field, &test.okm),
+                    valid: is_valid(&field, &test.result),
+                });
+            }
+        }
+    }
+    cases
+}
 
 /// A served SHA-2 algorithm, as named in digest vector ids.
 #[derive(Clone, Copy)]

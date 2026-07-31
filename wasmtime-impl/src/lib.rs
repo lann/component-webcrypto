@@ -211,6 +211,27 @@ pub struct SigningKeyOptions {
     pub(crate) policy: webcrypto_impl_core::SigningPolicy,
 }
 
+/// A `derive-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct DeriveOptions {
+    pub(crate) policy: webcrypto_impl_core::DerivePolicy,
+}
+
+/// Backing type for the `hkdf.ikm` resource: input keying material, never
+/// readable through the API under any grant.
+#[derive(Debug)]
+pub struct Ikm {
+    pub(crate) material: webcrypto_impl_core::IkmMaterial,
+}
+
+/// Backing type for the `derivation.derive-input` resource: a
+/// parameterized derivation, realized eagerly (the extract step runs at
+/// `prepare`, so this retains the PRK rather than the pre-image).
+#[derive(Debug)]
+pub struct DeriveInput {
+    pub(crate) material: webcrypto_impl_core::DeriveInputMaterial,
+}
+
 /// Backing type for the `mac.mac-key` resource.
 ///
 /// Holds the shared core's HMAC key material (raw bytes zeroized on drop,
@@ -333,6 +354,8 @@ where
         T::webcrypto,
     )?;
     bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::derivation::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::hkdf::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(

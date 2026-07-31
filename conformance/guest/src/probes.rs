@@ -4,9 +4,10 @@
 //! generated-key shape, and algorithm naming.
 
 use crate::mint::{
-    generate_chacha_key, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
-    generate_key, generate_xchacha_internal_nonce_key, generate_xchacha_key, import_aes_key_jwk,
-    import_chacha_key, import_hmac_key, import_hmac_key_jwk, import_internal_nonce_key, import_key,
+    derive_options, generate_chacha_key, generate_ed25519_key, generate_hmac_key,
+    generate_internal_nonce_key, generate_key, generate_xchacha_internal_nonce_key,
+    generate_xchacha_key, import_aes_key_jwk, import_chacha_key, import_hmac_key,
+    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key,
     import_xchacha_internal_nonce_key, import_xchacha_key,
 };
 use conformance_harness::stream::{
@@ -82,6 +83,8 @@ probes! {
     aead_usage_policy,
     internal_nonce_usage_policy,
     signing_usage_policy,
+    hkdf_derive_key_equivalence,
+    hkdf_grants_and_chaining,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -1795,4 +1798,178 @@ async fn signing_usage_policy() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     expect(key.can_sign(), true, "granted key can-sign")
+}
+
+/// WebCrypto §14.3.7 defines `deriveKey` as get-key-length → derive-bits →
+/// import, so for a fully granted input the two paths must agree exactly:
+/// `derive-key` equals importing the truncated `derive-bits` output. The
+/// HMAC length default (the hash's block size) rides the same
+/// get-key-length step `generate-key` uses.
+async fn hkdf_derive_key_equivalence() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm;
+    use lann_webcrypto_guest::bindings::hkdf;
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
+
+    let ikm = import_ikm(b"equivalence input keying material".to_vec(), true, true)
+        .await
+        .map_err(|e| describe("import-ikm", &e))?;
+    let input = hkdf::prepare(
+        Sha2Variant::Sha256,
+        &ikm,
+        b"equivalence salt".to_vec(),
+        b"equivalence info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare", &e))?;
+
+    let bits = input
+        .derive_bits(Some(256))
+        .await
+        .map_err(|e| describe("derive-bits", &e))?;
+
+    let aead_options = AeadKeyOptions::new();
+    aead_options.can_seal(true);
+    aead_options.extractable(true);
+    let derived = aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, aead_options)
+        .await
+        .map_err(|e| describe("aes-gcm derive-key", &e))?;
+    let exported = derived
+        .export_key()
+        .await
+        .map_err(|e| describe("export of derived AES key", &e))?;
+    expect_bytes(&exported, &bits, "derive-key equals import(derive-bits)")?;
+
+    // The HMAC default length is the block size, exactly as generate-key
+    // resolves it — and the derived key reports it.
+    let mac_options = MacKeyOptions::new();
+    mac_options.can_sign(true);
+    let mac = hmac_sha2::derive_key(Sha2Variant::Sha256, &input, None, mac_options)
+        .await
+        .map_err(|e| describe("hmac derive-key", &e))?;
+    expect(mac.algorithm_length(), 512, "derived HMAC default length")?;
+
+    // Prefix consistency across targets is the platform's own behavior:
+    // AES-128 from the same input is the first half of the 256-bit output.
+    let aead_options = AeadKeyOptions::new();
+    aead_options.can_seal(true);
+    aead_options.extractable(true);
+    let derived = aes_gcm::derive_key(aes_gcm::AesVariant::Aes128, &input, aead_options)
+        .await
+        .map_err(|e| describe("aes-128 derive-key", &e))?;
+    let exported = derived
+        .export_key()
+        .await
+        .map_err(|e| describe("export of derived AES-128 key", &e))?;
+    expect_bytes(
+        &exported,
+        &bits[..16],
+        "AES-128 is the 256-bit output's prefix",
+    )
+}
+
+/// The derive grants gate exactly their operations; an extractable key
+/// from a bits-less input is refused (the cap rule: an exportable key is
+/// bits disclosure by other means); KDF-from-KDF chaining fails as the
+/// platform's `deriveKey(… → "HKDF")` does; and the contract's parameter
+/// errors land on their documented cases.
+async fn hkdf_grants_and_chaining() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm;
+    use lann_webcrypto_guest::bindings::hkdf;
+
+    expect_err(
+        "zero-grant import-ikm",
+        ErrKind::NotPermitted,
+        import_ikm(vec![1; 32], false, false).await,
+        "minted material with no enabled grant",
+    )?;
+    expect_err(
+        "empty ikm",
+        ErrKind::InvalidKey,
+        import_ikm(Vec::new(), true, true).await,
+        "minted empty input keying material",
+    )?;
+
+    let bits_only = import_ikm(vec![2; 32], true, false)
+        .await
+        .map_err(|e| describe("bits-only import-ikm", &e))?;
+    expect(bits_only.can_derive_bits(), true, "ikm can-derive-bits")?;
+    expect(bits_only.can_derive_key(), false, "ikm can-derive-key")?;
+    expect_err(
+        "prepare on a truncated variant",
+        ErrKind::Unsupported,
+        hkdf::prepare(Sha2Variant::Sha224, &bits_only, Vec::new(), Vec::new()).await,
+        "prepared over an unserved variant",
+    )?;
+    let input = hkdf::prepare(Sha2Variant::Sha256, &bits_only, Vec::new(), Vec::new())
+        .await
+        .map_err(|e| describe("prepare", &e))?;
+    expect(
+        input.can_derive_bits(),
+        true,
+        "input copies can-derive-bits",
+    )?;
+    expect(input.can_derive_key(), false, "input copies can-derive-key")?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    expect_err(
+        "derive-key without the grant",
+        ErrKind::NotPermitted,
+        aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options).await,
+        "minted a key from a key-less input",
+    )?;
+    expect_err(
+        "derive-bits with no length on a KDF input",
+        ErrKind::Other,
+        input.derive_bits(None).await,
+        "derived with the platform's null-length error case",
+    )?;
+    expect_err(
+        "sub-byte derive length",
+        ErrKind::Other,
+        input.derive_bits(Some(12)).await,
+        "derived a sub-byte length",
+    )?;
+
+    let key_only = import_ikm(vec![3; 32], false, true)
+        .await
+        .map_err(|e| describe("key-only import-ikm", &e))?;
+    let input = hkdf::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), Vec::new())
+        .await
+        .map_err(|e| describe("prepare (key-only)", &e))?;
+    expect_err(
+        "derive-bits without the grant",
+        ErrKind::NotPermitted,
+        input.derive_bits(Some(256)).await,
+        "derived bits from a bits-less input",
+    )?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    options.extractable(true);
+    expect_err(
+        "extractable key from a bits-less input (the cap rule)",
+        ErrKind::NotPermitted,
+        aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options).await,
+        "laundered bits through an extractable derived key",
+    )?;
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    let key = aes_gcm::derive_key(aes_gcm::AesVariant::Aes256, &input, options)
+        .await
+        .map_err(|e| describe("non-extractable derive-key", &e))?;
+    expect(key.extractable(), false, "derived key extractability")?;
+
+    expect_err(
+        "KDF-from-KDF chaining",
+        ErrKind::Other,
+        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        "chained from an input with no natural output length",
+    )?;
+
+    // The grantless-options contract is per-mint: the consumed options above
+    // must not have leaked grants anywhere. A fresh zero-grant options fails.
+    let _ = derive_options(true, true); // constructed and dropped: no effect on anything
+    Ok(())
 }

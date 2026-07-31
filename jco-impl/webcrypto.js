@@ -801,7 +801,309 @@ export const hmacSha2 = {
   importKey: importHmacKey,
   importKeyJwk: importHmacKeyJwk,
   generateKey: generateHmacKey,
+  /**
+   * Mint an HMAC key from a parameterized derivation (the
+   * `hmac-sha2.derive-key` contract). `length` follows `generate-key`'s
+   * contract — `undefined` is the hash's block size, zero `invalid-key`,
+   * sub-byte `unsupported` — because WebCrypto's `deriveKey` computes the
+   * derived length by the same get-key-length step (§31.6.6).
+   * @param {string} variant
+   * @param {DeriveInput} input
+   * @param {number | undefined} length
+   * @param {MacKeyOptions} options
+   */
+  async deriveKey(variant, input, length, options) {
+    const policy = macPolicy(options);
+    const usages = macUsages(policy);
+    const { hash, blockBytes } = sha2Variant(variant);
+    if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
+    if (length !== undefined && length % 8 !== 0) {
+      throw errUnsupported(
+        `HMAC key length ${length} is not a multiple of 8; sub-byte lengths are not served`,
+      );
+    }
+    const bits = length ?? blockBytes * 8;
+    const key = await deriveKeyFrom(
+      input,
+      { name: "HMAC", hash, length: bits },
+      policy.extractable,
+      usages,
+    );
+    return new MacKey(key, bits, hash);
+  },
 };
+
+/** @type {WeakMap<DeriveOptions, { deriveBits: boolean, deriveKey: boolean }>} */
+const derivePolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {DeriveOptions} options
+ */
+function derivePolicy(options) {
+  const policy = derivePolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("derive-options minted by another provider");
+  }
+  return policy;
+}
+
+export class DeriveOptions {
+  constructor() {
+    derivePolicies.set(this, { deriveBits: false, deriveKey: false });
+  }
+
+  /** @param {boolean} allowed */
+  canDeriveBits(allowed) {
+    derivePolicy(this).deriveBits = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canDeriveKey(allowed) {
+    derivePolicy(this).deriveKey = allowed;
+  }
+}
+
+/**
+ * The platform usages for a derive policy, throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant (the options
+ * contract). The WIT grants map one-to-one onto the platform's derive
+ * usage pair.
+ * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+ * @returns {KeyUsage[]}
+ */
+function deriveUsages(policy) {
+  /** @type {KeyUsage[]} */
+  const usages = [];
+  if (policy.deriveBits) usages.push("deriveBits");
+  if (policy.deriveKey) usages.push("deriveKey");
+  if (usages.length === 0) {
+    throw errNotPermitted("an options resource granting nothing cannot mint");
+  }
+  return usages;
+}
+
+/**
+ * Per-instance state for the resources that appear as *parameters* of other
+ * interfaces' functions (`prepare` takes an `ikm`, `derive-key` takes a
+ * `derive-input`): state lives in WeakMaps rather than private fields, the
+ * options-classes idiom, so the classes stay structurally compatible with
+ * the interface definitions jco derives.
+ * @type {WeakMap<Ikm, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean } }>}
+ */
+const ikmState = new WeakMap();
+
+/** @param {Ikm} ikm */
+function ikmOf(ikm) {
+  const state = ikmState.get(ikm);
+  if (state === undefined) {
+    throw errOther("ikm minted by another provider");
+  }
+  return state;
+}
+
+/** A mint token so the resource classes have no public constructor path. */
+const MINT = Symbol("webcrypto mint");
+
+/**
+ * The `hkdf.ikm` resource: input keying material as a platform `CryptoKey`
+ * (`HKDF`-bound, non-extractable — the platform *forces* that at import,
+ * which is the WIT contract's "never readable" made platform-enforced).
+ * The WIT grants ride the key's usages, so the platform enforces them too.
+ */
+export class Ikm {
+  /**
+   * @param {symbol} token
+   * @param {CryptoKey} key
+   * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+   */
+  constructor(token, key, policy) {
+    if (token !== MINT) throw new TypeError("ikm is minted by import-ikm");
+    ikmState.set(this, { key, policy });
+  }
+
+  canDeriveBits() {
+    return ikmOf(this).policy.deriveBits;
+  }
+
+  canDeriveKey() {
+    return ikmOf(this).policy.deriveKey;
+  }
+}
+
+/**
+ * The `derivation.derive-input` resource: the spec's (baseKey, params)
+ * pair as an object — the platform `CryptoKey` plus the HKDF parameters,
+ * with the grants copied from the pre-image at `prepare`.
+ *
+ * Realization is deferred here, which on this host extends no pre-image
+ * residency: the IKM lives behind the platform `CryptoKey`, and this class
+ * holds no raw copy of anything secret.
+ */
+export class DeriveInput {
+  /**
+   * @param {symbol} token
+   * @param {CryptoKey} key
+   * @param {string} hash
+   * @param {Uint8Array} salt
+   * @param {Uint8Array} info
+   * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+   */
+  constructor(token, key, hash, salt, info, policy) {
+    if (token !== MINT) throw new TypeError("derive-input is minted by prepare");
+    inputState.set(this, { key, hash, salt, info, policy });
+  }
+
+  canDeriveBits() {
+    return inputOf(this).policy.deriveBits;
+  }
+
+  canDeriveKey() {
+    return inputOf(this).policy.deriveKey;
+  }
+
+  /**
+   * The derived bits at `length` (bits, a non-zero multiple of 8 — a KDF's
+   * output length is a caller choice, so `undefined` fails, the platform's
+   * own null-length behavior for HKDF). Fails `not-permitted` without the
+   * grant; the RFC 5869 output bound surfaces from the platform as
+   * `{ tag: 'other' }`.
+   * @param {number | undefined} length
+   * @returns {Promise<Uint8Array>}
+   */
+  async deriveBits(length) {
+    const state = inputOf(this);
+    if (!state.policy.deriveBits) throw notPermitted("derive-bits");
+    if (length === undefined) {
+      throw errOther(
+        "a KDF's output length is a caller choice: derive-bits from an HKDF input requires an explicit length",
+      );
+    }
+    if (length === 0 || length % 8 !== 0) {
+      throw errOther(`derive length must be a non-zero multiple of 8 bits, got ${length}`);
+    }
+    const bits = await platformCall("HKDF derive", () =>
+      subtle.deriveBits(hkdfParams(state), state.key, length),
+    );
+    return new Uint8Array(bits);
+  }
+
+}
+
+/**
+ * Mint a platform key from an input (the targets' `derive-key`), enforcing
+ * the grant and the cap rule: an extractable key is bits disclosure by
+ * other means, so it requires the `derive-bits` grant too. A free function
+ * rather than a method so the resource class carries exactly the WIT
+ * surface (it appears as a *parameter* of other interfaces' functions, so
+ * the derived definitions must remain assignable to it).
+ * @param {DeriveInput} input
+ * @param {AesKeyGenParams | HmacKeyGenParams} derived
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usages
+ */
+async function deriveKeyFrom(input, derived, extractable, usages) {
+  const state = inputOf(input);
+  if (!state.policy.deriveKey) throw notPermitted("derive-key");
+  if (extractable && !state.policy.deriveBits) {
+    throw errNotPermitted(
+      "minting an extractable key requires the derive-bits grant: an exportable key is bits disclosure by other means",
+    );
+  }
+  return await platformCall("HKDF derive-key", () =>
+    subtle.deriveKey(hkdfParams(state), state.key, derived, extractable, usages),
+  );
+}
+
+/**
+ * @type {WeakMap<DeriveInput, { key: CryptoKey, hash: string, salt: Uint8Array, info: Uint8Array, policy: { deriveBits: boolean, deriveKey: boolean } }>}
+ */
+const inputState = new WeakMap();
+
+/** @param {DeriveInput} input */
+function inputOf(input) {
+  const state = inputState.get(input);
+  if (state === undefined) {
+    throw errOther("derive-input minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * @param {{ hash: string, salt: Uint8Array, info: Uint8Array }} state
+ * @returns {HkdfParams}
+ */
+function hkdfParams(state) {
+  return {
+    name: "HKDF",
+    hash: state.hash,
+    salt: asBufferSource(state.salt),
+    info: asBufferSource(state.info),
+  };
+}
+
+/**
+ * Import input keying material (the `hkdf.import-ikm` contract): empty
+ * material is `invalid-key`, a grantless policy `not-permitted`. The
+ * platform key is minted non-extractable — its own requirement, and the
+ * WIT's.
+ * @param {Uint8Array} raw
+ * @param {DeriveOptions} options
+ */
+async function importIkm(raw, options) {
+  const policy = derivePolicy(options);
+  const usages = deriveUsages(policy);
+  if (raw.length === 0) throw errInvalidKey("HKDF input keying material must be non-empty");
+  let key;
+  try {
+    key = await subtle.importKey("raw", asBufferSource(raw), "HKDF", false, usages);
+  } catch (err) {
+    invalidKey(err, "HKDF input keying material");
+  }
+  return new Ikm(MINT, key, { ...policy });
+}
+
+/**
+ * Parameterize a derivation (the `hkdf.prepare` contract): the input's
+ * grants are copied; the salt and info are copied too, since the lifted
+ * arrays are this call's, not the resource's.
+ * @param {string} variant
+ * @param {Ikm} input
+ * @param {Uint8Array} salt
+ * @param {Uint8Array} info
+ */
+async function prepare(variant, input, salt, info) {
+  const { hash } = sha2Variant(variant);
+  const { key, policy } = ikmOf(input);
+  return new DeriveInput(MINT, key, hash, salt.slice(), info.slice(), { ...policy });
+}
+
+/**
+ * Chain from another derivation's output (the `hkdf.prepare-from`
+ * contract). Every input this host can hold today is a KDF's, which has
+ * no natural output length, so this fails exactly as the platform's
+ * `deriveKey(… → "HKDF")` does; agreement sources make it succeed.
+ * @param {string} variant
+ * @param {DeriveInput} input
+ * @param {Uint8Array} salt
+ * @param {Uint8Array} info
+ * @returns {Promise<DeriveInput>}
+ */
+async function prepareFrom(variant, input, salt, info) {
+  sha2Variant(variant);
+  void salt;
+  void info;
+  if (!inputOf(input).policy.deriveKey) throw notPermitted("derive-key");
+  throw errOther(
+    "a KDF input has no natural output length: chaining realizes the upstream at its natural length, which only agreement sources define",
+  );
+}
+
+/** The `lann:webcrypto/derivation` interface: its resource classes. */
+export const derivation = { DeriveOptions, DeriveInput };
+
+/** The `lann:webcrypto/hkdf` interface. */
+export const hkdf = { Ikm, importIkm, prepare, prepareFrom };
 
 /**
  * The `digest` resource: a digest algorithm bound at creation. Holds only
@@ -1013,6 +1315,27 @@ export const aead = { AeadKey, AeadKeyOptions };
 export const aesGcm = {
   ...aesMinting(AeadKey, aeadPolicy),
   importKeyJwk: importAesKeyJwk,
+  /**
+   * Mint an AES-GCM key from a parameterized derivation (the
+   * `aes-gcm.derive-key` contract): the platform's `deriveKey` chain, at
+   * the variant's key length. A variant this implementation declines
+   * throws `{ tag: 'unsupported', val }`.
+   * @param {string} variant
+   * @param {DeriveInput} input
+   * @param {AeadKeyOptions} options
+   */
+  async deriveKey(variant, input, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const bits = aesVariantByteLength(variant) * 8;
+    const key = await deriveKeyFrom(
+      input,
+      { name: "AES-GCM", length: bits },
+      policy.extractable,
+      usages,
+    );
+    return new AeadKey(key, bits);
+  },
 };
 
 /**

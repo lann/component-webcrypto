@@ -2485,6 +2485,7 @@ dependencies = [
  "getrandom 0.3.4",
  "ghash",
  "hex-literal",
+ "hkdf",
  "hmac",
  "p256",
  "p384",

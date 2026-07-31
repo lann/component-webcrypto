@@ -30,10 +30,14 @@ use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest}
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
 use crate::exports::lann::webcrypto::chacha20_poly1305::Guest as ChaChaPoly1305Guest;
-use crate::exports::lann::webcrypto::digest::{self, Guest as DigestGuest, GuestDigest};
+use crate::exports::lann::webcrypto::derivation::{
+    self, Guest as DerivationGuest, GuestDeriveInput, GuestDeriveOptions,
+};
+use crate::exports::lann::webcrypto::digest::{self as digest, Guest as DigestGuest, GuestDigest};
 use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
+use crate::exports::lann::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::mac::{
     self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
@@ -413,6 +417,134 @@ impl HmacSha2Guest for Component {
         let material = rng_infallible(MacKeyMaterial::generate(variant.into(), length, policy))?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
+
+    async fn derive_key(
+        variant: Sha2Variant,
+        input: derivation::DeriveInputBorrow<'_>,
+        length: Option<u32>,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = webcrypto_impl_core::derive_mac_key(
+            &input.get::<DeriveInput>().material,
+            variant.into(),
+            length,
+            policy,
+        )?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+}
+
+// --- derivation & hkdf ---------------------------------------------------------
+
+impl DerivationGuest for Component {
+    type DeriveOptions = DeriveOptions;
+    type DeriveInput = DeriveInput;
+}
+
+/// An exported `derive-options`. See [`MacKeyOptions`].
+pub struct DeriveOptions {
+    policy: Cell<webcrypto_impl_core::DerivePolicy>,
+}
+
+impl GuestDeriveOptions for DeriveOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(webcrypto_impl_core::DerivePolicy::default()),
+        }
+    }
+
+    fn can_derive_bits(&self, allowed: bool) {
+        self.policy.set(webcrypto_impl_core::DerivePolicy {
+            derive_bits: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_derive_key(&self, allowed: bool) {
+        self.policy.set(webcrypto_impl_core::DerivePolicy {
+            derive_key: allowed,
+            ..self.policy.get()
+        });
+    }
+}
+
+/// An exported `derive-input`: the shared core's parameterized derivation
+/// (realized eagerly — the PRK, not the pre-image).
+pub struct DeriveInput {
+    material: webcrypto_impl_core::DeriveInputMaterial,
+}
+
+impl GuestDeriveInput for DeriveInput {
+    fn can_derive_bits(&self) -> bool {
+        self.material.policy().derive_bits
+    }
+
+    fn can_derive_key(&self) -> bool {
+        self.material.policy().derive_key
+    }
+
+    async fn derive_bits(&self, length: Option<u32>) -> Result<Vec<u8>, Error> {
+        Ok(self.material.derive_bits(length)?.to_vec())
+    }
+}
+
+impl HkdfGuest for Component {
+    type Ikm = Ikm;
+
+    async fn import_ikm(
+        raw: Vec<u8>,
+        options: derivation::DeriveOptions,
+    ) -> Result<hkdf_iface::Ikm, Error> {
+        let policy = options.get::<DeriveOptions>().policy.get();
+        let material = webcrypto_impl_core::IkmMaterial::import(raw, policy)?;
+        Ok(hkdf_iface::Ikm::new(Ikm { material }))
+    }
+
+    async fn prepare(
+        variant: Sha2Variant,
+        input: hkdf_iface::IkmBorrow<'_>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare(
+            variant.into(),
+            &input.get::<Ikm>().material,
+            &salt,
+            info,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+
+    async fn prepare_from(
+        variant: Sha2Variant,
+        input: derivation::DeriveInputBorrow<'_>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare_from(
+            variant.into(),
+            &input.get::<DeriveInput>().material,
+            &salt,
+            info,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+}
+
+/// An exported `hkdf.ikm`: the shared core's input keying material.
+pub struct Ikm {
+    material: webcrypto_impl_core::IkmMaterial,
+}
+
+impl GuestIkm for Ikm {
+    fn can_derive_bits(&self) -> bool {
+        self.material.policy().derive_bits
+    }
+
+    fn can_derive_key(&self) -> bool {
+        self.material.policy().derive_key
+    }
 }
 
 // --- aes-gcm (key minting) -------------------------------------------------------
@@ -444,6 +576,20 @@ impl AesGcmGuest for Component {
     ) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
         let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(variant.into(), policy))?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn derive_key(
+        variant: AesVariant,
+        input: derivation::DeriveInputBorrow<'_>,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = webcrypto_impl_core::derive_aes_gcm_key(
+            &input.get::<DeriveInput>().material,
+            variant.into(),
+            policy,
+        )?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }

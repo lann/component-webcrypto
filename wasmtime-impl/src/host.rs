@@ -23,7 +23,12 @@ use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
 use crate::bindings::webcrypto::aead_internal_nonce::{
     self, HostInternalNonceKey, HostInternalNonceKeyWithStore,
 };
+use crate::bindings::webcrypto::derivation::{
+    self as derivation_iface, HostDeriveInput, HostDeriveInputWithStore, HostDeriveOptions,
+    HostDeriveOptionsWithStore,
+};
 use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
+use crate::bindings::webcrypto::hkdf::{self as hkdf_iface, HostIkm, HostIkmWithStore};
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
@@ -37,8 +42,8 @@ use crate::bindings::webcrypto::{
 use crate::limits::admit_input;
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
-    AeadKey, Digest, InternalNonceKey, MacKey, SigningKey, VerifyingKey, WasiWebcrypto,
-    WasiWebcryptoCtxView,
+    AeadKey, DeriveInput, Digest, Ikm, InternalNonceKey, MacKey, SigningKey, VerifyingKey,
+    WasiWebcrypto, WasiWebcryptoCtxView,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -412,6 +417,141 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
     }
 }
 
+// --- derivation -------------------------------------------------------------
+
+impl derivation_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostDeriveOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::DeriveOptions>> {
+        Ok(self.table.push(crate::DeriveOptions::default())?)
+    }
+
+    fn can_derive_bits(
+        &mut self,
+        self_: Resource<crate::DeriveOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.derive_bits = allowed;
+        Ok(())
+    }
+
+    fn can_derive_key(
+        &mut self,
+        self_: Resource<crate::DeriveOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.derive_key = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> HostDeriveOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<crate::DeriveOptions>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl HostDeriveInput for WasiWebcryptoCtxView<'_> {
+    fn can_derive_bits(&mut self, self_: Resource<DeriveInput>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_bits)
+    }
+
+    fn can_derive_key(&mut self, self_: Resource<DeriveInput>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_key)
+    }
+}
+
+impl<T: Send> HostDeriveInputWithStore<T> for WasiWebcrypto {
+    async fn derive_bits(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DeriveInput>,
+        length: Option<u32>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |input| {
+            input
+                .material
+                .derive_bits(length)
+                .map(|okm| okm.to_vec())
+                .map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<DeriveInput>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+// --- hkdf ----------------------------------------------------------------------
+
+impl hkdf_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostIkm for WasiWebcryptoCtxView<'_> {
+    fn can_derive_bits(&mut self, self_: Resource<Ikm>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_bits)
+    }
+
+    fn can_derive_key(&mut self, self_: Resource<Ikm>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().derive_key)
+    }
+}
+
+impl<T: Send> HostIkmWithStore<T> for WasiWebcrypto {
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<Ikm>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_ikm(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+        options: Resource<crate::DeriveOptions>,
+    ) -> Result<std::result::Result<Resource<Ikm>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = webcrypto_impl_core::IkmMaterial::import(raw, policy);
+        mint(accessor, material.map(|material| Ikm { material })).await
+    }
+
+    async fn prepare(
+        accessor: &Accessor<T, Self>,
+        variant: hkdf_iface::Sha2Variant,
+        input: Resource<Ikm>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |ikm| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare(
+                variant.into(),
+                &ikm.material,
+                &salt,
+                info,
+            )
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+
+    async fn prepare_from(
+        accessor: &Accessor<T, Self>,
+        variant: hkdf_iface::Sha2Variant,
+        input: Resource<DeriveInput>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |upstream| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare_from(
+                variant.into(),
+                &upstream.material,
+                &salt,
+                info,
+            )
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+}
+
 // --- digest --------------------------------------------------------------------
 
 impl digest_iface::Host for WasiWebcryptoCtxView<'_> {}
@@ -498,6 +638,21 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             .map_err(rng_trap("random key generation"))?;
         mint(accessor, material.map(|material| MacKey { material })).await
     }
+
+    async fn derive_key(
+        accessor: &Accessor<T, Self>,
+        variant: hmac_sha2_iface::Sha2Variant,
+        input: Resource<DeriveInput>,
+        length: Option<u32>,
+        options: Resource<crate::MacKeyOptions>,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = with_resource(accessor, input, |input| {
+            webcrypto_impl_core::derive_mac_key(&input.material, variant.into(), length, policy)
+        })
+        .await?;
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
 }
 
 // --- aes-gcm (key minting) -------------------------------------------------------
@@ -535,6 +690,20 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), policy)
             .map_err(rng_trap("random key generation"))?;
+        mint(accessor, material.map(|material| AeadKey { material })).await
+    }
+
+    async fn derive_key(
+        accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
+        input: Resource<DeriveInput>,
+        options: Resource<crate::AeadKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = with_resource(accessor, input, |input| {
+            webcrypto_impl_core::derive_aes_gcm_key(&input.material, variant.into(), policy)
+        })
+        .await?;
         mint(accessor, material.map(|material| AeadKey { material })).await
     }
 }

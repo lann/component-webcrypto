@@ -13,6 +13,8 @@ description = "Shared RustCrypto core for the Rust implementations of the lann:w
 # timing-channel classification.
 sha2 = "0.10"
 hmac = "0.12"
+# HKDF (RFC 5869) for the derivation core.
+hkdf = "0.12"
 subtle = "2"
 aes-gcm = "0.10"
 # Zeroize the AES round-key schedule on drop (the `aes-gcm` cipher owns an
