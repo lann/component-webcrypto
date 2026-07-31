@@ -127,16 +127,18 @@ is sensitive to the platform only where the platform itself is.
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
 | `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js` (references), `successes.js` |
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
+| `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
+| `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the
 suites' entry points directly with this library's algorithms (`HMAC`,
-`AES-GCM`, `X25519`), exactly as those drivers do among others. The X25519
-groups observe surface the library does not serve yet (the whole derive
-model and OKP key formats — see the shim header's deviations list), so
-their subset is empty: they exist to meter the gap, per AGENTS.md's "WPT
-fidelity is a first-class design constraint".
+`AES-GCM`, `X25519`), exactly as those drivers do among others. The X25519,
+HKDF, and PBKDF2 groups observe surface the library does not serve yet (the
+whole derive model, and for X25519 the OKP key formats — see the shim
+header's deviations list), so their subset is empty: they exist to meter
+the gap, per AGENTS.md's "WPT fidelity is a first-class design constraint".
 
 ## How it runs
 
