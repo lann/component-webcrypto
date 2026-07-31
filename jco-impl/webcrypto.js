@@ -138,6 +138,39 @@ function errKeyExhausted() {
 }
 
 /**
+ * `error.not-permitted` with a human-readable detail.
+ * @param {string} val
+ */
+function errNotPermitted(val) {
+  return witError("not-permitted", val);
+}
+
+/**
+ * The refusal an operation renders on a usage-denied key (the same string
+ * the shared Rust core renders, so the implementations report identically).
+ * @param {string} operation
+ */
+function notPermitted(operation) {
+  return errNotPermitted(`this key does not permit ${operation}`);
+}
+
+/**
+ * The WebCrypto usages granted by `pairs` (`[usage, granted]`), throwing
+ * `{ tag: 'not-permitted' }` when nothing is granted — the package-wide
+ * options contract's at-least-one-usage mint check, run before any other
+ * validation like the shared Rust core.
+ * @param {[KeyUsage, boolean][]} pairs
+ * @returns {KeyUsage[]}
+ */
+function grantedUsages(pairs) {
+  const usages = pairs.filter(([, granted]) => granted).map(([usage]) => usage);
+  if (usages.length === 0) {
+    throw errNotPermitted("a key with no enabled usage cannot be minted");
+  }
+  return usages;
+}
+
+/**
  * Lift a `subtle.decrypt` rejection. A failed tag check surfaces as
  * `OperationError`, which is `authentication-failed` and deliberately
  * carries no detail. Anything else — `DataError`, `InvalidAccessError`,
@@ -257,9 +290,55 @@ function sha2Variant(variant) {
 }
 
 /**
+ * The `mac-key-options` resource: mint-time policy under construction. Per
+ * the package-wide options contract the constructor grants nothing; the
+ * setters are opt-in, and a mint consumes the accumulated policy through
+ * `macPolicy`. The state lives in a module-private `WeakMap` rather than
+ * private fields, so the class stays structurally compatible with the
+ * generated interface types; the map lookup doubles as the same-provider
+ * check the WIT requires (a foreign object is not a key).
+ */
+/** @type {WeakMap<MacKeyOptions, { sign: boolean, verify: boolean, extractable: boolean }>} */
+const macPolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {MacKeyOptions} options
+ */
+function macPolicy(options) {
+  const policy = macPolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("mac-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class MacKeyOptions {
+  constructor() {
+    macPolicies.set(this, { sign: false, verify: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canSign(allowed) {
+    macPolicy(this).sign = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canVerify(allowed) {
+    macPolicy(this).verify = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    macPolicy(this).extractable = allowed;
+  }
+}
+
+/**
  * The `mac-key` resource: an HMAC key bound to a SHA-2 variant. Holds a
- * `CryptoKey` imported with usages `["sign", "verify"]` and the caller's
- * `extractable` flag; instances are minted only by the `hmac-sha2`
+ * `CryptoKey` imported with exactly the usages its mint options granted and
+ * the options' `extractable` flag, so the platform enforces the policy the
+ * resource reports; instances are minted only by the `hmac-sha2`
  * interface functions below.
  * `sign`/`verify` are one-shot and stateless per call, matching
  * `subtle.sign`/`verify` exactly (WebCrypto has no incremental HMAC): each
@@ -291,11 +370,13 @@ export class MacKey {
 
   /**
    * Compute the authentication tag over an entire byte stream, resolving
-   * once the stream is fully drained.
+   * once the stream is fully drained. Throws `{ tag: 'not-permitted' }` on
+   * a key minted without the `sign` usage.
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
     return withCollectedInput(data, async (message) => {
+      if (!this.canSign()) throw notPermitted("sign");
       return new Uint8Array(
         await platformCall("HMAC sign", () => subtle.sign("HMAC", this.#key, message)),
       );
@@ -305,12 +386,14 @@ export class MacKey {
   /**
    * Verify `tag` against the tag computed over an entire byte stream; the
    * platform performs the constant-time comparison. Throws
-   * `{ tag: 'authentication-failed' }` if the tag does not verify.
+   * `{ tag: 'authentication-failed' }` if the tag does not verify, and
+   * `{ tag: 'not-permitted' }` on a key minted without the `verify` usage.
    * @param {AsyncIterable<unknown> | ReadableStream} data
    * @param {Uint8Array} tag
    */
   async verify(data, tag) {
     await withCollectedInput(data, async (message) => {
+      if (!this.canVerify()) throw notPermitted("verify");
       const ok = await platformCall("HMAC verify", () =>
         subtle.verify("HMAC", this.#key, asBufferSource(tag), message),
       );
@@ -341,6 +424,15 @@ export class MacKey {
     return this.#key.extractable;
   }
 
+  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
+  canSign() {
+    return this.#key.usages.includes("sign");
+  }
+
+  canVerify() {
+    return this.#key.usages.includes("verify");
+  }
+
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
    * was created with `extractable` true (see `exportRawGated`).
@@ -359,9 +451,69 @@ export class MacKey {
 }
 
 /**
+ * The `aead-key-options` resource. See `MacKeyOptions` for the state and
+ * same-provider mechanics; the wrap/unwrap usages map onto WebCrypto's
+ * `wrapKey`/`unwrapKey` (recorded on the platform key; no operation in
+ * this package consumes them yet).
+ */
+/** @type {WeakMap<AeadKeyOptions, { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
+const aeadPolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {AeadKeyOptions} options
+ */
+function aeadPolicy(options) {
+  const policy = aeadPolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("aead-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class AeadKeyOptions {
+  constructor() {
+    aeadPolicies.set(this, {
+      seal: false,
+      open: false,
+      wrap: false,
+      unwrap: false,
+      extractable: false,
+    });
+  }
+
+  /** @param {boolean} allowed */
+  canSeal(allowed) {
+    aeadPolicy(this).seal = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canOpen(allowed) {
+    aeadPolicy(this).open = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canWrap(allowed) {
+    aeadPolicy(this).wrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canUnwrap(allowed) {
+    aeadPolicy(this).unwrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    aeadPolicy(this).extractable = allowed;
+  }
+}
+
+/**
  * The `aead-key` resource: an AES-GCM key. Holds a `CryptoKey` imported
- * with usages `["encrypt", "decrypt"]` and the caller's `extractable` flag;
- * instances are minted only by the `aes-gcm` interface functions below.
+ * with exactly the usages its mint options granted and the options'
+ * `extractable` flag, so the platform enforces the policy the resource
+ * reports; instances are minted only by the `aes-gcm` interface functions
+ * below.
  */
 export class AeadKey {
   #key;
@@ -399,6 +551,7 @@ export class AeadKey {
    */
   async seal(nonce, aad, tagSize, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
+      if (!this.canSeal()) throw notPermitted("seal");
       requireGcmNonce(nonce);
       const tagLength = gcmTagLengthBits(tagSize);
       let sealed;
@@ -439,6 +592,7 @@ export class AeadKey {
    */
   async open(nonce, aad, tagSize, ciphertext) {
     return withCollectedInputToStream(ciphertext, async (message) => {
+      if (!this.canOpen()) throw notPermitted("open");
       requireGcmNonce(nonce);
       const tagLength = gcmTagLengthBits(tagSize);
       let opened;
@@ -491,6 +645,23 @@ export class AeadKey {
     return this.#key.extractable;
   }
 
+  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
+  canSeal() {
+    return this.#key.usages.includes("encrypt");
+  }
+
+  canOpen() {
+    return this.#key.usages.includes("decrypt");
+  }
+
+  canWrap() {
+    return this.#key.usages.includes("wrapKey");
+  }
+
+  canUnwrap() {
+    return this.#key.usages.includes("unwrapKey");
+  }
+
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
    * was created with `extractable` true (see `exportRawGated`).
@@ -510,23 +681,40 @@ export class AeadKey {
 }
 
 /**
+ * The WebCrypto usages granted by a MAC mint policy, throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant.
+ * @param {{ sign: boolean, verify: boolean }} policy
+ */
+function macUsages(policy) {
+  return grantedUsages([
+    ["sign", policy.sign],
+    ["verify", policy.verify],
+  ]);
+}
+
+/**
  * Import raw key material as an HMAC key over the declared SHA-2 variant. A
  * variant this implementation declines throws `{ tag: 'unsupported', val }`.
  * Any non-empty length is accepted (RFC 2104); empty material throws
  * `{ tag: 'invalid-key', val }`.
  * @param {string} variant
  * @param {Uint8Array} raw
- * @param {boolean} extractable
+ * @param {MacKeyOptions} options
  */
-async function importHmacKey(variant, raw, extractable) {
+async function importHmacKey(variant, raw, options) {
+  const policy = macPolicy(options);
+  const usages = macUsages(policy);
   const { hash } = sha2Variant(variant);
   if (raw.length === 0) throw errInvalidKey("empty key");
   let key;
   try {
-    key = await subtle.importKey("raw", asBufferSource(raw), { name: "HMAC", hash }, extractable, [
-      "sign",
-      "verify",
-    ]);
+    key = await subtle.importKey(
+      "raw",
+      asBufferSource(raw),
+      { name: "HMAC", hash },
+      policy.extractable,
+      usages,
+    );
   } catch (err) {
     invalidKey(err, "HMAC key");
   }
@@ -542,9 +730,11 @@ async function importHmacKey(variant, raw, extractable) {
  * as does a variant this implementation declines.
  * @param {string} variant
  * @param {number | undefined} length
- * @param {boolean} extractable
+ * @param {MacKeyOptions} options
  */
-async function generateHmacKey(variant, length, extractable) {
+async function generateHmacKey(variant, length, options) {
+  const policy = macPolicy(options);
+  const usages = macUsages(policy);
   const { hash, blockBytes } = sha2Variant(variant);
   if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
   if (length !== undefined && length % 8 !== 0) {
@@ -554,7 +744,7 @@ async function generateHmacKey(variant, length, extractable) {
   }
   const bits = length ?? blockBytes * 8;
   const key = await platformCall(`HMAC-${hash} key generation`, () =>
-    subtle.generateKey({ name: "HMAC", hash, length: bits }, extractable, ["sign", "verify"]),
+    subtle.generateKey({ name: "HMAC", hash, length: bits }, policy.extractable, usages),
   );
   return new MacKey(key, bits, hash);
 }
@@ -563,22 +753,27 @@ async function generateHmacKey(variant, length, extractable) {
  * Import an `oct` JWK as an HMAC key over the declared SHA-2 variant (the
  * `hmac-sha2.import-key-jwk` contract). The platform owns the JWK
  * validation: `kty`, strict base64url `k`, `alg` against the requested
- * hash, and `ext` against `extractable` all fail there and map to
- * `{ tag: 'invalid-key', val }`.
+ * hash, and `ext` against the options' extractability all fail there and
+ * map to `{ tag: 'invalid-key', val }`.
  * @param {string} variant
  * @param {string} jwk
- * @param {boolean} extractable
+ * @param {MacKeyOptions} options
  */
-async function importHmacKeyJwk(variant, jwk, extractable) {
+async function importHmacKeyJwk(variant, jwk, options) {
+  const policy = macPolicy(options);
+  const usages = macUsages(policy);
   const { hash } = sha2Variant(variant);
   const material = jwkMaterial(jwk);
   requireStrictBase64url(material.k);
   let key;
   try {
-    key = await subtle.importKey("jwk", material, { name: "HMAC", hash }, extractable, [
-      "sign",
-      "verify",
-    ]);
+    key = await subtle.importKey(
+      "jwk",
+      material,
+      { name: "HMAC", hash },
+      policy.extractable,
+      usages,
+    );
   } catch (err) {
     invalidKey(err, "HMAC JWK");
   }
@@ -679,13 +874,32 @@ function aesVariantByteLength(variant) {
 }
 
 /**
+ * The WebCrypto usages granted by an AEAD mint policy (seal/open map onto
+ * encrypt/decrypt; wrap/unwrap onto wrapKey/unwrapKey), throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant. The internal-nonce
+ * vocabulary has no wrap usages, so its policies arrive without them.
+ * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ */
+function aeadUsages(policy) {
+  return grantedUsages([
+    ["encrypt", policy.seal],
+    ["decrypt", policy.open],
+    ["wrapKey", policy.wrap ?? false],
+    ["unwrapKey", policy.unwrap ?? false],
+  ]);
+}
+
+/**
  * The `aes-gcm` / `aes-gcm-internal-nonce` minting pair over `Ctor`: the
  * two interfaces share the whole import/generate contract and differ only
- * in the resource they mint.
+ * in the resource they mint and the options resource they consume
+ * (`readPolicy` is the matching options kind's policy reader).
  * @template T
+ * @template O
  * @param {new (key: CryptoKey, lengthBits: number) => T} Ctor
+ * @param {(options: O) => { seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean, extractable: boolean }} readPolicy
  */
-function aesMinting(Ctor) {
+function aesMinting(Ctor, readPolicy) {
   return {
     /**
      * Import raw key material as the declared AES variant. A variant this
@@ -694,19 +908,24 @@ function aesMinting(Ctor) {
      * `{ tag: 'invalid-key', val }`.
      * @param {string} variant
      * @param {Uint8Array} raw
-     * @param {boolean} extractable
+     * @param {O} options
      */
-    async importKey(variant, raw, extractable) {
+    async importKey(variant, raw, options) {
+      const policy = readPolicy(options);
+      const usages = aeadUsages(policy);
       const expected = aesVariantByteLength(variant);
       if (raw.length !== expected) {
         throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
       }
       let key;
       try {
-        key = await subtle.importKey("raw", asBufferSource(raw), { name: "AES-GCM" }, extractable, [
-          "encrypt",
-          "decrypt",
-        ]);
+        key = await subtle.importKey(
+          "raw",
+          asBufferSource(raw),
+          { name: "AES-GCM" },
+          policy.extractable,
+          usages,
+        );
       } catch (err) {
         invalidKey(err, `${variant} key`);
       }
@@ -717,12 +936,14 @@ function aesMinting(Ctor) {
      * Generate a fresh random AES key of the declared variant. A variant
      * this implementation declines throws `{ tag: 'unsupported', val }`.
      * @param {string} variant
-     * @param {boolean} extractable
+     * @param {O} options
      */
-    async generateKey(variant, extractable) {
+    async generateKey(variant, options) {
+      const policy = readPolicy(options);
+      const usages = aeadUsages(policy);
       const length = aesVariantByteLength(variant) * 8;
       const key = await platformCall(`${variant} key generation`, () =>
-        subtle.generateKey({ name: "AES-GCM", length }, extractable, ["encrypt", "decrypt"]),
+        subtle.generateKey({ name: "AES-GCM", length }, policy.extractable, usages),
       );
       return new Ctor(key, length);
     },
@@ -733,23 +954,28 @@ function aesMinting(Ctor) {
  * Import an `oct` JWK as an AES-GCM key of the declared variant (the
  * `aes-gcm.import-key-jwk` contract). The platform validates the JWK's
  * internal consistency (`kty`, strict base64url `k`, `alg` against `k`'s
- * length, `ext` against `extractable`); the variant check is against the
- * imported key's platform-computed length, since the platform cannot know
- * the declared variant.
+ * length, `ext` against the options' extractability); the variant check is
+ * against the imported key's platform-computed length, since the platform
+ * cannot know the declared variant.
  * @param {string} variant
  * @param {string} jwk
- * @param {boolean} extractable
+ * @param {AeadKeyOptions} options
  */
-async function importAesKeyJwk(variant, jwk, extractable) {
+async function importAesKeyJwk(variant, jwk, options) {
+  const policy = aeadPolicy(options);
+  const usages = aeadUsages(policy);
   const lengthBits = aesVariantByteLength(variant) * 8;
   const material = jwkMaterial(jwk);
   requireStrictBase64url(material.k);
   let key;
   try {
-    key = await subtle.importKey("jwk", material, { name: "AES-GCM" }, extractable, [
-      "encrypt",
-      "decrypt",
-    ]);
+    key = await subtle.importKey(
+      "jwk",
+      material,
+      { name: "AES-GCM" },
+      policy.extractable,
+      usages,
+    );
   } catch (err) {
     invalidKey(err, `${variant} JWK`);
   }
@@ -764,7 +990,10 @@ async function importAesKeyJwk(variant, jwk, extractable) {
 }
 
 /** The `lann:webcrypto/aes-gcm` interface (`--map '…#aesGcm'`). */
-export const aesGcm = { ...aesMinting(AeadKey), importKeyJwk: importAesKeyJwk };
+export const aesGcm = {
+  ...aesMinting(AeadKey, aeadPolicy),
+  importKeyJwk: importAesKeyJwk,
+};
 
 /**
  * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
@@ -800,6 +1029,47 @@ export const xchachaInternalNonce = {
   importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
+
+/**
+ * The `internal-nonce-key-options` resource. See `MacKeyOptions` for the
+ * state and same-provider mechanics; the vocabulary is seal/open only
+ * (this kind has no WebCrypto usage vocabulary beyond its own operations).
+ */
+/** @type {WeakMap<InternalNonceKeyOptions, { seal: boolean, open: boolean, extractable: boolean }>} */
+const internalNoncePolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {InternalNonceKeyOptions} options
+ */
+function internalNoncePolicy(options) {
+  const policy = internalNoncePolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("internal-nonce-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class InternalNonceKeyOptions {
+  constructor() {
+    internalNoncePolicies.set(this, { seal: false, open: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canSeal(allowed) {
+    internalNoncePolicy(this).seal = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canOpen(allowed) {
+    internalNoncePolicy(this).open = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    internalNoncePolicy(this).extractable = allowed;
+  }
+}
 
 /**
  * The `internal-nonce-key` resource: an AES-GCM key whose nonce is generated
@@ -842,6 +1112,7 @@ export class InternalNonceKey {
    */
   async seal(aad, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
+      if (!this.canSeal()) throw notPermitted("seal");
       if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
         throw errKeyExhausted();
       }
@@ -874,6 +1145,7 @@ export class InternalNonceKey {
    */
   async open(aad, sealed) {
     return withCollectedInputToStream(sealed, async (message) => {
+      if (!this.canOpen()) throw notPermitted("open");
       if (message.length < InternalNonceKey.#IV_BYTES) {
         throw errAuthenticationFailed();
       }
@@ -919,6 +1191,15 @@ export class InternalNonceKey {
     return this.#key.extractable;
   }
 
+  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
+  canSeal() {
+    return this.#key.usages.includes("encrypt");
+  }
+
+  canOpen() {
+    return this.#key.usages.includes("decrypt");
+  }
+
   /**
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
    * key was created with `extractable` true (see `exportRawGated`).
@@ -929,7 +1210,7 @@ export class InternalNonceKey {
 }
 
 /** The `lann:webcrypto/aes-gcm-internal-nonce` interface (`--map '…#aesGcmInternalNonce'`). */
-export const aesGcmInternalNonce = aesMinting(InternalNonceKey);
+export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePolicy);
 
 /**
  * Throw `{ tag: 'invalid-nonce', val }` for an empty nonce. AES-GCM accepts
@@ -1524,6 +1805,51 @@ export class VerifyingKey {
 }
 
 /**
+ * The `signing-key-options` resource. See `MacKeyOptions` for the state and
+ * same-provider mechanics; the vocabulary is degenerate (`sign` is the sole
+ * usage, and must be granted for a mint to succeed).
+ */
+/** @type {WeakMap<SigningKeyOptions, { sign: boolean, extractable: boolean }>} */
+const signingPolicies = new WeakMap();
+
+/**
+ * The policy accumulated by `options`, read by the setters and at mint.
+ * @param {SigningKeyOptions} options
+ */
+function signingPolicy(options) {
+  const policy = signingPolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("signing-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class SigningKeyOptions {
+  constructor() {
+    signingPolicies.set(this, { sign: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canSign(allowed) {
+    signingPolicy(this).sign = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    signingPolicy(this).extractable = allowed;
+  }
+}
+
+/**
+ * The mint-time check on a signing policy: `sign` is the sole usage, so it
+ * must be granted (the options contract's at-least-one-usage rule).
+ * @param {{ sign: boolean, extractable: boolean }} policy
+ */
+function requireSigningGrant(policy) {
+  grantedUsages([["sign", policy.sign]]);
+}
+
+/**
  * The `signing-key` resource: a private `CryptoKey` and the mint-bound
  * algorithm record. The WIT `extractable` flag is carried by the platform
  * key itself (it is passed through at import/generation), so the platform
@@ -1547,10 +1873,12 @@ export class SigningKey {
 
   /**
    * Sign an entire byte stream; resolves once the stream is fully drained.
+   * Throws `{ tag: 'not-permitted' }` on a key without the `sign` usage.
    * @param {AsyncIterable<unknown> | ReadableStream} data
    */
   async sign(data) {
     return withCollectedInput(data, async (message) => {
+      if (!this.canSign()) throw notPermitted("sign");
       const params = signParams(this.#algorithm);
       return new Uint8Array(
         await platformCall(`${this.#algorithm.name} sign`, () =>
@@ -1575,6 +1903,11 @@ export class SigningKey {
 
   extractable() {
     return this.#privateKey.extractable;
+  }
+
+  /** The `sign` grant: a projection of the `CryptoKey`'s own usage list. */
+  canSign() {
+    return this.#privateKey.usages.includes("sign");
   }
 }
 
@@ -1713,13 +2046,15 @@ export const ed25519Verify = { importVerifyingKey: importEd25519VerifyingKey };
 
 /**
  * Generate a fresh Ed25519 signing key, returning `[signing, verifying]`.
- * @param {boolean} extractable
+ * @param {SigningKeyOptions} options
  * @returns {Promise<[SigningKey, VerifyingKey]>}
  */
-async function generateEd25519Key(extractable) {
+async function generateEd25519Key(options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
   const pair = /** @type {CryptoKeyPair} */ (
     await platformCall("Ed25519 key generation", () =>
-      subtle.generateKey("Ed25519", extractable, ["sign", "verify"]),
+      subtle.generateKey("Ed25519", policy.extractable, ["sign", "verify"]),
     )
   );
   return [
@@ -1765,13 +2100,15 @@ export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
  * Generate a fresh ECDSA signing key of the declared variant, returning
  * `[signing, verifying]`.
  * @param {string} variant
- * @param {boolean} extractable
+ * @param {SigningKeyOptions} options
  * @returns {Promise<[SigningKey, VerifyingKey]>}
  */
-async function generateEcdsaKey(variant, extractable) {
+async function generateEcdsaKey(variant, options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
   const entry = ecdsaVariant(variant);
   const pair = await platformCall(`${variant} key generation`, () =>
-    subtle.generateKey({ name: "ECDSA", namedCurve: entry.namedCurve }, extractable, [
+    subtle.generateKey({ name: "ECDSA", namedCurve: entry.namedCurve }, policy.extractable, [
       "sign",
       "verify",
     ]),

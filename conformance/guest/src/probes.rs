@@ -3,42 +3,29 @@
 //! extractability, error variants for misuse, the seal/open drain rule,
 //! generated-key shape, and algorithm naming.
 
+use crate::mint::{
+    generate_chacha_key, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
+    generate_key, generate_xchacha_internal_nonce_key, generate_xchacha_key, import_aes_key_jwk,
+    import_chacha_key, import_hmac_key, import_hmac_key_jwk, import_internal_nonce_key, import_key,
+    import_xchacha_internal_nonce_key, import_xchacha_key,
+};
 use conformance_harness::stream::{
-    compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, verify, Schedule,
+    compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, try_sign, verify,
+    Schedule,
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
     FEATURE_GCM_ANY_IV,
 };
 use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::aes_gcm::{
-    generate_key, import_key, import_key_jwk as import_aes_key_jwk, AesVariant,
-};
-use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::{
-    generate_key as generate_internal_nonce_key, import_key as import_internal_nonce_key,
-};
+use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
-use lann_webcrypto_guest::bindings::chacha20_poly1305::{
-    generate_key as generate_chacha_key, import_key as import_chacha_key,
-};
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_sign::generate_key as generate_ed25519_key;
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::hmac_sha2::{
-    generate_key as generate_hmac_key, import_key as import_hmac_key,
-    import_key_jwk as import_hmac_key_jwk,
-};
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::xchacha20_poly1305::{
-    generate_key as generate_xchacha_key, import_key as import_xchacha_key,
-};
-use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::{
-    generate_key as generate_xchacha_internal_nonce_key,
-    import_key as import_xchacha_internal_nonce_key,
-};
 
 /// The features a bare tag in the `probes!` table stands for. Which
 /// features exist is this suite's business, not the harness's.
@@ -91,6 +78,10 @@ probes! {
     jwk_rejections,
     jwk_semantics,
     chacha_jwk_unsupported(chacha),
+    mac_usage_policy,
+    aead_usage_policy,
+    internal_nonce_usage_policy,
+    signing_usage_policy,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -1587,4 +1578,221 @@ async fn chacha_jwk_unsupported() -> Result<(), String> {
         )),
         Ok(_) => Err("ChaCha20-Poly1305 exported a JWK".into()),
     }
+}
+
+/// Usage policy on `mac-key`: an untouched options resource cannot mint
+/// (`not-permitted`, the package-wide options contract), grants are
+/// enforced per operation, and the usage getters report the recorded
+/// grants.
+async fn mac_usage_policy() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
+
+    let raw = b"mac-usage-policy key".to_vec();
+    expect_err(
+        "zero-usage import-key",
+        ErrKind::NotPermitted,
+        hmac_sha2::import_key(Sha2Variant::Sha256, raw.clone(), MacKeyOptions::new()).await,
+        "minted a key with no enabled usage",
+    )?;
+
+    let options = MacKeyOptions::new();
+    options.can_sign(true);
+    let sign_only = hmac_sha2::import_key(Sha2Variant::Sha256, raw.clone(), options)
+        .await
+        .map_err(|e| describe("sign-only import-key", &e))?;
+    expect(sign_only.can_sign(), true, "sign-only key can-sign")?;
+    expect(sign_only.can_verify(), false, "sign-only key can-verify")?;
+
+    let payload = b"usage-policy payload";
+    let (tag, fed) = sign(&sign_only, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let (refused, fed) = verify(&sign_only, payload, &tag, Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    expect_err(
+        "verify on a sign-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "sign-only key verified",
+    )?;
+
+    let options = MacKeyOptions::new();
+    options.can_verify(true);
+    let verify_only = hmac_sha2::import_key(Sha2Variant::Sha256, raw, options)
+        .await
+        .map_err(|e| describe("verify-only import-key", &e))?;
+    expect(verify_only.can_sign(), false, "verify-only key can-sign")?;
+    expect(verify_only.can_verify(), true, "verify-only key can-verify")?;
+    let (verified, fed) = verify(&verify_only, payload, &tag, Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    verified.map_err(|e| describe("valid tag under a verify-only key", &e))?;
+    let (refused, fed) = try_sign(&verify_only, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    expect_err(
+        "sign on a verify-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "verify-only key signed",
+    )
+}
+
+/// Usage policy on `aead-key`: the seal/open grants are enforced per
+/// operation and reported by the getters, and the wrap grants — recorded
+/// ahead of operations — mint a key on their own but permit neither
+/// operation.
+async fn aead_usage_policy() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm;
+
+    let raw = vec![0x5au8; 32];
+    expect_err(
+        "zero-usage import-key",
+        ErrKind::NotPermitted,
+        aes_gcm::import_key(AesVariant::Aes256, raw.clone(), AeadKeyOptions::new()).await,
+        "minted a key with no enabled usage",
+    )?;
+
+    let options = AeadKeyOptions::new();
+    options.can_seal(true);
+    let seal_only = aes_gcm::import_key(AesVariant::Aes256, raw.clone(), options)
+        .await
+        .map_err(|e| describe("seal-only import-key", &e))?;
+    expect(seal_only.can_seal(), true, "seal-only key can-seal")?;
+    expect(seal_only.can_open(), false, "seal-only key can-open")?;
+    expect(seal_only.can_wrap(), false, "seal-only key can-wrap")?;
+    expect(seal_only.can_unwrap(), false, "seal-only key can-unwrap")?;
+
+    let nonce = [3u8; 12];
+    let plaintext = b"usage-policy plaintext";
+    let (sealed, fed) = seal(&seal_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal under a seal-only key", &e))?;
+    let (refused, fed) = open(&seal_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    expect_err(
+        "open on a seal-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "seal-only key opened",
+    )?;
+
+    let options = AeadKeyOptions::new();
+    options.can_open(true);
+    let open_only = aes_gcm::import_key(AesVariant::Aes256, raw.clone(), options)
+        .await
+        .map_err(|e| describe("open-only import-key", &e))?;
+    expect(open_only.can_seal(), false, "open-only key can-seal")?;
+    expect(open_only.can_open(), true, "open-only key can-open")?;
+    let (opened, fed) = open(&open_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open under an open-only key", &e))?;
+    expect_bytes(&opened, plaintext, "plaintext under an open-only key")?;
+    let (refused, fed) = seal(&open_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    expect_err(
+        "seal on an open-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "open-only key sealed",
+    )?;
+
+    let options = AeadKeyOptions::new();
+    options.can_wrap(true);
+    let wrap_only = aes_gcm::import_key(AesVariant::Aes256, raw, options)
+        .await
+        .map_err(|e| describe("wrap-only import-key", &e))?;
+    expect(wrap_only.can_wrap(), true, "wrap-only key can-wrap")?;
+    expect(wrap_only.can_seal(), false, "wrap-only key can-seal")?;
+    let (refused, fed) = seal(&wrap_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    expect_err(
+        "seal on a wrap-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "wrap-only key sealed",
+    )
+}
+
+/// Usage policy on `internal-nonce-key`: the seal/open grants are enforced
+/// per operation and reported by the getters, and a zero-usage mint is
+/// refused.
+async fn internal_nonce_usage_policy() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKeyOptions;
+    use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce;
+
+    let raw = vec![0xc3u8; 32];
+    expect_err(
+        "zero-usage import-key",
+        ErrKind::NotPermitted,
+        aes_gcm_internal_nonce::import_key(
+            AesVariant::Aes256,
+            raw.clone(),
+            InternalNonceKeyOptions::new(),
+        )
+        .await,
+        "minted a key with no enabled usage",
+    )?;
+
+    let options = InternalNonceKeyOptions::new();
+    options.can_seal(true);
+    let seal_only = aes_gcm_internal_nonce::import_key(AesVariant::Aes256, raw.clone(), options)
+        .await
+        .map_err(|e| describe("seal-only import-key", &e))?;
+    expect(seal_only.can_seal(), true, "seal-only key can-seal")?;
+    expect(seal_only.can_open(), false, "seal-only key can-open")?;
+
+    let plaintext = b"internal-nonce usage-policy plaintext";
+    let (sealed, fed) = in_seal(&seal_only, b"", plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal under a seal-only key", &e))?;
+    let (refused, fed) = in_open(&seal_only, b"", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open input feeder: {e}"))?;
+    expect_err(
+        "open on a seal-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "seal-only key opened",
+    )?;
+
+    let options = InternalNonceKeyOptions::new();
+    options.can_open(true);
+    let open_only = aes_gcm_internal_nonce::import_key(AesVariant::Aes256, raw, options)
+        .await
+        .map_err(|e| describe("open-only import-key", &e))?;
+    expect(open_only.can_seal(), false, "open-only key can-seal")?;
+    expect(open_only.can_open(), true, "open-only key can-open")?;
+    let (opened, fed) = in_open(&open_only, b"", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open input feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open under an open-only key", &e))?;
+    expect_bytes(&opened, plaintext, "plaintext under an open-only key")?;
+    let (refused, fed) = in_seal(&open_only, b"", plaintext, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    expect_err(
+        "seal on an open-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "open-only key sealed",
+    )
+}
+
+/// Usage policy on `signing-key`: `sign` is the sole usage, so an
+/// untouched options resource cannot generate, and a granted key reports
+/// the grant through `can-sign`.
+async fn signing_usage_policy() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ed25519_sign;
+    use lann_webcrypto_guest::bindings::signature::SigningKeyOptions;
+
+    expect_err(
+        "zero-usage generate-key",
+        ErrKind::NotPermitted,
+        ed25519_sign::generate_key(SigningKeyOptions::new()).await,
+        "generated a key with no enabled usage",
+    )?;
+
+    let options = SigningKeyOptions::new();
+    options.can_sign(true);
+    let (key, _public) = ed25519_sign::generate_key(options)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect(key.can_sign(), true, "granted key can-sign")
 }

@@ -185,6 +185,32 @@ impl HasData for WasiWebcrypto {
     type Data<'a> = WasiWebcryptoCtxView<'a>;
 }
 
+/// A `mac-key-options` resource: mint-time policy under construction.
+/// Constructed with the WIT defaults (nothing granted), mutated by the
+/// setters, consumed by a mint.
+#[derive(Debug, Default)]
+pub struct MacKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::MacPolicy,
+}
+
+/// An `aead-key-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct AeadKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::AeadPolicy,
+}
+
+/// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct InternalNonceKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::InternalNoncePolicy,
+}
+
+/// A `signing-key-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct SigningKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::SigningPolicy,
+}
+
 /// Backing type for the `mac.mac-key` resource.
 ///
 /// Holds the shared core's HMAC key material (raw bytes zeroized on drop,

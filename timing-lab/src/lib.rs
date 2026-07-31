@@ -534,7 +534,10 @@ async fn run_lab() -> Result<(), String> {
 
     // mac-key.verify: corrupted tag, first vs last byte.
     {
-        let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, None, false)
+        let options = bindings::lann::webcrypto::mac::MacKeyOptions::new();
+        options.can_sign(true);
+        options.can_verify(true);
+        let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, None, options)
             .await
             .map_err(|e| format!("hmac generate-key: {e:?}"))?;
         let mut message = vec![0u8; TAG_PROBE_LEN];
@@ -557,11 +560,18 @@ async fn run_lab() -> Result<(), String> {
         );
     }
 
-    // AEAD tag rejection + seal data-dependence, per algorithm.
-    let gcm_key = aes_gcm::generate_key(aes_gcm::AesVariant::Aes256, false)
+    // AEAD tag rejection + seal data-dependence, per algorithm. The lab
+    // measures seal/open, so grant exactly those usages.
+    fn seal_open_options() -> bindings::lann::webcrypto::aead::AeadKeyOptions {
+        let options = bindings::lann::webcrypto::aead::AeadKeyOptions::new();
+        options.can_seal(true);
+        options.can_open(true);
+        options
+    }
+    let gcm_key = aes_gcm::generate_key(aes_gcm::AesVariant::Aes256, seal_open_options())
         .await
         .map_err(|e| format!("aes-gcm generate-key: {e:?}"))?;
-    let chacha_key = chacha::generate_key(false)
+    let chacha_key = chacha::generate_key(seal_open_options())
         .await
         .map_err(|e| format!("chacha generate-key: {e:?}"))?;
     // AES-GCM and the IETF ChaCha20-Poly1305 construction both take a

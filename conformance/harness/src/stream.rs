@@ -98,8 +98,8 @@ where
 }
 
 /// Fold a WIT error from an operation the contract lets callers treat as
-/// infallible (`sign`, `compute`) into the feeder slot, so those callers
-/// keep a single error path.
+/// infallible on a fully granted key (`sign`, `compute`) into the feeder
+/// slot, so those callers keep a single error path.
 fn merge<T: Default>(
     what: &str,
     result: Result<T, Error>,
@@ -128,6 +128,17 @@ async fn collect(result: Result<StreamReader<u8>, Error>) -> Result<Vec<u8>, Err
 pub async fn sign(key: &MacKey, data: &[u8], schedule: Schedule) -> (Vec<u8>, Result<(), String>) {
     let (tag, fed) = run_split(schedule.chunks(data), |rx| key.sign(rx)).await;
     merge("mac-key.sign", tag, fed)
+}
+
+/// `mac-key.sign`, like [`sign`] but surfacing the operation's own result:
+/// for probing keys whose usage policy refuses the operation, where
+/// [`sign`]'s treat-as-infallible shape does not apply.
+pub async fn try_sign(
+    key: &MacKey,
+    data: &[u8],
+    schedule: Schedule,
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    run_split(schedule.chunks(data), |rx| key.sign(rx)).await
 }
 
 /// `mac-key.verify`, feeding `data` per `schedule` concurrently with the

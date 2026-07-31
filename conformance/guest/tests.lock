@@ -6390,4 +6390,8 @@ cases = [
     { name = "probe/jwk-rejections" },
     { name = "probe/jwk-semantics" },
     { name = "probe/chacha-jwk-unsupported", features = ["chacha20-poly1305"] },
+    { name = "probe/mac-usage-policy" },
+    { name = "probe/aead-usage-policy" },
+    { name = "probe/internal-nonce-usage-policy" },
+    { name = "probe/signing-usage-policy" },
 ]

@@ -58,11 +58,13 @@ mod gcm;
 mod hash;
 mod jwk;
 mod mac;
+mod policy;
 mod sig;
 
 pub use aead::AeadKeyMaterial;
 pub use hash::{served_sha2, Sha2};
 pub use mac::MacKeyMaterial;
+pub use policy::{not_permitted, AeadPolicy, InternalNoncePolicy, MacPolicy, SigningPolicy};
 pub use sig::{SigPublic, SigningKeyMaterial};
 
 /// A failure of the platform's random source, surfaced separately from WIT
@@ -85,6 +87,8 @@ pub enum Error {
     AuthenticationFailed,
     /// WIT `not-extractable`.
     NotExtractable,
+    /// WIT `not-permitted(string)`.
+    NotPermitted(String),
     /// WIT `unsupported(string)`.
     Unsupported(String),
     /// WIT `key-exhausted`.
@@ -116,6 +120,7 @@ macro_rules! impl_conversions {
                     $crate::Error::InvalidNonce(msg) => Self::InvalidNonce(msg),
                     $crate::Error::AuthenticationFailed => Self::AuthenticationFailed,
                     $crate::Error::NotExtractable => Self::NotExtractable,
+                    $crate::Error::NotPermitted(msg) => Self::NotPermitted(msg),
                     $crate::Error::Unsupported(msg) => Self::Unsupported(msg),
                     $crate::Error::KeyExhausted => Self::KeyExhausted,
                     $crate::Error::Other(msg) => Self::Other(msg),

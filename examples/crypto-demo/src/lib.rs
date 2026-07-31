@@ -33,23 +33,104 @@ use anyhow::{ensure, Context, Result};
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
-use lann_webcrypto_guest::bindings::aes_gcm::{generate_key, import_key, AesVariant};
-use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::generate_key as generate_internal_nonce_key;
+use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
 use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_sign::generate_key as generate_ed25519_key;
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::hmac_sha2::{
-    generate_key as generate_hmac_key, import_key as import_hmac_key,
-};
 use lann_webcrypto_guest::bindings::mac::MacKey;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::wit_stream;
+
+// Full-grant minting wrappers over the raw bindings: the demo's checks
+// exercise algorithms and the key-capability surface, not usage policy, so
+// every usage is granted and only `extractable` varies per check.
+
+fn mac_options(extractable: bool) -> lann_webcrypto_guest::bindings::mac::MacKeyOptions {
+    let options = lann_webcrypto_guest::bindings::mac::MacKeyOptions::new();
+    options.can_sign(true);
+    options.can_verify(true);
+    options.extractable(extractable);
+    options
+}
+
+fn aead_options(extractable: bool) -> lann_webcrypto_guest::bindings::aead::AeadKeyOptions {
+    let options = lann_webcrypto_guest::bindings::aead::AeadKeyOptions::new();
+    options.can_seal(true);
+    options.can_open(true);
+    options.can_wrap(true);
+    options.can_unwrap(true);
+    options.extractable(extractable);
+    options
+}
+
+fn internal_nonce_options(
+    extractable: bool,
+) -> lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKeyOptions {
+    let options =
+        lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKeyOptions::new();
+    options.can_seal(true);
+    options.can_open(true);
+    options.extractable(extractable);
+    options
+}
+
+async fn import_hmac_key(
+    variant: Sha2Variant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<MacKey, Error> {
+    lann_webcrypto_guest::bindings::hmac_sha2::import_key(variant, raw, mac_options(extractable))
+        .await
+}
+
+async fn generate_hmac_key(
+    variant: Sha2Variant,
+    length: Option<u32>,
+    extractable: bool,
+) -> Result<MacKey, Error> {
+    lann_webcrypto_guest::bindings::hmac_sha2::generate_key(
+        variant,
+        length,
+        mac_options(extractable),
+    )
+    .await
+}
+
+async fn import_key(
+    variant: AesVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<AeadKey, Error> {
+    lann_webcrypto_guest::bindings::aes_gcm::import_key(variant, raw, aead_options(extractable))
+        .await
+}
+
+async fn generate_key(variant: AesVariant, extractable: bool) -> Result<AeadKey, Error> {
+    lann_webcrypto_guest::bindings::aes_gcm::generate_key(variant, aead_options(extractable)).await
+}
+
+async fn generate_internal_nonce_key(
+    variant: AesVariant,
+    extractable: bool,
+) -> Result<InternalNonceKey, Error> {
+    lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::generate_key(
+        variant,
+        internal_nonce_options(extractable),
+    )
+    .await
+}
+
+async fn generate_ed25519_key(extractable: bool) -> Result<(SigningKey, VerifyingKey), Error> {
+    let options = lann_webcrypto_guest::bindings::signature::SigningKeyOptions::new();
+    options.can_sign(true);
+    options.extractable(extractable);
+    lann_webcrypto_guest::bindings::ed25519_sign::generate_key(options).await
+}
 
 /// Assert that `result` failed with an error matching `pattern` (e.g.
 /// `Error::InvalidKey(_)`). `accepted` says what its wrongly succeeding
@@ -224,7 +305,12 @@ async fn hmac_key_export() -> Result<()> {
     // Exercises the library's newtype layer (`hmac_sha2` + `Mac`) rather
     // than the raw bindings the rest of the demo drives.
     use lann_webcrypto_guest::hmac_sha2;
-    let key = hmac_sha2::import_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
+    let full_grant = lann_webcrypto_guest::MacKeyOptions {
+        sign: true,
+        verify: true,
+        extractable: true,
+    };
+    let key = hmac_sha2::import_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), full_grant)
         .await
         .context("import-key")?;
     let exported = key
@@ -258,7 +344,7 @@ async fn hmac_key_export() -> Result<()> {
         .await
         .context("wrapper verify (multi-chunk)")?;
 
-    let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, None, true)
+    let generated = hmac_sha2::generate_key(Sha2Variant::Sha256, None, full_grant)
         .await
         .context("generate-key")?;
     let exported = generated
@@ -284,7 +370,12 @@ async fn hmac_key_export() -> Result<()> {
 async fn aead_wrapper_seal() -> Result<()> {
     use lann_webcrypto_guest::{aes_gcm, aes_gcm_internal_nonce};
 
-    let key = aes_gcm::import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
+    let seal_open = lann_webcrypto_guest::AeadKeyOptions {
+        seal: true,
+        open: true,
+        ..Default::default()
+    };
+    let key = aes_gcm::import_key(AesVariant::Aes256, unhex(GCM_KEY), seal_open)
         .await
         .context("import-key")?;
     let nonce = unhex(GCM_IV);
@@ -321,9 +412,16 @@ async fn aead_wrapper_seal() -> Result<()> {
 
     // The internal-nonce wrapper seals over the same shape; its wire format
     // carries the nonce, so the sealed message is longer still.
-    let internal = aes_gcm_internal_nonce::generate_key(AesVariant::Aes256, false)
-        .await
-        .context("generate-key (internal nonce)")?;
+    let internal = aes_gcm_internal_nonce::generate_key(
+        AesVariant::Aes256,
+        lann_webcrypto_guest::InternalNonceKeyOptions {
+            seal: true,
+            open: true,
+            extractable: false,
+        },
+    )
+    .await
+    .context("generate-key (internal nonce)")?;
     let sealed = internal
         .seal(&aad[..], &plaintext[..])
         .await
@@ -349,9 +447,16 @@ async fn aead_wrapper_seal() -> Result<()> {
 async fn concurrent_seal_open() -> Result<()> {
     use lann_webcrypto_guest::aes_gcm;
 
-    let key = aes_gcm::generate_key(AesVariant::Aes256, false)
-        .await
-        .context("generate-key")?;
+    let key = aes_gcm::generate_key(
+        AesVariant::Aes256,
+        lann_webcrypto_guest::AeadKeyOptions {
+            seal: true,
+            open: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .context("generate-key")?;
 
     async fn round_trip(key: &lann_webcrypto_guest::Aead, lane: u8) -> Result<()> {
         let mut nonce = [0u8; 12];

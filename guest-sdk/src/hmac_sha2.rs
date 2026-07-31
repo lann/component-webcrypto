@@ -1,6 +1,6 @@
 //! `hmac-sha2` key creation.
 
-use crate::{bindings, Error, Mac};
+use crate::{bindings, Error, Mac, MacKeyOptions};
 
 pub use crate::bindings::sha2::Sha2Variant;
 
@@ -8,10 +8,10 @@ pub use crate::bindings::sha2::Sha2Variant;
 pub async fn import_key(
     variant: Sha2Variant,
     raw_material: Vec<u8>,
-    extractable: bool,
+    options: MacKeyOptions,
 ) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha2::import_key(variant, raw_material, extractable).await?,
+        bindings::hmac_sha2::import_key(variant, raw_material, options.lower()).await?,
     ))
 }
 
@@ -21,10 +21,10 @@ pub async fn import_key(
 pub async fn import_key_jwk(
     variant: Sha2Variant,
     jwk: impl Into<String>,
-    extractable: bool,
+    options: MacKeyOptions,
 ) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha2::import_key_jwk(variant, jwk.into(), extractable).await?,
+        bindings::hmac_sha2::import_key_jwk(variant, jwk.into(), options.lower()).await?,
     ))
 }
 
@@ -35,9 +35,9 @@ pub async fn import_key_jwk(
 pub async fn generate_key(
     variant: Sha2Variant,
     length: Option<u32>,
-    extractable: bool,
+    options: MacKeyOptions,
 ) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha2::generate_key(variant, length, extractable).await?,
+        bindings::hmac_sha2::generate_key(variant, length, options.lower()).await?,
     ))
 }

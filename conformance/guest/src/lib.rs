@@ -18,6 +18,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+mod mint;
 mod probes;
 mod translate;
 mod vectors;

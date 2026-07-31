@@ -42,8 +42,10 @@ import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
 // generated resource classes to exist: componentize-js builds each returned
 // `mac-key`/`aead-key` wrapper from the class in its interface's module.
-import "lann:webcrypto/mac@0.1.0";
-import "lann:webcrypto/aead@0.1.0";
+// The `*-key-options` classes are the same interfaces' mint-time policy
+// resources, constructed here per mint.
+import { MacKeyOptions } from "lann:webcrypto/mac@0.1.0";
+import { AeadKeyOptions } from "lann:webcrypto/aead@0.1.0";
 
 // --- errors -------------------------------------------------------------------
 
@@ -112,6 +114,8 @@ function mapWitError(payload) {
       return dom("InvalidAccessError", "key is not extractable", payload);
     case "unsupported":
       return dom("NotSupportedError", payload.val ?? "unsupported", payload);
+    case "not-permitted":
+      return dom("InvalidAccessError", payload.val ?? "not permitted", payload);
     case "key-exhausted":
       return dom("OperationError", "key exhausted", payload);
     default:
@@ -470,6 +474,38 @@ function requireUsage(key, usage) {
 }
 
 /**
+ * The `mac-key-options` resource carrying `usages` and `extractable` (the
+ * WIT options resources are single-use, so one is built per mint).
+ * `normalizeUsages` has already rejected empty usages with the spec's
+ * `SyntaxError`, so the WIT's own zero-usage refusal is unreachable here.
+ * @param {readonly KeyUsage[]} usages
+ * @param {boolean} extractable
+ */
+function hmacMintOptions(usages, extractable) {
+  const options = new MacKeyOptions();
+  options.canSign(usages.includes("sign"));
+  options.canVerify(usages.includes("verify"));
+  options.extractable(extractable);
+  return options;
+}
+
+/**
+ * The `aead-key-options` resource carrying `usages` and `extractable`. See
+ * `hmacMintOptions`; `wrapKey`/`unwrapKey` map onto the WIT wrap usages.
+ * @param {readonly KeyUsage[]} usages
+ * @param {boolean} extractable
+ */
+function aesGcmMintOptions(usages, extractable) {
+  const options = new AeadKeyOptions();
+  options.canSeal(usages.includes("encrypt"));
+  options.canOpen(usages.includes("decrypt"));
+  options.canWrap(usages.includes("wrapKey"));
+  options.canUnwrap(usages.includes("unwrapKey"));
+  options.extractable(extractable);
+  return options;
+}
+
+/**
  * @param {unknown} key
  * @param {string} name
  * @returns {asserts key is CryptoKey}
@@ -604,8 +640,18 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     normalizeHash(alg.hash);
     return await mintHmacKey(
       format === "jwk"
-        ? () => hmacSha2.importKeyJwk("sha256", jwkForImport(keyData, "sig", usages), !!extractable)
-        : () => hmacSha2.importKey("sha256", bytesOf(keyData, "keyData"), !!extractable),
+        ? () =>
+            hmacSha2.importKeyJwk(
+              "sha256",
+              jwkForImport(keyData, "sig", usages),
+              hmacMintOptions(usages, !!extractable),
+            )
+        : () =>
+            hmacSha2.importKey(
+              "sha256",
+              bytesOf(keyData, "keyData"),
+              hmacMintOptions(usages, !!extractable),
+            ),
       alg.length === undefined ? undefined : Number(alg.length),
       !!extractable,
       usages,
@@ -616,8 +662,18 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     // WIT contract's `invalid-key`).
     return await mintAesGcmKey(
       format === "jwk"
-        ? () => aesGcm.importKeyJwk("aes256", jwkForImport(keyData, "enc", usages), !!extractable)
-        : () => aesGcm.importKey("aes256", bytesOf(keyData, "keyData"), !!extractable),
+        ? () =>
+            aesGcm.importKeyJwk(
+              "aes256",
+              jwkForImport(keyData, "enc", usages),
+              aesGcmMintOptions(usages, !!extractable),
+            )
+        : () =>
+            aesGcm.importKey(
+              "aes256",
+              bytesOf(keyData, "keyData"),
+              aesGcmMintOptions(usages, !!extractable),
+            ),
       !!extractable,
       usages,
     );
@@ -643,7 +699,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
     }
     const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
-      () => hmacSha2.generateKey("sha256", length, !!extractable),
+      () => hmacSha2.generateKey("sha256", length, hmacMintOptions(usages, !!extractable)),
       undefined,
       !!extractable,
       usages,
@@ -653,7 +709,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
       throw dom("NotSupportedError", `unsupported AES-GCM length ${alg.length}; only 256 is served`);
     }
     return await mintAesGcmKey(
-      () => aesGcm.generateKey("aes256", !!extractable),
+      () => aesGcm.generateKey("aes256", aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );

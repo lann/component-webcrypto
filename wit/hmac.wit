@@ -7,7 +7,7 @@ package lann:webcrypto@0.1.0;
 /// `verify`.
 interface hmac-sha2 {
     use types.{error};
-    use mac.{mac-key};
+    use mac.{mac-key, mac-key-options};
     use sha2.{sha2-variant};
 
     /// Import raw key material as an HMAC key over the declared SHA-2
@@ -18,7 +18,7 @@ interface hmac-sha2 {
     /// approved mode, which requires keys of at least 112 bits) MAY reject
     /// shorter keys with `error.invalid-key`. An implementation not serving
     /// the variant fails with `error.unsupported`.
-    import-key: async func(%variant: sha2-variant, raw: list<u8>, extractable: bool) -> result<mac-key, error>;
+    import-key: async func(%variant: sha2-variant, raw: list<u8>, options: mac-key-options) -> result<mac-key, error>;
 
     /// Import an RFC 7517 JSON Web Key as an HMAC key over the declared
     /// SHA-2 variant.
@@ -26,9 +26,10 @@ interface hmac-sha2 {
     /// `jwk` is the JWK as JSON text; the implementation owns the parse
     /// (see `mac.mac-key.export-key-jwk` for the package-wide JWK
     /// contract). The key must be an `oct` key whose `alg`, if present,
-    /// names the declared variant (`"HS256"`/`"HS384"`/`"HS512"`); the
+    /// names the declared variant (`"HS256"`/`"HS384"`/`"HS512"`), with `ext`
+    /// validated against the options' extractability; the
     /// decoded material is then subject to `import-key`'s contract.
-    import-key-jwk: async func(%variant: sha2-variant, jwk: string, extractable: bool) -> result<mac-key, error>;
+    import-key-jwk: async func(%variant: sha2-variant, jwk: string, options: mac-key-options) -> result<mac-key, error>;
 
     /// Generate a fresh random HMAC key over the declared SHA-2 variant.
     ///
@@ -43,5 +44,5 @@ interface hmac-sha2 {
     /// the same policy bounds as `import-key`. Fails with
     /// `error.unsupported` if this implementation does not serve the
     /// variant.
-    generate-key: async func(%variant: sha2-variant, length: option<u32>, extractable: bool) -> result<mac-key, error>;
+    generate-key: async func(%variant: sha2-variant, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
 }

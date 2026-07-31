@@ -45,10 +45,10 @@ interface ed25519-verify {
 /// seed path is a compatible change if a consumer need appears.
 interface ed25519-sign {
     use types.{error};
-    use signature.{signing-key, verifying-key};
+    use signature.{signing-key, signing-key-options, verifying-key};
 
     /// Generate a fresh random signing key, returning both halves — the
     /// only point at which every provider is guaranteed to have the public
     /// key on hand.
-    generate-key: async func(extractable: bool) -> result<tuple<signing-key, verifying-key>, error>;
+    generate-key: async func(options: signing-key-options) -> result<tuple<signing-key, verifying-key>, error>;
 }

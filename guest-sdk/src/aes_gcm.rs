@@ -2,7 +2,7 @@
 //! [`aes_gcm_internal_nonce`](crate::aes_gcm_internal_nonce) — see
 //! [`Aead`]'s nonce warning).
 
-use crate::{bindings, Aead, Error};
+use crate::{bindings, Aead, AeadKeyOptions, Error};
 
 pub use crate::bindings::aes_gcm::AesVariant;
 
@@ -10,10 +10,10 @@ pub use crate::bindings::aes_gcm::AesVariant;
 pub async fn import_key(
     variant: AesVariant,
     raw_material: Vec<u8>,
-    extractable: bool,
+    options: AeadKeyOptions,
 ) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
-        bindings::aes_gcm::import_key(variant, raw_material, extractable).await?,
+        bindings::aes_gcm::import_key(variant, raw_material, options.lower()).await?,
     ))
 }
 
@@ -23,16 +23,16 @@ pub async fn import_key(
 pub async fn import_key_jwk(
     variant: AesVariant,
     jwk: impl Into<String>,
-    extractable: bool,
+    options: AeadKeyOptions,
 ) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
-        bindings::aes_gcm::import_key_jwk(variant, jwk.into(), extractable).await?,
+        bindings::aes_gcm::import_key_jwk(variant, jwk.into(), options.lower()).await?,
     ))
 }
 
 /// Generate a fresh random key of the declared AES variant.
-pub async fn generate_key(variant: AesVariant, extractable: bool) -> Result<Aead, Error> {
+pub async fn generate_key(variant: AesVariant, options: AeadKeyOptions) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
-        bindings::aes_gcm::generate_key(variant, extractable).await?,
+        bindings::aes_gcm::generate_key(variant, options.lower()).await?,
     ))
 }

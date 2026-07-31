@@ -1,6 +1,11 @@
 //! Execution of the normalized vector cases against the imported
 //! `lann:webcrypto` interfaces.
 
+use crate::mint::{
+    import_chacha_key, import_hmac_key, import_internal_nonce_key as import_gcm_internal_key,
+    import_key, import_xchacha_internal_nonce_key as import_xchacha_internal_key,
+    import_xchacha_key,
+};
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase,
     Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
@@ -10,19 +15,14 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::aes_gcm::{import_key, AesVariant};
-use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce::import_key as import_gcm_internal_key;
+use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
-use lann_webcrypto_guest::bindings::chacha20_poly1305::import_key as import_chacha_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::hmac_sha2::import_key as import_hmac_key;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::xchacha20_poly1305::import_key as import_xchacha_key;
-use lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::import_key as import_xchacha_internal_key;
 
 /// The `aes-variant` for a vector's key size (the sizes the translation
 /// emits; AES-192 never reaches execution).

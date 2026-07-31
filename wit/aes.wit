@@ -51,7 +51,7 @@ interface aes {
 /// outside SP 800-38D §8's approved envelope) — see `aes-gcm-internal-nonce`.
 interface aes-gcm {
     use types.{error};
-    use aead.{aead-key};
+    use aead.{aead-key, aead-key-options};
     use aes.{aes-variant};
 
     /// Import raw key material as the declared AES variant.
@@ -62,7 +62,7 @@ interface aes-gcm {
     /// cannot silently mint a key of an unintended size. An implementation
     /// not serving the variant (for example, browsers decline AES-192)
     /// fails with `error.unsupported`.
-    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<aead-key, error>;
+    import-key: async func(%variant: aes-variant, raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Import an RFC 7517 JSON Web Key as an AES-GCM key of the declared
     /// variant.
@@ -72,12 +72,12 @@ interface aes-gcm {
     /// contract). The key must be an `oct` key whose `alg`, if present,
     /// names the declared variant (`"A128GCM"`/`"A192GCM"`/`"A256GCM"`);
     /// the decoded material is then subject to `import-key`'s contract.
-    import-key-jwk: async func(%variant: aes-variant, jwk: string, extractable: bool) -> result<aead-key, error>;
+    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random key of the given AES variant. Fails with
     /// `error.unsupported` if this implementation does not serve the
     /// variant.
-    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<aead-key, error>;
+    generate-key: async func(%variant: aes-variant, options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
@@ -97,7 +97,7 @@ interface aes-gcm {
 /// encryption IVs SP 800-38D §8 forbids in approved mode.
 interface aes-gcm-internal-nonce {
     use types.{error};
-    use aead-internal-nonce.{internal-nonce-key};
+    use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
     use aes.{aes-variant};
 
     /// Import raw key material as an internal-nonce AES-GCM key of the
@@ -112,10 +112,10 @@ interface aes-gcm-internal-nonce {
     /// externally sourced material) with `error.invalid-key` or
     /// `error.unsupported`; prefer `generate-key` where interop does not
     /// require import.
-    import-key: async func(%variant: aes-variant, raw: list<u8>, extractable: bool) -> result<internal-nonce-key, error>;
+    import-key: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce AES-GCM key of the declared
     /// variant. Fails with `error.unsupported` if this implementation does
     /// not serve the variant.
-    generate-key: async func(%variant: aes-variant, extractable: bool) -> result<internal-nonce-key, error>;
+    generate-key: async func(%variant: aes-variant, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }
