@@ -3,15 +3,18 @@ package lann:webcrypto@0.1.0;
 /// ChaCha20-Poly1305 key minting (RFC 8439): the IETF construction, with
 /// 12-byte nonces.
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with the
-/// `ciphertext ‖ tag` wire format. The construction fixes both parameters:
-/// nonces are exactly 12 bytes (`error.invalid-nonce` otherwise) and tags
-/// exactly 16 (a `tag-size` other than `none` or 16 fails
-/// `error.unsupported`). The 12-byte nonce space is too
-/// small to draw nonces at random; callers need a deterministic uniqueness
-/// scheme (such as a counter). For random nonces, use
-/// `xchacha20-poly1305`; to stop managing nonces entirely, use
-/// `xchacha20-poly1305-internal-nonce`.
+/// Keys minted here drive `aead.aead-key.seal`/`open` with the
+/// `ciphertext ‖ tag` wire format.
+///
+/// Security:
+/// - The 12-byte nonce space is too small to draw nonces at random.
+///   Callers need a deterministic uniqueness scheme (such as a counter).
+///   For random nonces, use `xchacha20-poly1305`; to stop managing nonces
+///   entirely, use `xchacha20-poly1305-internal-nonce`.
+///
+/// The construction fixes both parameters: nonces are exactly 12 bytes
+/// (`error.invalid-nonce` otherwise) and tags exactly 16 (a `tag-size`
+/// other than `none` or 16 fails `error.unsupported`).
 ///
 /// This interface and `xchacha20-poly1305` are deliberately separate (not a
 /// variant enum): platform-backed providers systematically serve one
@@ -19,7 +22,7 @@ package lann:webcrypto@0.1.0;
 /// CryptoKit, OpenSSL, and Conscrypt implement only the IETF construction,
 /// while libsodium-lineage providers center XChaCha), so the support
 /// boundary belongs at the interface, where a composition that needs the
-/// missing one fails at `wac plug` time rather than at minting.
+/// missing one fails at composition time rather than at minting.
 interface chacha20-poly1305 {
     use types.{error};
     use aead.{aead-key, aead-key-options};
@@ -37,7 +40,7 @@ interface chacha20-poly1305 {
 /// 24-byte nonces — large enough to be chosen at random. Not
 /// IETF-standardized.
 ///
-/// Keys returned here drive `aead.aead-key.seal`/`open` with the
+/// Keys minted here drive `aead.aead-key.seal`/`open` with the
 /// `ciphertext ‖ tag` wire format; nonces are exactly 24 bytes and tags
 /// exactly 16, as in `chacha20-poly1305`. See `chacha20-poly1305` for why
 /// the two constructions are separate interfaces rather than a variant
