@@ -134,11 +134,13 @@ is sensitive to the platform only where the platform itself is.
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the
 suites' entry points directly with this library's algorithms (`HMAC`,
-`AES-GCM`, `X25519`), exactly as those drivers do among others. The X25519,
-HKDF, and PBKDF2 groups observe surface the library does not serve yet (the
-whole derive model, and for X25519 the OKP key formats — see the shim
-header's deviations list), so their subset is empty: they exist to meter
-the gap, per AGENTS.md's "WPT fidelity is a first-class design constraint".
+`AES-GCM`, `X25519`), exactly as those drivers do among others. The derive
+groups' subsets follow what the library serves (`runner.js`'s classifiers
+are the authoritative definition): the KDF and OKP-import groups assert
+their served slices, while the cfrg derive suites and the X25519
+generateKey successes stay empty-subset — every test in them crosses
+pkcs8/spki (formats the WIT defers) or the WIT-forced private-key export
+(see the shim header's deviations list), so they meter that gap.
 
 ## How it runs
 

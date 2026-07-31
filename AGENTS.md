@@ -61,8 +61,10 @@ guest-sdk/              # guest-side Rust library over the lann:webcrypto
                         #   crate: lann-webcrypto-guest
 componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   ComponentizeJS reboot): webcrypto.js exposes a
-                        #   crypto.subtle subset (HMAC-SHA-256 + AES-256-GCM,
-                        #   raw keys) over the lann:webcrypto imports; the
+                        #   crypto.subtle subset (HMAC-SHA-256, AES-256-GCM,
+                        #   the derive model: HKDF/PBKDF2/X25519 with
+                        #   deriveBits/deriveKey; raw and jwk keys) over the
+                        #   lann:webcrypto imports; the
                         #   toolchain revision is pinned in
                         #   componentize-js.rev; interface-check.js asserts
                         #   the exported subset against the SubtleCrypto and
@@ -226,16 +228,17 @@ A WPT-observable behavior the shim does not exhibit is one of two things,
 and the difference is the signal:
 
 - **Unserved**: the WIT carries the semantics; the shim does not serve them
-  yet (algorithms beyond its documented pair, key formats beyond `raw`).
-  Backlog, not a design problem.
+  yet (algorithms beyond its documented set, key formats beyond
+  `raw`/`jwk`). Backlog, not a design problem.
 - **WIT-forced**: no shim could express the behavior through the interface
-  shape. The set is currently empty — its one historical member, the
-  fixed AES-GCM IV/tag contract, was resolved by carrying both as
-  per-call `aead-key.seal`/`open` parameters — and keeping it empty is
-  the goal. A WIT-forced deviation can still be correct, but it is a
-  design ruling, made when the interface is shaped and recorded where it
-  can be found, never a silent consequence of whatever shape was
-  convenient.
+  shape. Keeping the set small is the goal, and every member must be a
+  recorded ruling, never a silent consequence of whatever shape was
+  convenient. The historical example — the fixed AES-GCM IV/tag
+  contract — was resolved by carrying both as per-call
+  `aead-key.seal`/`open` parameters; the current members are two
+  deliberate rulings from `wit/README.md`'s design notes: empty HKDF IKM
+  is rejected, and private keys are generate-only (no export path until
+  the fallible JWK/PKCS#8 export returns additively).
 
 The shim header's deviations list is the registry: every deviation appears
 there with its classification, so the WIT-forced set — the true cost of the
@@ -443,7 +446,8 @@ closed numbers remain stable references.
   Growing toward parity is tiered — first behaviors the WIT already
   carries but the shim does not serve (more hashes, Ed25519/ECDSA,
   symmetric JWK, the usages model, `getRandomValues`), then additive WIT
-  surface (the RSA family, derive, wrap — see the bullets below), and only
+  surface (the RSA family, SPKI/PKCS#8 key formats, wrap — see the
+  bullets below), and only
   then any future WIT-forced deviations, each of which needs an explicit
   ruling (the historical example, the GCM IV/tag contract, was resolved
   by enriching the `aead` kind with per-call parameters). Class D is not implicated: the crypto runs host-side on the
