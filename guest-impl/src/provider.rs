@@ -473,7 +473,7 @@ impl GuestDeriveOptions for DeriveOptions {
 }
 
 /// An exported `derive-input`: the shared core's parameterized derivation
-/// (realized eagerly — the PRK, not the pre-image).
+/// (run eagerly at `prepare` — the PRK, not the base secret).
 pub struct DeriveInput {
     material: webcrypto_impl_core::DeriveInputMaterial,
 }

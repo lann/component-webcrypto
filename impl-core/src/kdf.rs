@@ -2,15 +2,15 @@
 //! behind the `derivation`, `hkdf`, and `pbkdf2` interfaces.
 //!
 //! The `derive-input` resource's semantics — a parameterized derivation —
-//! are implemented here as [`DeriveInputMaterial`], realized as eagerly as
-//! each KDF's structure permits. HKDF's `prepare` runs HKDF-Extract
+//! are implemented here as [`DeriveInputMaterial`], which runs each
+//! derivation as early as the KDF's structure permits. HKDF's `prepare` runs HKDF-Extract
 //! immediately, so the input retains the PRK and the bound `info`, never
 //! the IKM. PBKDF2 has no extract step — its whole cost is per-block and
 //! length-dependent — so the most its `prepare` can shed is the raw
 //! password: the input retains the PRF's *keyed state* (the HMAC key
 //! schedule), which is password-equivalent in sensitivity, like the PRK,
 //! but is not the password bytes. Either way, an input's existence does
-//! not extend the pre-image resource's raw-byte residency.
+//! not keep the base-secret resource's raw bytes in memory.
 
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
@@ -113,7 +113,7 @@ impl std::fmt::Debug for PbkdfPrf {
     }
 }
 
-/// A parameterized derivation, realized as far as its KDF's structure
+/// A parameterized derivation, run as far as its KDF's structure
 /// permits (see the module doc).
 #[derive(Debug)]
 enum Realized {
@@ -129,7 +129,7 @@ enum Realized {
 }
 
 /// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from` or
-/// `pbkdf2.prepare`, with the grants copied from the pre-image.
+/// `pbkdf2.prepare`, with the grants copied from the base secret.
 #[derive(Debug)]
 pub struct DeriveInputMaterial {
     realized: Realized,
@@ -188,7 +188,7 @@ impl DeriveInputMaterial {
     }
 
     /// Parameterize a derivation over another derivation's output
-    /// (`hkdf.prepare-from`): the upstream input is realized at its
+    /// (`hkdf.prepare-from`): the upstream derivation runs at its
     /// natural length — which, this core serving only KDF sources today,
     /// no upstream has, so this fails `error.other` exactly as the
     /// platform's `deriveKey(… → "HKDF")` does. The signature is the
@@ -304,7 +304,7 @@ impl DeriveInputMaterial {
 }
 
 /// Mint an HMAC key from a parameterized derivation (the
-/// `hmac-sha2.derive-key` contract): the input realized at the effective
+/// `hmac-sha2.derive-key` contract): the derivation run at the effective
 /// generate-key length, then subject to the import contract.
 pub fn derive_mac_key(
     input: &DeriveInputMaterial,
@@ -319,7 +319,7 @@ pub fn derive_mac_key(
 }
 
 /// Mint an AES-GCM key from a parameterized derivation (the
-/// `aes-gcm.derive-key` contract): the input realized at the variant's key
+/// `aes-gcm.derive-key` contract): the derivation run at the variant's key
 /// length, then subject to the import contract (which declines AES-192).
 pub fn derive_aes_gcm_key(
     input: &DeriveInputMaterial,

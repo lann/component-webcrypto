@@ -232,8 +232,8 @@ pub struct Password {
 }
 
 /// Backing type for the `derivation.derive-input` resource: a
-/// parameterized derivation, realized eagerly (the extract step runs at
-/// `prepare`, so this retains the PRK rather than the pre-image).
+/// parameterized derivation, run eagerly (the extract step runs at
+/// `prepare`, so this retains the PRK rather than the base secret).
 #[derive(Debug)]
 pub struct DeriveInput {
     pub(crate) material: webcrypto_impl_core::DeriveInputMaterial,
