@@ -1,7 +1,7 @@
 // @ts-check
-// Host implementation of the `lann:webcrypto` imports (`mac`, `aead`,
-// `digest`, `bytes`, `hmac-sha2`, `aes-gcm`, `chacha20-poly1305`, `sha2`)
-// for jco-transpiled components.
+// Host implementation of the `lann:webcrypto` imports for jco-transpiled
+// components. The interfaces served are the ones `wit/world.wit` names;
+// `interface-check.js` asserts this file against them.
 //
 // This is the "browser-first" host: it is written against the standard Web
 // Crypto API only — `globalThis.crypto.subtle` and
@@ -13,8 +13,7 @@
 // wildcard — `--map 'lann:webcrypto/*@0.1.0=./webcrypto.js#*'` — so the
 // export convention is fixed: every interface is served by the named export
 // spelling its name in camelCase (`hmacSha2`, `aesGcm`, …), and the
-// resource-bearing interfaces (`mac`, `aead`, `aead-internal-nonce`,
-// `digest`, `signature`) export objects holding their resource classes.
+// resource-bearing interfaces export objects holding their resource classes.
 // Adding an interface to the host means adding its camelCased export here;
 // no transpile flags change.
 //

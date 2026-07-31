@@ -74,8 +74,8 @@ componentize-sdk/       # JS guest library for componentize-js (dicej's
                         #   (wpt/component.sh, componentize-js.sha256); the
                         #   run's census is pinned by wpt/expected.js
 examples/
-  crypto-demo/          # guest component exercising mac + aead end to end
-    wit/deps/lann-webcrypto -> ../../../wit    # symlink to the root package
+  crypto-demo/          # guest component exercising the primitive kinds end
+                        #   to end (reaches lann:webcrypto via guest-sdk)
   demo-driver/          # CLI driver (async wasi:cli/run) for the composed
                         #   fully in-guest demo
   wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker

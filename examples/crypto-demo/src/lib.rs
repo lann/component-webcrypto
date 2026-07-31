@@ -1,27 +1,16 @@
 //! `crypto-demo`: an example WebAssembly component that exercises the
-//! `lann:webcrypto` `mac`, `aead`, `digest`, and `signature` primitive kinds
-//! end to end.
+//! `lann:webcrypto` primitive kinds end to end.
 //!
 //! The component is host-agnostic: the same binary runs unchanged under the
 //! Wasmtime (RustCrypto) host and the jco (browser WebCrypto) host, which is
-//! what demonstrates cross-implementation compatibility. It drives:
-//!
-//!   - HMAC-SHA-256 against an RFC 4231 known-answer vector, with the payload
-//!     signed both as one stream write and as several small chunked writes
-//!     (the result must be chunking-invariant),
-//!   - tag verification, positive and negative,
-//!   - SHA-256 against the FIPS 180-2 "abc" example (whole and chunked) and
-//!     `bytes.constant-time-equal`,
-//!   - AES-256-GCM against a NIST GCM known-answer vector (seal and open),
-//!   - seal/open round trips with a generated key, including tampered
-//!     ciphertext and wrong associated data failing with
-//!     `authentication-failed`,
-//!   - Ed25519 against an RFC 8032 known-answer vector (deterministic
-//!     signing, public-key derivation, verification) and ECDSA P-256
-//!     verification against an RFC 6979 known-answer vector,
-//!   - the key-capability surface: import/generate, `export` on extractable
-//!     keys (an import→export identity round trip), `not-extractable`
-//!     failures, and `invalid-key`/`invalid-nonce` rejections.
+//! what demonstrates cross-implementation compatibility. It drives
+//! known-answer vectors (whole and chunked — results must be
+//! chunking-invariant), seal/open round trips with tampering and
+//! wrong-AAD failures, signature known answers, and the key-capability
+//! surface (import/generate/export, `not-extractable`, and
+//! `invalid-key`/`invalid-nonce` rejections) — one check per behavior;
+//! the `check(...)` names below are the inventory, and the integration
+//! tests assert the expected summary.
 
 wit_bindgen::generate!({
     path: "wit",

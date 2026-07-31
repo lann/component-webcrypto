@@ -143,14 +143,11 @@ appended `export` of its entry point — the vendored sources stay pristine.
 `runner.js` installs the library as the `crypto`/`CryptoKey` globals, drives
 the suites, and classifies every result by test name:
 
-- **in-subset** — parameters the library documents as served (HMAC-SHA-256,
-  AES-256-GCM at every legal tag length, raw keys, non-extractable
-  `generateKey` cases). These must all pass; any failure fails the run.
+- **in-subset** — parameters the library documents as served. These must
+  all pass; any failure fails the run.
 - **out-of-subset** — the rest of WPT's parameter sweep (other hashes and
-  AES key sizes, JWK format, wrap/unwrap usages,
-  extractable `generateKey` cases, which export JWK). These are expected to
-  fail with the library's documented fail-closed errors and are reported by
-  count.
+  AES key sizes, and so on). These are expected to fail with the library's
+  documented fail-closed errors and are reported by count.
 
 The classifier functions in `runner.js` are the precise, machine-readable
 definition of the subset; the suite gates that every in-subset test passes

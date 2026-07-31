@@ -44,7 +44,7 @@ Garillot, Nikolaenko), at commit
 [`65519336fda78a3d016e947df6d82848aca0c9da`](https://github.com/novifinancial/ed25519-speccheck/blob/65519336fda78a3d016e947df6d82848aca0c9da/cases.json)
 (the upstream file is `cases.json`; renamed here for clarity):
 
-- `ed25519_speccheck.json` — 12 adversarial Ed25519 vectors (small-order
+- `ed25519_speccheck.json` — adversarial Ed25519 vectors (small-order
   and non-canonical `A`/`R`, out-of-range `S`, mixed-order torsion
   components) that discriminate between the EdDSA verification policies
   real implementations ship. They pin the `ed25519-verify` WIT criterion

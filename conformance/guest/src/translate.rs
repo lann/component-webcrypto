@@ -1,23 +1,10 @@
-//! Translation of the vendored test vectors (Wycheproof JSON for HMAC, GCM,
-//! and ChaCha20-Poly1305, NIST CAVP `.rsp` for SHA-2) into the
-//! `lann:webcrypto` contract — the authoritative encoding of the policy
-//! documented in `conformance/vectors/README.md`:
+//! Translation of the vendored test vectors into the `lann:webcrypto`
+//! contract.
 //!
-//! | Vector property | Our expectation |
-//! | --- | --- |
-//! | GCM, keySize ≠ 256 | Skipped (import rejection is covered by probes). |
-//! | GCM, keySize 256, ivSize 0 | `seal`/`open` both fail `invalid-nonce`. |
-//! | GCM, keySize 256, any other ivSize, `valid` | `seal` = `ct ‖ tag`; `open` = `msg` (the non-96-bit sizes exercise the `J0` derivation). |
-//! | GCM, keySize 256, any other ivSize, `invalid` | `open` fails `authentication-failed`. |
-//! | ChaCha20-Poly1305, ivSize ≠ the variant's (96 / 192 for X) | `seal`/`open` both fail `invalid-nonce`. |
-//! | ChaCha20-Poly1305, variant ivSize, `valid` | `seal` = `ct ‖ tag`; `open` = `msg`. |
-//! | ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed`. |
-//! | HMAC, tagSize ≠ 256 | Skipped (truncated tags are an application concern). |
-//! | HMAC, tagSize 256, `valid` | `sign` = `tag`; `verify(tag)` succeeds. |
-//! | HMAC, tagSize 256, `invalid` | `verify(tag)` is `authentication-failed`. |
-//! | SHA-2 ShortMsg case | `compute` = `MD` (every case; there are no invalid digest vectors). |
-//! | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
-//! | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` is `authentication-failed` (malformed signatures included — rejection carries no detail). |
+//! This module is the authoritative encoding of the translation policy;
+//! `conformance/vectors/README.md`, "Translation policy" carries the
+//! current summary table, and the two must agree. Change the policy
+//! deliberately and in review.
 //!
 //! Every executed vector is emitted once per chunking schedule; a vector whose
 //! stream inputs are all empty runs only `whole` (the other schedules are

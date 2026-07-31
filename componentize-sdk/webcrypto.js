@@ -5,7 +5,7 @@
 //
 // The surface mirrors `crypto.subtle` for the supported algorithms:
 //
-//   - `importKey` / `exportKey` ("raw" format only)
+//   - `importKey` / `exportKey` ("raw" and "jwk" formats)
 //   - `generateKey`
 //   - `sign` / `verify`     (HMAC-SHA-256)
 //   - `encrypt` / `decrypt` (AES-256-GCM)

@@ -10,14 +10,13 @@
 // with an appended `export` of its entry point, and this runner supplies the
 // testharness surface (harness.js) plus the `crypto`/`CryptoKey` globals.
 //
-// WPT sweeps parameters the library deliberately does not serve (other
-// hashes and AES key sizes, JWK format, non-128-bit tag lengths, wrap/unwrap
-// usages, extractable generateKey cases that export JWK). Each result is
-// classified by its test name: *in-subset* tests — those whose parameters
-// the library documents as served — must all pass; *out-of-subset* tests are
-// reported by count and expected to fail with the library's documented
-// fail-closed errors. The classifiers below are the machine-readable
-// definition of "the portion of WPT this library implements".
+// WPT sweeps parameters the library deliberately does not serve. Each
+// result is classified by its test name: *in-subset* tests — those whose
+// parameters the library documents as served — must all pass;
+// *out-of-subset* tests are reported by count and expected to fail with
+// the library's documented fail-closed errors. The classifiers below are
+// the machine-readable definition of "the portion of WPT this library
+// implements"; their doc comments enumerate each group's boundary.
 //
 // Module specifiers resolve against componentize-js's `--base-directory`,
 // which the justfile recipe sets to the repository root.

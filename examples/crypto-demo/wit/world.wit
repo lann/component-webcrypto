@@ -1,6 +1,7 @@
 // Demo-only WIT for the `crypto-demo` example component. The shared
-// `lann:webcrypto` package lives once at the repository root `wit/` and is
-// pulled in through the `deps/lann-webcrypto` symlink.
+// `lann:webcrypto` package lives once at the repository root `wit/`; this
+// guest reaches it through `guest-sdk`'s bindings, so no `deps` copy is
+// needed here.
 package demo:webcrypto-demo@0.1.0;
 
 /// The demo entry point exported by the component.
@@ -11,12 +12,10 @@ interface demo {
     run: async func() -> result<string, string>;
 }
 
-/// A guest that exercises the `mac`, `aead`, `digest`, and `signature`
-/// primitive kinds
-/// end to end: HMAC-SHA-256 known-answer vectors, SHA-256 digests plus
-/// `bytes.constant-time-equal`, and AES-256-GCM seal/open round trips,
-/// including the key-capability surface (import/generate/export and
-/// non-extractable keys).
+/// A guest that exercises the package's primitive kinds end to end —
+/// known-answer vectors, seal/open round trips, and the key-capability
+/// surface (import/generate/export and non-extractable keys) — one check
+/// per behavior; the check names in `src/lib.rs` are the inventory.
 world crypto-demo {
 
     export demo;
