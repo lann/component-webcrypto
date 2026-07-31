@@ -6379,7 +6379,6 @@ cases = [
     { name = "probe/internal-nonce-shape" },
     { name = "probe/chacha-internal-nonce-roundtrip", features = ["chacha20-poly1305"] },
     { name = "probe/aes128-shape" },
-    { name = "probe/ed25519-sign-known-answer" },
     { name = "probe/open-short-input" },
     { name = "probe/stream-empty-writes" },
     { name = "probe/extractable-getter" },

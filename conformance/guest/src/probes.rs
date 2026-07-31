@@ -24,9 +24,7 @@ use lann_webcrypto_guest::bindings::chacha20_poly1305::{
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_sign::{
-    generate_key as generate_ed25519_key, import_signing_key as import_ed25519_signing_key,
-};
+use lann_webcrypto_guest::bindings::ed25519_sign::generate_key as generate_ed25519_key;
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hmac_sha2::{
     generate_key as generate_hmac_key, import_key as import_hmac_key,
@@ -82,7 +80,6 @@ probes! {
     internal_nonce_shape,
     chacha_internal_nonce_roundtrip(chacha),
     aes128_shape,
-    ed25519_sign_known_answer,
     open_short_input,
     stream_empty_writes,
     extractable_getter,
@@ -888,12 +885,6 @@ async fn sig_import_invalid() -> Result<(), String> {
         "malformed material was accepted",
     )?;
     expect_err(
-        "ed25519 short seed",
-        ErrKind::InvalidKey,
-        import_ed25519_signing_key(vec![0u8; 16], false).await,
-        "malformed material was accepted",
-    )?;
-    expect_err(
         "ecdsa wrong-length point",
         ErrKind::InvalidKey,
         import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, vec![0x04; 64]).await,
@@ -1148,42 +1139,6 @@ async fn aes128_shape() -> Result<(), String> {
     fed.map_err(|e| format!("internal-nonce open feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("internal-nonce open", &e))?;
     expect_bytes(&opened, &plaintext, "internal-nonce round trip")
-}
-
-/// The RFC 8032 §7.1 TEST 2 known answer, in the suite rather than only
-/// the demo guest: `import-signing-key` succeeds, signing is deterministic
-/// and byte-exact, the seed round-trips through `export-key`, and the
-/// vector's public key verifies the signature.
-async fn ed25519_sign_known_answer() -> Result<(), String> {
-    let seed = unhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
-    let public = unhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
-    let message = [0x72u8];
-    let sig = unhex(
-        "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
-         085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
-    );
-
-    let key = import_ed25519_signing_key(seed.clone(), true)
-        .await
-        .map_err(|e| describe("import-signing-key", &e))?;
-    let exported = key
-        .export_key()
-        .await
-        .map_err(|e| describe("export-key", &e))?;
-    expect_bytes(&exported, &seed, "exported seed")?;
-
-    let (got, fed) = sig_sign(&key, &message, Schedule::Whole).await;
-    fed?;
-    expect_bytes(&got, &sig, "RFC 8032 test-2 signature")?;
-
-    // The signature verifies under the vector's public key: the seed and
-    // that key are the same key pair.
-    let verifying = import_ed25519_verifying_key(public)
-        .await
-        .map_err(|e| describe("import-verifying-key", &e))?;
-    let (verified, fed) = sig_verify(&verifying, &message, &got, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("vector public key did not verify the signature", &e))
 }
 
 /// Caller-nonce `open` of inputs shorter than the tag fails

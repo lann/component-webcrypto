@@ -28,6 +28,20 @@ interface types {
         /// associated data, did not verify under the key. Deliberately
         /// carries no detail, so implementations cannot leak *why*
         /// verification failed.
+        ///
+        /// The guarantee is one-sided. Failed verification MUST report
+        /// this case and nothing else — security telemetry may rely on it
+        /// never being misfiled. An implementation whose backend collapses
+        /// verification failure with other failures (WebCrypto's `decrypt`
+        /// throws one `OperationError` for both) MAY report this case for
+        /// failures it cannot distinguish from it, so rare operational
+        /// false positives are possible on `open`; `verify` is exact on
+        /// every current implementation (boolean-returning backends
+        /// preserve the distinction). Either way the case means
+        /// *unauthenticated input* — at the cryptographic layer a forgery
+        /// and accidental corruption are indistinguishable in principle,
+        /// so no implementation could report an attack/corruption
+        /// distinction.
         authentication-failed,
         /// The key was created with `extractable` false, so its material
         /// cannot be exported.
@@ -261,6 +275,13 @@ interface aead {
         /// misuse defeats the algorithm's guarantees. Short tags weaken the
         /// forgery bound and are opt-in by construction: they exist only
         /// behind an explicit `tag-size`.
+        ///
+        /// Unlike `crypto.subtle.encrypt`, which returns whole buffers,
+        /// the streamed output is not atomic: a producer that fails after
+        /// the stream is returned ends it early, and per the
+        /// truncating-producer note a closed stream carries no verdict.
+        /// A consumer that cannot bound the expected length from its own
+        /// knowledge of the plaintext must convey completeness in-band.
         ///
         /// The plaintext stream is fully drained even when the result is an
         /// error, so a caller feeding the stream concurrently never observes
@@ -560,12 +581,14 @@ interface signature {
         algorithm-hash: func() -> option<string>;
 
         /// Whether the private key material may be exported.
+        ///
+        /// There is currently no export operation on this resource —
+        /// signing keys are generate-only, and private-key export returns
+        /// with the format-specific work (PKCS#8/JWK). The getter stays:
+        /// extractability is mint-time recorded policy that those future
+        /// exports and platform-backed key storage honor, so it must be
+        /// captured and interrogable now.
         extractable: func() -> bool;
-
-        /// The private key material, in the minting interface's documented
-        /// private format. Fails with `error.not-extractable` unless the
-        /// key was created with `extractable` true.
-        export-key: async func() -> result<list<u8>, error>;
     }
 }
 

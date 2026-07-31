@@ -559,10 +559,6 @@ impl GuestSigningKey for SigningKey {
     fn extractable(&self) -> bool {
         self.material.extractable()
     }
-
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        Ok(self.material.export()?)
-    }
 }
 
 // --- ed25519 (key minting) -----------------------------------------------------
@@ -575,14 +571,6 @@ impl Ed25519VerifyGuest for Component {
 }
 
 impl Ed25519SignGuest for Component {
-    async fn import_signing_key(
-        raw: Vec<u8>,
-        extractable: bool,
-    ) -> Result<signature_iface::SigningKey, Error> {
-        let material = SigningKeyMaterial::import_ed25519_seed(&raw, extractable)?;
-        Ok(signature_iface::SigningKey::new(SigningKey { material }))
-    }
-
     async fn generate_key(
         extractable: bool,
     ) -> Result<(signature_iface::SigningKey, signature_iface::VerifyingKey), Error> {

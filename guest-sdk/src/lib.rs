@@ -954,18 +954,13 @@ impl SigningKey {
         self.0.algorithm_hash()
     }
 
-    /// Whether [`export_key`](Self::export_key) may return the private
-    /// material.
+    /// Whether the private key material may be exported. There is
+    /// currently no export operation — extractability is mint-time
+    /// recorded policy that future format-specific exports and
+    /// platform-backed key storage honor (see the WIT
+    /// `signing-key.extractable` doc).
     pub fn extractable(&self) -> bool {
         self.0.extractable()
-    }
-
-    /// The private key material, in the minting interface's documented
-    /// private format; fails with [`Error::NotExtractable`] unless the key
-    /// was minted extractable (an API property, not a physical one — see
-    /// [`Mac::export_key`]).
-    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key().await.map_err(Error::from)
     }
 }
 

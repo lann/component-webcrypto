@@ -6,6 +6,12 @@ use zeroize::Zeroizing;
 
 use crate::{EcdsaVariant, Error, RngError, ECDSA_NAME, ED25519_NAME};
 
+/// The P-521 decline every ECDSA minting path renders (see the WIT
+/// `ecdsa-variant` doc: declared, served by no implementation here).
+fn p521_unsupported() -> Error {
+    Error::Unsupported("ECDSA P-521 is not served by this implementation".into())
+}
+
 /// The algorithm behind a signature key, shared by the public and private
 /// halves so the `algorithm-name`/`-curve`/`-hash` getters have one table.
 #[derive(Clone, Copy)]
@@ -76,6 +82,7 @@ impl SigPublic {
         let expected = match variant {
             EcdsaVariant::P256Sha256 => 65,
             EcdsaVariant::P384Sha384 => 97,
+            EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
         };
         if raw.len() != expected || raw[0] != 0x04 {
             return Err(Error::InvalidKey(format!(
@@ -89,6 +96,7 @@ impl SigPublic {
             EcdsaVariant::P384Sha384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(raw)
                 .map(Self::EcdsaP384)
                 .map_err(|err| Error::InvalidKey(format!("invalid P-384 public key: {err}"))),
+            EcdsaVariant::P521Sha512 => Err(p521_unsupported()),
         }
     }
 
@@ -237,6 +245,7 @@ impl SigningKeyMaterial {
             EcdsaVariant::P384Sha384 => p384::ecdsa::SigningKey::from_slice(raw)
                 .map(SigPrivate::EcdsaP384)
                 .map_err(|err| Error::InvalidKey(format!("invalid P-384 private key: {err}")))?,
+            EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
         };
         Ok(Self {
             private,
@@ -248,10 +257,14 @@ impl SigningKeyMaterial {
     /// rejection-sampling the scalar range with fresh randomness (the
     /// probability of a retry is negligible for these curves).
     #[cfg(not(target_family = "wasm"))]
-    pub fn generate_ecdsa(variant: EcdsaVariant, extractable: bool) -> Result<Self, RngError> {
+    pub fn generate_ecdsa(
+        variant: EcdsaVariant,
+        extractable: bool,
+    ) -> Result<Result<Self, Error>, RngError> {
         let scalar_len = match variant {
             EcdsaVariant::P256Sha256 => 32,
             EcdsaVariant::P384Sha384 => 48,
+            EcdsaVariant::P521Sha512 => return Ok(Err(p521_unsupported())),
         };
         // Bound the retries. Both rejections `import_ecdsa_scalar` can
         // report — an out-of-range scalar and a length mismatch — arrive as
@@ -267,7 +280,7 @@ impl SigningKeyMaterial {
             let mut raw = Zeroizing::new(vec![0u8; scalar_len]);
             getrandom::fill(&mut raw)?;
             if let Ok(key) = Self::import_ecdsa_scalar(variant, &raw, extractable) {
-                return Ok(key);
+                return Ok(Ok(key));
             }
         }
         unreachable!(
@@ -409,7 +422,9 @@ mod tests {
     #[test]
     fn ecdsa_sign_verify_round_trip() {
         for variant in [EcdsaVariant::P256Sha256, EcdsaVariant::P384Sha384] {
-            let key = SigningKeyMaterial::generate_ecdsa(variant, false).unwrap();
+            let key = SigningKeyMaterial::generate_ecdsa(variant, false)
+                .unwrap()
+                .unwrap();
             assert_eq!(key.export(), Err(Error::NotExtractable));
             let sig = key.sign(b"message");
             let public = key.public();

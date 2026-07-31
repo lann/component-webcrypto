@@ -71,7 +71,7 @@ const subtle = globalThis.crypto.subtle;
 /**
  * An `ECDSA_VARIANTS` entry: a `SignatureAlgorithm` whose curve is fixed,
  * carrying the curve OID the PKCS#8 wrapping needs.
- * @typedef {SignatureAlgorithm & { namedCurve: string, hash: string, curveOid: readonly number[] }} EcdsaAlgorithm
+ * @typedef {SignatureAlgorithm & { namedCurve: string, hash: string }} EcdsaAlgorithm
  */
 
 /**
@@ -1381,7 +1381,6 @@ const ECDSA_VARIANTS = Object.assign(Object.create(null), {
     publicLength: 65,
     scalarLength: 32,
     signatureLength: 64,
-    curveOid: [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
   },
   "p384-sha384": {
     name: "ECDSA",
@@ -1390,7 +1389,6 @@ const ECDSA_VARIANTS = Object.assign(Object.create(null), {
     publicLength: 97,
     scalarLength: 48,
     signatureLength: 96,
-    curveOid: [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22],
   },
 });
 
@@ -1578,38 +1576,6 @@ export class SigningKey {
   extractable() {
     return this.#privateKey.extractable;
   }
-
-  /**
-   * The private key material (the 32-byte RFC 8032 seed for Ed25519, the
-   * raw big-endian scalar for ECDSA), recovered from the JWK `d` field.
-   * Throws `{ tag: 'not-extractable' }` unless minted with `extractable`
-   * true (checked on the `CryptoKey` itself rather than relying on the
-   * `DOMException` from `exportKey`).
-   */
-  async exportKey() {
-    if (!this.#privateKey.extractable) throw errNotExtractable();
-    const jwk = await platformCall("private key export", () =>
-      subtle.exportKey("jwk", this.#privateKey),
-    );
-    const scalar = /** @type {JsonWebKey} */ (jwk).d;
-    if (scalar === undefined) {
-      throw errOther("private key export returned a JWK without a `d` field");
-    }
-    return base64UrlDecode(scalar);
-  }
-}
-
-/**
- * Decode a base64url string (JWK field encoding) to bytes.
- * @param {string} text
- */
-function base64UrlDecode(text) {
-  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-  const binary = atob(padded);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-  return out;
 }
 
 /**
@@ -1746,37 +1712,6 @@ async function importEd25519VerifyingKey(raw) {
 export const ed25519Verify = { importVerifyingKey: importEd25519VerifyingKey };
 
 /**
- * The fixed PKCS#8 prefix wrapping a 32-byte Ed25519 seed (RFC 5958 +
- * RFC 8410): WebCrypto imports private keys as `pkcs8`, not `raw`.
- */
-const ED25519_PKCS8_PREFIX = new Uint8Array([
-  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
-]);
-
-/**
- * Import a 32-byte raw Ed25519 private seed.
- * @param {Uint8Array} raw
- * @param {boolean} extractable
- */
-async function importEd25519SigningKey(raw, extractable) {
-  if (raw.length !== ED25519_ALGORITHM.scalarLength) {
-    throw errInvalidKey(
-      `Ed25519 private keys are ${ED25519_ALGORITHM.scalarLength}-byte seeds, got ${raw.length}`,
-    );
-  }
-  const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + raw.length);
-  pkcs8.set(ED25519_PKCS8_PREFIX);
-  pkcs8.set(raw, ED25519_PKCS8_PREFIX.length);
-  let privateKey;
-  try {
-    privateKey = await subtle.importKey("pkcs8", pkcs8, "Ed25519", extractable, ["sign"]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 private key");
-  }
-  return new SigningKey(privateKey, ED25519_ALGORITHM);
-}
-
-/**
  * Generate a fresh Ed25519 signing key, returning `[signing, verifying]`.
  * @param {boolean} extractable
  * @returns {Promise<[SigningKey, VerifyingKey]>}
@@ -1794,10 +1729,7 @@ async function generateEd25519Key(extractable) {
 }
 
 /** The `lann:webcrypto/ed25519-sign` interface (`--map '…#ed25519Sign'`). */
-export const ed25519Sign = {
-  importSigningKey: importEd25519SigningKey,
-  generateKey: generateEd25519Key,
-};
+export const ed25519Sign = { generateKey: generateEd25519Key };
 
 /**
  * Import an uncompressed-SEC1 ECDSA public key of the declared variant.
@@ -1830,67 +1762,6 @@ async function importEcdsaVerifyingKey(variant, raw) {
 export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
 
 /**
- * Import a raw big-endian ECDSA scalar of the declared variant.
- * @param {string} variant
- * @param {Uint8Array} raw
- * @param {boolean} extractable
- */
-async function importEcdsaSigningKey(variant, raw, extractable) {
-  const entry = ecdsaVariant(variant);
-  if (raw.length !== entry.scalarLength) {
-    throw errInvalidKey(
-      `${variant} private keys are raw ${entry.scalarLength}-byte scalars, got ${raw.length}`,
-    );
-  }
-  // WebCrypto imports EC private keys as pkcs8 or jwk only, and a JWK
-  // private key requires the public coordinates — which plain JS cannot
-  // compute. Import via a minimal PKCS#8/RFC 5915 wrapping instead.
-  // Private-only PKCS#8 import is a recognized WebCrypto spec gap
-  // (w3c/webcrypto#356) — engines diverge on it — so this import is
-  // best-effort: it works where the platform cooperates and fails
-  // `invalid-key` where it declines, which the WIT permits.
-  const pkcs8 = ecdsaScalarToPkcs8(entry.curveOid, raw);
-  let privateKey;
-  try {
-    privateKey = await subtle.importKey(
-      "pkcs8",
-      pkcs8,
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} private key`);
-  }
-  return new SigningKey(privateKey, entry);
-}
-
-/**
- * Wrap a raw EC scalar in a minimal PKCS#8 `PrivateKeyInfo` (RFC 5208)
- * containing an RFC 5915 `ECPrivateKey` without the optional public key.
- * @param {readonly number[]} curveOid the curve's encoded OID, from `ECDSA_VARIANTS`
- * @param {Uint8Array} scalar
- */
-function ecdsaScalarToPkcs8(curveOid, scalar) {
-  const ecPrivateKey = [
-    0x30, 3 + 2 + scalar.length, // SEQUENCE { INTEGER 1, OCTET STRING d }
-    0x02, 0x01, 0x01,
-    0x04, scalar.length, ...scalar,
-  ];
-  const algorithm = [
-    0x30, 9 + curveOid.length, // SEQUENCE { OID ecPublicKey, OID curve }
-    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-    ...curveOid,
-  ];
-  const body = [
-    0x02, 0x01, 0x00, // INTEGER 0 (version)
-    ...algorithm,
-    0x04, ecPrivateKey.length, ...ecPrivateKey, // OCTET STRING { ECPrivateKey }
-  ];
-  return new Uint8Array([0x30, body.length, ...body]);
-}
-
-/**
  * Generate a fresh ECDSA signing key of the declared variant, returning
  * `[signing, verifying]`.
  * @param {string} variant
@@ -1909,7 +1780,4 @@ async function generateEcdsaKey(variant, extractable) {
 }
 
 /** The `lann:webcrypto/ecdsa-sign` interface (`--map '…#ecdsaSign'`). */
-export const ecdsaSign = {
-  importSigningKey: importEcdsaSigningKey,
-  generateKey: generateEcdsaKey,
-};
+export const ecdsaSign = { generateKey: generateEcdsaKey };
