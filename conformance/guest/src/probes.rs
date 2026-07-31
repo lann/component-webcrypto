@@ -67,6 +67,7 @@ probes! {
     aes128_internal_nonce,
     open_short_input,
     stream_empty_writes,
+    large_stream,
     extractable_getter,
     hmac_generate_length,
     gcm_full_parameters,
@@ -1065,6 +1066,95 @@ async fn open_short_input() -> Result<(), String> {
 /// finishing" path, where a consumer that parks without arming its waker
 /// never resumes: the failure mode is a wedged operation — and, for a host
 /// holding an admission reservation across the call, a wedged instance —
+/// Multi-mebibyte streams delivered in writes that straddle every
+/// implementation's internal boundaries. The stream collectors batch:
+/// jco reads in 64 KiB batches, the in-guest provider refills an 8 KiB
+/// buffer, and the wasmtime host meters admission and output reservations
+/// per buffer — and nothing else in the suite exceeds a few KiB, so those
+/// seams were otherwise crossed only a couple of times. At this scale the
+/// MAC tag must still be chunking-invariant against a single whole write,
+/// and both AEAD disciplines must round-trip.
+async fn large_stream() -> Result<(), String> {
+    // Odd-sized so no chunk size divides it evenly.
+    const LEN: usize = 2 * 1024 * 1024 + 13;
+
+    /// Split `data` into writes cycling through sizes chosen to land one
+    /// byte on either side of the 64 KiB and 8 KiB batch sizes, with a
+    /// single-byte write between the seams.
+    fn boundary_chunks(data: &[u8]) -> Vec<Vec<u8>> {
+        const SIZES: [usize; 6] = [65537, 8191, 1, 65535, 8193, 4096];
+        let mut chunks = Vec::new();
+        let (mut offset, mut turn) = (0, 0);
+        while offset < data.len() {
+            let end = (offset + SIZES[turn % SIZES.len()]).min(data.len());
+            chunks.push(data[offset..end].to_vec());
+            offset = end;
+            turn += 1;
+        }
+        chunks
+    }
+
+    let payload: Vec<u8> = (0..=255u8).cycle().take(LEN).collect();
+
+    let key = import_hmac_key(Sha2Variant::Sha256, b"large-stream key".to_vec(), false)
+        .await
+        .map_err(|e| describe("import-key", &e))?;
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (chunked, fed) = futures::join!(key.sign(rx), feed(tx, boundary_chunks(&payload)));
+    fed?;
+    let chunked = chunked.map_err(|e| describe("sign over boundary chunks", &e))?;
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (whole, fed) = futures::join!(key.sign(rx), feed(tx, vec![payload.clone()]));
+    fed?;
+    let whole = whole.map_err(|e| describe("sign over one whole write", &e))?;
+    expect_bytes(&chunked, &whole, "tag over boundary chunks vs one write")?;
+
+    let key = generate_key_256(false).await?;
+    let nonce = [5u8; 12];
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (sealed, fed) = futures::join!(
+        key.seal(nonce.to_vec(), b"large aad".to_vec(), None, rx),
+        feed(tx, boundary_chunks(&payload))
+    );
+    fed?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?.collect().await;
+    expect(sealed.len(), LEN + 16, "sealed length")?;
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (opened, fed) = futures::join!(
+        key.open(nonce.to_vec(), b"large aad".to_vec(), None, rx),
+        feed(tx, boundary_chunks(&sealed))
+    );
+    fed?;
+    let opened = opened.map_err(|e| describe("open", &e))?.collect().await;
+    expect_bytes(&opened, &payload, "round-tripped plaintext")?;
+
+    let key = generate_internal_nonce_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("generate-key (internal nonce)", &e))?;
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (sealed, fed) = futures::join!(
+        key.seal(b"large aad".to_vec(), rx),
+        feed(tx, boundary_chunks(&payload))
+    );
+    fed?;
+    let sealed = sealed
+        .map_err(|e| describe("internal-nonce seal", &e))?
+        .collect()
+        .await;
+    expect(sealed.len(), LEN + 12 + 16, "internal-nonce sealed length")?;
+    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (opened, fed) = futures::join!(
+        key.open(b"large aad".to_vec(), rx),
+        feed(tx, boundary_chunks(&sealed))
+    );
+    fed?;
+    let opened = opened
+        .map_err(|e| describe("internal-nonce open", &e))?
+        .collect()
+        .await;
+    expect_bytes(&opened, &payload, "internal-nonce round trip")
+}
+
 /// rather than a wrong answer, so this probe hangs instead of failing when
 /// it regresses.
 async fn stream_empty_writes() -> Result<(), String> {
