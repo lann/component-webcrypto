@@ -547,7 +547,6 @@ impl std::fmt::Debug for AeadKeyMaterial {
 mod tests {
     use super::*;
 
-    /// An extractable default policy.
     /// A full grant, non-extractable.
     fn ap() -> AeadPolicy {
         AeadPolicy {

@@ -63,11 +63,9 @@ pub type ProbeFn = fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Re
 /// the baseline surface, and that function's name.
 ///
 /// The case id is *derived* from the function's own identifier rather than
-/// written beside it, so a case cannot name one thing and run another. Held
-/// as parallel lists — a name table and a `match index` dispatch — that was
-/// a live hazard: inserting or reordering one alone re-points a name at a
-/// different body, which then asserts the wrong thing and reports *pass*,
-/// and a lockfile can show a reordering but not a mis-pairing.
+/// written beside it, so a case cannot name one thing and run another (a
+/// mis-pairing asserts the wrong thing and reports *pass*, and a lockfile
+/// can show a reordering but not a mis-pairing).
 pub struct Probe {
     /// The probe function's identifier, as `stringify!` sees it.
     pub ident: &'static str,
@@ -306,9 +304,8 @@ impl ErrKind {
 /// names the operation, `accepted` says what its wrongly succeeding would
 /// mean.
 ///
-/// Shared so the three-arm match this stands for cannot be fumbled at any
-/// of its call sites, and so the failure reads the same whichever suite
-/// reports it.
+/// Stands in for the three-arm match at every call site, so the failure
+/// reads the same whichever suite reports it.
 pub fn expect_err<T>(
     what: &str,
     want: ErrKind,

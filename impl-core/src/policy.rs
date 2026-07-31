@@ -84,8 +84,6 @@ impl SigningPolicy {
     }
 }
 
-/// A key with no enabled usage fails at mint: platform backends cannot
-/// mint zero-usage keys, so the contract declines uniformly.
 /// `derivation.derive-options`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DerivePolicy {
@@ -100,6 +98,9 @@ impl DerivePolicy {
     }
 }
 
+/// The at-least-one-usage mint check: a key with no enabled usage fails at
+/// mint (platform backends cannot mint zero-usage keys, so the contract
+/// declines uniformly).
 fn useful(any: bool) -> Result<(), Error> {
     if any {
         Ok(())

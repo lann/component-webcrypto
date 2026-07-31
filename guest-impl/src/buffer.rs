@@ -8,19 +8,14 @@
 //! failure, recoverable by its caller — where an infallible `Vec` would abort
 //! and trap the instance, taking the composition around it down too.
 //!
-//! The memory limit is the bound, deliberately. It is the one number the
-//! deployment already controls — the embedder sets it on the composed
-//! instance the way it sets the host providers' pools — and this provider has
-//! essentially one caller: the composition it was plugged into. Admission
-//! control exists to protect a shared resource from callers that cannot
-//! coordinate; this provider's caller can coordinate with itself, knows its
-//! own workload, and pays for its own concurrency. A provider-side scheduler
-//! or watermark would be a second, uncoordinated number baked into a wasm
-//! binary — untunable per deployment, and a behavioral divergence from the
-//! host providers that makes the same guest perform differently composed than
-//! hosted. (The Model's `backpressure.{inc,dec}` remains available to a
-//! component callee should a genuinely shared deployment ever need it; it is
-//! unused here because there is nothing to schedule *between*.)
+//! The instance memory limit is the retention bound, deliberately: it is
+//! the one number the deployment already controls (the embedder sets it on
+//! the composed instance the way it sets the host providers' pools), and
+//! this provider has essentially one caller — the composition it was
+//! plugged into — which can coordinate with itself. There is no
+//! provider-side admission control here; `backpressure.{inc,dec}` remains
+//! available to a component callee should a genuinely shared deployment
+//! ever need it.
 //!
 //! The fallibility is honest but partial: only the buffering paths are
 //! fallible, while the crypto core's output allocation (input-sized) and the

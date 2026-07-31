@@ -284,9 +284,6 @@ impl GuestAeadKey for AeadKey {
         tag_size: Option<u8>,
         plaintext: wit_bindgen::StreamReader<u8>,
     ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
-        // Per the WIT contract, the input stream is fully drained even when
-        // the call resolves with an error, so the caller's writer always
-        // completes.
         let msg = drain_stream(plaintext).await?;
         Ok(stream_of(self.material.seal(&nonce, &aad, tag_size, &msg)?))
     }
@@ -746,9 +743,6 @@ impl GuestInternalNonceKey for InternalNonceKey {
         aad: Vec<u8>,
         plaintext: wit_bindgen::StreamReader<u8>,
     ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
-        // Per the WIT contract, the input stream is fully drained even when
-        // the call resolves with an error, so the caller's writer always
-        // completes.
         let msg = drain_stream(plaintext).await?;
         // Count this invocation against the algorithm's nonce budget, per
         // the minting interfaces' SHOULD-enforce contract.

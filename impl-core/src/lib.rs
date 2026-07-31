@@ -48,10 +48,10 @@
 //! protection, and they return a plain `Vec<u8>`.
 //!
 //! An extractable key's bytes are bound for guest memory, which the runtime
-//! allocates and frees and this crate cannot scrub. Every caller lowers the
-//! buffer across the boundary in the expression that receives it and keeps
-//! nothing, so the material is unprotected from this call onward whatever
-//! the return type says; wrapping it buys a second copy and no protection.
+//! allocates and frees and this crate cannot scrub: the material is
+//! unprotected from this call onward whatever the return type says. Every
+//! caller lowers the buffer across the boundary in the expression that
+//! receives it and keeps nothing.
 
 mod aead;
 mod gcm;

@@ -87,13 +87,12 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
         // here, since this collector either buffers or, past the cap,
         // drains and discards.
         //
-        // `Pending` would be wrong, not merely slower. The contract requires
-        // arming `cx`'s waker before parking, and this consumer has nothing
-        // to arm it from: it awaits no external event, so a parked poll is
-        // never resumed. The writer would never receive `COMPLETED`,
-        // `drain_stream`'s completion signal would never fire, and the
-        // admission `Reservation` held across the call would starve every
-        // other operation in the store.
+        // This consumer must never return `Pending`: it awaits no
+        // external event, so it has nothing to arm `cx`'s waker from, and
+        // a parked poll is never resumed — the writer would never receive
+        // `COMPLETED`, `drain_stream`'s completion signal would never
+        // fire, and the admission `Reservation` held across the call
+        // would starve every other operation in the store.
         Poll::Ready(Ok(StreamResult::Completed))
     }
 }

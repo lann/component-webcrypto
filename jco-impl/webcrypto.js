@@ -1902,16 +1902,6 @@ async function exportJwkGated(key) {
 }
 
 /**
- * Parse JWK JSON text and strip the members the WIT contract ignores.
- * `use`/`key_ops` are consumer policy — they must not reach the platform,
- * whose import would otherwise enforce them against the usages this host
- * passes. `ext` stays: the platform validates it against `extractable`,
- * which the WIT does model. Malformed JSON throws
- * `{ tag: 'invalid-key', val }`.
- * @param {string} jwkText
- * @returns {Record<string, unknown>}
- */
-/**
  * The decoded byte length of a valid unpadded-base64url string — exact:
  * `floor(chars * 3 / 4)`. Only meaningful after the platform accepted the
  * JWK (which validates the encoding).
@@ -1952,6 +1942,12 @@ function requireStrictBase64url(k) {
 }
 
 /**
+ * Parse JWK JSON text and strip the members the WIT contract ignores.
+ * `use`/`key_ops` are consumer policy — they must not reach the platform,
+ * whose import would otherwise enforce them against the usages this host
+ * passes. `ext` stays: the platform validates it against `extractable`,
+ * which the WIT does model. Malformed JSON throws
+ * `{ tag: 'invalid-key', val }`.
  * @param {string} jwkText
  * @returns {Record<string, unknown>}
  */

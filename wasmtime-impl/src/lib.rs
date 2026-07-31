@@ -69,15 +69,10 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// instance memory limit is its bound — see guest-impl's `buffer` module.)
 ///
 /// The pool's budget is resolved **once**, at the first operation that
-/// buffers, and belongs to the pool from then on. Changing
-/// [`Store::set_hostcall_fuel`] afterwards therefore retunes the per-call
-/// limit but not the pool. The alternative — re-reading the ceiling per
-/// acquisition — leaves the pool enforcing nothing of its own: every
-/// waiter judges one shared counter against its own ceiling, so acquirers
-/// configured differently disagree about how full the pool is, and a
-/// release cannot tell whether the next waiter fits without borrowing a
-/// ceiling from whoever happened to be releasing. Configure the limits
-/// before the first crypto call.
+/// buffers, and belongs to the pool from then on (see `limits.rs` for why
+/// the budget is the pool's, not each acquirer's). Configure the limits
+/// before the first crypto call; changing them afterwards retunes the
+/// per-call limit but not the pool.
 ///
 /// Cloning the context gives the clone its own pool, since the pool is
 /// parameterized by the budget the context carries.
