@@ -27,20 +27,35 @@ use conformance_harness::stream::Schedule;
 use conformance_harness::{FEATURE_CHACHA, FEATURE_GCM_ANY_IV};
 use serde::Deserialize;
 
+/// The deterministic 1-in-N sample of rejection vectors that also run
+/// `straddle` (selected by id, so the sample is stable and lands in the
+/// lockfile).
+const REJECTION_STRADDLE_SAMPLE: u64 = 20;
+
 /// The schedule set for a vector whose longest stream input is
-/// `max_input_len` bytes and whose expected outcome is acceptance
-/// (`valid`) or rejection.
+/// `max_input_len` bytes, whose expected outcome is acceptance (`valid`)
+/// or rejection, and whose stable id within its file is `id`.
 ///
-/// Rejection-expectation vectors run only `whole`: the verdict is computed
-/// after the stream is assembled, and assembly-under-chunking correctness
-/// is pinned by the valid cases (a mis-assembled valid input produces
-/// wrong bytes — a distinct, detected failure), so chunking a rejection
-/// adds runs without adding a claim.
-fn schedules(max_input_len: usize, valid: bool) -> Vec<Schedule> {
-    if max_input_len == 0 || !valid {
+/// Rejection-expectation vectors run `whole`, plus `straddle` for a
+/// deterministic 1-in-20 sample. Assembly-under-chunking correctness is
+/// pinned by the valid cases (a mis-assembled valid input produces wrong
+/// bytes — a distinct, detected failure), so chunking *every* rejection
+/// would add hundreds of runs without adding that claim — but the
+/// drain-on-error rule is its own contract, and the sample pins it under
+/// chunked delivery on every rejecting path family rather than only
+/// where a probe thought to ask (mirrored in
+/// conformance/vectors/README.md's schedule policy).
+fn schedules(max_input_len: usize, valid: bool, id: u64) -> Vec<Schedule> {
+    if max_input_len == 0 {
         return vec![Schedule::Whole];
     }
-    vec![Schedule::Whole, Schedule::Bytes, Schedule::Straddle]
+    if valid {
+        return vec![Schedule::Whole, Schedule::Bytes, Schedule::Straddle];
+    }
+    if id.is_multiple_of(REJECTION_STRADDLE_SAMPLE) {
+        return vec![Schedule::Whole, Schedule::Straddle];
+    }
+    vec![Schedule::Whole]
 }
 
 /// A served HMAC digest parameterization, as named in test ids.
@@ -292,7 +307,7 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
                 sealed.extend(unhex(&field, &test.ct));
                 sealed.extend(unhex(&field, &test.tag));
                 let valid = is_valid(&field, &test.result) && group.iv_size == aead_alg.iv_bits();
-                for schedule in schedules(sealed.len(), valid) {
+                for schedule in schedules(sealed.len(), valid, test.tc_id) {
                     cases.push(InternalNonceCase {
                         alg,
                         key_bits: group.key_size,
@@ -351,6 +366,20 @@ const HKDF_VECTORS: [(HkdfAlg, &str); 3] = [
     (
         HkdfAlg::Sha512,
         include_str!("../../vectors/hkdf_sha512_test.json"),
+    ),
+];
+const PBKDF2_VECTORS: [(Pbkdf2Alg, &str); 3] = [
+    (
+        Pbkdf2Alg::Sha256,
+        include_str!("../../vectors/pbkdf2_hmacsha256_test.json"),
+    ),
+    (
+        Pbkdf2Alg::Sha384,
+        include_str!("../../vectors/pbkdf2_hmacsha384_test.json"),
+    ),
+    (
+        Pbkdf2Alg::Sha512,
+        include_str!("../../vectors/pbkdf2_hmacsha512_test.json"),
     ),
 ];
 const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
@@ -468,6 +497,100 @@ pub fn hkdf_cases() -> Vec<HkdfCase> {
                     info: unhex(&field, &test.info),
                     size: test.size,
                     okm: unhex(&field, &test.okm),
+                    valid: is_valid(&field, &test.result),
+                });
+            }
+        }
+    }
+    cases
+}
+
+/// A served PBKDF2 parameterization, as named in derivation vector ids.
+#[derive(Clone, Copy)]
+pub enum Pbkdf2Alg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl Pbkdf2Alg {
+    /// The algorithm name used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pbkdf2Alg::Sha256 => "pbkdf2-sha256",
+            Pbkdf2Alg::Sha384 => "pbkdf2-sha384",
+            Pbkdf2Alg::Sha512 => "pbkdf2-sha512",
+        }
+    }
+}
+
+/// One Wycheproof PBKDF2 vector: derive `dk_len` bytes from
+/// (`password`, `salt`, `iterations`) and compare with `dk`. Every
+/// upstream vector is `valid` (the file has no invalid cases), including
+/// the empty-password ones — which is why `import-password` accepts empty
+/// material.
+pub struct Pbkdf2Case {
+    pub alg: Pbkdf2Alg,
+    pub tc_id: u64,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub iterations: u32,
+    /// Output size in bytes.
+    pub dk_len: u32,
+    pub dk: Vec<u8>,
+    pub valid: bool,
+}
+
+impl Pbkdf2Case {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    pub fn case_id(&self) -> String {
+        format!("{}/wycheproof/tc{}", self.alg.name(), self.tc_id)
+    }
+
+    /// The features this case exercises beyond the baseline surface.
+    pub fn features(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+#[derive(Deserialize)]
+struct Pbkdf2Group {
+    tests: Vec<Pbkdf2Test>,
+}
+
+#[derive(Deserialize)]
+struct Pbkdf2Test {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    password: String,
+    salt: String,
+    #[serde(rename = "iterationCount")]
+    iterations: u32,
+    #[serde(rename = "dkLen")]
+    dk_len: u32,
+    dk: String,
+    result: String,
+}
+
+/// Translate the PBKDF2 vector files. Every vector runs: the WIT surface
+/// carries the full (password, salt, iterations, dkLen) parameter space.
+pub fn pbkdf2_cases() -> Vec<Pbkdf2Case> {
+    let mut cases = Vec::new();
+    for (alg, text) in PBKDF2_VECTORS {
+        let file: VectorFile<Pbkdf2Group> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
+        for group in &file.test_groups {
+            for test in &group.tests {
+                let field = format!("{} tc{}", alg.name(), test.tc_id);
+                cases.push(Pbkdf2Case {
+                    alg,
+                    tc_id: test.tc_id,
+                    password: unhex(&field, &test.password),
+                    salt: unhex(&field, &test.salt),
+                    iterations: test.iterations,
+                    dk_len: test.dk_len,
+                    dk: unhex(&field, &test.dk),
                     valid: is_valid(&field, &test.result),
                 });
             }
@@ -599,7 +722,7 @@ pub fn hmac_cases() -> Vec<HmacCase> {
                 let msg = unhex(&field, &test.msg);
                 let tag = unhex(&field, &test.tag);
                 let valid = is_valid(&field, &test.result);
-                for schedule in schedules(msg.len(), valid) {
+                for schedule in schedules(msg.len(), valid, test.tc_id) {
                     cases.push(HmacCase {
                         alg,
                         tc_id: test.tc_id,
@@ -640,7 +763,7 @@ pub fn aead_cases() -> Vec<AeadCase> {
                 let field = format!("{} tc{}", alg.name(), test.tc_id);
                 let (fields, expectation, max_input_len) = translate_aead(&field, alg, group, test);
                 let valid = matches!(expectation, AeadExpectation::Valid);
-                for schedule in schedules(max_input_len, valid) {
+                for schedule in schedules(max_input_len, valid, test.tc_id) {
                     let (key, iv, aad, msg, ct_tag) = fields.clone();
                     cases.push(AeadCase {
                         alg,
@@ -725,7 +848,7 @@ pub fn sha2_cases() -> Vec<Sha2Case> {
                     let mut msg = msg.take().expect("MD before Msg");
                     msg.truncate((len_bits / 8) as usize);
                     let md = unhex(&format!("{} len{len_bits} md", alg.name()), value);
-                    for schedule in schedules(msg.len(), true) {
+                    for schedule in schedules(msg.len(), true, len_bits) {
                         cases.push(Sha2Case {
                             alg,
                             len_bits,
@@ -852,7 +975,7 @@ pub fn speccheck_cases() -> Vec<SpeccheckCase> {
         let field = format!("speccheck tc{index}");
         let msg = unhex(&field, &vector.message);
         let valid = index as u64 == SPECCHECK_VALID_CASE;
-        for schedule in schedules(msg.len(), valid) {
+        for schedule in schedules(msg.len(), valid, index as u64) {
             cases.push(SpeccheckCase {
                 tc_id: index as u64,
                 schedule,
@@ -909,7 +1032,7 @@ pub fn sig_cases() -> Vec<SigCase> {
             let msg = unhex(&field, &test.msg);
             let sig = unhex(&field, &test.sig);
             let valid = is_valid(&field, &test.result);
-            for schedule in schedules(msg.len(), valid) {
+            for schedule in schedules(msg.len(), valid, test.tc_id) {
                 cases.push(SigCase {
                     alg,
                     tc_id: test.tc_id,

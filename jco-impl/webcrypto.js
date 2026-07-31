@@ -944,14 +944,12 @@ export class DeriveInput {
   /**
    * @param {symbol} token
    * @param {CryptoKey} key
-   * @param {string} hash
-   * @param {Uint8Array} salt
-   * @param {Uint8Array} info
+   * @param {HkdfParams | Pbkdf2Params} params
    * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
    */
-  constructor(token, key, hash, salt, info, policy) {
+  constructor(token, key, params, policy) {
     if (token !== MINT) throw new TypeError("derive-input is minted by prepare");
-    inputState.set(this, { key, hash, salt, info, policy });
+    inputState.set(this, { key, params, policy });
   }
 
   canDeriveBits() {
@@ -982,8 +980,8 @@ export class DeriveInput {
     if (length === 0 || length % 8 !== 0) {
       throw errOther(`derive length must be a non-zero multiple of 8 bits, got ${length}`);
     }
-    const bits = await platformCall("HKDF derive", () =>
-      subtle.deriveBits(hkdfParams(state), state.key, length),
+    const bits = await platformCall("KDF derive", () =>
+      subtle.deriveBits(state.params, state.key, length),
     );
     return new Uint8Array(bits);
   }
@@ -1010,13 +1008,13 @@ async function deriveKeyFrom(input, derived, extractable, usages) {
       "minting an extractable key requires the derive-bits grant: an exportable key is bits disclosure by other means",
     );
   }
-  return await platformCall("HKDF derive-key", () =>
-    subtle.deriveKey(hkdfParams(state), state.key, derived, extractable, usages),
+  return await platformCall("KDF derive-key", () =>
+    subtle.deriveKey(state.params, state.key, derived, extractable, usages),
   );
 }
 
 /**
- * @type {WeakMap<DeriveInput, { key: CryptoKey, hash: string, salt: Uint8Array, info: Uint8Array, policy: { deriveBits: boolean, deriveKey: boolean } }>}
+ * @type {WeakMap<DeriveInput, { key: CryptoKey, params: HkdfParams | Pbkdf2Params, policy: { deriveBits: boolean, deriveKey: boolean } }>}
  */
 const inputState = new WeakMap();
 
@@ -1029,18 +1027,7 @@ function inputOf(input) {
   return state;
 }
 
-/**
- * @param {{ hash: string, salt: Uint8Array, info: Uint8Array }} state
- * @returns {HkdfParams}
- */
-function hkdfParams(state) {
-  return {
-    name: "HKDF",
-    hash: state.hash,
-    salt: asBufferSource(state.salt),
-    info: asBufferSource(state.info),
-  };
-}
+
 
 /**
  * Import input keying material (the `hkdf.import-ikm` contract): empty
@@ -1075,7 +1062,13 @@ async function importIkm(raw, options) {
 async function prepare(variant, input, salt, info) {
   const { hash } = sha2Variant(variant);
   const { key, policy } = ikmOf(input);
-  return new DeriveInput(MINT, key, hash, salt.slice(), info.slice(), { ...policy });
+  const params = {
+    name: "HKDF",
+    hash,
+    salt: asBufferSource(salt.slice()),
+    info: asBufferSource(info.slice()),
+  };
+  return new DeriveInput(MINT, key, params, { ...policy });
 }
 
 /**
@@ -1104,6 +1097,90 @@ export const derivation = { DeriveOptions, DeriveInput };
 
 /** The `lann:webcrypto/hkdf` interface. */
 export const hkdf = { Ikm, importIkm, prepare, prepareFrom };
+
+/**
+ * @type {WeakMap<Password, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean } }>}
+ */
+const passwordState = new WeakMap();
+
+/** @param {Password} password */
+function passwordOf(password) {
+  const state = passwordState.get(password);
+  if (state === undefined) {
+    throw errOther("password minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * The `pbkdf2.password` resource: a password as a platform `CryptoKey`
+ * (`PBKDF2`-bound, non-extractable — the platform *forces* that at import).
+ * The WIT grants ride the key's usages, so the platform enforces them too.
+ * Like `ikm`, state lives in a WeakMap: the resource appears as a
+ * parameter of `prepare`.
+ */
+export class Password {
+  /**
+   * @param {symbol} token
+   * @param {CryptoKey} key
+   * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+   */
+  constructor(token, key, policy) {
+    if (token !== MINT) throw new TypeError("password is minted by import-password");
+    passwordState.set(this, { key, policy });
+  }
+
+  canDeriveBits() {
+    return passwordOf(this).policy.deriveBits;
+  }
+
+  canDeriveKey() {
+    return passwordOf(this).policy.deriveKey;
+  }
+}
+
+/**
+ * Import a password (the `pbkdf2.import-password` contract): empty
+ * passwords are accepted — the platform serves them, and the upstream
+ * vectors exercise them as valid (the documented asymmetry with
+ * `import-ikm`). A grantless policy is `not-permitted`.
+ * @param {Uint8Array} raw
+ * @param {DeriveOptions} options
+ */
+async function importPassword(raw, options) {
+  const policy = derivePolicy(options);
+  const usages = deriveUsages(policy);
+  let key;
+  try {
+    key = await subtle.importKey("raw", asBufferSource(raw), "PBKDF2", false, usages);
+  } catch (err) {
+    invalidKey(err, "PBKDF2 password");
+  }
+  return new Password(MINT, key, { ...policy });
+}
+
+/**
+ * Parameterize a PBKDF2 derivation (the `pbkdf2.prepare` contract): salt
+ * and iteration count bound now, output length per use. A zero iteration
+ * count fails here — the platform's `OperationError`, checked early so a
+ * misparameterized input cannot mint.
+ * @param {string} variant
+ * @param {Password} input
+ * @param {Uint8Array} salt
+ * @param {number} iterations
+ */
+async function preparePbkdf2(variant, input, salt, iterations) {
+  const { hash } = sha2Variant(variant);
+  if (iterations === 0) {
+    throw errOther("PBKDF2 requires a positive iteration count");
+  }
+  const { key, policy } = passwordOf(input);
+  const params = { name: "PBKDF2", hash, salt: asBufferSource(salt.slice()), iterations };
+  return new DeriveInput(MINT, key, params, { ...policy });
+}
+
+/** The `lann:webcrypto/pbkdf2` interface. */
+export const pbkdf2 = { Password, importPassword, prepare: preparePbkdf2 };
 
 /**
  * The `digest` resource: a digest algorithm bound at creation. Holds only

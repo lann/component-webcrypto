@@ -16,6 +16,12 @@ commit
 
 - `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
   — HMAC MAC vectors for every served SHA-2 parameterization.
+- `pbkdf2_hmacsha256_test.json`, `pbkdf2_hmacsha384_test.json`,
+  `pbkdf2_hmacsha512_test.json` — PBKDF2 derivation vectors for every
+  served SHA-2 parameterization. Every vector runs and every one is
+  `valid` upstream, including the empty-password cases — which is why
+  `pbkdf2.import-password` accepts empty material where `hkdf.import-ikm`
+  does not.
 - `hkdf_sha256_test.json`, `hkdf_sha384_test.json`, `hkdf_sha512_test.json`
   — HKDF derivation vectors for every served SHA-2 parameterization. Every
   vector runs: the WIT surface carries the full (ikm, salt, info, size)
@@ -62,9 +68,13 @@ generation stamps in their headers.
 Vectors whose expected outcome is *acceptance* run under every chunking
 schedule (`whole`, 1-byte `bytes`, block-straddling `straddle`):
 assembled-input correctness is the claim chunking can affect.
-Rejection-expectation vectors run only `whole` — their verdict is computed
-after assembly, and mis-assembly is already a detected failure of the
-accepted cases — so chunking them adds runs without adding a claim.
+Rejection-expectation vectors run `whole`, plus `straddle` for a
+deterministic 1-in-20 sample (selected by vector id in
+`guest/src/translate.rs`) — their verdict is computed after assembly, and
+mis-assembly is already a detected failure of the accepted cases, so
+chunking every rejection would add runs without adding that claim; the
+sample instead pins the drain-on-error rule under chunked delivery on
+every rejecting path family.
 
 ## Translation policy
 

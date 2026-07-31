@@ -42,6 +42,9 @@ use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::mac::{
     self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
 };
+use crate::exports::lann::webcrypto::pbkdf2::{
+    self as pbkdf2_iface, Guest as Pbkdf2Guest, GuestPassword,
+};
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
@@ -538,6 +541,49 @@ pub struct Ikm {
 }
 
 impl GuestIkm for Ikm {
+    fn can_derive_bits(&self) -> bool {
+        self.material.policy().derive_bits
+    }
+
+    fn can_derive_key(&self) -> bool {
+        self.material.policy().derive_key
+    }
+}
+
+impl Pbkdf2Guest for Component {
+    type Password = Password;
+
+    async fn import_password(
+        raw: Vec<u8>,
+        options: derivation::DeriveOptions,
+    ) -> Result<pbkdf2_iface::Password, Error> {
+        let policy = options.get::<DeriveOptions>().policy.get();
+        let material = webcrypto_impl_core::PasswordMaterial::import(raw, policy)?;
+        Ok(pbkdf2_iface::Password::new(Password { material }))
+    }
+
+    async fn prepare(
+        variant: Sha2Variant,
+        input: pbkdf2_iface::PasswordBorrow<'_>,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare_pbkdf2(
+            variant.into(),
+            &input.get::<Password>().material,
+            salt,
+            iterations,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+}
+
+/// An exported `pbkdf2.password`: the shared core's password material.
+pub struct Password {
+    material: webcrypto_impl_core::PasswordMaterial,
+}
+
+impl GuestPassword for Password {
     fn can_derive_bits(&self) -> bool {
         self.material.policy().derive_bits
     }

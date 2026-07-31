@@ -14,6 +14,7 @@ use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
 use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
+use lann_webcrypto_guest::bindings::pbkdf2::{self, Password};
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
@@ -70,6 +71,11 @@ pub fn derive_options(bits: bool, key: bool) -> DeriveOptions {
 /// Import HKDF input keying material with the given grants.
 pub async fn import_ikm(raw: Vec<u8>, bits: bool, key: bool) -> Result<Ikm, Error> {
     hkdf::import_ikm(raw, derive_options(bits, key)).await
+}
+
+/// Import a PBKDF2 password with the given grants.
+pub async fn import_password(raw: Vec<u8>, bits: bool, key: bool) -> Result<Password, Error> {
+    pbkdf2::import_password(raw, derive_options(bits, key)).await
 }
 
 pub async fn import_hmac_key(
@@ -135,16 +141,8 @@ pub async fn import_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKe
     chacha20_poly1305::import_key(raw, aead_options(extractable)).await
 }
 
-pub async fn generate_chacha_key(extractable: bool) -> Result<AeadKey, Error> {
-    chacha20_poly1305::generate_key(aead_options(extractable)).await
-}
-
 pub async fn import_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
     xchacha20_poly1305::import_key(raw, aead_options(extractable)).await
-}
-
-pub async fn generate_xchacha_key(extractable: bool) -> Result<AeadKey, Error> {
-    xchacha20_poly1305::generate_key(aead_options(extractable)).await
 }
 
 pub async fn import_xchacha_internal_nonce_key(

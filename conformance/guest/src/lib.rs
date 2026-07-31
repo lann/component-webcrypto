@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
-    AeadCase, HkdfCase, HmacCase, InternalNonceCase, Sha2Case, SigCase, SpeccheckCase,
+    AeadCase, HkdfCase, HmacCase, InternalNonceCase, Pbkdf2Case, Sha2Case, SigCase, SpeccheckCase,
 };
 
 /// Validate a `missing-features` declaration against
@@ -55,6 +55,7 @@ pub struct Case {
 
 enum CaseKind {
     Hkdf(HkdfCase),
+    Pbkdf2(Pbkdf2Case),
     Hmac(HmacCase),
     Aead(AeadCase),
     InternalNonce(InternalNonceCase),
@@ -93,6 +94,7 @@ impl GuestTestCase for Case {
         if self.provided {
             let outcome = match &self.kind {
                 CaseKind::Hkdf(case) => vectors::run_hkdf_case(case).await,
+                CaseKind::Pbkdf2(case) => vectors::run_pbkdf2_case(case).await,
                 CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
                 CaseKind::Aead(case) => vectors::run_aead_case(case).await,
                 CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
@@ -143,6 +145,14 @@ impl Guest for Component {
                 case.features(),
                 &missing,
                 CaseKind::Hkdf(case),
+            ));
+        }
+        for case in translate::pbkdf2_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                case.features(),
+                &missing,
+                CaseKind::Pbkdf2(case),
             ));
         }
         for case in translate::hmac_cases() {
