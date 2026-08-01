@@ -20,4 +20,8 @@ declare module "lann:webcrypto/key-agreement@0.1.0";
 declare module "lann:webcrypto/x25519@0.1.0";
 declare module "lann:webcrypto/sha2@0.1.0";
 declare module "lann:webcrypto/digest@0.1.0";
+declare module "lann:webcrypto/signature@0.1.0";
+declare module "lann:webcrypto/ed25519-verify@0.1.0";
+declare module "lann:webcrypto/ed25519-sign@0.1.0";
+declare module "lann:webcrypto/ecdsa-verify@0.1.0";
 declare module "wit-world";
