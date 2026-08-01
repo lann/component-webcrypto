@@ -58,7 +58,16 @@ pub fn load(
     let component = Component::from_file(&engine, path)
         .with_context(|| format!("loading component {}", path.display()))?;
     let mut linker: Linker<Ctx> = Linker::new(&engine);
-    crate::add_to_linker(&mut linker)?;
+    // The canned embedding is the demo and conformance-adapter path, and
+    // the conformance manifest declares the wasmtime target missing no
+    // features — so the `@unstable`-gated interfaces are all served here,
+    // unlike `add_to_linker`'s default.
+    crate::add_to_linker_with_options(
+        &mut linker,
+        crate::LinkOptions::default()
+            .chacha20_poly1305(true)
+            .xchacha20_poly1305(true),
+    )?;
     let store = Store::new(
         &engine,
         Ctx {

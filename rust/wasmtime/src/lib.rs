@@ -526,7 +526,48 @@ minted_resources! {
 ///     add_to_linker(linker)
 /// }
 /// ```
+///
+/// The `@unstable`-gated ChaCha interfaces (see `wit/README.md`,
+/// "Stability gates") are **not** added: a guest whose world imports them
+/// fails to instantiate against this default. Opt in with
+/// [`add_to_linker_with_options`].
 pub fn add_to_linker<T>(linker: &mut Linker<T>) -> wasmtime::Result<()>
+where
+    T: WasiWebcryptoView + 'static,
+{
+    add_to_linker_with_options(linker, &LinkOptions::default())
+}
+
+/// Which `@unstable`-gated interfaces [`add_to_linker_with_options`] adds.
+/// Every flag defaults to off; this host implements all of them, so a flag
+/// is embedder policy, not capability.
+#[derive(Clone, Debug, Default)]
+pub struct LinkOptions {
+    chacha20_poly1305: bool,
+    xchacha20_poly1305: bool,
+}
+
+impl LinkOptions {
+    /// Serve `lann:webcrypto/chacha20-poly1305`.
+    pub fn chacha20_poly1305(&mut self, enabled: bool) -> &mut Self {
+        self.chacha20_poly1305 = enabled;
+        self
+    }
+
+    /// Serve `lann:webcrypto/xchacha20-poly1305` and
+    /// `lann:webcrypto/xchacha20-poly1305-internal-nonce`.
+    pub fn xchacha20_poly1305(&mut self, enabled: bool) -> &mut Self {
+        self.xchacha20_poly1305 = enabled;
+        self
+    }
+}
+
+/// [`add_to_linker`], with the `@unstable`-gated interfaces `options`
+/// selects also served.
+pub fn add_to_linker_with_options<T>(
+    linker: &mut Linker<T>,
+    options: &LinkOptions,
+) -> wasmtime::Result<()>
 where
     T: WasiWebcryptoView + 'static,
 {
@@ -554,19 +595,18 @@ where
     bindings::webcrypto::cipher::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_cbc::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_ctr::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
-    // The ChaCha interfaces are gated `@unstable` in the WIT (see
-    // `wit/README.md`, "Stability gates"), so their generated
-    // `add_to_linker`s take `LinkOptions`. This host serves them
-    // unconditionally: the gate marks the interface shape provisional, not
-    // this implementation's capability.
+    // The generated `add_to_linker`s for the gated interfaces consult
+    // their `LinkOptions` and add nothing when the flag is off.
     bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
         linker,
-        bindings::webcrypto::chacha20_poly1305::LinkOptions::default().chacha20_poly1305(true),
+        bindings::webcrypto::chacha20_poly1305::LinkOptions::default()
+            .chacha20_poly1305(options.chacha20_poly1305),
         T::webcrypto,
     )?;
     bindings::webcrypto::xchacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
         linker,
-        bindings::webcrypto::xchacha20_poly1305::LinkOptions::default().xchacha20_poly1305(true),
+        bindings::webcrypto::xchacha20_poly1305::LinkOptions::default()
+            .xchacha20_poly1305(options.xchacha20_poly1305),
         T::webcrypto,
     )?;
     bindings::webcrypto::aes_gcm_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
@@ -576,7 +616,7 @@ where
     bindings::webcrypto::xchacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
         bindings::webcrypto::xchacha20_poly1305_internal_nonce::LinkOptions::default()
-            .xchacha20_poly1305(true),
+            .xchacha20_poly1305(options.xchacha20_poly1305),
         T::webcrypto,
     )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;

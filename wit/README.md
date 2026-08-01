@@ -243,6 +243,13 @@ availability: an implementation may decline any minting path with
 still needs the same handling. Stabilization replaces the gate with
 `@since` once the referenced externals settle.
 
+Within this repository, only test builds enable the features by default
+(the conformance and demo guests, the WPT runners, the timing lab, and
+the standalone Wasmtime embedding). The library surfaces keep the gated
+default: the guest SDK's ChaCha wrappers and imports sit behind its
+`chacha` cargo feature, and the Wasmtime host's plain `add_to_linker`
+serves no gated interface (`add_to_linker_with_options` opts in).
+
 ["Modern Algorithms in the Web Cryptography API"]: https://wicg.github.io/webcrypto-modern-algos/
 
 ## Design notes
