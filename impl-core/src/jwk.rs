@@ -463,11 +463,26 @@ mod tests {
     #[test]
     fn okp_contract_errors() {
         // Wrong curve, wrong kty, missing x, missing d, ext conflict.
+        // A present-but-wrong crv names the expected value; only a missing
+        // or non-string crv falls to the carry-a-string diagnostic.
         let jwk = build_okp_private("Ed25519", &[1; 32], &[2; 32]);
-        assert!(matches!(
-            parse_okp_private(&jwk, "X25519", false, None),
-            Err(Error::InvalidKey(_))
-        ));
+        match parse_okp_private(&jwk, "X25519", false, None) {
+            Err(Error::InvalidKey(msg)) => {
+                assert_eq!(msg, r#"JWK crv is "Ed25519", not "X25519""#)
+            }
+            _ => panic!("expected invalid-key"),
+        }
+        match parse_okp_private(
+            r#"{"kty":"OKP","x":"AQID","d":"AQID"}"#,
+            "X25519",
+            false,
+            None,
+        ) {
+            Err(Error::InvalidKey(msg)) => {
+                assert_eq!(msg, "JWK must carry a string `crv`")
+            }
+            _ => panic!("expected invalid-key"),
+        }
         assert!(matches!(
             parse_okp_private(
                 r#"{"kty":"oct","crv":"X25519","x":"AQID","d":"AQID"}"#,
