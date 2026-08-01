@@ -546,7 +546,37 @@ function normalizeAlgorithm(algorithm) {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
   alg.name = name;
+  // The spec normalizes nested algorithms during algorithm normalization,
+  // so a bad `hash` member fails here — before usages are looked at.
+  if (alg.hash !== undefined) {
+    alg.hash = normalizeHashName(alg.hash);
+  }
   return /** @type {NormalizedAlgorithm} */ (alg);
+}
+
+/**
+ * Normalize a `hash` member to its registry spelling: a string or
+ * `{ name }` object naming SHA-1 or the SHA-2 family, case-insensitively.
+ * Unknown hash names are the spec's `NotSupportedError`.
+ * @param {unknown} hash
+ * @returns {"SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"}
+ */
+function normalizeHashName(hash) {
+  if (typeof hash === "object" && hash !== null) {
+    const named = /** @type {{ name?: unknown }} */ (hash).name;
+    if (typeof named === "string") hash = named;
+  }
+  if (typeof hash !== "string") {
+    throw new TypeError("a hash algorithm must be named by a string or a { name } object");
+  }
+  const upper = hash.toUpperCase();
+  const name = /** @type {const} */ (["SHA-1", "SHA-256", "SHA-384", "SHA-512"]).find(
+    (served) => served === upper,
+  );
+  if (name === undefined) {
+    throw dom("NotSupportedError", `unsupported hash ${hash}`);
+  }
+  return name;
 }
 
 /**
@@ -745,10 +775,21 @@ function normalizeUsages(keyUsages, name) {
       usages.push(usage);
     }
   }
+  return usages;
+}
+
+/**
+ * The spec's empty-usage check for secret- and private-key mints. Kept
+ * separate from `normalizeUsages` because the two fire at different
+ * points: usage *membership* is validated during normalization, while an
+ * empty set is only rejected after the algorithm's own parameter checks
+ * (a bad AES length is an `OperationError` even with empty usages).
+ * @param {readonly KeyUsage[]} usages
+ */
+function requireNonEmptyUsages(usages) {
   if (usages.length === 0) {
     throw dom("SyntaxError", "usages cannot be empty for secret or private keys");
   }
-  return usages;
 }
 
 /**
@@ -779,8 +820,9 @@ function requireUsage(key, usage) {
 /**
  * The `mac-key-options` resource carrying `usages` and `extractable` (the
  * WIT options resources are single-use, so one is built per mint).
- * `normalizeUsages` has already rejected empty usages with the spec's
- * `SyntaxError`, so the WIT's own zero-usage refusal is unreachable here.
+ * Every minting path rejects empty usages with the spec's `SyntaxError`
+ * before reaching here, so the WIT's own zero-usage refusal is
+ * unreachable.
  * @param {readonly KeyUsage[]} usages
  * @param {boolean} extractable
  */
@@ -1110,6 +1152,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
       throw dom("NotSupportedError", `${alg.name} keys support the "raw" format only`);
     }
     const usages = normalizeUsages(keyUsages, alg.name);
+    requireNonEmptyUsages(usages);
     if (extractable) {
       throw dom("SyntaxError", `${alg.name} keys cannot be extractable`);
     }
@@ -1139,6 +1182,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     }
     if (format === "pkcs8") {
       const usages = normalizeUsages(keyUsages, "X25519");
+      requireNonEmptyUsages(usages);
       const handle = await callImport(
         x25519Iface.importSecretKeyPkcs8(
           bytesOf(keyData, "keyData"),
@@ -1160,6 +1204,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
       return mintKey(handle, "public", { name: "X25519" }, !!extractable, []);
     }
     const usages = normalizeUsages(keyUsages, "X25519");
+    requireNonEmptyUsages(usages);
     const handle = await callImport(
       x25519Iface.importSecretKeyJwk(
         jwkForImport(jwk, "enc", usages),
@@ -1203,6 +1248,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
         );
       }
       const usages = normalizeUsages(keyUsages, "Ed25519");
+      requireNonEmptyUsages(usages);
       if (usages.includes("verify")) {
         throw dom("SyntaxError", "verify is not valid for private signature keys");
       }
@@ -1256,6 +1302,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     throw dom("NotSupportedError", `${alg.name} keys do not use the ${format} format`);
   }
   const usages = normalizeUsages(keyUsages, alg.name);
+  requireNonEmptyUsages(usages);
 
   if (alg.name === "HMAC") {
     const route = hmacHashOf(alg.hash);
@@ -1353,6 +1400,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
   const usages = normalizeUsages(keyUsages, alg.name);
 
   if (alg.name === "X25519") {
+    requireNonEmptyUsages(usages);
     const pair = /** @type {[any, any]} */ (
       await callImport(x25519Iface.generateKey(agreementMintOptions(!!extractable)))
     );
@@ -1400,6 +1448,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
     if (alg.length === 0) {
       throw dom("OperationError", "HMAC length cannot be 0");
     }
+    requireNonEmptyUsages(usages);
     const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
       "sha1" in route
@@ -1412,6 +1461,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
     );
   } else {
     const variant = aesVariantOf(Number(alg.length));
+    requireNonEmptyUsages(usages);
     const mode = CIPHER_MODES[alg.name];
     if (mode !== undefined) {
       return await mintCipherKey(

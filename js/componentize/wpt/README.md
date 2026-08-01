@@ -144,6 +144,7 @@ relative path.
 | `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
 | `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js` (references), `successes.js` |
+| `generateKey` failures | `failures_HMAC.https.any.js`, `failures_AES-GCM.https.any.js`, `failures_AES-CBC.https.any.js`, `failures_AES-CTR.https.any.js`, `failures_Ed25519.https.any.js`, `failures_X25519.https.any.js` (references), `failures.js` |
 | `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |
 | `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |

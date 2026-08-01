@@ -102,6 +102,19 @@ function generateKeyInSubset(name) {
 }
 
 /**
+ * generateKey/failures, run for the served algorithms (HMAC, the AES
+ * family, Ed25519, X25519): the whole group is in-subset — the suite
+ * asserts the spec's error ordering (algorithm normalization, then usage
+ * membership, then algorithm properties, then the empty-usage check),
+ * which this library implements for every served algorithm. The AES-192
+ * rows are in too: their expected errors are usage and length checks that
+ * precede the mint, so they never reach the package-wide AES-192 decline.
+ */
+function generateKeyFailuresInSubset() {
+  return true;
+}
+
+/**
  * sign_verify/ecdsa: every test needs ECDSA signing or a generated pair —
  * `ecdsa-sign` is class D, withheld by the in-guest provider this shim
  * composes with (see the shim header) — so the subset stays empty and the
@@ -145,9 +158,11 @@ function okpEd25519FailuresInSubset() {
  *
  * Excluded, in match order: subtests needing an ECDH key (`generateKey`
  * does not serve ECDH, so the fixture is null); the empty HKDF base key
- * (WIT-forced — `import-ikm` rejects empty material by ruling); and
- * unserved derived-key targets. The SHA-1 rows are served (the
- * `hkdf-sha1`/`pbkdf2-sha1` interfaces).
+ * (WIT-forced — `import-ikm` rejects empty material by ruling), except
+ * its bad-hash rows, which are served: algorithm normalization rejects
+ * the hash before the base key is looked at, the spec's own order, so
+ * the refused import never matters; and unserved derived-key targets.
+ * The SHA-1 rows are served (the `hkdf-sha1`/`pbkdf2-sha1` interfaces).
  *
  * The exclusions are whole-row, so the census pins a large `outPassed`
  * for these groups: an unserved-target row's bad-hash and missing-usage
@@ -164,7 +179,7 @@ function kdfDeriveInSubset(name) {
   if (name.includes("wrong (ECDH) key")) {
     return false;
   }
-  if (name.includes("empty derivedKey")) {
+  if (name.includes("empty derivedKey") && !name.includes("with bad hash name")) {
     return false;
   }
   if (name.startsWith("Derived key of type")) {
@@ -297,6 +312,12 @@ export const GROUPS = [
     module: "group-generate-key.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM"]),
     inSubset: generateKeyInSubset,
+  },
+  {
+    name: "generateKey/failures (HMAC, AES, Ed25519, X25519)",
+    module: "group-generate-key-failures.js",
+    start: (ns) => ns.run_test(["HMAC", "AES-GCM", "AES-CBC", "AES-CTR", "Ed25519", "X25519"]),
+    inSubset: generateKeyFailuresInSubset,
   },
   {
     name: "derive_bits_keys/cfrg_curves_bits (X25519)",

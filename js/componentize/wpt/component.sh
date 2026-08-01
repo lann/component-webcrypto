@@ -158,6 +158,8 @@ gen_suites() {
     echo 'export { runTests };' >> "$B"/group-import-key.js
     cat "$V"/helpers.js "$V"/successes.js > "$B"/group-generate-key.js
     echo 'export { run_test };' >> "$B"/group-generate-key.js
+    cat "$V"/helpers.js "$V"/failures.js > "$B"/group-generate-key-failures.js
+    echo 'export { run_test };' >> "$B"/group-generate-key-failures.js
     # The cfrg helpers assign their key tables as sloppy-mode implicit
     # globals; a concatenated module is strict, so declare them here (the
     # vendored sources stay pristine, like the appended exports).
