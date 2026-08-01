@@ -1,5 +1,5 @@
 // The in-browser conformance harness: drives every case of both transpiled
-// conformance suites against jco-impl/webcrypto.js running in *this*
+// conformance suites against js/jco/webcrypto.js running in *this*
 // browser, reporting each result as it completes. Shared between the page's
 // Web Worker (worker.mjs) and the main-thread fallback (app.mjs), so both
 // paths run identically; the worker pool itself (`runInWorkers`) also lives
@@ -9,7 +9,7 @@
 // The module paths are resolved relative to this file, so they work from
 // any base path (the local server's repo root, or a GitHub Pages project
 // subpath); the transpiled guests resolve their own relative imports of
-// jco-impl/webcrypto.js the same way, so the serving tree must mirror the
+// js/jco/webcrypto.js the same way, so the serving tree must mirror the
 // repository layout (see serve.mjs and the `conformance-web-site` recipe).
 
 export const SUITES = [

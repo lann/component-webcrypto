@@ -1,0 +1,56 @@
+// The `lann-webcrypto-guest-provider` component world.
+//
+// This is the third implementation of `lann:webcrypto`, alongside the
+// `lann-webcrypto-wasmtime` (RustCrypto, native) and `webcrypto-jco` (browser Web Crypto)
+// hosts. Unlike those two, this implementation is itself a **wasm component**:
+// it runs RustCrypto in-guest and *exports* the package surface.
+//
+// Because it exports the package surface and needs no crypto capability from
+// the host (key generation uses the WASI random imports the standard library
+// links in), it can be composed (`wac plug`) with any consumer component that
+// imports these interfaces, producing a single self-contained component whose
+// cryptography runs entirely in wasm.
+//
+// This provider deliberately exports only algorithms whose constant-time
+// story survives wasm's lack of timing guarantees (see the crate README's
+// classification); algorithm interfaces that cannot meet that bar are simply
+// not exported, so a composition requiring them fails at `wac plug` time.
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/lann-webcrypto` symlink, exactly like the
+// demo components do.
+package guest:webcrypto;
+
+/// The composable in-guest WebCrypto provider.
+world provider {
+    export lann:webcrypto/mac@0.1.0;
+    export lann:webcrypto/aead@0.1.0;
+    export lann:webcrypto/cipher@0.1.0;
+    export lann:webcrypto/aead-internal-nonce@0.1.0;
+    export lann:webcrypto/digest@0.1.0;
+    export lann:webcrypto/bytes@0.1.0;
+    export lann:webcrypto/sha2@0.1.0;
+    export lann:webcrypto/sha1-checked@0.1.0;
+    export lann:webcrypto/hmac-sha2@0.1.0;
+    export lann:webcrypto/hmac-sha1@0.1.0;
+    export lann:webcrypto/aes-gcm@0.1.0;
+    export lann:webcrypto/aes-cbc@0.1.0;
+    export lann:webcrypto/aes-ctr@0.1.0;
+    export lann:webcrypto/chacha20-poly1305@0.1.0;
+    export lann:webcrypto/xchacha20-poly1305@0.1.0;
+    export lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
+    export lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
+    export lann:webcrypto/derivation@0.1.0;
+    export lann:webcrypto/hkdf@0.1.0;
+    export lann:webcrypto/hkdf-sha2@0.1.0;
+    export lann:webcrypto/hkdf-sha1@0.1.0;
+    export lann:webcrypto/pbkdf2@0.1.0;
+    export lann:webcrypto/pbkdf2-sha2@0.1.0;
+    export lann:webcrypto/pbkdf2-sha1@0.1.0;
+    export lann:webcrypto/key-agreement@0.1.0;
+    export lann:webcrypto/x25519@0.1.0;
+    export lann:webcrypto/signature@0.1.0;
+    export lann:webcrypto/ed25519-verify@0.1.0;
+    export lann:webcrypto/ed25519-sign@0.1.0;
+    export lann:webcrypto/ecdsa-verify@0.1.0;
+}

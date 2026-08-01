@@ -1,5 +1,5 @@
 // The componentize-demo guest: exercises the WebCrypto-subset library in
-// `componentize-sdk/webcrypto.js` (HMAC-SHA-256 + AES-256-GCM over the
+// `js/componentize/webcrypto.js` (HMAC-SHA-256 + AES-256-GCM over the
 // `lann:webcrypto` imports) end to end, and exports the same
 // `demo:webcrypto-demo/demo@0.1.0` entry point as the Rust `crypto-demo`
 // guest so the existing `crypto-demo-driver` component can drive it.
@@ -8,7 +8,7 @@
 // which the justfile recipe sets to the repository root — hence the
 // root-relative library path below.
 
-import { crypto, subtle, CryptoKey, DOMException } from "./componentize-sdk/webcrypto.js";
+import { crypto, subtle, CryptoKey, DOMException } from "./js/componentize/webcrypto.js";
 
 const encoder = new TextEncoder();
 

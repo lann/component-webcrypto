@@ -1,0 +1,26 @@
+[package]
+name = "lann-webcrypto-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Guest-side bindings and ergonomic helpers for the lann:webcrypto interfaces"
+
+[features]
+# `DataSource::from_buf`: feed an operation from any `bytes::Buf`.
+bytes = ["dep:bytes"]
+# `DataSource::from_reader`: feed an operation from any
+# `futures_io::AsyncRead`.
+futures-io = ["dep:futures-io"]
+
+[dependencies]
+# `async` pulls in the component-model `stream`/`future` runtime support and
+# the `wit_stream` helpers the byte-buffer wrappers are built on.
+wit-bindgen = { version = "0.59", features = ["async"] }
+# `join!` runs an operation and its stream feeder concurrently within a
+# single cooperative task — the core of the byte-buffer wrappers.
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+bytes = { version = "1", optional = true, default-features = false }
+futures-io = { version = "0.3", optional = true }
+
+[lints.rust]
+missing_docs = "warn"

@@ -7,6 +7,6 @@ components = ["rustfmt", "clippy"]
 targets = [
     # crypto-demo (the example guest component)
     "wasm32-unknown-unknown",
-    # guest-webcrypto (the in-guest provider) and crypto-demo-driver
+    # lann-webcrypto-guest-provider (the in-guest provider) and crypto-demo-driver
     "wasm32-wasip2",
 ]

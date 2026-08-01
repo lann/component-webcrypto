@@ -3,10 +3,10 @@ name = "conformance-adapter-wasmtime"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Runs the conformance guest under the Wasmtime host (wasmtime-webcrypto) and writes conformance/results/wasmtime.json."
+description = "Runs the conformance guest under the Wasmtime host (lann-webcrypto-wasmtime) and writes conformance/results/wasmtime.json."
 
 [dependencies]
-wasmtime-webcrypto = { path = "../../../wasmtime-impl" }
+lann-webcrypto-wasmtime = { path = "../../../rust/wasmtime" }
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1"

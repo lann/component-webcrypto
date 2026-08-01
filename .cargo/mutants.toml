@@ -6,8 +6,8 @@
 # the cross-implementation cases distinguish it.
 
 test_package = [
-    "webcrypto-impl-core",
-    "wasmtime-webcrypto",
+    "lann-webcrypto-core",
+    "lann-webcrypto-wasmtime",
     "conformance-adapter-wasmtime",
 ]
 

@@ -5,7 +5,7 @@
 //! Every helper returns the operation's outcome and the feeder's outcome
 //! *separately*, so drain-rule violations (a callee closing its input
 //! stream early) are distinguishable from the call's own error. The
-//! guest-sdk wrappers deliberately merge the two; the drain-rule probes are
+//! lann-webcrypto-guest wrappers deliberately merge the two; the drain-rule probes are
 //! why these helpers do not.
 
 use lann_webcrypto_guest::bindings::aead::AeadKey;

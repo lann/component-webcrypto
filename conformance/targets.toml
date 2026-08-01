@@ -47,7 +47,7 @@ missing-features = []
 
 [targets.composed]
 # The in-guest RustCrypto provider deliberately does not export
-# `ecdsa-sign` (class D — see guest-impl/README.md), which excludes the
+# `ecdsa-sign` (class D — see rust/guest-provider/README.md), which excludes the
 # signing suite structurally. `just class-d-composition` asserts the
 # absent export, so this line cannot outlive the fact it records.
 missing-features = ["ecdsa-sign"]

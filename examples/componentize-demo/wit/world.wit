@@ -7,7 +7,7 @@
 package demo:componentize-webcrypto-demo@0.1.0;
 
 /// The world for a JS guest using the WebCrypto-subset library in
-/// `componentize-sdk/`: it imports exactly the `lann:webcrypto` surface the
+/// `js/componentize/`: it imports exactly the `lann:webcrypto` surface the
 /// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
 /// `aes-gcm`/`aead`, and the derive model via `derivation`/`hkdf`/`pbkdf2`/
 /// `key-agreement`/`x25519`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the

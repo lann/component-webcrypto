@@ -1,7 +1,7 @@
 //! `conformance-signing-guest`: the host-only conformance component.
 //!
 //! Probes the signature-minting surface the in-guest provider deliberately
-//! does not export — `ecdsa-sign` is class D (see guest-impl/README.md) —
+//! does not export — `ecdsa-sign` is class D (see rust/guest-provider/README.md) —
 //! which the shared `conformance-guest` therefore cannot import, since it
 //! must compose with that provider. This guest runs only under the
 //! host-backed targets (wasmtime, jco).
@@ -13,7 +13,7 @@
 //! import ever derives a public half (the w3c/webcrypto#356 gap). The
 //! Rust-side private-import known answers (the RFC 6979 A.2.5
 //! deterministic signature, out-of-range scalar rejection) are pinned by
-//! `webcrypto-impl-core`'s unit tests.
+//! `lann-webcrypto-core`'s unit tests.
 
 wit_bindgen::generate!({
     path: "../guest/wit",

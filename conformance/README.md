@@ -78,10 +78,10 @@ signing-guest/     # the signing suite's host-only guest: probes for
                    #   runs under the wasmtime and jco targets only, with
                    #   its own tests.lock
 adapters/
-  wasmtime/        # native adapter over wasmtime-webcrypto's add_to_linker
+  wasmtime/        # native adapter over lann-webcrypto-wasmtime's add_to_linker
   composed-driver/   # CLI driver for the composed in-guest target (guest +
                    #   in-guest provider via `wac plug`); prints results JSON
-  jco/             # Node + headless-Chromium adapters over jco-impl's
+  jco/             # Node + headless-Chromium adapters over webcrypto-jco's
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
                    #   with Chrome/Chromium 137+ installed); the browser
@@ -136,7 +136,7 @@ target facts), written alongside `matrix.md` and cleared with the rest of
 
 The page is also itself a live target: **Test this browser** runs both
 transpiled suites (the same bundles the jco adapters use) against
-`jco-impl/webcrypto.js` in the visiting browser — striped across parallel
+`js/jco/webcrypto.js` in the visiting browser — striped across parallel
 Web Workers, each with its own instances of the guests (cases are
 self-contained one-shots, so shards cannot interfere), falling back to a
 sequential main-thread run — streaming results into a "this browser" column
@@ -156,7 +156,7 @@ alongside the public crates' API docs) by the `pages` workflow: every
 push to main reruns the conformance tests (including the jco-browser target)
 and deploys the site assembled by `just conformance-web-site` — a pruned
 mirror of the repository layout, which the page's relative URLs and the
-transpiled guests' relative imports of `jco-impl/webcrypto.js` both rely on.
+transpiled guests' relative imports of `js/jco/webcrypto.js` both rely on.
 
 ## Why this suite is shaped unlike its WebRTC sibling
 
@@ -192,7 +192,7 @@ crypto conformance tests *functions against mathematics*.
   `importKey` behavior is unspecified and inconsistent across engines
   (w3c/webcrypto#356). The private-import known answers (RFC 6979
   determinism, scalar export identity, known-point derivation, scalar
-  range rejection) are pinned by `webcrypto-impl-core`'s unit tests for
+  range rejection) are pinned by `lann-webcrypto-core`'s unit tests for
   both Rust implementations instead.
 
 ## Deliberately deferred
@@ -208,7 +208,7 @@ crypto conformance tests *functions against mathematics*.
   target-varying degrees of freedom.
 - **The timing lab** (dudect-style statistical tests of the composed in-guest
   provider, targeting the class B/C surfaces in
-  `guest-impl/README.md`): when built, it reports (a matrix column and
+  `rust/guest-provider/README.md`): when built, it reports (a matrix column and
   artifacts) but does **not** gate — statistical p-values flapping in CI
   train people to ignore red.
 

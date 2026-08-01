@@ -1,6 +1,6 @@
 //! `conformance-adapter-wasmtime`: runs a conformance guest under the
 //! Wasmtime host, with the `lann:webcrypto` imports satisfied by
-//! [`wasmtime_webcrypto`]'s RustCrypto implementation, and writes the
+//! [`lann_webcrypto_wasmtime`]'s RustCrypto implementation, and writes the
 //! per-case results as JSON — or, in `--lock-out` mode, writes the suite
 //! lockfile (case names and feature tags) the runner validates results
 //! against. See `--help` for the flags.
@@ -21,9 +21,9 @@ use conformance_report::{CaseResult, LockCase, Outcome, ResultsFile};
 mod harness {
     use std::path::Path;
 
+    use lann_webcrypto_wasmtime::standalone::{self, Ctx};
+    use lann_webcrypto_wasmtime::WasiWebcryptoCtx;
     use wasmtime::component::Accessor;
-    use wasmtime_webcrypto::standalone::{self, Ctx};
-    use wasmtime_webcrypto::WasiWebcryptoCtx;
 
     use super::{CaseResult, LockCase, Outcome};
 

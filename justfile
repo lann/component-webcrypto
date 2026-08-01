@@ -22,9 +22,9 @@ jco-checks:
     @just _step wpt-parity
 
 # Everything the componentize CI job runs: the WPT WebCryptoAPI suites
-# against the componentize-sdk JS guest library.
+# against the webcrypto-componentize JS guest library.
 componentize-checks:
-    @just _step typecheck-componentize-sdk
+    @just _step typecheck-webcrypto-componentize
     @just _step test-webcrypto-componentize-wpt
 
 # Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
@@ -52,15 +52,15 @@ fmt-check:
 
 # Run clippy across all crates (the wasm crates on their wasm targets).
 clippy:
-    cargo clippy --workspace --exclude crypto-demo --exclude guest-webcrypto --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
+    cargo clippy --workspace --exclude crypto-demo --exclude lann-webcrypto-guest-provider --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
     cargo clippy -p crypto-demo --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p conformance-guest --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p conformance-signing-guest --target wasm32-unknown-unknown -- -D warnings
-    cargo clippy -p guest-webcrypto --target wasm32-wasip2 -- -D warnings
+    cargo clippy -p lann-webcrypto-guest-provider --target wasm32-wasip2 -- -D warnings
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
     cargo clippy -p conformance-composed-driver --target wasm32-wasip2 -- -D warnings
-    # guest-sdk's optional source adaptors are only compiled with their
+    # lann-webcrypto-guest's optional source adaptors are only compiled with their
     # features on, and one of them holds the only code path that can produce
     # `Error::Read` — the crate's subtlest behaviour. Nothing in the
     # workspace enables them, so without this they are never checked.
@@ -69,9 +69,9 @@ clippy:
 # Validate WIT packages.
 validate-wit:
     wasm-tools component wit wit
-    wasm-tools component wit wasmtime-impl/wit
-    wasm-tools component wit jco-impl/wit
-    wasm-tools component wit guest-impl/wit
+    wasm-tools component wit rust/wasmtime/wit
+    wasm-tools component wit js/jco/wit
+    wasm-tools component wit rust/guest-provider/wit
     wasm-tools component wit examples/crypto-demo/wit
     wasm-tools component wit examples/componentize-demo/wit
     wasm-tools component wit conformance/guest/wit
@@ -101,30 +101,30 @@ test-node: transpile
 # Run the jco host's own unit tests: the input-buffering admission subsystem,
 # which the conformance suite cannot reach because it runs cases sequentially.
 test-jco-host:
-    cd jco-impl && npm test
+    cd js/jco && npm test
 
 # Type-check the jco host against the interface definitions jco-transpile
 # derives from `wit/`. The definitions are generated on demand, so there is
 # no checked-in copy to go stale.
 typecheck-jco:
-    cd jco-impl && npm run typecheck
+    cd js/jco && npm run typecheck
 
 # Type-check the componentize-js guest library against the Web Cryptography
 # API definitions TypeScript ships. Nothing is generated, so nothing can go
 # stale; no component build.
-typecheck-componentize-sdk:
-    cd componentize-sdk && npm run typecheck
+typecheck-webcrypto-componentize:
+    cd js/componentize && npm run typecheck
 
 # Run the Wasmtime (native, RustCrypto) host demo.
 demo-wasmtime: build-component
-    cargo run --release --bin wasmtime-webcrypto-host -- \
+    cargo run --release --bin wasmtime-demo-host -- \
         examples/crypto-demo/build/crypto-demo.component.wasm
 
 # Build the in-guest provider component (RustCrypto entirely in-guest; it
 # exports the lann:webcrypto surface) into
-# target/wasm32-wasip2/release/guest_webcrypto.wasm.
+# target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm.
 build-guest-provider:
-    cargo build --release -p guest-webcrypto --target wasm32-wasip2
+    cargo build --release -p lann-webcrypto-guest-provider --target wasm32-wasip2
 
 # Compose `guest` with the in-guest provider and plug `driver` (a
 # wasm32-wasip2 bin crate) on top, yielding one self-contained component at
@@ -136,7 +136,7 @@ _compose stem guest driver: build-guest-provider
     cargo build --release -p {{driver}} --target wasm32-wasip2
     driver_wasm="target/wasm32-wasip2/release/$(echo '{{driver}}' | tr - _).wasm"
     wac plug {{guest}} \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
         -o target/{{stem}}-with-crypto.wasm
     wac plug "$driver_wasm" \
         --plug target/{{stem}}-with-crypto.wasm \
@@ -163,15 +163,15 @@ test-webcrypto-composed: compose-demo
 # componentize-js-toolchain workflow publishes one build per pinned revision
 # and platform, and `component.sh toolchain` downloads it into
 # target/toolchains on first use (set COMPONENTIZE_JS to use your own build
-# instead). The pinned revision lives in componentize-sdk/componentize-js.rev.
+# instead). The pinned revision lives in js/componentize/componentize-js.rev.
 
-# Componentize the JS WebCrypto-subset demo guest (componentize-sdk library +
+# Componentize the JS WebCrypto-subset demo guest (webcrypto-componentize library +
 # examples/componentize-demo app) into examples/componentize-demo/build/.
 # The base directory is the repository root, so the app's module specifiers
-# (./componentize-sdk/webcrypto.js) resolve against it.
+# (./js/componentize/webcrypto.js) resolve against it.
 build-componentize-demo:
     mkdir -p examples/componentize-demo/build
-    "$(componentize-sdk/wpt/component.sh toolchain)" \
+    "$(js/componentize/wpt/component.sh toolchain)" \
         -q -d examples/componentize-demo/wit -w componentize-demo \
         componentize examples/componentize-demo/app.js -p . \
         -o examples/componentize-demo/build/componentize-demo.component.wasm
@@ -196,11 +196,11 @@ test-webcrypto-componentize: compose-componentize-demo
 # refuses to execute it. Pass a platform to record one you are not running
 # on, e.g. `just update-toolchain-digest linux-x86_64`.
 update-toolchain-digest platform="":
-    componentize-sdk/wpt/update-toolchain-digest.sh {{platform}}
+    js/componentize/wpt/update-toolchain-digest.sh {{platform}}
 
 # Run the vendored web-platform-tests WebCryptoAPI suites against the
-# componentize-sdk library: every in-subset test must pass; out-of-subset
-# tests are reported by count (componentize-sdk/wpt/README.md has the
+# webcrypto-componentize library: every in-subset test must pass; out-of-subset
+# tests are reported by count (js/componentize/wpt/README.md has the
 # vendoring and subset policy). The runner is componentized from the working
 # tree with the pinned componentize-js (downloaded on first use), then
 # composed with a freshly built in-guest provider and driver and run under
@@ -211,55 +211,55 @@ test-webcrypto-componentize-wpt: compose-wpt-runner
 
 # Componentize the WPT runner from the working tree and compose it with a
 # freshly built in-guest provider and driver.
-compose-wpt-runner: _componentize-wpt-runner (_compose "wpt-runner" "componentize-sdk/wpt/build/runner.component.wasm" "crypto-demo-driver")
+compose-wpt-runner: _componentize-wpt-runner (_compose "wpt-runner" "js/componentize/wpt/build/runner.component.wasm" "crypto-demo-driver")
 
 # Componentize the WPT runner from the working tree with the pinned
 # componentize-js (downloaded on first use).
 _componentize-wpt-runner:
-    componentize-sdk/wpt/component.sh build
+    js/componentize/wpt/component.sh build
 
-# Re-record componentize-sdk/wpt/expected.js from an actual run: run this
+# Re-record js/componentize/wpt/expected.js from an actual run: run this
 # when a change legitimately moves a count, and review the diff — each moved
 # number is a test that appeared, vanished, or crossed the in-subset
 # boundary.
 update-wpt-expectations: compose-wpt-runner
-    componentize-sdk/wpt/update-expectations.sh target/wpt-runner-composed.wasm
+    js/componentize/wpt/update-expectations.sh target/wpt-runner-composed.wasm
 
 # --- WPT parity (jco path) ------------------------------------------------------
 
 # Run the WPT parity gate: the vendored WPT suites run twice — directly
 # against this platform's own crypto.subtle (the baseline) and through the
-# componentized shim transpiled by jco against jco-impl/webcrypto.js (the
+# componentized shim transpiled by jco against js/jco/webcrypto.js (the
 # round trip) — and the comparator holds the round trip to the baseline's
-# pass set, with known losses pinned in componentize-sdk/wpt/parity/losses.js.
+# pass set, with known losses pinned in js/componentize/wpt/parity/losses.js.
 # Both legs end at the same platform crypto, so the delta isolates exactly
 # what the carrier stack (shim, WIT shape, component ABI, jco) loses.
 # Needs Node 24+ and the pinned componentize-js (downloaded — see
-# componentize-sdk/wpt/component.sh).
+# js/componentize/wpt/component.sh).
 wpt-parity: _wpt-parity-legs
-    node componentize-sdk/wpt/parity/compare.mjs \
-        componentize-sdk/wpt/build/parity-baseline.json \
-        componentize-sdk/wpt/build/parity-roundtrip.json
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline.json \
+        js/componentize/wpt/build/parity-roundtrip.json
 
-# Re-record componentize-sdk/wpt/parity/losses.js from an actual run: run
+# Re-record js/componentize/wpt/parity/losses.js from an actual run: run
 # this when a change legitimately moves the loss set, and review the diff —
 # every removed line is a platform behavior the round trip now preserves,
 # and every added line needs a classification in the shim header's
 # deviations registry.
 update-wpt-parity: _wpt-parity-legs
-    node componentize-sdk/wpt/parity/compare.mjs \
-        componentize-sdk/wpt/build/parity-baseline.json \
-        componentize-sdk/wpt/build/parity-roundtrip.json --update
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline.json \
+        js/componentize/wpt/build/parity-roundtrip.json --update
 
-# Produce both parity legs' results under componentize-sdk/wpt/build/:
+# Produce both parity legs' results under js/componentize/wpt/build/:
 # componentize the ungated parity runner from the tree, transpile it with
 # jco against the jco host, and run each leg on this Node.
 _wpt-parity-legs:
-    componentize-sdk/wpt/component.sh build-parity
-    cd componentize-sdk/wpt/parity && npm run -s transpile
-    node componentize-sdk/wpt/parity/baseline.mjs \
-        > componentize-sdk/wpt/build/parity-baseline.json
-    cd componentize-sdk/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
+    js/componentize/wpt/component.sh build-parity
+    cd js/componentize/wpt/parity && npm run -s transpile
+    node js/componentize/wpt/parity/baseline.mjs \
+        > js/componentize/wpt/build/parity-baseline.json
+    cd js/componentize/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
         > ../build/parity-roundtrip.json
 
 # --- conformance -------------------------------------------------------------
@@ -314,12 +314,12 @@ class-d-composition: build-signing-guest build-guest-provider
     set -uo pipefail
     output=$(wac plug \
         conformance/signing-guest/build/conformance-signing-guest.component.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
         -o target/class-d-composition.wasm 2>&1)
     status=$?
     if [ $status -eq 0 ]; then
         echo "class-D gate: composing the signing guest with the in-guest provider SUCCEEDED." >&2
-        echo "The provider must not export lann:webcrypto/ecdsa-sign (guest-impl/wit/world.wit)." >&2
+        echo "The provider must not export lann:webcrypto/ecdsa-sign (rust/guest-provider/wit/world.wit)." >&2
         exit 1
     fi
     if ! printf '%s' "$output" | grep -q 'lann:webcrypto/ecdsa-sign'; then
@@ -340,7 +340,7 @@ conformance-web: conformance
 # lint-gates there), giving one rustdoc tree with a shared search index in
 # target/doc.
 rust-docs:
-    cargo doc --no-deps -p wasmtime-webcrypto -p lann-webcrypto-guest
+    cargo doc --no-deps -p lann-webcrypto-wasmtime -p lann-webcrypto-guest
 
 # Assemble the Pages site in target/conformance-site: the results viewer
 # (used by the pages workflow; assumes a conformance run already produced
@@ -352,14 +352,14 @@ conformance-web-site: rust-docs
     rm -rf target/conformance-site
     mkdir -p target/conformance-site/conformance/results \
         target/conformance-site/conformance/adapters/jco \
-        target/conformance-site/jco-impl
+        target/conformance-site/js/jco
     cp -r conformance/web target/conformance-site/conformance/web
     rm target/conformance-site/conformance/web/serve.mjs
     cp conformance/results/matrix.json target/conformance-site/conformance/results/
     cp -r conformance/adapters/jco/generated \
         conformance/adapters/jco/generated-signing \
         target/conformance-site/conformance/adapters/jco/
-    cp jco-impl/webcrypto.js target/conformance-site/jco-impl/
+    cp js/jco/webcrypto.js target/conformance-site/js/jco/
     cp -r target/doc target/conformance-site/doc
     cp .github/pages/index.html target/conformance-site/index.html
 
@@ -457,7 +457,7 @@ conformance-jco-browser: build-conformance-guest build-signing-guest
 compose-timing-lab: build-guest-provider
     cargo build --release -p timing-lab --target wasm32-wasip2
     wac plug target/wasm32-wasip2/release/timing_lab.wasm \
-        --plug target/wasm32-wasip2/release/guest_webcrypto.wasm \
+        --plug target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
         -o target/timing-lab-composed.wasm
 
 # Run the dudect-style timing lab against the composed in-guest provider.
@@ -538,7 +538,7 @@ mutants shard="": build-conformance-guest build-signing-guest
     CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/conformance/guest/build/conformance-guest.component.wasm" \
     CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/conformance/signing-guest/build/conformance-signing-guest.component.wasm" \
         cargo mutants --jobs 2 --profile mutants \
-        -p webcrypto-impl-core -p wasmtime-webcrypto \
+        -p lann-webcrypto-core -p lann-webcrypto-wasmtime \
         {{ if shard != "" { "--shard " + shard } else { "" } }}
     status=$?
     if [ "$status" -eq 3 ] && [ -f mutants.out/missed.txt ] && ! [ -s mutants.out/missed.txt ]; then

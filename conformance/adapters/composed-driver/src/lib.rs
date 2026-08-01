@@ -3,7 +3,7 @@
 //!
 //! It imports the conformance guest's exported `conformance:webcrypto/tests`
 //! interface and exports an async `wasi:cli/run` (via the `wasip3` crate), so
-//! the fully composed component — conformance guest + `guest-webcrypto`
+//! the fully composed component — conformance guest + `lann-webcrypto-guest-provider`
 //! provider + this driver — runs under a plain `wasmtime run -S cli`.
 //!
 //! The composition fixes the implementation under test, so the target's

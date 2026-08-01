@@ -1,0 +1,14 @@
+{
+  "name": "@lann/webcrypto-componentize",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A crypto.subtle subset for JS guests componentized with componentize-js, backed by the lann:webcrypto imports. No runtime dependencies; the component's world supplies them.",
+  "exports": "./webcrypto.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

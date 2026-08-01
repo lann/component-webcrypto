@@ -33,7 +33,7 @@ async fn crypto_demo_all_checks_pass() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_component(&workspace_root);
 
-    let summary = wasmtime_webcrypto_demo::run_demo(&component)
+    let summary = wasmtime_demo::run_demo(&component)
         .await
         .expect("run_demo failed");
     // The summary's declared count must agree with the checks it lists —
@@ -60,9 +60,9 @@ async fn tiny_buffer_limit_fails_recoverably() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_component(&workspace_root);
 
-    let mut ctx = wasmtime_webcrypto::WasiWebcryptoCtx::new();
+    let mut ctx = lann_webcrypto_wasmtime::WasiWebcryptoCtx::new();
     ctx.set_per_call_buffer_limit(Some(4));
-    let err = wasmtime_webcrypto_demo::run_demo_with(&component, ctx)
+    let err = wasmtime_demo::run_demo_with(&component, ctx)
         .await
         .expect_err("a 4-byte buffer limit must fail the demo's checks");
     let rendered = format!("{err:#}");
@@ -90,12 +90,12 @@ async fn checks_complete_under_a_contended_pool() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_component(&workspace_root);
 
-    let mut ctx = wasmtime_webcrypto::WasiWebcryptoCtx::new();
+    let mut ctx = lann_webcrypto_wasmtime::WasiWebcryptoCtx::new();
     ctx.set_per_call_buffer_limit(Some(32 * 1024));
     ctx.set_total_buffer_limit(Some(64 * 1024));
     let summary = tokio::time::timeout(
         std::time::Duration::from_secs(120),
-        wasmtime_webcrypto_demo::run_demo_with(&component, ctx),
+        wasmtime_demo::run_demo_with(&component, ctx),
     )
     .await
     .expect("the demo deadlocked against the contended pool")

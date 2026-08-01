@@ -11,7 +11,7 @@
 //!
 //! The guests are prebuilt and referenced by absolute path: guest wasm is
 //! compiled from unmutated sources once, before the mutation run — the
-//! subject under mutation is the host stack (impl-core + wasmtime-impl),
+//! subject under mutation is the host stack (lann-webcrypto-core + lann-webcrypto-wasmtime),
 //! which the wasm calls into.
 
 use conformance_report::{Outcome, ResultsFile};
