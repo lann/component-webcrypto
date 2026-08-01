@@ -292,7 +292,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Retained<T> {
 /// The [`Retained`] table-entry aliases the generated bindings name: the
 /// bindgen `with` option takes plain paths, so each wrapped payload type
 /// needs one.
-pub mod retained {
+mod retained {
     macro_rules! retained_aliases {
         ($($name:ident),* $(,)?) => {
             $(pub type $name = super::Retained<super::$name>;)*

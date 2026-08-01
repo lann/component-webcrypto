@@ -2346,7 +2346,6 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
 
 #[cfg(test)]
 mod tests {
-    use crate::bindings::webcrypto::mac::HostMacKeyOptions as _;
     use crate::bindings::webcrypto::sha1_checked::Host as _;
     use crate::bindings::webcrypto::sha2::{self as sha2_iface, Host as _};
     use crate::bindings::webcrypto::types::Error;
