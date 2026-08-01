@@ -85,8 +85,9 @@ pub mod bindings {
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, bytes,
         chacha20_poly1305, cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign,
-        ed25519_verify, hkdf, hmac_sha2, key_agreement, mac, pbkdf2, sha1_checked, sha2, signature,
-        types, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+        ed25519_verify, hkdf, hkdf_sha1, hmac_sha1, hmac_sha2, key_agreement, mac, pbkdf2,
+        pbkdf2_sha1, sha1_checked, sha2, signature, types, x25519, xchacha20_poly1305,
+        xchacha20_poly1305_internal_nonce,
     };
 }
 
@@ -1288,6 +1289,7 @@ pub mod aes_gcm_internal_nonce;
 pub mod chacha20_poly1305;
 pub mod ecdsa;
 pub mod ed25519;
+pub mod hmac_sha1;
 pub mod hmac_sha2;
 pub mod sha1_checked;
 pub mod sha2;

@@ -2513,6 +2513,7 @@ dependencies = [
  "p384",
  "pkcs8",
  "serde_json",
+ "sha1",
  "sha1-checked",
  "sha2",
  "spki",

@@ -64,3 +64,43 @@ interface hmac-sha2 {
     /// `can-derive-bits` (see `aes-gcm.derive-key`).
     derive-key: async func(%variant: sha2-variant, input: borrow<derive-input>, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
 }
+
+/// HMAC key minting (RFC 2104) over SHA-1 (FIPS 180-4), for
+/// interoperability with SHA-1-committed constructions — RFC 6238 TOTP,
+/// WPA2's handshake PRF, and their contemporaries.
+///
+/// Security:
+/// - HMAC-SHA-1 is *not* affected by SHA-1's collision breaks: HMAC's
+///   security rests on the compression function's PRF property, which
+///   stands. The construction is sound; only its hash is
+///   hygiene-stale. Prefer `hmac-sha2` in new designs.
+/// - No SHA-1 digest is ever exposed here (the hash runs inside the
+///   construction); bare SHA-1 digests exist in this package only through
+///   `sha1-checked`.
+///
+/// Keys report `algorithm-hash` `"SHA-1"`; every other contract —
+/// key-length policy, `length` semantics (the block size, 512 bits, when
+/// `none`), JWK handling (`alg` `"HS1"`) — is `hmac-sha2`'s, minus the
+/// variant parameter.
+interface hmac-sha1 {
+    use types.{error};
+    use mac.{mac-key, mac-key-options};
+    use derivation.{derive-input};
+
+    /// Import raw key material as an HMAC-SHA-1 key. See
+    /// `hmac-sha2.import-key-raw` for the key-length contract.
+    import-key-raw: async func(raw: list<u8>, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Import an RFC 7517 JSON Web Key as an HMAC-SHA-1 key (`alg`, when
+    /// present, must be `"HS1"`). See `hmac-sha2.import-key-jwk`.
+    import-key-jwk: async func(jwk: string, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Generate a fresh random HMAC-SHA-1 key. See
+    /// `hmac-sha2.generate-key` for the `length` contract; `none` means
+    /// SHA-1's block size, 512 bits.
+    generate-key: async func(length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from a parameterized derivation. See
+    /// `hmac-sha2.derive-key`.
+    derive-key: async func(input: borrow<derive-input>, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
+}

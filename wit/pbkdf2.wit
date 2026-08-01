@@ -68,3 +68,23 @@ interface pbkdf2 {
     /// and still not the raw password bytes.
     prepare: async func(%variant: sha2-variant, input: borrow<password>, salt: list<u8>, iterations: u32) -> result<derive-input, error>;
 }
+
+/// PBKDF2 (RFC 8018) over HMAC-SHA-1, for interoperability with
+/// SHA-1-committed derivations — WPA2-PSK, Kerberos RFC 3962
+/// string-to-key, WinZip AE-2, and their contemporaries. The construction
+/// is HMAC-based, so SHA-1's collision breaks do not reach it (see
+/// `hmac-sha1`'s Security notes); prefer the SHA-2 parameterizations in
+/// new designs.
+///
+/// This interface adds only the SHA-1 `prepare` step: the `password`
+/// resource and its import stay `pbkdf2`'s, so one imported password can
+/// parameterize derivations of either hash family.
+interface pbkdf2-sha1 {
+    use types.{error};
+    use pbkdf2.{password};
+    use derivation.{derive-input};
+
+    /// Parameterize a PBKDF2-HMAC-SHA-1 derivation. See `pbkdf2.prepare`
+    /// for the `salt` and `iterations` contracts.
+    prepare: async func(input: borrow<password>, salt: list<u8>, iterations: u32) -> result<derive-input, error>;
+}

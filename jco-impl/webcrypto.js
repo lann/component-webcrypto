@@ -702,18 +702,17 @@ function macUsages(policy) {
 }
 
 /**
- * Import raw key material as an HMAC key over the declared SHA-2 variant. A
- * variant this implementation declines throws `{ tag: 'unsupported', val }`.
- * Any non-empty length is accepted (RFC 2104); empty material throws
+ * Import raw key material as an HMAC key over the resolved hash. Any
+ * non-empty length is accepted (RFC 2104); empty material throws
  * `{ tag: 'invalid-key', val }`.
- * @param {string} variant
+ * @param {{ hash: string, blockBytes: number }} resolved
  * @param {Uint8Array} raw
  * @param {MacKeyOptions} options
  */
-async function importHmacKey(variant, raw, options) {
+async function importHmacKey(resolved, raw, options) {
   const policy = macPolicy(options);
   const usages = macUsages(policy);
-  const { hash } = sha2Variant(variant);
+  const { hash } = resolved;
   if (raw.length === 0) throw errInvalidKey("empty key");
   let key;
   try {
@@ -735,16 +734,15 @@ async function importHmacKey(variant, raw, options) {
  * `length` is the key length in bits, `undefined` meaning the underlying
  * hash's block size (WebCrypto's `generateKey` default). A zero length
  * throws `{ tag: 'invalid-key' }`; a length that is not a multiple of 8
- * throws `{ tag: 'unsupported', val }` (sub-byte lengths are not served),
- * as does a variant this implementation declines.
- * @param {string} variant
+ * throws `{ tag: 'unsupported', val }` (sub-byte lengths are not served).
+ * @param {{ hash: string, blockBytes: number }} resolved
  * @param {number | undefined} length
  * @param {MacKeyOptions} options
  */
-async function generateHmacKey(variant, length, options) {
+async function generateHmacKey(resolved, length, options) {
   const policy = macPolicy(options);
   const usages = macUsages(policy);
-  const { hash, blockBytes } = sha2Variant(variant);
+  const { hash, blockBytes } = resolved;
   if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
   if (length !== undefined && length % 8 !== 0) {
     throw errUnsupported(
@@ -760,18 +758,18 @@ async function generateHmacKey(variant, length, options) {
 
 /**
  * Import an `oct` JWK as an HMAC key over the declared SHA-2 variant (the
- * `hmac-sha2.import-key-jwk` contract). The platform owns the JWK
- * validation: `kty`, strict base64url `k`, `alg` against the requested
- * hash, and `ext` against the options' extractability all fail there and
- * map to `{ tag: 'invalid-key', val }`.
- * @param {string} variant
+ * `import-key-jwk` contract of both HMAC interfaces). The platform owns
+ * the JWK validation: `kty`, strict base64url `k`, `alg` against the
+ * requested hash, and `ext` against the options' extractability all fail
+ * there and map to `{ tag: 'invalid-key', val }`.
+ * @param {{ hash: string, blockBytes: number }} resolved
  * @param {string} jwk
  * @param {MacKeyOptions} options
  */
-async function importHmacKeyJwk(variant, jwk, options) {
+async function importHmacKeyJwk(resolved, jwk, options) {
   const policy = macPolicy(options);
   const usages = macUsages(policy);
-  const { hash } = sha2Variant(variant);
+  const { hash } = resolved;
   const material = jwkMaterial(jwk);
   requireStrictBase64url(material.k);
   let key;
@@ -794,41 +792,98 @@ async function importHmacKeyJwk(variant, jwk, options) {
 /** The `lann:webcrypto/mac` interface: its resource classes. */
 export const mac = { MacKey, MacKeyOptions };
 
+/**
+ * The shared derive-key body of both HMAC interfaces (`length` semantics
+ * as `generateHmacKey`).
+ * @param {{ hash: string, blockBytes: number }} resolved
+ * @param {DeriveInput} input
+ * @param {number | undefined} length
+ * @param {MacKeyOptions} options
+ */
+async function deriveHmacKey(resolved, input, length, options) {
+  const policy = macPolicy(options);
+  const usages = macUsages(policy);
+  const { hash, blockBytes } = resolved;
+  if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
+  if (length !== undefined && length % 8 !== 0) {
+    throw errUnsupported(
+      `HMAC key length ${length} is not a multiple of 8; sub-byte lengths are not served`,
+    );
+  }
+  const bits = length ?? blockBytes * 8;
+  const key = await deriveKeyFrom(
+    input,
+    { name: "HMAC", hash, length: bits },
+    policy.extractable,
+    usages,
+  );
+  return new MacKey(key, bits, hash);
+}
+
+/** SHA-1's HMAC parameters (the `hmac-sha1` interface; 64-byte blocks). */
+const SHA1_HMAC = { hash: "SHA-1", blockBytes: 64 };
+
+/**
+ * The `lann:webcrypto/hmac-sha1` interface: the same platform paths as
+ * `hmac-sha2` at `SHA-1` (the platform serves the hash; HMAC's security
+ * rests on the PRF property, which SHA-1's collision breaks do not
+ * reach — see the WIT doc).
+ */
+export const hmacSha1 = {
+  /**
+   * @param {Uint8Array} raw
+   * @param {MacKeyOptions} options
+   */
+  importKeyRaw: (raw, options) => importHmacKey(SHA1_HMAC, raw, options),
+  /**
+   * @param {string} jwk
+   * @param {MacKeyOptions} options
+   */
+  importKeyJwk: (jwk, options) => importHmacKeyJwk(SHA1_HMAC, jwk, options),
+  /**
+   * @param {number | undefined} length
+   * @param {MacKeyOptions} options
+   */
+  generateKey: (length, options) => generateHmacKey(SHA1_HMAC, length, options),
+  /**
+   * @param {DeriveInput} input
+   * @param {number | undefined} length
+   * @param {MacKeyOptions} options
+   */
+  deriveKey: (input, length, options) => deriveHmacKey(SHA1_HMAC, input, length, options),
+};
+
 /** The `lann:webcrypto/hmac-sha2` interface. */
 export const hmacSha2 = {
-  importKeyRaw: importHmacKey,
-  importKeyJwk: importHmacKeyJwk,
-  generateKey: generateHmacKey,
+  /**
+   * @param {string} variant
+   * @param {Uint8Array} raw
+   * @param {MacKeyOptions} options
+   */
+  importKeyRaw: (variant, raw, options) => importHmacKey(sha2Variant(variant), raw, options),
+  /**
+   * @param {string} variant
+   * @param {string} jwk
+   * @param {MacKeyOptions} options
+   */
+  importKeyJwk: (variant, jwk, options) => importHmacKeyJwk(sha2Variant(variant), jwk, options),
+  /**
+   * @param {string} variant
+   * @param {number | undefined} length
+   * @param {MacKeyOptions} options
+   */
+  generateKey: (variant, length, options) =>
+    generateHmacKey(sha2Variant(variant), length, options),
   /**
    * Mint an HMAC key from a parameterized derivation (the
-   * `hmac-sha2.derive-key` contract). `length` follows `generate-key`'s
-   * contract — `undefined` is the hash's block size, zero `invalid-key`,
-   * sub-byte `unsupported` — because WebCrypto's `deriveKey` computes the
-   * derived length by the same get-key-length step (§31.6.6).
+   * `hmac-sha2.derive-key` contract; length semantics as `generate-key`).
    * @param {string} variant
    * @param {DeriveInput} input
    * @param {number | undefined} length
    * @param {MacKeyOptions} options
    */
-  async deriveKey(variant, input, length, options) {
-    const policy = macPolicy(options);
-    const usages = macUsages(policy);
-    const { hash, blockBytes } = sha2Variant(variant);
-    if (length === 0) throw errInvalidKey("HMAC key length must be non-zero");
-    if (length !== undefined && length % 8 !== 0) {
-      throw errUnsupported(
-        `HMAC key length ${length} is not a multiple of 8; sub-byte lengths are not served`,
-      );
-    }
-    const bits = length ?? blockBytes * 8;
-    const key = await deriveKeyFrom(
-      input,
-      { name: "HMAC", hash, length: bits },
-      policy.extractable,
-      usages,
-    );
-    return new MacKey(key, bits, hash);
-  },
+  deriveKey: (variant, input, length, options) =>
+    deriveHmacKey(sha2Variant(variant), input, length, options),
 };
 
 /** @type {WeakMap<DeriveOptions, { deriveBits: boolean, deriveKey: boolean }>} */
@@ -1072,13 +1127,13 @@ async function importIkm(raw, options) {
  * Parameterize a derivation (the `hkdf.prepare` contract): the input's
  * grants are copied; the salt and info are copied too, since the lifted
  * arrays are this call's, not the resource's.
- * @param {string} variant
+ * @param {{ hash: string }} resolved
  * @param {Ikm} input
  * @param {Uint8Array} salt
  * @param {Uint8Array} info
  */
-async function prepare(variant, input, salt, info) {
-  const { hash } = sha2Variant(variant);
+async function prepare(resolved, input, salt, info) {
+  const { hash } = resolved;
   const { key, policy } = ikmOf(input);
   const params = {
     name: "HKDF",
@@ -1096,14 +1151,14 @@ async function prepare(variant, input, salt, info) {
  * turns the shared secret into an HKDF base key without the bytes
  * transiting this host. A KDF input has no natural length, so it fails
  * exactly as the platform's `deriveKey(… → "HKDF")` does.
- * @param {string} variant
+ * @param {{ hash: string }} resolved
  * @param {DeriveInput} input
  * @param {Uint8Array} salt
  * @param {Uint8Array} info
  * @returns {Promise<DeriveInput>}
  */
-async function prepareFrom(variant, input, salt, info) {
-  const { hash } = sha2Variant(variant);
+async function prepareFrom(resolved, input, salt, info) {
+  const { hash } = resolved;
   const state = inputOf(input);
   if (!state.policy.deriveKey) throw notPermitted("derive-key");
   if (!isAgreementParams(state.params)) {
@@ -1128,7 +1183,44 @@ async function prepareFrom(variant, input, salt, info) {
 export const derivation = { DeriveOptions, DeriveInput };
 
 /** The `lann:webcrypto/hkdf` interface. */
-export const hkdf = { Ikm, importIkm, prepare, prepareFrom };
+export const hkdf = {
+  Ikm,
+  importIkm,
+  /**
+   * @param {string} variant
+   * @param {Ikm} input
+   * @param {Uint8Array} salt
+   * @param {Uint8Array} info
+   */
+  prepare: (variant, input, salt, info) => prepare(sha2Variant(variant), input, salt, info),
+  /**
+   * @param {string} variant
+   * @param {DeriveInput} input
+   * @param {Uint8Array} salt
+   * @param {Uint8Array} info
+   */
+  prepareFrom: (variant, input, salt, info) =>
+    prepareFrom(sha2Variant(variant), input, salt, info),
+};
+
+/**
+ * The `lann:webcrypto/hkdf-sha1` interface: `hkdf`'s prepare steps at
+ * `SHA-1` (see `hmacSha1`'s note; the `ikm` resource is shared).
+ */
+export const hkdfSha1 = {
+  /**
+   * @param {Ikm} input
+   * @param {Uint8Array} salt
+   * @param {Uint8Array} info
+   */
+  prepare: (input, salt, info) => prepare(SHA1_HMAC, input, salt, info),
+  /**
+   * @param {DeriveInput} input
+   * @param {Uint8Array} salt
+   * @param {Uint8Array} info
+   */
+  prepareFrom: (input, salt, info) => prepareFrom(SHA1_HMAC, input, salt, info),
+};
 
 /**
  * @type {WeakMap<Password, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean } }>}
@@ -1196,13 +1288,13 @@ async function importPassword(raw, options) {
  * and iteration count bound now, output length per use. A zero iteration
  * count fails here — the platform's `OperationError`, checked early so a
  * misparameterized input cannot mint.
- * @param {string} variant
+ * @param {{ hash: string }} resolved
  * @param {Password} input
  * @param {Uint8Array} salt
  * @param {number} iterations
  */
-async function preparePbkdf2(variant, input, salt, iterations) {
-  const { hash } = sha2Variant(variant);
+async function preparePbkdf2(resolved, input, salt, iterations) {
+  const { hash } = resolved;
   if (iterations === 0) {
     throw errOther("PBKDF2 requires a positive iteration count");
   }
@@ -1212,7 +1304,31 @@ async function preparePbkdf2(variant, input, salt, iterations) {
 }
 
 /** The `lann:webcrypto/pbkdf2` interface. */
-export const pbkdf2 = { Password, importPassword, prepare: preparePbkdf2 };
+export const pbkdf2 = {
+  Password,
+  importPassword,
+  /**
+   * @param {string} variant
+   * @param {Password} input
+   * @param {Uint8Array} salt
+   * @param {number} iterations
+   */
+  prepare: (variant, input, salt, iterations) =>
+    preparePbkdf2(sha2Variant(variant), input, salt, iterations),
+};
+
+/**
+ * The `lann:webcrypto/pbkdf2-sha1` interface: `pbkdf2`'s prepare step at
+ * `SHA-1` (see `hmacSha1`'s note; the `password` resource is shared).
+ */
+export const pbkdf2Sha1 = {
+  /**
+   * @param {Password} input
+   * @param {Uint8Array} salt
+   * @param {number} iterations
+   */
+  prepare: (input, salt, iterations) => preparePbkdf2(SHA1_HMAC, input, salt, iterations),
+};
 
 /** @type {WeakMap<AgreementKeyOptions, { deriveBits: boolean, deriveKey: boolean, extractable: boolean }>} */
 const agreementPolicies = new WeakMap();

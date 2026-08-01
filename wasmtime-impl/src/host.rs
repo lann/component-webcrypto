@@ -47,7 +47,8 @@ use crate::bindings::webcrypto::{
     aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
     chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
     ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
-    ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface,
+    ed25519_verify as ed25519_verify_iface, hkdf_sha1 as hkdf_sha1_iface,
+    hmac_sha1 as hmac_sha1_iface, hmac_sha2 as hmac_sha2_iface, pbkdf2_sha1 as pbkdf2_sha1_iface,
     sha1_checked as sha1_checked_iface, sha2 as sha2_iface, signature as signature_iface,
     x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
@@ -798,6 +799,112 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
                 &upstream.material,
                 &salt,
                 info,
+            )
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+}
+
+// --- the SHA-1 constructions (hmac-sha1 / hkdf-sha1 / pbkdf2-sha1) ---------------
+
+impl hmac_sha1_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_key_raw(
+        accessor: &Accessor<T, Self>,
+        raw: Vec<u8>,
+        options: Resource<crate::MacKeyOptions>,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::import_sha1(raw, policy);
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
+
+    async fn import_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+        options: Resource<crate::MacKeyOptions>,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::import_jwk_sha1(&jwk, policy);
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        length: Option<u32>,
+        options: Resource<crate::MacKeyOptions>,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = MacKeyMaterial::generate_sha1(length, policy)
+            .map_err(rng_trap("random key generation"))?;
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
+
+    async fn derive_key(
+        accessor: &Accessor<T, Self>,
+        input: Resource<DeriveInput>,
+        length: Option<u32>,
+        options: Resource<crate::MacKeyOptions>,
+    ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = with_resource(accessor, input, |input| {
+            webcrypto_impl_core::derive_mac_key_sha1(&input.material, length, policy)
+        })
+        .await?;
+        mint(accessor, material.map(|material| MacKey { material })).await
+    }
+}
+
+impl hkdf_sha1_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn prepare(
+        accessor: &Accessor<T, Self>,
+        input: Resource<Ikm>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |ikm| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare_sha1(&ikm.material, &salt, info)
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+
+    async fn prepare_from(
+        accessor: &Accessor<T, Self>,
+        input: Resource<DeriveInput>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |upstream| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare_from_sha1(
+                &upstream.material,
+                &salt,
+                info,
+            )
+        })
+        .await?;
+        mint(accessor, material.map(|material| DeriveInput { material })).await
+    }
+}
+
+impl pbkdf2_sha1_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> pbkdf2_sha1_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn prepare(
+        accessor: &Accessor<T, Self>,
+        input: Resource<Password>,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let material = with_resource(accessor, input, |password| {
+            webcrypto_impl_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
+                &password.material,
+                salt.clone(),
+                iterations,
             )
         })
         .await?;

@@ -18,6 +18,7 @@ world imports {
     import lann:webcrypto/sha2@0.1.0;
     import lann:webcrypto/sha1-checked@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/hmac-sha1@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
     import lann:webcrypto/aes-cbc@0.1.0;
     import lann:webcrypto/aes-ctr@0.1.0;
@@ -27,7 +28,9 @@ world imports {
     import lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
     import lann:webcrypto/derivation@0.1.0;
     import lann:webcrypto/hkdf@0.1.0;
+    import lann:webcrypto/hkdf-sha1@0.1.0;
     import lann:webcrypto/pbkdf2@0.1.0;
+    import lann:webcrypto/pbkdf2-sha1@0.1.0;
     import lann:webcrypto/key-agreement@0.1.0;
     import lann:webcrypto/x25519@0.1.0;
     import lann:webcrypto/signature@0.1.0;

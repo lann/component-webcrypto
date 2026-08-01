@@ -68,10 +68,10 @@ mod sig;
 pub use aead::AeadKeyMaterial;
 pub use agreement::{AgreementPublicMaterial, AgreementSecretMaterial};
 pub use cipher::{CipherKeyMaterial, CipherMode};
-pub use hash::{served_sha2, DigestKind, Sha1Posture, Sha2};
+pub use hash::{served_sha2, DigestKind, HmacHash, Sha1Posture, Sha2};
 pub use kdf::{
-    derive_aes_gcm_key, derive_cipher_key, derive_mac_key, DeriveInputMaterial, IkmMaterial,
-    PasswordMaterial,
+    derive_aes_gcm_key, derive_cipher_key, derive_mac_key, derive_mac_key_sha1,
+    DeriveInputMaterial, IkmMaterial, PasswordMaterial,
 };
 pub use mac::MacKeyMaterial;
 pub use policy::{

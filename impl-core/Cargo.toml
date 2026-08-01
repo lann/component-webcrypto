@@ -12,9 +12,13 @@ description = "Shared RustCrypto core for the Rust implementations of the lann:w
 # backend — what makes AES-GCM acceptable in-guest; see guest-impl's README
 # timing-channel classification.
 sha2 = "0.10"
-# SHA-1 with sha1dc collision detection (the `sha1-checked` interface);
-# plain SHA-1 is deliberately not a dependency.
+# SHA-1 with sha1dc collision detection (the `sha1-checked` interface).
 sha1-checked = "0.10"
+# Plain SHA-1, used only *inside* the HMAC-family constructions
+# (hmac-sha1, hkdf-sha1, pbkdf2-sha1), where collision resistance is not
+# load-bearing and no digest is exposed; bare SHA-1 digests go through
+# `sha1-checked` alone.
+sha1 = "0.10"
 hmac = "0.12"
 # HKDF (RFC 5869) for the derivation core.
 hkdf = "0.12"
