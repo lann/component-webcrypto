@@ -54,7 +54,7 @@ algorithm:
   `error` variant carries no misuse cases — incrementality comes from the
   streams, not from resource state.
 - **`crypto.subtle` fidelity is measured, not assumed.** The
-  `componentize-sdk` library re-exposes the package as `crypto.subtle`, and
+  `webcrypto-componentize` library re-exposes the package as `crypto.subtle`, and
   the vendored WebCryptoAPI web-platform-tests run through it in CI —
   WPT → shim → WIT → implementation — so the platform's own test suite
   meters what the interface shape preserves. Any deviation the shape forced
@@ -81,26 +81,31 @@ are specified in [`wit/README.md`](wit/README.md) and the WIT doc comments.
 
 ```
 wit/                    # the lann:webcrypto package (defined once, here)
-impl-core/              # shared RustCrypto core of both Rust
-                        #   implementations (crate: webcrypto-impl-core);
-                        #   ECDSA signing is compiled out of wasm builds
-wasmtime-impl/          # Wasmtime host crate (RustCrypto); add_to_linker +
-                        #   WasiWebcryptoView; crate: wasmtime-webcrypto
-jco-impl/               # jco host library: webcrypto.js, browser-compatible
-                        #   Web Crypto API only (crypto.subtle /
-                        #   getRandomValues); no dependencies
-guest-impl/            # in-guest wasm component: RustCrypto in wasm,
+rust/                   # the Rust crates (dir = crate name minus the
+                        #   `lann-webcrypto-` family root)
+  core/                 # shared RustCrypto core of both Rust
+                        #   implementations; ECDSA signing is compiled out
+                        #   of wasm builds
+  wasmtime/             # Wasmtime host crate (RustCrypto); add_to_linker +
+                        #   WasiWebcryptoView
+  guest/                # guest-side Rust library over the lann:webcrypto
+                        #   imports: typed wrappers and a byte-source
+                        #   abstraction, so consumers need not hand-roll
+                        #   stream plumbing
+  guest-provider/       # in-guest wasm component: RustCrypto in wasm,
                         #   EXPORTS the package surface, composable via
                         #   `wac plug` — see its README for the wasm
                         #   timing-channel classification & export policy
-guest-sdk/              # guest-side Rust library over the lann:webcrypto
-                        #   imports (crate: lann-webcrypto-guest): typed
-                        #   wrappers and a byte-source abstraction, so
-                        #   consumers need not hand-roll stream plumbing
-componentize-sdk/       # WebCrypto-subset library (crypto.subtle) for JS
+js/                     # the JS packages (dir = npm name minus the
+                        #   `@lann/webcrypto-` family root)
+  jco/                  # jco host library: webcrypto.js,
+                        #   browser-compatible Web Crypto API only
+                        #   (crypto.subtle / getRandomValues); no
+                        #   dependencies
+  componentize/         # WebCrypto-subset library (crypto.subtle) for JS
                         #   guests built with componentize-js, backed by the
                         #   lann:webcrypto imports; the JS counterpart of
-                        #   guest-sdk
+                        #   rust/guest
 examples/
   crypto-demo/          # guest component: known-answer vectors, chunked
                         #   streams, error taxonomy, extractability —
@@ -109,9 +114,9 @@ examples/
   demo-driver/          # CLI driver for the fully in-guest composed demo
   wasmtime-demo/        # thin native host + the integration test
   jco-demo/             # Node 24+ driver: transpiles crypto-demo with jco
-                        #   against the jco-impl host and runs it
+                        #   against the webcrypto-jco host and runs it
   componentize-demo/    # JS guest (componentize-js) exercising the
-                        #   componentize-sdk library; drives through the
+                        #   webcrypto-componentize library; drives through the
                         #   same demo interface and composed pipeline
 conformance/            # cross-implementation conformance tests: vendored
                         #   Wycheproof vectors + translation policy, a shared
@@ -125,7 +130,7 @@ timing-lab/             # dudect-style statistical timing tests of the
 
 Components that name the package in their own WIT pull it in through
 `wit/deps/lann-webcrypto` symlinks back to the root `wit/`, so there is a
-single copy to edit; guests built on `guest-sdk` reach it through that
+single copy to edit; guests built on `lann-webcrypto-guest` reach it through that
 crate's bindings instead.
 
 ## Build & run
@@ -141,16 +146,16 @@ just test-node               # transpile and run the same guest under the jco ho
 just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
                              #   and run the whole thing under `wasmtime run`
 just test-webcrypto-componentize-wpt # the WPT WebCryptoAPI suites against the
-                             #   componentize-sdk JS guest library, via its
+                             #   webcrypto-componentize JS guest library, via its
                              #   published runner component (no componentize-js
-                             #   toolchain needed — see componentize-sdk/wpt/)
+                             #   toolchain needed — see js/componentize/wpt/)
 just test-webcrypto-componentize # the composed pipeline with the JS demo guest
                              #   (needs the componentize-js CLI — see
-                             #   componentize-sdk/README.md)
+                             #   js/componentize/README.md)
 just wpt-parity              # the WPT suites against the platform's own
                              #   crypto.subtle and through the jco round trip;
                              #   holds the round trip to the platform's pass set
-                             #   (see componentize-sdk/wpt/README.md)
+                             #   (see js/componentize/wpt/README.md)
 just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally
@@ -170,7 +175,7 @@ with `CONFORMANCE_BROWSER=1`; needs Chrome/Chromium 137+); the
 `crypto-demo` guest additionally covers the jco host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time
-guarantees, so [`guest-impl/README.md`](guest-impl/README.md) classifies
+guarantees, so [`rust/guest-provider/README.md`](rust/guest-provider/README.md) classifies
 algorithms by how exploitable their timing channels are in wasm (classes A–D)
 and enforces the policy structurally — class D algorithms (e.g. RSA
 private-key ops) are simply never exported by it, so compositions that need

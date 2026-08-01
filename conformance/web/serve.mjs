@@ -2,7 +2,7 @@
 // Serve the conformance results viewer (conformance/web/) over the
 // repository root, so the page can fetch conformance/results/matrix.json
 // and the transpiled guests can resolve their relative imports of
-// jco-impl/webcrypto.js. Dependency-free; run it with `just conformance-web`
+// js/jco/webcrypto.js. Dependency-free; run it with `just conformance-web`
 // (which produces the results and transpiled guests first).
 //
 // PORT overrides the default port.

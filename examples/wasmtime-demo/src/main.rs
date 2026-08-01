@@ -1,4 +1,4 @@
-//! Thin CLI over [`wasmtime_webcrypto_demo::run_demo`]: load the
+//! Thin CLI over [`wasmtime_demo::run_demo`]: load the
 //! `crypto-demo` component (path from argument 1, defaulting to the
 //! repository's build location) and print the summary its `run` export
 //! returns.
@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("examples/crypto-demo/build/crypto-demo.component.wasm"));
 
-    let summary = wasmtime_webcrypto_demo::run_demo(&path).await?;
+    let summary = wasmtime_demo::run_demo(&path).await?;
     println!("crypto-demo (Wasmtime / RustCrypto host) result:");
     println!("  {summary}");
     Ok(())

@@ -64,7 +64,7 @@ jobs:
         env:
           TIMING_LAB_SAMPLES: ${{ inputs.samples || '2000' }}
 
-  # Mutation testing: cargo-mutants over impl-core and wasmtime-impl, oracle =
+  # Mutation testing: cargo-mutants over lann-webcrypto-core and lann-webcrypto-wasmtime, oracle =
   # their unit tests + both conformance suites through the wasmtime adapter's
   # env-gated oracle test. A missed mutant fails the job: it is a change to
   # the crypto that no suite distinguishes — exactly the assertion-strength

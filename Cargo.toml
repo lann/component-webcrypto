@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "impl-core",
-    "guest-sdk",
-    "wasmtime-impl",
-    "guest-impl",
+    "rust/core",
+    "rust/guest",
+    "rust/wasmtime",
+    "rust/guest-provider",
     "examples/crypto-demo",
     "examples/demo-driver",
     "examples/wasmtime-demo",

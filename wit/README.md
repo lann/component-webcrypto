@@ -215,7 +215,7 @@ key-recovering. Providers that execute inside an attacker-observable timing
 domain should not export such interfaces; a composition that requires one
 then fails at composition (`wac plug`) time rather than at run time. This
 repository's in-guest provider documents its classification and policy in
-`guest-impl/README.md`.
+`rust/guest-provider/README.md`.
 
 ## Design notes
 

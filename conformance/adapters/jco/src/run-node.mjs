@@ -1,5 +1,5 @@
 // The jco Node conformance adapter: runs a conformance guest against the
-// browser-first host (`jco-impl/webcrypto.js`, wired in at transpile time
+// browser-first host (`js/jco/webcrypto.js`, wired in at transpile time
 // via `--map`) under Node and writes its results file under
 // `conformance/results/`.
 //

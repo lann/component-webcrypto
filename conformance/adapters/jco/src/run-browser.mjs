@@ -82,7 +82,7 @@ const collect = (message) => {
 </script>`;
 
 /** Serve the repository root (so the guests' relative imports of
- *  jco-impl/webcrypto.js resolve) plus the harness page. */
+ *  js/jco/webcrypto.js resolve) plus the harness page. */
 function serve(page) {
   const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://localhost").pathname;

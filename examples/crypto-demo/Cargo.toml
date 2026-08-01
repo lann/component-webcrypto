@@ -16,7 +16,7 @@ anyhow = "1"
 wit-bindgen = { version = "0.59", features = ["async"] }
 # The lann:webcrypto bindings and byte-buffer helpers; carries the imports,
 # so this component's own world declares only its export.
-lann-webcrypto-guest = { path = "../../guest-sdk" }
+lann-webcrypto-guest = { path = "../../rust/guest" }
 # `join!` lets the component feed a stream and await the consuming import
 # concurrently within a single cooperative task (no OS threads).
 futures = { version = "0.3", default-features = false, features = ["async-await"] }

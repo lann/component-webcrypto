@@ -48,7 +48,7 @@ jobs:
       - name: Run rust checks
         run: just rust-checks
 
-  # The WPT WebCryptoAPI suites against the componentize-sdk JS guest
+  # The WPT WebCryptoAPI suites against the webcrypto-componentize JS guest
   # library: componentizes the runner with the pinned componentize-js
   # (downloaded — see the componentize-js-toolchain workflow), composes it
   # with a freshly built in-guest provider and driver, and runs it under

@@ -6,7 +6,7 @@ name: componentize-js toolchain
 # function of nothing but the pinned revision and the host platform, so it
 # is built once per (revision, platform) and published on the rolling
 # `toolchains` release; CI's gating jobs and contributors download it
-# (componentize-sdk/wpt/component.sh).
+# (js/componentize/wpt/component.sh).
 #
 # Pushing a change to the pin runs this automatically. Until it finishes,
 # checks that need the toolchain fail with instructions rather than silently
@@ -15,7 +15,7 @@ name: componentize-js toolchain
 on:
   push:
     paths:
-      - componentize-sdk/componentize-js.rev
+      - js/componentize/componentize-js.rev
       - .github/workflows/componentize-js-toolchain.yml
   workflow_dispatch:
 
@@ -48,7 +48,7 @@ jobs:
         id: id
         run: |
           {
-            echo "rev=$(cat componentize-sdk/componentize-js.rev)"
+            echo "rev=$(cat js/componentize/componentize-js.rev)"
             echo "platform=${{ matrix.platform }}"
           } >> "$GITHUB_OUTPUT"
 
@@ -105,7 +105,7 @@ jobs:
           asset="componentize-js-${{ steps.id.outputs.rev }}-${{ steps.id.outputs.platform }}.gz"
           gzip -c "$RUNNER_TEMP/out/bin/componentize-js" > "$asset"
           echo "asset=$asset" >> "$GITHUB_ENV"
-          # Consumers pin these (componentize-sdk/componentize-js.sha256) and
+          # Consumers pin these (js/componentize/componentize-js.sha256) and
           # refuse to execute anything else, so surface them here rather than
           # making someone re-download to find out what was built.
           {
@@ -127,7 +127,7 @@ jobs:
           gh release view toolchains >/dev/null 2>&1 || \
             gh release create toolchains --latest=false \
               --title "Toolchains (CI artifacts)" \
-              --notes "componentize-js builds, one asset per pinned revision and platform. See componentize-sdk/wpt/component.sh."
+              --notes "componentize-js builds, one asset per pinned revision and platform. See js/componentize/wpt/component.sh."
           # No --clobber: a published (revision, platform) is immutable, so
           # that a recorded digest cannot be invalidated by replacing the
           # asset underneath it. Re-publishing is a deliberate act — delete

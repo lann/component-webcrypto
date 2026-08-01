@@ -1,5 +1,5 @@
 /// Vendored from wasi-random 0.2.0 (the `random` interface only): the
-/// world imports it so the componentize-sdk library can serve
+/// world imports it so the webcrypto-componentize library can serve
 /// `crypto.getRandomValues` from the host's entropy.
 package wasi:random@0.2.0;
 

@@ -1,6 +1,6 @@
 // Demo-only WIT for the `crypto-demo` example component. The shared
 // `lann:webcrypto` package lives once at the repository root `wit/`; this
-// guest reaches it through `guest-sdk`'s bindings, so no `deps` copy is
+// guest reaches it through `lann-webcrypto-guest`'s bindings, so no `deps` copy is
 // needed here.
 package demo:webcrypto-demo@0.1.0;
 

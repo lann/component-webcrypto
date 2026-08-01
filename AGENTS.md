@@ -27,67 +27,74 @@ wit/                    # the lann:webcrypto package, one file per layer:
                         #   family files (aes/chacha/sha2/hmac/ed25519/
                         #   ecdsa.wit) hold the minting interfaces and grow
                         #   as algorithms are added
-impl-core/              # the shared RustCrypto core of both Rust
-                        #   implementations: cipher/digest dispatch, key
-                        #   validation and generation, error rendering, the
-                        #   internal-nonce wire format, signature keys (ECDSA
-                        #   signing is compiled out of wasm builds — class D);
-                        #   crate: webcrypto-impl-core
-wasmtime-impl/          # Wasmtime host crate, modeled after
-                        #   wasmtime_wasi_http::p3; add_to_linker +
-                        #   WasiWebcryptoView; crate: wasmtime-webcrypto
-jco-impl/               # jco host LIBRARY: webcrypto.js implements the
-                        #   imports over the browser-compatible Web Crypto
-                        #   API ONLY; no runtime dependencies, no demo code.
+rust/                   # the Rust library surface (directory = crate name
+                        # minus the `lann-webcrypto-` family root)
+  core/                 # lann-webcrypto-core: the shared RustCrypto core of
+                        #   both Rust implementations: cipher/digest
+                        #   dispatch, key validation and generation, error
+                        #   rendering, the internal-nonce wire format,
+                        #   signature keys (ECDSA signing is compiled out of
+                        #   wasm builds — class D)
+  wasmtime/             # lann-webcrypto-wasmtime: Wasmtime host crate,
+                        #   modeled after wasmtime_wasi_http::p3;
+                        #   add_to_linker + WasiWebcryptoView
+  guest/                # lann-webcrypto-guest: guest-side Rust library over
+                        #   the lann:webcrypto imports: typed wrappers with
+                        #   a byte-source abstraction, so consumers do not
+                        #   re-implement the feed-a-stream-and-await
+                        #   plumbing; the Rust counterpart of
+                        #   @lann/webcrypto-componentize
+  guest-provider/       # lann-webcrypto-guest-provider: wasm COMPONENT,
+                        #   RustCrypto in-guest, EXPORTS the package
+                        #   surface; composable via `wac plug`; buffer.rs
+                        #   makes input buffering fallible, so allocation
+                        #   failure is the operation's error rather than the
+                        #   instance's trap; the instance memory limit the
+                        #   embedder sets is the retention bound,
+                        #   deliberately (see the module doc); see its
+                        #   README for the timing-channel classification and
+                        #   export policy
+js/                     # the JS library surface (directory = npm name minus
+                        # the `@lann/webcrypto-` family root)
+  jco/                  # @lann/webcrypto-jco: jco host LIBRARY.
+                        #   webcrypto.js implements the imports over the
+                        #   browser-compatible Web Crypto API ONLY; no
+                        #   runtime dependencies, no demo code.
                         #   wit/world.wit names the interfaces it serves;
-                        #   `jco-transpile` derives their definitions from it and
-                        #   interface-check.js asserts the host against them
-                        #   (`just typecheck-jco`); test/ covers the
-                        #   admission subsystem conformance cannot reach
-guest-impl/            # wasm COMPONENT: RustCrypto in-guest, EXPORTS the
-                        #   package surface; composable via `wac plug`;
-                        #   buffer.rs makes input buffering fallible, so
-                        #   allocation failure is the operation's error
-                        #   rather than the instance's trap; the instance
-                        #   memory limit the embedder sets is the retention
-                        #   bound, deliberately (see the module doc);
-                        #   crate: guest-webcrypto — see its README for the
-                        #   timing-channel classification and export policy
-guest-sdk/              # guest-side Rust library over the lann:webcrypto
-                        #   imports: typed wrappers with a byte-source
-                        #   abstraction, so consumers do not re-implement
-                        #   the feed-a-stream-and-await plumbing; the Rust
-                        #   counterpart of componentize-sdk;
-                        #   crate: lann-webcrypto-guest
-componentize-sdk/       # JS guest library for componentize-js (dicej's
-                        #   ComponentizeJS reboot): webcrypto.js exposes a
-                        #   crypto.subtle subset (HMAC-SHA-256, AES-256-GCM,
-                        #   the derive model: HKDF/PBKDF2/X25519 with
-                        #   deriveBits/deriveKey; raw and jwk keys) over the
-                        #   lann:webcrypto imports; the
-                        #   toolchain revision is pinned in
+                        #   `jco-transpile` derives their definitions from
+                        #   it and interface-check.js asserts the host
+                        #   against them (`just typecheck-jco`); test/
+                        #   covers the admission subsystem conformance
+                        #   cannot reach
+  componentize/         # @lann/webcrypto-componentize: JS guest library for
+                        #   componentize-js (dicej's ComponentizeJS reboot):
+                        #   webcrypto.js exposes a crypto.subtle subset
+                        #   (HMAC-SHA-256, AES-256-GCM, the derive model:
+                        #   HKDF/PBKDF2/X25519 with deriveBits/deriveKey;
+                        #   raw and jwk keys) over the lann:webcrypto
+                        #   imports; the toolchain revision is pinned in
                         #   componentize-js.rev; interface-check.js asserts
                         #   the exported subset against the SubtleCrypto and
                         #   CryptoKey definitions TypeScript ships
-                        #   (`just typecheck-componentize-sdk`); wpt/ vendors the
-                        #   WebCryptoAPI web-platform-tests and gates in CI,
-                        #   componentizing its runner from the tree with a
-                        #   digest-pinned componentize-js build
+                        #   (`just typecheck-webcrypto-componentize`); wpt/
+                        #   vendors the WebCryptoAPI web-platform-tests and
+                        #   gates in CI, componentizing its runner from the
+                        #   tree with a digest-pinned componentize-js build
                         #   (wpt/component.sh, componentize-js.sha256); the
                         #   run's census is pinned by wpt/expected.js
 examples/
   crypto-demo/          # guest component exercising the primitive kinds end
-                        #   to end (reaches lann:webcrypto via guest-sdk)
+                        #   to end (reaches lann:webcrypto via lann-webcrypto-guest)
   demo-driver/          # CLI driver (async wasi:cli/run) for the composed
                         #   fully in-guest demo
-  wasmtime-demo/        # thin native host over wasmtime-impl's add_to_linker
+  wasmtime-demo/        # thin native host over lann-webcrypto-wasmtime's add_to_linker
                         #   + the integration test (tests/demo.rs)
   jco-demo/             # Node 24+ driver for the jco host: transpiles
                         #   crypto-demo with jco (one wildcard --map; async
                         #   is read from the component) and runs it against
-                        #   jco-impl/webcrypto.js
+                        #   js/jco/webcrypto.js
   componentize-demo/    # JS guest (componentize-js) exercising the
-                        #   componentize-sdk library; exports the same demo
+                        #   webcrypto-componentize library; exports the same demo
                         #   interface as crypto-demo, composed and run via
                         #   `just test-webcrypto-componentize` (not in ci)
 conformance/            # cross-implementation conformance tests — see
@@ -184,17 +191,17 @@ it does.
 
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
-bindgen configs (`wasmtime-impl/src/bindings.rs`,
+bindgen configs (`rust/wasmtime/src/bindings.rs`,
 `examples/wasmtime-demo/src/lib.rs`), the in-guest provider world and bindings
-(`guest-impl/`), the driver's inline world
+(`rust/guest-provider/`), the driver's inline world
 (`examples/demo-driver/src/lib.rs`), and the camelCased named export in
-`jco-impl/webcrypto.js` (the transpile invocations carry one wildcard
+`js/jco/webcrypto.js` (the transpile invocations carry one wildcard
 `--map` and enumerate nothing per interface; async-ness is read from the
 component — see the conventions note in that file's header).
 
 ### The in-guest provider's timing-channel policy
 
-`guest-impl/README.md` carries the timing-channel classification (classes
+`rust/guest-provider/README.md` carries the timing-channel classification (classes
 A–D) and this provider's policy: only class A–C algorithms are exported,
 always via constant-time-variant implementations; class D algorithm
 interfaces (RSA private-key ops, ECDSA signing, …) are **never** exported by
@@ -207,22 +214,22 @@ adding algorithms, and keep class D out of the provider's world.
 last sentence: it asserts the conformance signing guest, whose world imports
 `ecdsa-sign`, does not compose with the provider. Adding a class-D export
 turns that composition green and fails the gate. The failure mode it guards
-against is subtle — see guest-impl/README.md, "What the failure looks like":
+against is subtle — see rust/guest-provider/README.md, "What the failure looks like":
 `wac plug` tolerates imports it cannot satisfy, so the composition breaks
 only because the provider exports the *generic* interface owning the key
 resource that the withheld minting interface mints.
 
 ### The jco host must stay browser-compatible
 
-`jco-impl/webcrypto.js` uses only `globalThis.crypto.subtle` and
+`js/jco/webcrypto.js` uses only `globalThis.crypto.subtle` and
 `globalThis.crypto.getRandomValues`. No `node:crypto`, no Node-only APIs: the
 same file must be loadable in a browser unchanged. Node is just the current
 runner (24+ for JSPI).
 
 ### WPT fidelity is a first-class design constraint
 
-`componentize-sdk/webcrypto.js` re-exposes the package as `crypto.subtle`,
-and the WPT harness (`componentize-sdk/wpt/`) runs the platform's own test
+`js/componentize/webcrypto.js` re-exposes the package as `crypto.subtle`,
+and the WPT harness (`js/componentize/wpt/`) runs the platform's own test
 suite through it. That round trip — WPT → shim → WIT → implementation — is
 the repository's instrument for a question the conformance suites cannot
 ask: whether `crypto.subtle`'s observable semantics survive the WIT shape.
@@ -279,15 +286,15 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just validate-wit` | any `.wit` file. |
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just build-component` | the `crypto-demo` guest or its WIT. |
-| `just test-webcrypto-composed` | the `guest-impl` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just typecheck-componentize-sdk` | the `componentize-sdk` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
-| `just test-webcrypto-componentize-wpt` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`componentize-sdk/wpt/component.sh`), never compiled here. Changing `componentize-sdk/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
+| `just test-webcrypto-composed` | the `lann-webcrypto-guest-provider` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just typecheck-webcrypto-componentize` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
+| `just test-webcrypto-componentize-wpt` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
 | `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
 | `just test-jco-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since it runs cases sequentially. |
 | `just typecheck-jco` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
-| `just wpt-parity` | the `componentize-sdk` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `componentize-sdk/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
+| `just wpt-parity` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `js/componentize/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
@@ -445,7 +452,7 @@ closed numbers remain stable references.
 ## Direction (designed, not yet built)
 
 - WPT platform parity through the jco path: the measuring harness exists
-  (`just wpt-parity` — see componentize-sdk/wpt/README.md, "The parity
+  (`just wpt-parity` — see js/componentize/wpt/README.md, "The parity
   gate") and pins the loss set; what remains is driving that set down.
   Growing toward parity is tiered — first behaviors the WIT already
   carries but the shim does not serve (more hashes, Ed25519/ECDSA,
