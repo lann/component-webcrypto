@@ -265,7 +265,7 @@ pub(crate) trait Minted: Sized {
     fn minted(payload: Self::Payload, retention: crate::limits::Reservation) -> Self;
 }
 
-/// Declare the minted resource types: the `payload` field, an optional
+/// Declare the minted resource types: the `#[payload]` field, an optional
 /// `retains` byte measure (the retention charge's variable part; the
 /// default is floor-only), any defaulted extra fields, and the hidden
 /// retention reservation, with the [`Minted`] impl assembling them.
@@ -274,8 +274,9 @@ macro_rules! minted_resources {
         $(#[$attr:meta])*
         pub struct $name:ident {
             $(retains $bytes:expr,)?
+            #[payload]
             $(#[$pattr:meta])*
-            payload $payload:ident: $pty:ty
+            $payload:ident: $pty:ty
             $(, $(#[$fattr:meta])* $field:ident: $fty:ty = $default:expr)* $(,)?
         }
     )*) => {$(
@@ -315,50 +316,58 @@ minted_resources! {
     /// setters, consumed by a mint.
     #[derive(Debug)]
     pub struct MacKeyOptions {
-        payload policy: lann_webcrypto_core::MacPolicy,
+        #[payload]
+        policy: lann_webcrypto_core::MacPolicy,
     }
 
     /// An `aead-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct AeadKeyOptions {
-        payload policy: lann_webcrypto_core::AeadPolicy,
+        #[payload]
+        policy: lann_webcrypto_core::AeadPolicy,
     }
 
     /// A `cipher-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct CipherKeyOptions {
-        payload policy: lann_webcrypto_core::CipherPolicy,
+        #[payload]
+        policy: lann_webcrypto_core::CipherPolicy,
     }
 
     /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct InternalNonceKeyOptions {
-        payload policy: lann_webcrypto_core::InternalNoncePolicy,
+        #[payload]
+        policy: lann_webcrypto_core::InternalNoncePolicy,
     }
 
     /// A `signing-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct SigningKeyOptions {
-        payload policy: lann_webcrypto_core::SigningPolicy,
+        #[payload]
+        policy: lann_webcrypto_core::SigningPolicy,
     }
 
     /// A `derive-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct DeriveOptions {
-        payload policy: lann_webcrypto_core::DerivePolicy,
+        #[payload]
+        policy: lann_webcrypto_core::DerivePolicy,
     }
 
     /// An `agreement-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct AgreementKeyOptions {
-        payload policy: lann_webcrypto_core::AgreementPolicy,
+        #[payload]
+        policy: lann_webcrypto_core::AgreementPolicy,
     }
 
     /// Backing type for the `key-agreement.public-key` resource: public
     /// material only, exchangeable and secret-free.
     #[derive(Debug)]
     pub struct AgreementPublicKey {
-        payload material: lann_webcrypto_core::AgreementPublicMaterial,
+        #[payload]
+        material: lann_webcrypto_core::AgreementPublicMaterial,
     }
 
     /// Backing type for the `key-agreement.secret-key` resource. `agree` is
@@ -366,7 +375,8 @@ minted_resources! {
     /// `derive-input` it mints.
     #[derive(Debug)]
     pub struct AgreementSecretKey {
-        payload material: lann_webcrypto_core::AgreementSecretMaterial,
+        #[payload]
+        material: lann_webcrypto_core::AgreementSecretMaterial,
     }
 
     /// Backing type for the `hkdf.ikm` resource: input keying material, never
@@ -374,7 +384,8 @@ minted_resources! {
     #[derive(Debug)]
     pub struct Ikm {
         retains |m| m.byte_len(),
-        payload material: lann_webcrypto_core::IkmMaterial,
+        #[payload]
+        material: lann_webcrypto_core::IkmMaterial,
     }
 
     /// Backing type for the `pbkdf2.password` resource: a password, never
@@ -382,7 +393,8 @@ minted_resources! {
     #[derive(Debug)]
     pub struct Password {
         retains |m| m.byte_len(),
-        payload material: lann_webcrypto_core::PasswordMaterial,
+        #[payload]
+        material: lann_webcrypto_core::PasswordMaterial,
     }
 
     /// Backing type for the `derivation.derive-input` resource: a
@@ -391,7 +403,8 @@ minted_resources! {
     #[derive(Debug)]
     pub struct DeriveInput {
         retains |m| m.byte_len(),
-        payload material: lann_webcrypto_core::DeriveInputMaterial,
+        #[payload]
+        material: lann_webcrypto_core::DeriveInputMaterial,
     }
 
     /// Backing type for the `mac.mac-key` resource.
@@ -404,7 +417,8 @@ minted_resources! {
     #[derive(Debug)]
     pub struct MacKey {
         retains |m| m.length_bits() as usize / 8,
-        payload material: lann_webcrypto_core::MacKeyMaterial,
+        #[payload]
+        material: lann_webcrypto_core::MacKeyMaterial,
     }
 
     /// Backing type for the `aead.aead-key` resource.
@@ -416,14 +430,16 @@ minted_resources! {
     #[derive(Debug)]
     pub struct AeadKey {
         retains |m| m.length_bits() as usize / 8,
-        payload material: lann_webcrypto_core::AeadKeyMaterial,
+        #[payload]
+        material: lann_webcrypto_core::AeadKeyMaterial,
     }
 
     /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
     /// AES modes' key material.
     pub struct CipherKey {
         retains |m| m.length_bits() as usize / 8,
-        payload material: lann_webcrypto_core::CipherKeyMaterial,
+        #[payload]
+        material: lann_webcrypto_core::CipherKeyMaterial,
     }
 
     /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
@@ -435,7 +451,8 @@ minted_resources! {
     #[derive(Debug)]
     pub struct InternalNonceKey {
         retains |m| m.length_bits() as usize / 8,
-        payload material: lann_webcrypto_core::AeadKeyMaterial,
+        #[payload]
+        material: lann_webcrypto_core::AeadKeyMaterial,
         /// The number of `seal` invocations so far, counted against the
         /// algorithm's nonce budget.
         sealed: u64 = 0,
@@ -449,8 +466,9 @@ minted_resources! {
     /// carries no per-operation state.
     #[derive(Debug)]
     pub struct Digest {
+        #[payload]
         /// The digest algorithm this resource is bound to.
-        payload variant: lann_webcrypto_core::DigestKind,
+        variant: lann_webcrypto_core::DigestKind,
     }
 
     /// Backing type for the `signature.verifying-key` resource.
@@ -459,9 +477,10 @@ minted_resources! {
     /// extractability gate (`%export` always succeeds).
     #[derive(Debug)]
     pub struct VerifyingKey {
+        #[payload]
         /// The public key, bound to its algorithm (and, for ECDSA, its
         /// curve/digest variant) at minting.
-        payload public: lann_webcrypto_core::SigPublic,
+        public: lann_webcrypto_core::SigPublic,
     }
 
     /// Backing type for the `signature.signing-key` resource.
@@ -470,7 +489,8 @@ minted_resources! {
     /// per-operation state. `extractable` gates `%export` only.
     #[derive(Debug)]
     pub struct SigningKey {
-        payload material: lann_webcrypto_core::SigningKeyMaterial,
+        #[payload]
+        material: lann_webcrypto_core::SigningKeyMaterial,
     }
 }
 
