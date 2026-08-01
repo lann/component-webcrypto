@@ -100,17 +100,16 @@ the stack in the middle, and `parity/compare.mjs` holds the loss set to
 recorded loss no longer observed fails it too (progress must land as a
 reviewable diff, via `just update-wpt-parity`). Which *kind* each loss is —
 unserved or WIT-forced — is the shim header's deviations registry's to say.
-
 Two properties of the comparison follow from how WPT registers tests. Test
 names are outcome-dependent — a failed setup step registers a synthetic
 step name in place of the real test's — so round-trip-only *failures* are
 expected renames, while a round-trip-only *pass* fails the run: a pass the
-baseline never measured is outside the gate's premise and marks the legs'
-group tables drifting (the baseline duplicates the runner's group table,
-since it cannot import a module whose `lann:webcrypto` specifiers only
-resolve under componentize-js). And the baseline is recomputed per run,
-never pinned, so a platform upgrade moves both legs together; the loss set
-is sensitive to the platform only where the platform itself is.
+baseline never measured is outside the gate's premise. Both legs run the
+shared group table in [`groups.js`](groups.js), and the comparator fails
+hard if their observed group sets diverge anyway. And the baseline is
+recomputed per run, never pinned, so a platform upgrade moves both legs
+together; the loss set is sensitive to the platform only where the
+platform itself is.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
@@ -144,7 +143,7 @@ is sensitive to the platform only where the platform itself is.
 The `.https.any.js` drivers are kept for reference; the runner invokes the
 suites' entry points directly with this library's algorithms (`HMAC`,
 `AES-GCM`, `X25519`), exactly as those drivers do among others. Each
-group's subset follows what the library serves (`runner.js`'s classifiers
+group's subset follows what the library serves (`groups.js`'s classifiers
 are the authoritative definition): most groups assert their served slices
 whole, the KDF groups exclude their SHA-1 and unserved-target rows, and
 `sign_verify/ecdsa` stays empty-subset — every test in it needs ECDSA
@@ -168,7 +167,7 @@ the suites, and classifies every result by test name:
   AES key sizes, and so on). These are expected to fail with the library's
   documented fail-closed errors and are reported by count.
 
-The classifier functions in `runner.js` are the precise, machine-readable
+The classifier functions in `groups.js` are the precise, machine-readable
 definition of the subset; the suite gates that every in-subset test passes
 and surfaces any out-of-subset test that unexpectedly passes (the counts are
 printed either way).
