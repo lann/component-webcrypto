@@ -21,10 +21,12 @@ jco-checks:
     @just _step test-node
     @just _step wpt-parity
 
-# Everything the componentize CI job runs: the WPT WebCryptoAPI suites
-# against the webcrypto-componentize JS guest library.
+# Everything the componentize CI job runs: the webcrypto-componentize JS
+# guest library's behavioral checks (the composed demo) and the WPT
+# WebCryptoAPI suites against it.
 componentize-checks:
     @just _step typecheck-webcrypto-componentize
+    @just _step test-webcrypto-componentize
     @just _step test-webcrypto-componentize-wpt
 
 # Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
