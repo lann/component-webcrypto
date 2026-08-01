@@ -2114,9 +2114,10 @@ const RFC7748_BOB_D: &str = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2
 const RFC7748_BOB_X: &str = "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f";
 const RFC7748_SHARED: &str = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
 
-/// The X25519 key surface: metadata getters, public-key export round
-/// trips, the OKP JWK import contract's rejections, and the zero-grant
-/// mint refusals.
+/// The X25519 key surface: metadata getters in both grant directions,
+/// generated-key freshness, public-key export round trips, the OKP JWK
+/// import contract's rejections, extractability recording, and the
+/// zero-grant mint refusals.
 async fn x25519_key_contract() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::x25519;
 
@@ -2139,6 +2140,34 @@ async fn x25519_key_contract() -> Result<(), String> {
         secret.extractable(),
         false,
         "secret-key extractable (mint default)",
+    )?;
+
+    // Single-grant mints report through the getters in both directions.
+    let (bits_only, _) = generate_x25519_key(true, false)
+        .await
+        .map_err(|e| describe("bits-only generate-key", &e))?;
+    expect(
+        bits_only.can_derive_bits(),
+        true,
+        "bits-only secret-key can-derive-bits",
+    )?;
+    expect(
+        bits_only.can_derive_key(),
+        false,
+        "bits-only secret-key can-derive-key",
+    )?;
+    let (key_only, _) = generate_x25519_key(false, true)
+        .await
+        .map_err(|e| describe("key-only generate-key", &e))?;
+    expect(
+        key_only.can_derive_bits(),
+        false,
+        "key-only secret-key can-derive-bits",
+    )?;
+    expect(
+        key_only.can_derive_key(),
+        true,
+        "key-only secret-key can-derive-key",
     )?;
 
     // A generated public key exports as the raw 32-byte u-coordinate and
@@ -2166,6 +2195,22 @@ async fn x25519_key_contract() -> Result<(), String> {
         .await
         .map_err(|e| describe("derive-bits (re-imported public)", &e))?;
     expect_bytes(&via_reimport, &direct, "agreement after raw round trip")?;
+
+    // Generated keys are fresh: a second generate yields a different
+    // public point. Identical points mean the implementation's randomness
+    // is broken (all-zero or constant output repeats the key), which
+    // nothing else on this surface can observe — every round trip works
+    // fine under a constant key.
+    let (_, public2) = generate_x25519_key(true, true)
+        .await
+        .map_err(|e| describe("second generate-key", &e))?;
+    let raw2 = public2
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("second public-key export-key-raw", &e))?;
+    if raw2 == raw {
+        return Err("two generated keys share a public point".into());
+    }
 
     // The public JWK export carries the OKP material members.
     let jwk = public
@@ -2225,6 +2270,21 @@ async fn x25519_key_contract() -> Result<(), String> {
         ErrKind::NotPermitted,
         generate_x25519_key(false, false).await,
         "generated a key with no enabled grant",
+    )?;
+
+    // The extractable grant records through the options onto the minted
+    // key (secret keys have no export operation; the getter is the
+    // observable).
+    let extractable_import = x25519::import_secret_key_jwk(
+        x25519_secret_jwk(&alice_x, &alice_d),
+        agreement_options(true, true, true),
+    )
+    .await
+    .map_err(|e| describe("extractable import", &e))?;
+    expect(
+        extractable_import.extractable(),
+        true,
+        "extractable import's getter",
     )
 }
 
