@@ -33,6 +33,11 @@ import { define_tests_25519 as defineCfrgKeys } from "./componentize-sdk/wpt/bui
 import { runTests as runOkpImportKey } from "./componentize-sdk/wpt/build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "./componentize-sdk/wpt/build/group-okp-import-key-failures.js";
 import { run_digest_tests as runDigest } from "./componentize-sdk/wpt/build/group-digest.js";
+import { run_test as runEddsa } from "./componentize-sdk/wpt/build/group-eddsa.js";
+import { run_test as runEddsaSmallOrder } from "./componentize-sdk/wpt/build/group-eddsa-small-order.js";
+import { run_test as runEcdsa } from "./componentize-sdk/wpt/build/group-ecdsa.js";
+import { run_ec_import_tests as runEcImportKey } from "./componentize-sdk/wpt/build/group-ec-import-key.js";
+import { run_test as runEcImportKeyFailures } from "./componentize-sdk/wpt/build/group-ec-import-key-failures.js";
 import { define_tests as defineHkdf } from "./componentize-sdk/wpt/build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group-pbkdf2-derive.js";
 
@@ -102,16 +107,38 @@ function generateKeyInSubset(name) {
 }
 
 /**
- * The X25519 groups whose every test crosses unserved surface: the cfrg
- * derive suites import all their keys as pkcs8/spki (formats the WIT
- * defers by the format-admission ruling), and each generateKey success
- * test exports the pair as spki + private JWK (the private export is
- * WIT-forced; see the shim header). Their subset is therefore empty: the
- * agreement's behavioral assertions live in the conformance suites, and
- * these groups meter the remaining format gap.
+ * The groups whose every test crosses unserved formats: the cfrg derive
+ * and the eddsa/ecdsa sign_verify suites import all their keys as
+ * pkcs8/spki (formats the WIT defers by the format-admission ruling), and
+ * each generateKey success test exports its pair as spki + private JWK
+ * (the private export is WIT-forced; see the shim header). Their subsets
+ * are therefore empty: the algorithms' behavioral assertions live in the
+ * conformance suites (and the demo guest covers the shim's own sign
+ * path), and these groups meter the remaining format gap.
  */
-function x25519FormatGatedInSubset() {
+function formatGatedInSubset() {
   return false;
+}
+
+/**
+ * import_export/okp_importKey (Ed25519): raw public imports are served;
+ * private OKP JWKs are not — Ed25519 signing keys are generate-only
+ * (WIT-forced; see the shim header) — and public JWKs and pkcs8/spki are
+ * unserved, as for X25519.
+ * @param {string} name
+ */
+function okpEd25519ImportInSubset(name) {
+  return name.includes("(raw, buffer(32)");
+}
+
+/**
+ * import_export/okp_importKey_failures (Ed25519): the raw-format
+ * rejections are served; every JWK form is out (no private import at
+ * all, unlike X25519).
+ * @param {string} name
+ */
+function okpEd25519FailuresInSubset(name) {
+  return name.includes("(raw") || name.startsWith("Missing algorithm name");
 }
 
 /**
@@ -159,6 +186,34 @@ function kdfDeriveInSubset(name) {
 }
 
 /**
+ * import_export/ec_importKey: raw uncompressed ECDSA P-256/P-384 public
+ * imports are served (65- and 97-byte points); ECDH is not an algorithm
+ * here at all, P-521 is declared by the WIT and served by nothing, and
+ * the spki/pkcs8/jwk EC forms are unserved.
+ * @param {string} name
+ */
+function ecImportInSubset(name) {
+  return name.includes("name: ECDSA") && /\(raw, buffer\((65|97)\)/.test(name);
+}
+
+/**
+ * import_export/ec_importKey_failures (ECDSA): raw-format rejections are
+ * served — for P-521 only the usage rejections, whose check precedes the
+ * curve's — plus the missing-algorithm-name rows, whose `TypeError`
+ * precedes every format and curve consideration.
+ * @param {string} name
+ */
+function ecImportFailuresInSubset(name) {
+  if (name.startsWith("Missing algorithm name")) {
+    return true;
+  }
+  if (!name.includes("(raw")) {
+    return false;
+  }
+  return name.startsWith("Bad usages") || !name.includes("P-521");
+}
+
+/**
  * digest/digest: the served SHA-2 family (SHA-256/384/512, any name
  * casing), the bad-algorithm-name rejections, and the missing-name
  * `TypeError`s; SHA-1 rows are unserved (the WIT carries no SHA-1
@@ -191,7 +246,11 @@ function okpImportInSubset(name) {
  * @param {string} name
  */
 function okpImportFailuresInSubset(name) {
-  return name.includes("(raw") || name.includes("jwk(private)");
+  return (
+    name.includes("(raw") ||
+    name.includes("jwk(private)") ||
+    name.startsWith("Missing algorithm name")
+  );
 }
 
 // --- runner -----------------------------------------------------------------------
@@ -220,12 +279,12 @@ export const GROUPS = [
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",
     () => promise_test(defineCfrgBits, "setup - define tests"),
-    x25519FormatGatedInSubset,
+    formatGatedInSubset,
   ],
   [
     "derive_bits_keys/cfrg_curves_keys (X25519)",
     () => promise_test(defineCfrgKeys, "setup - define tests"),
-    x25519FormatGatedInSubset,
+    formatGatedInSubset,
   ],
   ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), okpImportInSubset],
   [
@@ -233,7 +292,7 @@ export const GROUPS = [
     () => runOkpImportKeyFailures(["X25519"]),
     okpImportFailuresInSubset,
   ],
-  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), x25519FormatGatedInSubset],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), formatGatedInSubset],
   [
     "derive_bits_keys/hkdf",
     () => promise_test(defineHkdf, "setup - define tests"),
@@ -245,6 +304,22 @@ export const GROUPS = [
     kdfDeriveInSubset,
   ],
   ["digest/digest", () => runDigest(), digestInSubset],
+  ["sign_verify/eddsa (Ed25519)", () => runEddsa("Ed25519"), formatGatedInSubset],
+  ["sign_verify/eddsa_small_order_points", () => runEddsaSmallOrder(), formatGatedInSubset],
+  ["sign_verify/ecdsa", () => runEcdsa(), formatGatedInSubset],
+  ["import_export/okp_importKey (Ed25519)", () => runOkpImportKey("Ed25519"), okpEd25519ImportInSubset],
+  [
+    "import_export/okp_importKey_failures (Ed25519)",
+    () => runOkpImportKeyFailures(["Ed25519"]),
+    okpEd25519FailuresInSubset,
+  ],
+  ["generateKey/successes (Ed25519)", () => runGenerateKey(["Ed25519"]), formatGatedInSubset],
+  ["import_export/ec_importKey", () => runEcImportKey(), ecImportInSubset],
+  [
+    "import_export/ec_importKey_failures (ECDSA)",
+    () => runEcImportKeyFailures(["ECDSA"]),
+    ecImportFailuresInSubset,
+  ],
 ];
 
 export const demoWebcryptoDemoDemo010 = {

@@ -266,6 +266,59 @@ async function jwkRejectsMalformed() {
   }
 }
 
+/**
+ * Ed25519 through the shim, end to end: generate a pair, sign, verify,
+ * reject a tampered signature and a tampered message, export the public
+ * key raw and re-import it to the same verdicts. The vendored WPT
+ * sign_verify suites import via spki, which the shim does not serve, so
+ * this check is the gate on the shim's own sign/verify dispatch (the
+ * algorithms themselves are pinned cross-target by the conformance
+ * suites).
+ */
+async function ed25519SignVerify() {
+  const message = new TextEncoder().encode("componentize-demo signs this");
+  const pair = await subtle.generateKey("Ed25519", false, ["sign", "verify"]);
+  if (!(pair.privateKey instanceof CryptoKey) || pair.privateKey.type !== "private") {
+    throw new Error("generateKey did not yield a private CryptoKey");
+  }
+  if (pair.publicKey.usages.join() !== "verify" || pair.privateKey.usages.join() !== "sign") {
+    throw new Error("pair usages did not split sign/verify");
+  }
+  const sig = new Uint8Array(await subtle.sign("Ed25519", pair.privateKey, message));
+  if (sig.length !== 64) {
+    throw new Error(`Ed25519 signature is ${sig.length} bytes, not 64`);
+  }
+  if (!(await subtle.verify("Ed25519", pair.publicKey, sig, message))) {
+    throw new Error("fresh signature did not verify");
+  }
+  const tampered = sig.slice();
+  tampered[0] ^= 1;
+  if (await subtle.verify("Ed25519", pair.publicKey, tampered, message)) {
+    throw new Error("tampered signature verified");
+  }
+  const wrongMessage = new TextEncoder().encode("some other message");
+  if (await subtle.verify("Ed25519", pair.publicKey, sig, wrongMessage)) {
+    throw new Error("signature verified over a different message");
+  }
+  const raw = await subtle.exportKey("raw", pair.publicKey);
+  const reimported = await subtle.importKey("raw", raw, "Ed25519", true, ["verify"]);
+  if (!(await subtle.verify("Ed25519", reimported, sig, message))) {
+    throw new Error("signature did not verify under the re-imported public key");
+  }
+  await expectDomException("InvalidAccessError", "sign with the public key", () =>
+    subtle.sign("Ed25519", pair.publicKey, message),
+  );
+  await expectDomException("InvalidAccessError", "export the non-extractable private key", () =>
+    subtle.exportKey("jwk", pair.privateKey),
+  );
+  // Even extractable, a private key has no export path: signing keys are
+  // generate-only (the WIT-forced deviation the shim header records).
+  const extractable = await subtle.generateKey("Ed25519", true, ["sign"]);
+  await expectDomException("NotSupportedError", "export the extractable private key", () =>
+    subtle.exportKey("jwk", extractable.privateKey),
+  );
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -278,6 +331,7 @@ const CHECKS = [
   ["gcm-rejects-malformed", gcmRejectsMalformed],
   ["jwk-roundtrip", jwkRoundtrip],
   ["jwk-rejects-malformed", jwkRejectsMalformed],
+  ["ed25519-sign-verify", ed25519SignVerify],
 ];
 
 // The `demo:webcrypto-demo/demo@0.1.0` export. `run` returns the ok summary

@@ -18,6 +18,9 @@ let registered = 0;
 let settled = 0;
 
 class AssertionError extends Error {}
+// The eddsa/ecdsa suites discriminate assertion failures from operation
+// errors by `instanceof AssertionError`, which testharness.js exposes.
+globalThis.AssertionError = AssertionError;
 
 function fail(message) {
   throw new AssertionError(message);
@@ -87,6 +90,15 @@ globalThis.assert_in_array = function (actual, expected, message) {
   }
 };
 
+globalThis.assert_implements_optional = function (condition, message) {
+  // WPT's optional-feature marker (PRECONDITION_FAILED there); this harness
+  // has two statuses, so a missing optional feature reports as a failure
+  // and the classifiers keep such tests out of the asserted subset.
+  if (!condition) {
+    fail(message);
+  }
+};
+
 globalThis.assert_unreached = function (message) {
   fail(`assert_unreached: ${message ?? ""}`);
 };
@@ -95,6 +107,32 @@ globalThis.assert_unreached = function (message) {
 // themselves are outside this library's subset, but the data is constructed
 // unconditionally).
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+// The ecdsa vectors clone their fixtures with `structuredClone`, which the
+// componentize-js runtime lacks. This covers the shapes those fixtures are
+// made of (plain objects, arrays, typed arrays, ArrayBuffers, primitives) —
+// not the platform algorithm.
+if (typeof globalThis.structuredClone !== "function") {
+  globalThis.structuredClone = function clone(value) {
+    if (value === null || typeof value !== "object") {
+      return value;
+    }
+    if (ArrayBuffer.isView(value)) {
+      return new (/** @type {any} */ (value.constructor))(value);
+    }
+    if (value instanceof ArrayBuffer) {
+      return value.slice(0);
+    }
+    if (Array.isArray(value)) {
+      return value.map(clone);
+    }
+    const out = {};
+    for (const key of Object.keys(value)) {
+      out[key] = clone(value[key]);
+    }
+    return out;
+  };
+}
+
 globalThis.btoa = function (s) {
   let out = "";
   for (let i = 0; i < s.length; i += 3) {

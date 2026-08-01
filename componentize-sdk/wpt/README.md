@@ -125,7 +125,11 @@ is sensitive to the platform only where the platform itself is.
 | `sign_verify/hmac` | `hmac.https.any.js` (reference), `hmac.js`, `hmac_vectors.js` |
 | `encrypt_decrypt/aes_gcm` (96-bit iv) | `aes_gcm.https.any.js` (reference), `aes.js`, `aes_gcm_vectors.js`, `aes_gcm_96_iv_fixtures.js` |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
-| `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js` (references), `successes.js` |
+| `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js` (references), `successes.js` |
+| `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |
+| `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
+| `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
+| `import_export/ec_importKey` | `ec_importKey.https.any.js` (wrapped callable), `ec_importKey_failures_ECDSA.https.any.js` (reference), `ec_importKey_failures_fixtures.js` |
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
 | `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |

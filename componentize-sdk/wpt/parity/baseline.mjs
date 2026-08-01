@@ -23,6 +23,11 @@ import { define_tests_25519 as defineCfrgKeys } from "../build/group-cfrg-keys.j
 import { runTests as runOkpImportKey } from "../build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "../build/group-okp-import-key-failures.js";
 import { run_digest_tests as runDigest } from "../build/group-digest.js";
+import { run_test as runEddsa } from "../build/group-eddsa.js";
+import { run_test as runEddsaSmallOrder } from "../build/group-eddsa-small-order.js";
+import { run_test as runEcdsa } from "../build/group-ecdsa.js";
+import { run_ec_import_tests as runEcImportKey } from "../build/group-ec-import-key.js";
+import { run_test as runEcImportKeyFailures } from "../build/group-ec-import-key-failures.js";
 import { define_tests as defineHkdf } from "../build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "../build/group-pbkdf2-derive.js";
 
@@ -51,6 +56,14 @@ const GROUPS = [
   ["derive_bits_keys/hkdf", () => promise_test(defineHkdf, "setup - define tests")],
   ["derive_bits_keys/pbkdf2", () => promise_test(definePbkdf2, "setup - define tests")],
   ["digest/digest", () => runDigest()],
+  ["sign_verify/eddsa (Ed25519)", () => runEddsa("Ed25519")],
+  ["sign_verify/eddsa_small_order_points", () => runEddsaSmallOrder()],
+  ["sign_verify/ecdsa", () => runEcdsa()],
+  ["import_export/okp_importKey (Ed25519)", () => runOkpImportKey("Ed25519")],
+  ["import_export/okp_importKey_failures (Ed25519)", () => runOkpImportKeyFailures(["Ed25519"])],
+  ["generateKey/successes (Ed25519)", () => runGenerateKey(["Ed25519"])],
+  ["import_export/ec_importKey", () => runEcImportKey()],
+  ["import_export/ec_importKey_failures (ECDSA)", () => runEcImportKeyFailures(["ECDSA"])],
 ];
 
 const records = [];
