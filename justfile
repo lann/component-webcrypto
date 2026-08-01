@@ -520,6 +520,12 @@ timing-lab-scheduled:
 # Guests are prebuilt from unmutated sources: the subject is the host stack
 # the wasm calls into. Results land in mutants.out/.
 #
+# Two mutants run at a time, each in its own copy of the tree (the oracle
+# suites run single-threaded, so the test phases parallelize cleanly, and
+# cargo-mutants' shared jobserver keeps the build phases from
+# oversubscribing the runner). The guest paths are absolute for the same
+# reason: the copies must reach the one prebuilt pair.
+#
 # The verdict is the missed set, not cargo-mutants' exit code: exit 3
 # ("some mutants timed out") is a pass when mutants.out/missed.txt is
 # empty, because on this host a hang IS a distinction — the WIT drain
@@ -531,7 +537,7 @@ mutants shard="": build-conformance-guest build-signing-guest
     set -uo pipefail
     CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/conformance/guest/build/conformance-guest.component.wasm" \
     CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/conformance/signing-guest/build/conformance-signing-guest.component.wasm" \
-        cargo mutants --in-place --profile mutants \
+        cargo mutants --jobs 2 --profile mutants \
         -p webcrypto-impl-core -p wasmtime-webcrypto \
         {{ if shard != "" { "--shard " + shard } else { "" } }}
     status=$?
