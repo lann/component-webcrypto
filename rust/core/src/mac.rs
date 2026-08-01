@@ -162,6 +162,11 @@ impl MacKeyMaterial {
         length_bits(self.raw.len())
     }
 
+    /// The material's length in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.raw.len()
+    }
+
     /// Whether the key material may be exported (`mac-key.extractable`).
     pub fn extractable(&self) -> bool {
         self.policy.extractable
