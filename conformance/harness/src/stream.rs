@@ -98,8 +98,8 @@ where
 }
 
 /// Fold a WIT error from an operation the contract lets callers treat as
-/// infallible on a fully granted key (`sign`, `compute`) into the feeder
-/// slot, so those callers keep a single error path.
+/// infallible on a fully granted key (`sign`) into the feeder slot, so
+/// those callers keep a single error path.
 fn merge<T: Default>(
     what: &str,
     result: Result<T, Error>,
@@ -153,14 +153,16 @@ pub async fn verify(
 }
 
 /// `digest.compute`, feeding `data` per `schedule` concurrently with the
-/// call; same outcome split as [`sign`].
+/// call. Returns the call's outcome and the feeder's separately: unlike
+/// `sign`, `compute` is fallible by contract on some digest kinds
+/// (checked SHA-1's rejecting posture), so its error is a probe subject,
+/// not foldable operational noise.
 pub async fn compute(
     digest: &Digest,
     data: &[u8],
     schedule: Schedule,
-) -> (Vec<u8>, Result<(), String>) {
-    let (got, fed) = run_split(schedule.chunks(data), |rx| digest.compute(rx)).await;
-    merge("digest.compute", got, fed)
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    run_split(schedule.chunks(data), |rx| digest.compute(rx)).await
 }
 
 /// `aead-key.seal`, feeding the plaintext per `schedule` concurrently with

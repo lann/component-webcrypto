@@ -48,6 +48,7 @@ pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
     let digest = make_digest(variant).map_err(|e| describe("make-digest", &e))?;
     let (got, fed) = compute(&digest, &case.msg, case.schedule).await;
     fed.map_err(|e| format!("compute data feeder: {e}"))?;
+    let got = got.map_err(|e| describe("compute", &e))?;
     expect_bytes(&got, &case.md, "computed digest")?;
     // The comparison every caller of a digest vector makes; pins
     // `constant-time-equal`'s agreement with plain equality on real data.

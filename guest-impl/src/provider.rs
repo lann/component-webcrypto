@@ -49,6 +49,7 @@ use crate::exports::lann::webcrypto::mac::{
 use crate::exports::lann::webcrypto::pbkdf2::{
     self as pbkdf2_iface, Guest as Pbkdf2Guest, GuestPassword,
 };
+use crate::exports::lann::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
@@ -65,6 +66,7 @@ pub struct Component;
 
 webcrypto_impl_core::impl_conversions! {
     error: Error,
+    extension: crate::lann::webcrypto::types::ExtensionError,
     sha2: Sha2Variant,
     aes: AesVariant,
     ecdsa: EcdsaVariant,
@@ -350,22 +352,22 @@ impl DigestGuest for Component {
     type Digest = Digest;
 }
 
-/// An exported `digest`: no key material, just the SHA-2 variant it is
-/// bound to. `compute` is one-shot and stateless per call, so the resource
-/// is reusable.
+/// An exported `digest`: no key material, just the algorithm it is bound
+/// to (a SHA-2 variant, or checked SHA-1 in a collision posture).
+/// `compute` is one-shot and stateless per call, so the resource is
+/// reusable.
 pub struct Digest {
-    variant: webcrypto_impl_core::Sha2,
+    variant: webcrypto_impl_core::DigestKind,
 }
 
 impl GuestDigest for Digest {
     async fn compute(&self, data: wit_bindgen::StreamReader<u8>) -> Result<Vec<u8>, Error> {
         // Buffer the whole stream, then hash it; the result is
-        // chunking-invariant either way.
-        //
-        // Hashing computes in-process, so the only operational failure is
-        // the buffering itself.
+        // chunking-invariant either way. Besides the buffering itself,
+        // the only failure is checked SHA-1's `collision-detected` in
+        // the rejecting posture.
         let bytes = drain_stream(data).await?;
-        Ok(self.variant.digest(&bytes))
+        Ok(self.variant.digest(&bytes)?)
     }
 
     fn algorithm_name(&self) -> String {
@@ -386,7 +388,29 @@ impl BytesGuest for Component {
 impl Sha2Guest for Component {
     fn make_digest(variant: Sha2Variant) -> Result<digest::Digest, Error> {
         let variant = served_sha2(variant.into())?;
-        Ok(digest::Digest::new(Digest { variant }))
+        Ok(digest::Digest::new(Digest {
+            variant: webcrypto_impl_core::DigestKind::Sha2(variant),
+        }))
+    }
+}
+
+// --- sha1-checked (digest minting) ---------------------------------------------
+
+impl Sha1CheckedGuest for Component {
+    fn make_rejecting_digest() -> Result<digest::Digest, Error> {
+        Ok(digest::Digest::new(Digest {
+            variant: webcrypto_impl_core::DigestKind::Sha1Checked(
+                webcrypto_impl_core::Sha1Posture::Reject,
+            ),
+        }))
+    }
+
+    fn make_mitigating_digest() -> Result<digest::Digest, Error> {
+        Ok(digest::Digest::new(Digest {
+            variant: webcrypto_impl_core::DigestKind::Sha1Checked(
+                webcrypto_impl_core::Sha1Posture::Mitigate,
+            ),
+        }))
     }
 }
 

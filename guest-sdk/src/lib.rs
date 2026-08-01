@@ -85,8 +85,8 @@ pub mod bindings {
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
         derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hkdf,
-        hmac_sha2, key_agreement, mac, pbkdf2, sha2, signature, types, x25519, xchacha20_poly1305,
-        xchacha20_poly1305_internal_nonce,
+        hmac_sha2, key_agreement, mac, pbkdf2, sha1_checked, sha2, signature, types, x25519,
+        xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
 }
 
@@ -140,10 +140,25 @@ pub enum Error {
     /// that cannot complete the operation, an input exceeding a buffering
     /// limit, …). The string is human-readable.
     Other(String),
+    /// A named condition outside the WIT `error` variant's closed set,
+    /// identified by the (`origin`, `name`) pair; the defining interface's
+    /// contract says when it occurs. Known pairs have constants in
+    /// [`extension`].
+    Extension(bindings::types::ExtensionError),
     /// A caller-supplied [`DataSource`] producer failed while being fed into
     /// the operation (see `DataSource::from_reader`). The operation's own
     /// result is discarded: it was computed over a truncated input.
     Read(std::io::Error),
+}
+
+/// The known extension-error conditions, as (`origin`, `name`) constants
+/// for matching against [`Error::Extension`].
+pub mod extension {
+    /// The `origin` of conditions the `lann:webcrypto` package defines.
+    pub const LANN_WEBCRYPTO: &str = "lann:webcrypto";
+    /// `sha1-checked`'s collision condition: a rejecting digest's input
+    /// carried a SHA-1 collision attack pattern.
+    pub const COLLISION_DETECTED: &str = "collision-detected";
 }
 
 impl From<bindings::types::Error> for Error {
@@ -158,6 +173,7 @@ impl From<bindings::types::Error> for Error {
             Raw::NotPermitted(detail) => Error::NotPermitted(detail),
             Raw::KeyExhausted => Error::KeyExhausted,
             Raw::Other(detail) => Error::Other(detail),
+            Raw::Extension(ext) => Error::Extension(ext),
         }
     }
 }
@@ -175,6 +191,13 @@ impl fmt::Display for Error {
             Error::NotPermitted(detail) => write!(f, "not-permitted: {detail}"),
             Error::KeyExhausted => write!(f, "key-exhausted"),
             Error::Other(detail) => write!(f, "other: {detail}"),
+            Error::Extension(ext) => write!(
+                f,
+                "extension({origin}, {name}): {message}",
+                origin = ext.origin,
+                name = ext.name,
+                message = ext.message,
+            ),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
         }
     }
@@ -1138,6 +1161,7 @@ pub mod chacha20_poly1305;
 pub mod ecdsa;
 pub mod ed25519;
 pub mod hmac_sha2;
+pub mod sha1_checked;
 pub mod sha2;
 pub mod xchacha20_poly1305;
 pub mod xchacha20_poly1305_internal_nonce;

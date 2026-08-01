@@ -1,5 +1,7 @@
-//! SHA-2 dispatch: the served variants, digesting, and the HMAC operations
-//! keyed over them.
+//! Digest dispatch: the served SHA-2 variants, the checked-SHA-1
+//! postures, digesting, and the HMAC operations keyed over SHA-2.
+
+use sha1_checked::{CollisionResult, Digest as _};
 
 use crate::{Error, Sha2Variant};
 
@@ -25,6 +27,66 @@ pub fn served_sha2(variant: Sha2Variant) -> Result<Sha2, Error> {
         Sha2Variant::Sha224 | Sha2Variant::Sha512224 | Sha2Variant::Sha512256 => Err(
             Error::Unsupported(format!("{variant:?} is not served by this implementation")),
         ),
+    }
+}
+
+/// The algorithm a `digest` resource is bound to: a served SHA-2 variant,
+/// or checked SHA-1 in one of its collision postures (the `sha1-checked`
+/// minting interface; plain SHA-1 is deliberately unrepresentable).
+#[derive(Clone, Copy, Debug)]
+pub enum DigestKind {
+    Sha2(Sha2),
+    Sha1Checked(Sha1Posture),
+}
+
+/// What a checked-SHA-1 digest does when collision detection fires: the
+/// posture each `sha1-checked` constructor binds.
+#[derive(Clone, Copy, Debug)]
+pub enum Sha1Posture {
+    /// `make-rejecting-digest`: fail with the `collision-detected`
+    /// extension condition.
+    Reject,
+    /// `make-mitigating-digest`: return the deterministic sha1dc safe
+    /// hash.
+    Mitigate,
+}
+
+impl DigestKind {
+    /// The digest's `algorithm-name` (the registry hash name).
+    pub fn hash_name(self) -> &'static str {
+        match self {
+            Self::Sha2(variant) => variant.hash_name(),
+            Self::Sha1Checked(_) => "SHA-1",
+        }
+    }
+
+    /// One-shot digest of `data`, applying the bound posture's
+    /// collision behavior for checked SHA-1.
+    pub fn digest(self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        match self {
+            Self::Sha2(variant) => Ok(variant.digest(data)),
+            Self::Sha1Checked(posture) => sha1_checked_digest(posture, data),
+        }
+    }
+}
+
+/// Checked SHA-1 over `data`: standard SHA-1 for honest input; for input
+/// carrying a collision attack pattern, the posture decides — the sha1dc
+/// safe hash (deterministic, so parties agree on it) or the
+/// `collision-detected` extension error.
+fn sha1_checked_digest(posture: Sha1Posture, data: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut hasher = sha1_checked::Sha1::new();
+    hasher.update(data);
+    match (posture, hasher.try_finalize()) {
+        (_, CollisionResult::Ok(digest)) => Ok(digest.to_vec()),
+        (Sha1Posture::Mitigate, CollisionResult::Mitigated(digest)) => Ok(digest.to_vec()),
+        // `Collision` carries the unmitigated digest and is only produced
+        // with the safe hash disabled, which this hasher never is; treat
+        // it as detection all the same, never as output.
+        (Sha1Posture::Mitigate, CollisionResult::Collision(_))
+        | (Sha1Posture::Reject, CollisionResult::Mitigated(_) | CollisionResult::Collision(_)) => {
+            Err(Error::collision_detected())
+        }
     }
 }
 
@@ -136,6 +198,60 @@ mod tests {
                 0xf2, 0x00, 0x15, 0xad,
             ]
         );
+    }
+
+    // The SHAttered colliding pair's first five blocks (bytes 0..320 of
+    // each PDF, from https://shattered.io): each half independently
+    // carries the attack's disturbance-vector pattern, and the two halves
+    // collide under plain SHA-1.
+    const SHATTERED_1: &str = "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3c2f57696474682032203020522f4865696768742033203020522f547970652034203020522f537562747970652035203020522f46696c7465722036203020522f436f6c6f7253706163652037203020522f4c656e6774682038203020522f42697473506572436f6d706f6e656e7420383e3e0a73747265616d0affd8fffe00245348412d3120697320646561642121212121852fec092339759c39b1a1c63c4c97e1fffe017346dc9166b67e118f029ab621b2560ff9ca67cca8c7f85ba84c79030c2b3de218f86db3a90901d5df45c14f26fedfb3dc38e96ac22fe7bd728f0e45bce046d23c570feb141398bb552ef5a0a82be331fea48037b8b5d71f0e332edf93ac3500eb4ddc0decc1a864790c782c76215660dd309791d06bd0af3f98cda4bc4629b1";
+    const SHATTERED_2: &str = "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3c2f57696474682032203020522f4865696768742033203020522f547970652034203020522f537562747970652035203020522f46696c7465722036203020522f436f6c6f7253706163652037203020522f4c656e6774682038203020522f42697473506572436f6d706f6e656e7420383e3e0a73747265616d0affd8fffe00245348412d3120697320646561642121212121852fec092339759c39b1a1c63c4c97e1fffe017f46dc93a6b67e013b029aaa1db2560b45ca67d688c7f84b8c4c791fe02b3df614f86db1690901c56b45c1530afedfb76038e972722fe7ad728f0e4904e046c230570fe9d41398abe12ef5bc942be33542a4802d98b5d70f2a332ec37fac3514e74ddc0f2cc1a874cd0c78305a21566461309789606bd0bf3f98cda8044629a1";
+
+    #[test]
+    fn sha1_checked_honest_input_is_standard_sha1() {
+        // FIPS 180-1 "abc" known answer, identical in both postures.
+        let expected = hex_literal::hex!("a9993e364706816aba3e25717850c26c9cd0d89d");
+        for posture in [Sha1Posture::Reject, Sha1Posture::Mitigate] {
+            let kind = DigestKind::Sha1Checked(posture);
+            assert_eq!(kind.digest(b"abc").unwrap(), expected);
+            assert_eq!(kind.hash_name(), "SHA-1");
+        }
+    }
+
+    #[test]
+    fn sha1_checked_postures_on_the_shattered_pair() {
+        let m1 = unhex(SHATTERED_1);
+        let m2 = unhex(SHATTERED_2);
+
+        // The rejecting posture names the condition.
+        for m in [&m1, &m2] {
+            assert_eq!(
+                DigestKind::Sha1Checked(Sha1Posture::Reject).digest(m),
+                Err(Error::collision_detected())
+            );
+        }
+
+        // The mitigating posture returns the deterministic safe hash —
+        // and the colliding pair no longer collides under it.
+        let mitigate = DigestKind::Sha1Checked(Sha1Posture::Mitigate);
+        let d1 = mitigate.digest(&m1).unwrap();
+        let d2 = mitigate.digest(&m2).unwrap();
+        assert_eq!(
+            d1,
+            hex_literal::hex!("7117b3cb9225aaf0d8ef1a40e493957b0bf8693d")
+        );
+        assert_eq!(
+            d2,
+            hex_literal::hex!("29f38ae9fd98e2931120fa0bf213e024250d3f6a")
+        );
+        assert_ne!(d1, d2);
+    }
+
+    fn unhex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]

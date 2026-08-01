@@ -66,7 +66,7 @@ mod sig;
 
 pub use aead::AeadKeyMaterial;
 pub use agreement::{AgreementPublicMaterial, AgreementSecretMaterial};
-pub use hash::{served_sha2, Sha2};
+pub use hash::{served_sha2, DigestKind, Sha1Posture, Sha2};
 pub use kdf::{
     derive_aes_gcm_key, derive_mac_key, DeriveInputMaterial, IkmMaterial, PasswordMaterial,
 };
@@ -105,6 +105,38 @@ pub enum Error {
     KeyExhausted,
     /// WIT `other(string)`.
     Other(String),
+    /// WIT `extension(extension-error)`.
+    Extension(ExtensionError),
+}
+
+/// The WIT `types.extension-error` record: a named condition outside the
+/// `error` variant's closed set, identified by the (`origin`, `name`)
+/// pair. The conditions this crate produces are constructed through the
+/// helpers below, so the pinned pairs are spelled exactly once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionError {
+    pub origin: String,
+    pub name: String,
+    pub message: String,
+}
+
+/// The extension-condition `origin` for conditions this package defines.
+pub const EXTENSION_ORIGIN: &str = "lann:webcrypto";
+
+/// The `sha1-checked` collision condition's `name`.
+pub const COLLISION_DETECTED: &str = "collision-detected";
+
+impl Error {
+    /// The `sha1-checked` rejecting posture's error: extension condition
+    /// `("lann:webcrypto", "collision-detected")`, with the message both
+    /// Rust implementations share verbatim.
+    pub fn collision_detected() -> Self {
+        Self::Extension(ExtensionError {
+            origin: EXTENSION_ORIGIN.into(),
+            name: COLLISION_DETECTED.into(),
+            message: "input carries a SHA-1 collision attack pattern".into(),
+        })
+    }
 }
 
 /// Define the mechanical bindings glue both implementations need:
@@ -119,12 +151,16 @@ pub enum Error {
 macro_rules! impl_conversions {
     (
         error: $error:path,
+        extension: $extension:path,
         sha2: $sha2:path,
         aes: $aes:path,
         ecdsa: $ecdsa:path $(,)?
     ) => {
         impl From<$crate::Error> for $error {
             fn from(err: $crate::Error) -> Self {
+                // A `:path` fragment cannot head a struct literal; the
+                // alias can.
+                type Extension = $extension;
                 match err {
                     $crate::Error::InvalidKey(msg) => Self::InvalidKey(msg),
                     $crate::Error::InvalidNonce(msg) => Self::InvalidNonce(msg),
@@ -134,6 +170,11 @@ macro_rules! impl_conversions {
                     $crate::Error::Unsupported(msg) => Self::Unsupported(msg),
                     $crate::Error::KeyExhausted => Self::KeyExhausted,
                     $crate::Error::Other(msg) => Self::Other(msg),
+                    $crate::Error::Extension(ext) => Self::Extension(Extension {
+                        origin: ext.origin,
+                        name: ext.name,
+                        message: ext.message,
+                    }),
                 }
             }
         }

@@ -17,7 +17,7 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
-    FEATURE_GCM_ANY_IV,
+    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
@@ -39,6 +39,9 @@ macro_rules! feature_tags {
     };
     (gcm_any_iv) => {
         &[FEATURE_GCM_ANY_IV]
+    };
+    (sha1_checked) => {
+        &[FEATURE_SHA1_CHECKED]
     };
 }
 
@@ -94,6 +97,7 @@ probes! {
     ecdsa_cross_hash_variants,
     x25519_format_roundtrips,
     internal_nonce_jwk,
+    sha1_checked_postures(sha1_checked),
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -103,6 +107,8 @@ probes! {
 pub async fn run_declined(features: &[&str]) -> Result<String, String> {
     if features == [FEATURE_CHACHA] {
         chacha_minting_declined().await
+    } else if features == [FEATURE_SHA1_CHECKED] {
+        sha1_checked_minting_declined().await
     } else if features == [FEATURE_GCM_ANY_IV] {
         gcm_any_iv_declined().await
     } else {
@@ -598,8 +604,10 @@ async fn digest_reuse() -> Result<(), String> {
         )?;
         let (first, fed) = compute(&digest, b"reusable", Schedule::Whole).await;
         fed.map_err(|e| format!("first compute feeder: {e}"))?;
+        let first = first.map_err(|e| describe("first compute", &e))?;
         let (second, fed) = compute(&digest, b"reusable", Schedule::Bytes).await;
         fed.map_err(|e| format!("second compute feeder: {e}"))?;
+        let second = second.map_err(|e| describe("second compute", &e))?;
         expect_bytes(&second, &first, &format!("{name} recomputed digest"))?;
     }
     Ok(())
@@ -2990,4 +2998,110 @@ async fn internal_nonce_jwk() -> Result<(), String> {
         .await,
         "minted an aes128 key from 32 bytes",
     )
+}
+
+// The SHAttered colliding pair's first five blocks (bytes 0..320 of each
+// PDF, from https://shattered.io): each half independently carries the
+// attack's disturbance-vector pattern, and the two halves collide under
+// plain SHA-1.
+const SHATTERED_1: &str = "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3c2f57696474682032203020522f4865696768742033203020522f547970652034203020522f537562747970652035203020522f46696c7465722036203020522f436f6c6f7253706163652037203020522f4c656e6774682038203020522f42697473506572436f6d706f6e656e7420383e3e0a73747265616d0affd8fffe00245348412d3120697320646561642121212121852fec092339759c39b1a1c63c4c97e1fffe017346dc9166b67e118f029ab621b2560ff9ca67cca8c7f85ba84c79030c2b3de218f86db3a90901d5df45c14f26fedfb3dc38e96ac22fe7bd728f0e45bce046d23c570feb141398bb552ef5a0a82be331fea48037b8b5d71f0e332edf93ac3500eb4ddc0decc1a864790c782c76215660dd309791d06bd0af3f98cda4bc4629b1";
+const SHATTERED_2: &str = "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3c2f57696474682032203020522f4865696768742033203020522f547970652034203020522f537562747970652035203020522f46696c7465722036203020522f436f6c6f7253706163652037203020522f4c656e6774682038203020522f42697473506572436f6d706f6e656e7420383e3e0a73747265616d0affd8fffe00245348412d3120697320646561642121212121852fec092339759c39b1a1c63c4c97e1fffe017f46dc93a6b67e013b029aaa1db2560b45ca67d688c7f84b8c4c791fe02b3df614f86db1690901c56b45c1530afedfb76038e972722fe7ad728f0e4904e046c230570fe9d41398abe12ef5bc942be33542a4802d98b5d70f2a332ec37fac3514e74ddc0f2cc1a874cd0c78305a21566461309789606bd0bf3f98cda8044629a1";
+
+/// The `sha1-checked` contract, pinned with known answers: honest input is
+/// standard SHA-1 in both postures; on the SHAttered pair the rejecting
+/// posture fails with the exact `collision-detected` extension condition
+/// and the mitigating posture returns the deterministic safe hashes, under
+/// which the pair no longer collides.
+async fn sha1_checked_postures() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::sha1_checked;
+    use lann_webcrypto_guest::bindings::types::Error;
+
+    let rejecting =
+        sha1_checked::make_rejecting_digest().map_err(|e| describe("make-rejecting-digest", &e))?;
+    let mitigating = sha1_checked::make_mitigating_digest()
+        .map_err(|e| describe("make-mitigating-digest", &e))?;
+
+    // Honest input: the FIPS 180-1 "abc" answer, identical in both
+    // postures, chunking-invariant, and reusable (the digest-kind
+    // contract).
+    let abc = unhex("a9993e364706816aba3e25717850c26c9cd0d89d");
+    for digest in [&rejecting, &mitigating] {
+        expect(
+            digest.algorithm_name(),
+            "SHA-1".to_string(),
+            "checked-SHA-1 algorithm-name",
+        )?;
+        for schedule in [Schedule::Whole, Schedule::Bytes] {
+            let (got, fed) = compute(digest, b"abc", schedule).await;
+            fed.map_err(|e| format!("compute data feeder: {e}"))?;
+            let got = got.map_err(|e| describe("compute (honest input)", &e))?;
+            expect_bytes(&got, &abc, "honest-input digest is standard SHA-1")?;
+        }
+    }
+
+    let m1 = unhex(SHATTERED_1);
+    let m2 = unhex(SHATTERED_2);
+
+    // The rejecting posture: the exact extension condition, pinned
+    // cross-target — (origin, name) is the branchable pair, the message
+    // is pinned like every other message string.
+    for m in [&m1, &m2] {
+        let (got, fed) = compute(&rejecting, m, Schedule::Whole).await;
+        fed.map_err(|e| format!("compute data feeder: {e}"))?;
+        match got {
+            Err(Error::Extension(ext))
+                if ext.origin == "lann:webcrypto"
+                    && ext.name == "collision-detected"
+                    && ext.message == "input carries a SHA-1 collision attack pattern" => {}
+            Err(other) => {
+                return Err(describe(
+                    "rejecting compute: expected the collision-detected extension condition, got",
+                    &other,
+                ))
+            }
+            Ok(_) => return Err("a rejecting digest hashed an attacked input".into()),
+        }
+    }
+
+    // The mitigating posture: the deterministic safe hashes — never the
+    // raw SHA-1 the pair collides under — and the pair no longer
+    // collides.
+    let (d1, fed) = compute(&mitigating, &m1, Schedule::Whole).await;
+    fed.map_err(|e| format!("compute data feeder: {e}"))?;
+    let d1 = d1.map_err(|e| describe("mitigating compute", &e))?;
+    let (d2, fed) = compute(&mitigating, &m2, Schedule::Whole).await;
+    fed.map_err(|e| format!("compute data feeder: {e}"))?;
+    let d2 = d2.map_err(|e| describe("mitigating compute", &e))?;
+    expect_bytes(
+        &d1,
+        &unhex("7117b3cb9225aaf0d8ef1a40e493957b0bf8693d"),
+        "safe hash of the first SHAttered half",
+    )?;
+    expect_bytes(
+        &d2,
+        &unhex("29f38ae9fd98e2931120fa0bf213e024250d3f6a"),
+        "safe hash of the second SHAttered half",
+    )
+}
+
+/// The decline assertion for targets declaring `sha1-checked` missing:
+/// both constructors must fail `unsupported`.
+async fn sha1_checked_minting_declined() -> Result<String, String> {
+    use lann_webcrypto_guest::bindings::sha1_checked;
+
+    expect_err(
+        "make-rejecting-digest",
+        ErrKind::Unsupported,
+        sha1_checked::make_rejecting_digest(),
+        "minted a digest for a feature declared missing",
+    )
+    .map_err(|detail| format!("sha1-checked decline: {detail}"))?;
+    expect_err(
+        "make-mitigating-digest",
+        ErrKind::Unsupported,
+        sha1_checked::make_mitigating_digest(),
+        "minted a digest for a feature declared missing",
+    )
+    .map_err(|detail| format!("sha1-checked decline: {detail}"))?;
+    Ok("asserted both sha1-checked constructors decline unsupported".into())
 }

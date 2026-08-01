@@ -14,14 +14,16 @@
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
 //     X25519 key agreement; derived-key targets HMAC over the same
 //     hashes and AES-GCM)
-//   - `digest`                  (SHA-256/384/512)
+//   - `digest`                  (SHA-256/384/512; SHA-1 through the
+//     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
 //   - `generateKey`             (the secret-key algorithms, X25519, and
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
 // `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, `x25519`,
-// `sha2`, `digest`, `signature`, `ed25519-verify`, `ed25519-sign`, and
+// `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
+// `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
 // elaboration). Module specifiers here name those imports directly, so this
@@ -49,6 +51,15 @@
 //     `hkdf.import-ikm` rejects empty input keying material by ruling
 //     (`wit/README.md`, "Design notes": a zero-entropy IKM is never what a
 //     caller meant), so it fails with `DataError` instead.
+//   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
+//     served through the package's `sha1-checked` interface (sha1dc
+//     collision detection; the package never serves plain SHA-1), in the
+//     *mitigating* posture by default — byte-identical to the platform on
+//     every honest input, and returning the deterministic sha1dc safe
+//     hash for input carrying a collision attack. The module export
+//     `setSha1CollisionPolicy("mitigate" | "reject")` (not a global, not
+//     on the frozen `crypto` object) opts into the rejecting posture,
+//     where such input throws `OperationError` instead.
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
@@ -74,6 +85,7 @@ import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
 import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
 import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
+import * as sha1CheckedIface from "lann:webcrypto/sha1-checked@0.1.0";
 import * as ed25519Verify from "lann:webcrypto/ed25519-verify@0.1.0";
 import * as ed25519Sign from "lann:webcrypto/ed25519-sign@0.1.0";
 import * as ecdsaVerify from "lann:webcrypto/ecdsa-verify@0.1.0";
@@ -123,8 +135,10 @@ function dom(name, message, cause = undefined) {
 }
 
 /**
- * A WIT `types.error` variant, as componentize-js delivers it.
- * @typedef {{ tag: string, val?: string }} WitError
+ * A WIT `types.error` variant, as componentize-js delivers it: `val` is a
+ * string for the detail-carrying closed cases, an `extension-error`
+ * record for `extension`, and absent for the detail-free cases.
+ * @typedef {{ tag: string, val?: string | { origin: string, name: string, message: string } }} WitError
  */
 
 /**
@@ -145,25 +159,40 @@ function isWitError(e) {
 }
 
 /**
+ * The `DOMException` names for the known extension conditions, by
+ * (`origin`, `name`); a pair not listed here is treated as an operational
+ * failure.
+ * @type {Readonly<Record<string, Readonly<Record<string, string>> | undefined>>}
+ */
+const EXTENSION_ERRORS = {
+  "lann:webcrypto": { "collision-detected": "OperationError" },
+};
+
+/**
  * Map a WIT `types.error` variant onto the WebCrypto error vocabulary.
  * @param {WitError} payload
  */
 function mapWitError(payload) {
   switch (payload.tag) {
     case "invalid-key":
-      return dom("DataError", payload.val ?? "invalid key", payload);
+      return dom("DataError", String(payload.val ?? "invalid key"), payload);
     case "invalid-nonce":
-      return dom("OperationError", payload.val ?? "invalid nonce", payload);
+      return dom("OperationError", String(payload.val ?? "invalid nonce"), payload);
     case "authentication-failed":
       return dom("OperationError", "authentication failed", payload);
     case "not-extractable":
       return dom("InvalidAccessError", "key is not extractable", payload);
     case "unsupported":
-      return dom("NotSupportedError", payload.val ?? "unsupported", payload);
+      return dom("NotSupportedError", String(payload.val ?? "unsupported"), payload);
     case "not-permitted":
-      return dom("InvalidAccessError", payload.val ?? "not permitted", payload);
+      return dom("InvalidAccessError", String(payload.val ?? "not permitted"), payload);
     case "key-exhausted":
       return dom("OperationError", "key exhausted", payload);
+    case "extension": {
+      const ext = /** @type {{ origin: string, name: string, message: string }} */ (payload.val);
+      const name = EXTENSION_ERRORS[ext.origin]?.[ext.name] ?? "OperationError";
+      return dom(name, ext.message || `${ext.origin} ${ext.name}`, payload);
+    }
     default:
       return dom("OperationError", String(payload.val ?? "operation failed"), payload);
   }
@@ -793,7 +822,11 @@ async function prepareInput(alg, baseKey) {
     } catch (e) {
       const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
       if (cause?.tag === "invalid-key") {
-        throw dom("OperationError", cause.val ?? "the shared secret is the all-zero value", cause);
+        throw dom(
+          "OperationError",
+          String(cause.val ?? "the shared secret is the all-zero value"),
+          cause,
+        );
       }
       throw e;
     }
@@ -1576,21 +1609,49 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
 }
 
 /**
- * The `digest.digest` resources, minted once per served variant: the WIT
- * resource is reusable and stateless per call, so one handle serves every
+ * The `digest.digest` resources, minted once per served variant (the
+ * SHA-1 postures cache under their own keys): the WIT resource is
+ * reusable and stateless per call, so one handle serves every
  * `subtle.digest` invocation of its hash.
  * @type {Map<string, any>}
  */
 const DIGESTS = new Map();
 
-/** @param {"sha256" | "sha384" | "sha512"} variant */
+/** @param {"sha256" | "sha384" | "sha512" | "sha1-mitigate" | "sha1-reject"} variant */
 function digestFor(variant) {
   let handle = DIGESTS.get(variant);
   if (handle === undefined) {
-    handle = callSync(() => sha2Iface.makeDigest(variant));
+    handle = callSync(() =>
+      variant === "sha1-mitigate"
+        ? sha1CheckedIface.makeMitigatingDigest()
+        : variant === "sha1-reject"
+          ? sha1CheckedIface.makeRejectingDigest()
+          : sha2Iface.makeDigest(variant),
+    );
     DIGESTS.set(variant, handle);
   }
   return handle;
+}
+
+/**
+ * The collision posture `subtle.digest("SHA-1")` uses (the additive
+ * surface documented in the header): the sha1dc default, mitigate.
+ * @type {"mitigate" | "reject"}
+ */
+let sha1CollisionPolicy = "mitigate";
+
+/**
+ * Choose what `subtle.digest("SHA-1")` does with input carrying a SHA-1
+ * collision attack: `"mitigate"` (the default) returns the deterministic
+ * sha1dc safe hash; `"reject"` throws `OperationError`. Honest input
+ * hashes identically either way. See the header's additive-surface note.
+ * @param {"mitigate" | "reject"} policy
+ */
+export function setSha1CollisionPolicy(policy) {
+  if (policy !== "mitigate" && policy !== "reject") {
+    throw new TypeError(`SHA-1 collision policy must be "mitigate" or "reject", got ${policy}`);
+  }
+  sha1CollisionPolicy = policy;
 }
 
 /**
@@ -1602,10 +1663,27 @@ async function digest(algorithm, data) {
   // Normalization reads the algorithm before the data is copied, the
   // spec's order (WPT's altered-buffer tests observe it through a `name`
   // getter that edits the buffer).
-  const variant = sha2VariantOf(algorithm);
+  const variant = digestVariantOf(algorithm);
   const bytes = bytesOf(data, "data");
   const out = await callFed((rx) => digestFor(variant).compute(rx), bytes);
   return toArrayBuffer(out);
+}
+
+/**
+ * The digest handle key for a `subtle.digest` algorithm: the SHA-2 family,
+ * plus SHA-1 under the current collision policy.
+ * @param {AlgorithmIdentifier} algorithm
+ * @returns {"sha256" | "sha384" | "sha512" | "sha1-mitigate" | "sha1-reject"}
+ */
+function digestVariantOf(algorithm) {
+  if (typeof algorithm === "object" && algorithm !== null) {
+    const named = /** @type {{ name?: unknown }} */ (algorithm).name;
+    if (typeof named === "string") algorithm = named;
+  }
+  if (typeof algorithm === "string" && algorithm.toUpperCase() === "SHA-1") {
+    return sha1CollisionPolicy === "reject" ? "sha1-reject" : "sha1-mitigate";
+  }
+  return sha2VariantOf(algorithm);
 }
 
 /** The `crypto.subtle` subset. */

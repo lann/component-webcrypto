@@ -27,7 +27,7 @@ export const EXPECTED = {
   "generateKey/successes (X25519)": { inPassed: 32, inFailed: 0, outPassed: 0, outFailed: 0 },
   "derive_bits_keys/hkdf": { inPassed: 673, inFailed: 0, outPassed: 716, outFailed: 2272 },
   "derive_bits_keys/pbkdf2": { inPassed: 2269, inFailed: 0, outPassed: 1755, outFailed: 4608 },
-  "digest/digest": { inPassed: 92, inFailed: 0, outPassed: 0, outFailed: 24 },
+  "digest/digest": { inPassed: 116, inFailed: 0, outPassed: 0, outFailed: 0 },
   "sign_verify/eddsa (Ed25519)": { inPassed: 17, inFailed: 0, outPassed: 0, outFailed: 2 },
   "sign_verify/eddsa_small_order_points": { inPassed: 14, inFailed: 0, outPassed: 0, outFailed: 0 },
   "sign_verify/ecdsa": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 324 },

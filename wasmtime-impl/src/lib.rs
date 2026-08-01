@@ -292,13 +292,14 @@ pub struct InternalNonceKey {
 
 /// Backing type for the `digest.digest` resource.
 ///
-/// A digest holds no key material — just the SHA-2 variant it is bound to;
-/// `compute` is one-shot and stateless per call, so the resource is
-/// reusable and carries no per-operation state.
+/// A digest holds no key material — just the algorithm it is bound to
+/// (a SHA-2 variant, or checked SHA-1 in a collision posture); `compute`
+/// is one-shot and stateless per call, so the resource is reusable and
+/// carries no per-operation state.
 #[derive(Debug)]
 pub struct Digest {
-    /// The SHA-2 variant this digest is bound to.
-    pub(crate) variant: webcrypto_impl_core::Sha2,
+    /// The digest algorithm this resource is bound to.
+    pub(crate) variant: webcrypto_impl_core::DigestKind,
 }
 
 /// Backing type for the `signature.verifying-key` resource.
@@ -399,6 +400,7 @@ where
         T::webcrypto,
     )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::sha1_checked::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::signature::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ed25519_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ed25519_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;

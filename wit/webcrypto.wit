@@ -10,6 +10,25 @@ package lann:webcrypto@0.1.0;
 /// See `README.md` in this package for the package-wide contracts and
 /// terminology.
 interface types {
+    /// A named error condition defined outside `error`'s closed set: by an
+    /// algorithm interface's contract (the first is `sha1-checked`'s
+    /// `collision-detected`), a future feature's, or a third-party
+    /// provider's. Callers may branch on the (`origin`, `name`) pair; the
+    /// defining interface documents when its conditions occur. See
+    /// `README.md`, "Error contract".
+    record extension-error {
+        /// The package that defines the condition, e.g. `"lann:webcrypto"`.
+        /// Namespacing: third-party providers mint conditions under their
+        /// own package name, so names cannot collide.
+        origin: string,
+        /// The condition's name within `origin`, kebab-case by convention,
+        /// e.g. `"collision-detected"`.
+        name: string,
+        /// Human-readable detail. Empty where the condition's contract is
+        /// deliberately detail-free.
+        message: string,
+    }
+
     /// Errors surfaced by key creation and cryptographic operations.
     ///
     /// There is no case for API misuse: the package aims to make misuse
@@ -60,6 +79,12 @@ interface types {
         /// is still fully drained first). The string is human-readable.
         /// Never a semantic condition a caller must branch on.
         other(string),
+        /// A named condition outside this variant's closed set (see
+        /// `extension-error`). Unlike `other`, callers may branch on it:
+        /// the defining interface's contract says when it occurs. See
+        /// `README.md`, "Error contract", for which conditions belong in
+        /// the closed cases and which here.
+        extension(extension-error),
     }
 }
 

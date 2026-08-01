@@ -1634,6 +1634,25 @@ export const digest = { Digest };
 export const sha2 = { makeDigest };
 
 /**
+ * Throw `{ tag: 'unsupported', val }` for checked SHA-1: the platform's
+ * SHA-1 carries no sha1dc collision detection, this host is constrained
+ * to `crypto.subtle`, and implementing the counter-cryptanalysis in host
+ * JS is against its platform-backed charter — so it declines the
+ * interface whole, like ChaCha, and a composition needing it must supply
+ * another provider (the in-guest provider serves both postures).
+ * @returns {never}
+ */
+function unsupportedSha1Checked() {
+  throw errUnsupported("sha1-checked is not served by this implementation");
+}
+
+/** The `lann:webcrypto/sha1-checked` interface. */
+export const sha1Checked = {
+  makeRejectingDigest: () => unsupportedSha1Checked(),
+  makeMitigatingDigest: () => unsupportedSha1Checked(),
+};
+
+/**
  * Whether `a` and `b` are equal, in time independent of their contents
  * (necessarily dependent on their lengths). WebCrypto has no comparison
  * primitive and `timingSafeEqual` is Node-only, so this is a hand-rolled

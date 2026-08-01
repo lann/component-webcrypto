@@ -16,7 +16,8 @@
 use wasmtime::component::{Accessor, Resource, StreamReader};
 use wasmtime::Result;
 use webcrypto_impl_core::{
-    served_sha2, AeadKeyMaterial, MacKeyMaterial, SigPublic, SigningKeyMaterial, HMAC_NAME,
+    served_sha2, AeadKeyMaterial, DigestKind, MacKeyMaterial, Sha1Posture, SigPublic,
+    SigningKeyMaterial, HMAC_NAME,
 };
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
@@ -42,8 +43,9 @@ use crate::bindings::webcrypto::{
     aes_gcm as aes_gcm_iface, aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
     chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
     ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
-    ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface, sha2 as sha2_iface,
-    signature as signature_iface, x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
+    ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface,
+    sha1_checked as sha1_checked_iface, sha2 as sha2_iface, signature as signature_iface,
+    x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::admit_input;
@@ -57,6 +59,7 @@ use crate::{
 
 webcrypto_impl_core::impl_conversions! {
     error: Error,
+    extension: types::ExtensionError,
     sha2: sha2_iface::Sha2Variant,
     aes: aes_gcm_iface::AesVariant,
     ecdsa: ecdsa_verify_iface::EcdsaVariant,
@@ -854,13 +857,11 @@ impl<T: Send> HostDigestWithStore<T> for WasiWebcrypto {
         data: StreamReader<u8>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
         // Buffer the whole stream, then hash it; the result is
-        // chunking-invariant either way.
-        //
-        // The WIT `err` case exists for operational failures (e.g. an
-        // external digest engine); this implementation computes in-process,
-        // so it never errs.
+        // chunking-invariant either way. The only error a compute can
+        // report is checked SHA-1's `collision-detected` in the rejecting
+        // posture.
         drain_then(accessor, self_, data, |digest, bytes| {
-            Ok(digest.variant.digest(bytes))
+            digest.variant.digest(bytes).map_err(Into::into)
         })
         .await
     }
@@ -881,7 +882,25 @@ impl sha2_iface::Host for WasiWebcryptoCtxView<'_> {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err.into())),
         };
-        Ok(Ok(self.table.push(Digest { variant })?))
+        Ok(Ok(self.table.push(Digest {
+            variant: DigestKind::Sha2(variant),
+        })?))
+    }
+}
+
+// --- sha1-checked (digest minting) ---------------------------------------------
+
+impl sha1_checked_iface::Host for WasiWebcryptoCtxView<'_> {
+    fn make_rejecting_digest(&mut self) -> Result<std::result::Result<Resource<Digest>, Error>> {
+        Ok(Ok(self.table.push(Digest {
+            variant: DigestKind::Sha1Checked(Sha1Posture::Reject),
+        })?))
+    }
+
+    fn make_mitigating_digest(&mut self) -> Result<std::result::Result<Resource<Digest>, Error>> {
+        Ok(Ok(self.table.push(Digest {
+            variant: DigestKind::Sha1Checked(Sha1Posture::Mitigate),
+        })?))
     }
 }
 
