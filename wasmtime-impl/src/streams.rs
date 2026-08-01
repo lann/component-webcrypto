@@ -40,6 +40,23 @@ struct ByteCollector {
 #[derive(Debug, PartialEq)]
 struct InputOverflow;
 
+impl ByteCollector {
+    /// Retain `chunk` while the running total stays within the per-call
+    /// cap. The first chunk that would push past the cap latches the
+    /// collector into drain-and-discard: the held buffer is freed, this
+    /// chunk and every later one are dropped, and `Drop` delivers the
+    /// overflow marker instead of a buffer.
+    fn accept(&mut self, chunk: &[u8]) {
+        if !self.overflowed && self.buf.len().saturating_add(chunk.len()) > self.cap {
+            self.overflowed = true;
+            self.buf = Vec::new();
+        }
+        if !self.overflowed {
+            self.buf.extend_from_slice(chunk);
+        }
+    }
+}
+
 impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
     type Item = u8;
 
@@ -54,12 +71,6 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
 
         let available = source.remaining(&mut store);
         if available > 0 {
-            if !this.overflowed && this.buf.len().saturating_add(available) > this.cap {
-                // Over the per-call cap: stop retaining (free what we
-                // held), keep draining-and-discarding below.
-                this.overflowed = true;
-                this.buf = Vec::new();
-            }
             let mut chunk = Vec::with_capacity(available);
             if let Err(err) = source.read(&mut store, &mut chunk) {
                 // Never let `Drop` deliver a partial buffer as if it were
@@ -67,9 +78,7 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
                 this.failed = true;
                 return Poll::Ready(Err(err));
             }
-            if !this.overflowed {
-                this.buf.extend_from_slice(&chunk);
-            }
+            this.accept(&chunk);
             return Poll::Ready(Ok(StreamResult::Completed));
         }
 
@@ -193,6 +202,61 @@ impl<D> StreamProducer<D> for GuardedOutput {
 mod tests {
     use super::ByteCollector;
     use futures::channel::oneshot;
+
+    /// A collector with the given cap and no completion channel (these
+    /// tests observe the retention state directly).
+    fn collector(cap: usize) -> ByteCollector {
+        ByteCollector {
+            buf: Vec::new(),
+            cap,
+            overflowed: false,
+            failed: false,
+            done_tx: None,
+        }
+    }
+
+    /// An input summing to exactly the cap is retained in full: the latch
+    /// fires strictly past the cap, not at it.
+    #[test]
+    fn accept_retains_up_to_the_cap() {
+        let mut c = collector(8);
+        c.accept(&[1; 5]);
+        c.accept(&[2; 3]);
+        assert!(!c.overflowed);
+        assert_eq!(c.buf, [1, 1, 1, 1, 1, 2, 2, 2]);
+    }
+
+    /// The chunk that pushes one byte past the cap latches drain-and-discard
+    /// and frees what was held.
+    #[test]
+    fn accept_latches_one_byte_past_the_cap() {
+        let mut c = collector(8);
+        c.accept(&[1; 8]);
+        c.accept(&[2; 1]);
+        assert!(c.overflowed);
+        assert!(c.buf.is_empty());
+    }
+
+    /// A single chunk that jumps far past the cap latches too — the
+    /// comparison is an ordering, not an exact-boundary hit.
+    #[test]
+    fn accept_latches_on_a_jump_past_the_cap() {
+        let mut c = collector(8);
+        c.accept(&[1; 19]);
+        assert!(c.overflowed);
+        assert!(c.buf.is_empty());
+    }
+
+    /// Once latched, later chunks stay discarded: the latch never resets
+    /// within a collection.
+    #[test]
+    fn accept_stays_latched() {
+        let mut c = collector(8);
+        c.accept(&[1; 9]);
+        c.accept(&[2; 1]);
+        assert!(c.overflowed);
+        assert!(c.buf.is_empty());
+    }
 
     /// Dropping the collector (Wasmtime's end-of-stream notification)
     /// delivers the collected buffer.

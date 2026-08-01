@@ -41,19 +41,14 @@ impl AeadPolicy {
 }
 
 /// `aead-internal-nonce.internal-nonce-key-options` (seal/open only: the
-/// kind has no WebCrypto usage vocabulary beyond its own operations).
+/// kind has no WebCrypto usage vocabulary beyond its own operations). The
+/// at-least-one-usage mint check runs on the widened [`AeadPolicy`], which
+/// the `From` impl below produces with the wrap grants disabled.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InternalNoncePolicy {
     pub seal: bool,
     pub open: bool,
     pub extractable: bool,
-}
-
-impl InternalNoncePolicy {
-    /// The at-least-one-usage mint check (the options contract).
-    pub fn check_useful(&self) -> Result<(), Error> {
-        useful(self.seal || self.open)
-    }
 }
 
 impl From<InternalNoncePolicy> for AeadPolicy {

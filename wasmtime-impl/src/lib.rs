@@ -406,3 +406,43 @@ where
     bindings::webcrypto::ecdsa_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WasiWebcryptoCtx;
+
+    /// The untouched defaults derive from the store's hostcall fuel — ¼
+    /// per call, 1× total — floored at 1 when the derivation rounds to
+    /// zero.
+    #[test]
+    fn buffer_limits_default_derivation() {
+        let ctx = WasiWebcryptoCtx::new();
+        assert_eq!(ctx.buffer_limits(8), (2, 8));
+        assert_eq!(ctx.buffer_limits(0), (1, 1));
+    }
+
+    /// The setters govern the derived limits, with per-call clamped into
+    /// the pool's bound.
+    #[test]
+    fn buffer_limits_reflect_configuration() {
+        let mut ctx = WasiWebcryptoCtx::new();
+        ctx.set_per_call_buffer_limit(Some(16));
+        ctx.set_total_buffer_limit(Some(64));
+        assert_eq!(ctx.buffer_limits(1024), (16, 64));
+        ctx.set_per_call_buffer_limit(Some(128));
+        assert_eq!(ctx.buffer_limits(1024), (64, 64));
+    }
+
+    /// A clone carries the configured limits but gets its own pool (the
+    /// `Clone` impl's contract: budgets are per-context).
+    #[test]
+    fn clone_preserves_limits_with_a_fresh_pool() {
+        let mut ctx = WasiWebcryptoCtx::new();
+        ctx.set_per_call_buffer_limit(Some(3));
+        ctx.set_total_buffer_limit(Some(9));
+        let pool = ctx.pool(9).clone();
+        let clone = ctx.clone();
+        assert_eq!(clone.buffer_limits(1024), (3, 9));
+        assert!(!std::sync::Arc::ptr_eq(&pool, clone.pool(9)));
+    }
+}
