@@ -1,0 +1,67 @@
+package experiments:hpke@0.1.0;
+
+/// RFC 9180 Hybrid Public Key Encryption (HPKE), base mode, single-shot.
+///
+/// The KEM and KDF are fixed: DHKEM(X25519, HKDF-SHA-256) and HKDF-SHA-256.
+/// The AEAD is chosen per call. Keys travel as raw bytes (RFC 9180's
+/// `SerializePublicKey`/`SerializePrivateKey` encodings for X25519: the
+/// 32-byte u-coordinate and the 32-byte scalar), so this interface is a
+/// byte-oriented protocol surface, not a capability surface — see the
+/// experiment's README.
+///
+/// Every function is declared `async` deliberately, even though the
+/// implementation computes synchronously: the implementation bridges its
+/// synchronous HPKE engine onto the async `lann:webcrypto` imports with a
+/// blocking executor, and the component model permits a task to block —
+/// whether on waitables or in a sync-lowered call to an async callee —
+/// only when its export was lifted `async`. That bridge is part of what
+/// this experiment exists to exercise.
+interface hpke {
+    /// The AEADs of RFC 9180 §7.3 this experiment serves.
+    enum aead-id {
+        aes-128-gcm,
+        aes-256-gcm,
+        chacha20-poly1305,
+    }
+
+    /// An X25519 key pair in RFC 9180 serialized form.
+    record key-pair {
+        /// The 32-byte secret scalar.
+        secret-key: list<u8>,
+        /// The 32-byte public u-coordinate.
+        public-key: list<u8>,
+    }
+
+    /// The output of `seal`.
+    record sealed {
+        /// The encapsulated key: the ephemeral X25519 public key.
+        enc: list<u8>,
+        /// `ciphertext ‖ tag`.
+        ciphertext: list<u8>,
+    }
+
+    /// Generate a fresh recipient key pair (RFC 9180 `GenerateKeyPair`).
+    generate-key-pair: async func() -> result<key-pair, string>;
+
+    /// Derive a key pair deterministically from input keying material
+    /// (RFC 9180 §7.1.3 `DeriveKeyPair`).
+    derive-key-pair: async func(ikm: list<u8>) -> result<key-pair, string>;
+
+    /// Single-shot base-mode seal (RFC 9180 §6.1) to
+    /// `recipient-public-key`.
+    seal: async func(aead: aead-id, recipient-public-key: list<u8>, info: list<u8>, aad: list<u8>, plaintext: list<u8>) -> result<sealed, string>;
+
+    /// `seal` with the ephemeral key pair derived from `ikm-e` instead of
+    /// fresh randomness — the RFC 9180 test-vector door (the vectors give
+    /// `ikmE`). Deterministic and therefore **test-only**: reusing an
+    /// `ikm-e` reuses the ephemeral key and the AEAD nonce.
+    seal-deterministic: async func(aead: aead-id, recipient-public-key: list<u8>, ikm-e: list<u8>, info: list<u8>, aad: list<u8>, plaintext: list<u8>) -> result<sealed, string>;
+
+    /// Single-shot base-mode open (RFC 9180 §6.1) with the recipient's
+    /// secret key.
+    open: async func(aead: aead-id, recipient-secret-key: list<u8>, enc: list<u8>, info: list<u8>, aad: list<u8>, ciphertext: list<u8>) -> result<list<u8>, string>;
+}
+
+world hpke-guest {
+    export hpke;
+}

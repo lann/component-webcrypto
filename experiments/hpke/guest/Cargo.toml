@@ -1,0 +1,26 @@
+[package]
+name = "hpke-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Experimental wasm component: RFC 9180 HPKE (hpke-rs) over lann:webcrypto imports."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# `async` pulls in the component-model async runtime: the lann:webcrypto
+# imports are async-lowered, and `wit_bindgen::block_on` bridges them into
+# hpke-rs's synchronous provider trait.
+wit-bindgen = { version = "0.59", features = ["async"] }
+# The lann:webcrypto bindings and wrappers; carries the imports, so this
+# component's own world declares only its export.
+lann-webcrypto-guest = { path = "../../../rust/guest" }
+# The HPKE engine, generic over its crypto provider. `hpke-test` +
+# `hpke-test-prng` expose PRNG seeding for the RFC 9180 known-answer tests;
+# `hazmat` exposes private-key bytes, which the byte-oriented export needs.
+hpke-rs = { version = "0.7.0", features = ["hpke-test", "hpke-test-prng", "hazmat"] }
+hpke-rs-crypto = "0.7.0"
+# The RNG traits hpke-rs-crypto's provider PRNG must implement.
+rand = { version = "0.10", default-features = false }
+zeroize = { version = "1.8", features = ["zeroize_derive"] }

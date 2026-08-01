@@ -1,0 +1,17 @@
+[package]
+name = "hpke-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CLI driver component for the fully in-guest HPKE smoke run: imports experiments:hpke/hpke, exports an async wasi:cli/run."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:cli/run` export.
+wasip3 = { version = "0.7", features = ["async-spawn"] }
+# Pinned to the wit-bindgen version the `wasip3` crate uses (mixing two
+# wit-bindgen runtime versions in one component is unsupported) — the same
+# pairing as the repository's examples/demo-driver.
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }

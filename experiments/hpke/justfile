@@ -1,0 +1,40 @@
+# List the available recipes.
+default:
+    @just --list
+
+# Build the HPKE guest component into build/hpke.component.wasm.
+build-component:
+    cargo build --release -p hpke-guest --target wasm32-unknown-unknown
+    mkdir -p build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/hpke_guest.wasm \
+        -o build/hpke.component.wasm
+
+# Run the smoke tests against the Wasmtime host (lann-webcrypto-wasmtime serves
+# the lann:webcrypto imports natively). Builds the component itself.
+test:
+    cargo test -p hpke-host-test
+
+# Compose the fully in-guest smoke run: the HPKE guest's lann:webcrypto
+# imports are satisfied by the repository's in-guest provider (RustCrypto in
+# wasm), then a CLI driver (async wasi:cli/run) is plugged on top. Mirrors
+# the root justfile's `_compose`.
+compose: build-component
+    cargo build --release -p hpke-driver --target wasm32-wasip2
+    cargo build --release -p lann-webcrypto-guest-provider --target wasm32-wasip2 \
+        --manifest-path ../../Cargo.toml
+    wac plug build/hpke.component.wasm \
+        --plug ../../target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
+        -o build/hpke-with-crypto.wasm
+    wac plug target/wasm32-wasip2/release/hpke_driver.wasm \
+        --plug build/hpke-with-crypto.wasm \
+        -o build/hpke-composed.wasm
+
+# Run the composed smoke test under `wasmtime` — HPKE and all of its
+# cryptography execute inside wasm. Needs `wasmtime` (v47+) and `wac`.
+test-composed: compose
+    timeout 120 wasmtime run -W component-model-async=y -S cli \
+        build/hpke-composed.wasm
+
+# Both smoke runs.
+test-all: test test-composed
