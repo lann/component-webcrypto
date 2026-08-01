@@ -12,9 +12,11 @@
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
 //     X25519 key agreement; derived-key targets HMAC-SHA-256 and
 //     AES-256-GCM)
+//   - `digest`                  (SHA-256/384/512)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, and `x25519`
+// `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, `x25519`,
+// `sha2`, and `digest`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
 // elaboration). Module specifiers here name those imports directly, so this
 // file needs no bundler: componentize-js resolves them against the world at
@@ -65,6 +67,10 @@ import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
 import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
+import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
+// Imported for evaluation only: `make-digest` returns `digest` resources,
+// whose generated class lives in this module (see the note below).
+import "lann:webcrypto/digest@0.1.0";
 import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
 // generated resource classes to exist: componentize-js builds each returned
@@ -181,6 +187,15 @@ async function callImport(promise) {
   } catch (e) {
     rethrow(e);
   }
+  return unwrapResult(value);
+}
+
+/**
+ * Unwrap a possible raw canonical `result` wrapper (see `callImport`).
+ * @param {unknown} value
+ * @returns {any}
+ */
+function unwrapResult(value) {
   const wrapper = /** @type {{ tag?: unknown, val?: unknown } | null} */ (
     typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype
       ? value
@@ -193,6 +208,24 @@ async function callImport(promise) {
     return wrapper.val;
   }
   return value;
+}
+
+/**
+ * Call a synchronous `lann:webcrypto` import, normalizing a thrown
+ * `ComponentError` and the raw `result` wrapper (the sync counterpart of
+ * `callImport`).
+ * @param {() => unknown} run
+ * @returns {any}
+ */
+function callSync(run) {
+  /** @type {unknown} */
+  let value;
+  try {
+    value = run();
+  } catch (e) {
+    rethrow(e);
+  }
+  return unwrapResult(value);
 }
 
 // --- byte plumbing --------------------------------------------------------------
@@ -480,7 +513,7 @@ function sha2VariantOf(hash) {
     if (typeof named === "string") hash = named;
   }
   if (typeof hash !== "string") {
-    throw new TypeError("a KDF algorithm requires a `hash` member (a string or { name })");
+    throw new TypeError("a hash algorithm must be named by a string or a { name } object");
   }
   switch (hash.toUpperCase()) {
     case "SHA-256":
@@ -1218,6 +1251,39 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
   );
 }
 
+/**
+ * The `digest.digest` resources, minted once per served variant: the WIT
+ * resource is reusable and stateless per call, so one handle serves every
+ * `subtle.digest` invocation of its hash.
+ * @type {Map<string, any>}
+ */
+const DIGESTS = new Map();
+
+/** @param {"sha256" | "sha384" | "sha512"} variant */
+function digestFor(variant) {
+  let handle = DIGESTS.get(variant);
+  if (handle === undefined) {
+    handle = callSync(() => sha2Iface.makeDigest(variant));
+    DIGESTS.set(variant, handle);
+  }
+  return handle;
+}
+
+/**
+ * @param {AlgorithmIdentifier} algorithm
+ * @param {BufferSource} data
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function digest(algorithm, data) {
+  // Normalization reads the algorithm before the data is copied, the
+  // spec's order (WPT's altered-buffer tests observe it through a `name`
+  // getter that edits the buffer).
+  const variant = sha2VariantOf(algorithm);
+  const bytes = bytesOf(data, "data");
+  const out = await callFed((rx) => digestFor(variant).compute(rx), bytes);
+  return toArrayBuffer(out);
+}
+
 /** The `crypto.subtle` subset. */
 export const subtle = Object.freeze({
   importKey,
@@ -1229,6 +1295,7 @@ export const subtle = Object.freeze({
   decrypt,
   deriveBits,
   deriveKey,
+  digest,
 });
 
 /** A `crypto`-shaped namespace for code expecting `crypto.subtle`. */

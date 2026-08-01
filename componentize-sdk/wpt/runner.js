@@ -32,6 +32,7 @@ import { define_tests_25519 as defineCfrgBits } from "./componentize-sdk/wpt/bui
 import { define_tests_25519 as defineCfrgKeys } from "./componentize-sdk/wpt/build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "./componentize-sdk/wpt/build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "./componentize-sdk/wpt/build/group-okp-import-key-failures.js";
+import { run_digest_tests as runDigest } from "./componentize-sdk/wpt/build/group-digest.js";
 import { define_tests as defineHkdf } from "./componentize-sdk/wpt/build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group-pbkdf2-derive.js";
 
@@ -155,6 +156,17 @@ function kdfDeriveInSubset(name) {
 }
 
 /**
+ * digest/digest: the served SHA-2 family (SHA-256/384/512, any name
+ * casing), the bad-algorithm-name rejections, and the missing-name
+ * `TypeError`s; SHA-1 rows are unserved (the WIT carries no SHA-1
+ * anywhere).
+ * @param {string} name
+ */
+function digestInSubset(name) {
+  return !/^sha-1 /i.test(name);
+}
+
+/**
  * import_export/okp_importKey (X25519): raw public imports and
  * non-extractable private JWK imports are served. Extractable private
  * imports are excluded — each such test also exports the key, and private
@@ -229,6 +241,7 @@ export const GROUPS = [
     () => promise_test(definePbkdf2, "setup - define tests"),
     kdfDeriveInSubset,
   ],
+  ["digest/digest", () => runDigest(), digestInSubset],
 ];
 
 export const demoWebcryptoDemoDemo010 = {

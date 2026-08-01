@@ -171,6 +171,13 @@ JS
     echo 'export { runTests };' >> "$B"/group-okp-import-key.js
     cat "$V"/helpers.js "$V"/okp_importKey_failures_fixtures.js "$V"/importKey_failures.js > "$B"/group-okp-import-key-failures.js
     echo 'export { run_test };' >> "$B"/group-okp-import-key-failures.js
+    # digest.https.any.js registers its tests at top level (its body is
+    # written pre-indented for exactly this): wrap it in a callable so the
+    # group starts on demand like the others, helpers outside the wrapper.
+    cat "$V"/helpers.js > "$B"/group-digest.js
+    echo 'function run_digest_tests() {' >> "$B"/group-digest.js
+    cat "$V"/digest.https.any.js >> "$B"/group-digest.js
+    printf '}\nexport { run_digest_tests };\n' >> "$B"/group-digest.js
     cat "$V"/helpers.js "$V"/hkdf_vectors.js "$V"/hkdf.js > "$B"/group-hkdf-derive.js
     echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
     cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js
