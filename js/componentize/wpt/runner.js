@@ -41,6 +41,7 @@ import { run_test as runEcdsa } from "./js/componentize/wpt/build/group-ecdsa.js
 import { run_ec_import_tests as runEcImportKey } from "./js/componentize/wpt/build/group-ec-import-key.js";
 import { run_test as runEcImportKeyFailures } from "./js/componentize/wpt/build/group-ec-import-key-failures.js";
 import { run_get_random_values_tests as runGetRandomValues } from "./js/componentize/wpt/build/group-get-random-values.js";
+import { run_random_uuid_tests as runRandomUuid } from "./js/componentize/wpt/build/group-random-uuid.js";
 import { define_tests as defineHkdf } from "./js/componentize/wpt/build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "./js/componentize/wpt/build/group-pbkdf2-derive.js";
 
@@ -243,6 +244,11 @@ function getRandomValuesInSubset() {
   return true;
 }
 
+/** randomUUID: the whole group is served. */
+function randomUuidInSubset() {
+  return true;
+}
+
 /**
  * digest/digest: the whole group — the SHA-2 family, the bad-algorithm-name
  * rejections, the missing-name `TypeError`s, and the SHA-1 rows, which the
@@ -341,6 +347,7 @@ export const GROUPS = [
     ecImportFailuresInSubset,
   ],
   ["getRandomValues", () => runGetRandomValues(), getRandomValuesInSubset],
+  ["randomUUID", () => runRandomUuid(), randomUuidInSubset],
 ];
 
 export const demoWebcryptoDemoDemo010 = {
