@@ -236,7 +236,7 @@ build)
 build-parity)
     gen_suites
     ensure_toolchain
-    "$TOOLCHAIN" -q -d examples/componentize-demo/wit -w componentize-demo \
+    "$TOOLCHAIN" -q -d js/componentize/wpt/wit -w wpt-parity-runner \
         componentize js/componentize/wpt/parity-runner.js -p . \
         -o "$B"/parity-runner.component.wasm
     ;;

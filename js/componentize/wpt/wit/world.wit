@@ -1,0 +1,56 @@
+// Harness-only WIT for the WPT parity runner (parity-runner.js): the world
+// it is componentized against. The shared `lann:webcrypto` package lives
+// once at the repository root `wit/` and is pulled in through the
+// `deps/lann-webcrypto` symlink; `demo:webcrypto-demo` (the entry-point
+// interface) comes in through `deps/webcrypto-demo`.
+package wpt:parity@0.1.0;
+
+/// The runner's streaming channel: the embedder receives each settled
+/// test's record while the run is still executing, so a live consumer (the
+/// browser parity page) can show progress and a batch consumer (the Node
+/// round-trip leg) can simply collect.
+interface reporter {
+    /// One settled WPT test, as the JSON encoding of
+    /// `{ group, name, status, message? }` — the record shape the parity
+    /// comparator consumes.
+    report: func(%record: string);
+}
+
+/// The parity runner's world: the `componentize-demo` imports (the
+/// `lann:webcrypto` surface the webcrypto-componentize library is backed
+/// by) plus the reporter, exporting the same demo entry point. `run`
+/// resolves only after every record has been reported; its ok value
+/// carries the reported-record count for the consumer to cross-check.
+world wpt-parity-runner {
+    import reporter;
+
+    import lann:webcrypto/types@0.1.0;
+    import lann:webcrypto/mac@0.1.0;
+    import lann:webcrypto/aead@0.1.0;
+    import lann:webcrypto/hmac-sha2@0.1.0;
+    import lann:webcrypto/hmac-sha1@0.1.0;
+    import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/cipher@0.1.0;
+    import lann:webcrypto/aes-cbc@0.1.0;
+    import lann:webcrypto/aes-ctr@0.1.0;
+    import lann:webcrypto/chacha20-poly1305@0.1.0;
+    import lann:webcrypto/derivation@0.1.0;
+    import lann:webcrypto/hkdf@0.1.0;
+    import lann:webcrypto/hkdf-sha2@0.1.0;
+    import lann:webcrypto/hkdf-sha1@0.1.0;
+    import lann:webcrypto/pbkdf2@0.1.0;
+    import lann:webcrypto/pbkdf2-sha2@0.1.0;
+    import lann:webcrypto/pbkdf2-sha1@0.1.0;
+    import lann:webcrypto/key-agreement@0.1.0;
+    import lann:webcrypto/x25519@0.1.0;
+    import lann:webcrypto/digest@0.1.0;
+    import lann:webcrypto/sha2@0.1.0;
+    import lann:webcrypto/sha1-checked@0.1.0;
+    import lann:webcrypto/signature@0.1.0;
+    import lann:webcrypto/ed25519-verify@0.1.0;
+    import lann:webcrypto/ed25519-sign@0.1.0;
+    import lann:webcrypto/ecdsa-verify@0.1.0;
+    import wasi:random/random@0.2.0;
+
+    export demo:webcrypto-demo/demo@0.1.0;
+}

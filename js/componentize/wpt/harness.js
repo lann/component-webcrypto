@@ -17,6 +17,17 @@ const results = [];
 let queue = Promise.resolve();
 let registered = 0;
 let settled = 0;
+let onResult = null;
+
+/**
+ * Subscribe to results as they settle: `cb` receives each
+ * `{ name, status, message? }` record immediately after it lands in the
+ * queue, before `takeResults` would return it. One subscriber; pass null
+ * to unsubscribe. The parity runner streams its records through this.
+ */
+export function setOnResult(cb) {
+  onResult = cb;
+}
 
 class AssertionError extends Error {}
 // The eddsa/ecdsa suites discriminate assertion failures from operation
@@ -30,18 +41,26 @@ function fail(message) {
 function record(name, run) {
   registered += 1;
   queue = queue.then(async () => {
+    let result;
     try {
       await run();
-      results.push({ name, status: "PASS" });
+      result = { name, status: "PASS" };
     } catch (e) {
-      results.push({ name, status: "FAIL", message: String((e && e.message) || e) });
+      result = { name, status: "FAIL", message: String((e && e.message) || e) };
     } finally {
       settled += 1;
     }
+    results.push(result);
+    onResult?.(result);
   });
 }
 
-globalThis.self = globalThis;
+// `self`, absent in componentize-js guests and on Node. Assignment must be
+// conditional: a Web Worker's scope already has it as a getter-only
+// accessor, where assigning throws.
+if (globalThis.self === undefined) {
+  globalThis.self = globalThis;
+}
 
 globalThis.setup = function () {};
 globalThis.done = function () {};

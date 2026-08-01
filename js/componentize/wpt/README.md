@@ -87,10 +87,14 @@ round trip:  WPT tests ► shim ► WIT ► component ABI ► jco ► platform c
 ```
 
 `parity/baseline.mjs` runs the suite bundles directly on this Node's
-`crypto.subtle`; `parity-runner.js` (componentized from the tree like the
-gating runner, but ungated — it reports every result and asserts nothing
-in-guest) is transpiled by jco against `js/jco/webcrypto.js` and run by
-`parity/roundtrip.mjs`. Because both legs end at the identical platform
+`crypto.subtle`; `parity-runner.js` (componentized from the tree against
+the `wpt-parity-runner` world in [`wit/`](wit/), ungated — it reports
+every result and asserts nothing in-guest) is transpiled by jco against
+`js/jco/webcrypto.js` and run by `parity/roundtrip.mjs`. The runner
+streams each record through its `wpt:parity/reporter` import as the test
+settles — the Node leg just collects them; the browser page shows them
+live — and `run` resolves to a record count the embedder cross-checks.
+Because both legs end at the identical platform
 engine, the platform's own coverage cancels out: whatever it does not
 implement fails both legs, with no exclusion list to maintain. Every test
 the baseline passes and the round trip does not is a *loss* introduced by
@@ -117,14 +121,19 @@ platform itself is.
 
 `web/` is the same two legs run live in a visiting browser, published on
 the GitHub Pages site: the baseline against that browser's own
-`crypto.subtle`, the round trip through the same jco-transpiled parity
-runner the Node leg uses, resolving its wasi imports through the page's
-import map (the preview2-shim browser build, vendored beside the page by
-`just wpt-web-artifacts`). The round trip needs JSPI; without it the page
-runs the baseline alone. Nothing on the page gates, and the pinned loss
-ratchet does not apply to it: `losses.js` records the *Node* baseline's
-losses, and a browser's baseline legitimately differs. Serve it locally
-with `just wpt-web`.
+`crypto.subtle`, the round trip through a web transpile of the same parity
+runner (`transpile:web` in parity/package.json — every import mapped to a
+relative path, wasi included, so the module loads in the page's Web
+Worker with no import map; `just wpt-web-artifacts` vendors the
+preview2-shim browser build those paths resolve to). Both legs run in the
+worker and stream: the round trip's records arrive through the runner's
+reporter import as each test settles, so the page shows live progress
+mid-run; a main-thread fallback runs the same legs if the worker path
+fails. The round trip needs JSPI; without it the page runs the baseline
+alone. Nothing on the page gates, and the pinned loss ratchet does not
+apply to it: `losses.js` records the *Node* baseline's losses, and a
+browser's baseline legitimately differs. Serve it locally with
+`just wpt-web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
 repository layout: the transpiled runner imports `js/jco/webcrypto.js` by

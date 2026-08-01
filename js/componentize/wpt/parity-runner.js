@@ -11,24 +11,41 @@
 // globals (a module side effect there) and shares its GROUPS table, so a
 // vendored group cannot reach one runner and miss the other.
 //
-// The exported `run` resolves to the marker line `WPT-PARITY-RESULTS`
-// followed by a JSON array of `{ group, name, status, message? }` records.
+// Records stream out through the world's `wpt:parity/reporter` import as
+// each test settles — one `report` call per record, the JSON encoding of
+// `{ group, name, status, message? }` — so a live embedder (the browser
+// parity page) shows progress mid-run and a batch one (the Node round-trip
+// leg) collects. `run` resolves after the last record, to
+// `WPT-PARITY-STREAMED <count>` for the embedder to cross-check against
+// what it received.
+//
 // Module specifiers resolve against componentize-js's base directory, the
 // repository root.
 
+import { report } from "wpt:parity/reporter@0.1.0";
 import { GROUPS } from "./js/componentize/wpt/runner.js";
-import { drain, takeResults } from "./js/componentize/wpt/harness.js";
+import { drain, setOnResult, takeResults } from "./js/componentize/wpt/harness.js";
 
 export const demoWebcryptoDemoDemo010 = {
   run: async function () {
-    const records = [];
+    let currentGroup = "";
+    let count = 0;
+    setOnResult(({ name, status, message }) => {
+      count += 1;
+      report(
+        JSON.stringify(
+          message === undefined
+            ? { group: currentGroup, name, status }
+            : { group: currentGroup, name, status, message },
+        ),
+      );
+    });
     for (const [group, start] of GROUPS) {
+      currentGroup = group;
       start();
       await drain();
-      for (const { name, status, message } of takeResults()) {
-        records.push(message === undefined ? { group, name, status } : { group, name, status, message });
-      }
+      takeResults();
     }
-    return `WPT-PARITY-RESULTS\n${JSON.stringify(records)}`;
+    return `WPT-PARITY-STREAMED ${count}`;
   },
 };
