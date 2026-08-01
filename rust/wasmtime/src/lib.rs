@@ -247,55 +247,115 @@ impl HasData for WasiWebcrypto {
     type Data<'a> = WasiWebcryptoCtxView<'a>;
 }
 
+/// The store's table entry for every resource this host mints: the
+/// resource's payload together with its retention reservation, which
+/// releases back to the retention pool when the entry drops (see
+/// [`WasiWebcryptoCtx`], "Minted-resource retention").
+///
+/// Derefs to the payload, so reads and writes go through it transparently.
+pub struct Retained<T> {
+    value: T,
+    _reservation: crate::limits::Reservation,
+}
+
+impl<T> Retained<T> {
+    pub(crate) fn new(value: T, reservation: crate::limits::Reservation) -> Self {
+        Self {
+            value,
+            _reservation: reservation,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for Retained<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> std::ops::DerefMut for Retained<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+/// Transparent, like the standard library's smart pointers: the
+/// reservation is bookkeeping, the payload is what a log line means.
+impl<T: std::fmt::Debug> std::fmt::Debug for Retained<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
+/// The [`Retained`] table-entry aliases the generated bindings name: the
+/// bindgen `with` option takes plain paths, so each wrapped payload type
+/// needs one.
+pub mod retained {
+    pub type MacKey = super::Retained<super::MacKey>;
+    pub type MacKeyOptions = super::Retained<super::MacKeyOptions>;
+    pub type AeadKey = super::Retained<super::AeadKey>;
+    pub type AeadKeyOptions = super::Retained<super::AeadKeyOptions>;
+    pub type CipherKey = super::Retained<super::CipherKey>;
+    pub type CipherKeyOptions = super::Retained<super::CipherKeyOptions>;
+    pub type InternalNonceKey = super::Retained<super::InternalNonceKey>;
+    pub type InternalNonceKeyOptions = super::Retained<super::InternalNonceKeyOptions>;
+    pub type Digest = super::Retained<super::Digest>;
+    pub type VerifyingKey = super::Retained<super::VerifyingKey>;
+    pub type SigningKey = super::Retained<super::SigningKey>;
+    pub type SigningKeyOptions = super::Retained<super::SigningKeyOptions>;
+    pub type Ikm = super::Retained<super::Ikm>;
+    pub type Password = super::Retained<super::Password>;
+    pub type DeriveInput = super::Retained<super::DeriveInput>;
+    pub type DeriveOptions = super::Retained<super::DeriveOptions>;
+    pub type AgreementKeyOptions = super::Retained<super::AgreementKeyOptions>;
+    pub type AgreementPublicKey = super::Retained<super::AgreementPublicKey>;
+    pub type AgreementSecretKey = super::Retained<super::AgreementSecretKey>;
+}
+
 /// A `mac-key-options` resource: mint-time policy under construction.
 /// Constructed with the WIT defaults (nothing granted), mutated by the
 /// setters, consumed by a mint.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MacKeyOptions {
     pub(crate) policy: lann_webcrypto_core::MacPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `aead-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AeadKeyOptions {
     pub(crate) policy: lann_webcrypto_core::AeadPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `cipher-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CipherKeyOptions {
     pub(crate) policy: lann_webcrypto_core::CipherPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InternalNonceKeyOptions {
     pub(crate) policy: lann_webcrypto_core::InternalNoncePolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `signing-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SigningKeyOptions {
     pub(crate) policy: lann_webcrypto_core::SigningPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `derive-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DeriveOptions {
     pub(crate) policy: lann_webcrypto_core::DerivePolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `agreement-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AgreementKeyOptions {
     pub(crate) policy: lann_webcrypto_core::AgreementPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `key-agreement.public-key` resource: public
@@ -303,7 +363,6 @@ pub struct AgreementKeyOptions {
 #[derive(Debug)]
 pub struct AgreementPublicKey {
     pub(crate) material: lann_webcrypto_core::AgreementPublicMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `key-agreement.secret-key` resource. `agree` is
@@ -312,7 +371,6 @@ pub struct AgreementPublicKey {
 #[derive(Debug)]
 pub struct AgreementSecretKey {
     pub(crate) material: lann_webcrypto_core::AgreementSecretMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `hkdf.ikm` resource: input keying material, never
@@ -320,7 +378,6 @@ pub struct AgreementSecretKey {
 #[derive(Debug)]
 pub struct Ikm {
     pub(crate) material: lann_webcrypto_core::IkmMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `pbkdf2.password` resource: a password, never
@@ -328,7 +385,6 @@ pub struct Ikm {
 #[derive(Debug)]
 pub struct Password {
     pub(crate) material: lann_webcrypto_core::PasswordMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `derivation.derive-input` resource: a
@@ -337,7 +393,6 @@ pub struct Password {
 #[derive(Debug)]
 pub struct DeriveInput {
     pub(crate) material: lann_webcrypto_core::DeriveInputMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `mac.mac-key` resource.
@@ -350,7 +405,6 @@ pub struct DeriveInput {
 #[derive(Debug)]
 pub struct MacKey {
     pub(crate) material: lann_webcrypto_core::MacKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `aead.aead-key` resource.
@@ -362,14 +416,12 @@ pub struct MacKey {
 #[derive(Debug)]
 pub struct AeadKey {
     pub(crate) material: lann_webcrypto_core::AeadKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
 /// AES modes' key material.
 pub struct CipherKey {
     pub(crate) material: lann_webcrypto_core::CipherKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
@@ -384,7 +436,6 @@ pub struct InternalNonceKey {
     /// The number of `seal` invocations so far, counted against the
     /// algorithm's nonce budget.
     pub(crate) sealed: u64,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `digest.digest` resource.
@@ -397,7 +448,6 @@ pub struct InternalNonceKey {
 pub struct Digest {
     /// The digest algorithm this resource is bound to.
     pub(crate) variant: lann_webcrypto_core::DigestKind,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `signature.verifying-key` resource.
@@ -409,7 +459,6 @@ pub struct VerifyingKey {
     /// The public key, bound to its algorithm (and, for ECDSA, its
     /// curve/digest variant) at minting.
     pub(crate) public: lann_webcrypto_core::SigPublic,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `signature.signing-key` resource.
@@ -419,7 +468,6 @@ pub struct VerifyingKey {
 #[derive(Debug)]
 pub struct SigningKey {
     pub(crate) material: lann_webcrypto_core::SigningKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
 }
 
 // `Debug` derives on the key-holding types print through the shared
