@@ -1,0 +1,14 @@
+[package]
+name = "hpke-host-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Wasmtime-host smoke tests for the experimental HPKE component."
+
+[dependencies]
+lann-webcrypto-wasmtime = { path = "../../../rust/wasmtime" }
+wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
