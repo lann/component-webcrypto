@@ -70,14 +70,23 @@ jobs:
   # the crypto that no suite distinguishes — exactly the assertion-strength
   # gap the lockfiles cannot pin (they pin the case inventory, not what the
   # cases check).
+  #
+  # The run is sharded across parallel jobs (`cargo mutants --shard` via the
+  # recipe's argument): the per-mutant cost is irreducible single-threaded
+  # oracle time, so wall clock only scales with machines. Each shard pays
+  # its own setup and baseline and writes its own summary section and
+  # artifact; growing the shard count is the lever if the mutant count
+  # outgrows the timeout below.
   mutants:
     if: github.repository == 'lann/component-webcrypto'
     runs-on: ubuntu-latest
-    # The recipe runs two mutants at a time; the baseline full run fit in
-    # ~2.5 h single-job for ~700 mutants, so this cap has slack. The
-    # `just mutants <k/n>` shard argument is the escape hatch if growth
-    # ever pushes it against the 6-hour job cap.
-    timeout-minutes: 350
+    strategy:
+      # One shard's missed mutants must not cancel the others: the weekly
+      # verdict is the union of all shards' findings.
+      fail-fast: false
+      matrix:
+        shard: ["0/4", "1/4", "2/4", "3/4"]
+    timeout-minutes: 180
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -102,13 +111,13 @@ jobs:
         run: cargo install cargo-mutants --locked
 
       - name: Run mutation testing
-        run: just mutants
+        run: just mutants ${{ matrix.shard }}
 
       - name: Summarize
         if: always()
         run: |
           {
-            echo "### Mutation testing"
+            echo "### Mutation testing (shard ${{ matrix.shard }})"
             echo
             if [ -f mutants.out/missed.txt ] && [ -s mutants.out/missed.txt ]; then
               echo "**Missed mutants (changes to the crypto no suite distinguishes):**"
@@ -127,6 +136,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-out
+          name: mutants-out-${{ strategy.job-index }}
           path: mutants.out/
           if-no-files-found: ignore
