@@ -48,6 +48,7 @@ fn schedules(max_input_len: usize, valid: bool, id: u64) -> Vec<Schedule> {
 /// A served HMAC digest parameterization, as named in test ids.
 #[derive(Clone, Copy)]
 pub enum HmacAlg {
+    Sha1,
     Sha256,
     Sha384,
     Sha512,
@@ -57,6 +58,7 @@ impl HmacAlg {
     /// The algorithm name used in test ids.
     pub fn name(self) -> &'static str {
         match self {
+            HmacAlg::Sha1 => "hmac-sha1",
             HmacAlg::Sha256 => "hmac-sha256",
             HmacAlg::Sha384 => "hmac-sha384",
             HmacAlg::Sha512 => "hmac-sha512",
@@ -67,6 +69,7 @@ impl HmacAlg {
     /// per the translation policy).
     fn tag_bits(self) -> u32 {
         match self {
+            HmacAlg::Sha1 => 160,
             HmacAlg::Sha256 => 256,
             HmacAlg::Sha384 => 384,
             HmacAlg::Sha512 => 512,
@@ -313,7 +316,11 @@ pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
     cases
 }
 
-const HMAC_VECTORS: [(HmacAlg, &str); 3] = [
+const HMAC_VECTORS: [(HmacAlg, &str); 4] = [
+    (
+        HmacAlg::Sha1,
+        include_str!("../../vectors/hmac_sha1_test.json"),
+    ),
     (
         HmacAlg::Sha256,
         include_str!("../../vectors/hmac_sha256_test.json"),
@@ -341,7 +348,11 @@ const AEAD_VECTORS: [(AeadAlg, &str); 3] = [
         include_str!("../../vectors/xchacha20_poly1305_test.json"),
     ),
 ];
-const HKDF_VECTORS: [(HkdfAlg, &str); 3] = [
+const HKDF_VECTORS: [(HkdfAlg, &str); 4] = [
+    (
+        HkdfAlg::Sha1,
+        include_str!("../../vectors/hkdf_sha1_test.json"),
+    ),
     (
         HkdfAlg::Sha256,
         include_str!("../../vectors/hkdf_sha256_test.json"),
@@ -355,7 +366,11 @@ const HKDF_VECTORS: [(HkdfAlg, &str); 3] = [
         include_str!("../../vectors/hkdf_sha512_test.json"),
     ),
 ];
-const PBKDF2_VECTORS: [(Pbkdf2Alg, &str); 3] = [
+const PBKDF2_VECTORS: [(Pbkdf2Alg, &str); 4] = [
+    (
+        Pbkdf2Alg::Sha1,
+        include_str!("../../vectors/pbkdf2_hmacsha1_test.json"),
+    ),
     (
         Pbkdf2Alg::Sha256,
         include_str!("../../vectors/pbkdf2_hmacsha256_test.json"),
@@ -409,6 +424,7 @@ const X25519_PUBLIC_KEYS: &str = include_str!("../../vectors/x25519_test_public_
 /// A served HKDF parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy)]
 pub enum HkdfAlg {
+    Sha1,
     Sha256,
     Sha384,
     Sha512,
@@ -418,6 +434,7 @@ impl HkdfAlg {
     /// The algorithm name used in test ids.
     pub fn name(self) -> &'static str {
         match self {
+            HkdfAlg::Sha1 => "hkdf-sha1",
             HkdfAlg::Sha256 => "hkdf-sha256",
             HkdfAlg::Sha384 => "hkdf-sha384",
             HkdfAlg::Sha512 => "hkdf-sha512",
@@ -502,6 +519,7 @@ pub fn hkdf_cases() -> Vec<HkdfCase> {
 /// A served PBKDF2 parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy)]
 pub enum Pbkdf2Alg {
+    Sha1,
     Sha256,
     Sha384,
     Sha512,
@@ -511,6 +529,7 @@ impl Pbkdf2Alg {
     /// The algorithm name used in test ids.
     pub fn name(self) -> &'static str {
         match self {
+            Pbkdf2Alg::Sha1 => "pbkdf2-sha1",
             Pbkdf2Alg::Sha256 => "pbkdf2-sha256",
             Pbkdf2Alg::Sha384 => "pbkdf2-sha384",
             Pbkdf2Alg::Sha512 => "pbkdf2-sha512",

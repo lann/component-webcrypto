@@ -8,15 +8,15 @@
 //   - `importKey` / `exportKey` ("raw", "jwk", "spki", and "pkcs8"
 //     formats)
 //   - `generateKey`
-//   - `sign` / `verify`         (HMAC over SHA-256/384/512; Ed25519;
-//     ECDSA P-256/P-384 verification)
+//   - `sign` / `verify`         (HMAC over SHA-1 and SHA-256/384/512;
+//     Ed25519; ECDSA P-256/P-384 verification)
 //   - `encrypt` / `decrypt`     (AES-GCM, and the unauthenticated
 //     AES-CBC/AES-CTR through the package's `cipher` kind — see
 //     `wit/README.md`, "Unauthenticated modes are in, for compatibility";
 //     128- and 256-bit keys)
-//   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
-//     X25519 key agreement; derived-key targets HMAC over the same
-//     hashes and AES-GCM/CBC/CTR)
+//   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-1 and
+//     SHA-256/384/512; X25519 key agreement; derived-key targets HMAC
+//     over the same hashes and AES-GCM/CBC/CTR)
 //   - `digest`                  (SHA-256/384/512; SHA-1 through the
 //     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
@@ -24,8 +24,8 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `aes-gcm`, `aes-cbc`, `aes-ctr`, `derivation`, `hkdf`, `pbkdf2`,
-// `key-agreement`, `x25519`,
+// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `derivation`, `hkdf`,
+// `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha1`, `key-agreement`, `x25519`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
 // `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
@@ -42,9 +42,9 @@
 // first-class design constraint":
 //
 //   - Unserved: beyond the algorithms above, everything throws
-//     `NotSupportedError` — including SHA-1 as a KDF hash, AES-192 (which
-//     every implementation of the package declines), and AES-KW (parked
-//     with the package's wrap direction).
+//     `NotSupportedError` — including AES-192 (which every implementation
+//     of the package declines) and AES-KW (parked with the package's wrap
+//     direction).
 //   - Unserved by composition: ECDSA signing, key generation, and
 //     private-key import. The interface exists (`ecdsa-sign`), but it is
 //     class D and the in-guest provider this library composes with
@@ -84,11 +84,14 @@
 // enforced here, the jco host's agreement-key pattern.
 
 import * as hmacSha2 from "lann:webcrypto/hmac-sha2@0.1.0";
+import * as hmacSha1Iface from "lann:webcrypto/hmac-sha1@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
 import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
 import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
+import * as hkdfSha1Iface from "lann:webcrypto/hkdf-sha1@0.1.0";
 import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
+import * as pbkdf2Sha1Iface from "lann:webcrypto/pbkdf2-sha1@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
 import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
 import * as sha1CheckedIface from "lann:webcrypto/sha1-checked@0.1.0";
@@ -549,6 +552,25 @@ function normalizeAlgorithm(algorithm) {
 const SHA2_REGISTRY_NAMES = { sha256: "SHA-256", sha384: "SHA-384", sha512: "SHA-512" };
 
 /**
+ * The hash parameter of the HMAC-family algorithms (HMAC, HKDF, PBKDF2),
+ * resolved to the WIT route: the `sha2-variant` interfaces, or the
+ * per-algorithm SHA-1 interfaces (served for compatibility — see
+ * `wit/README.md`, "The SHA-1 HMAC constructions are in").
+ * @param {unknown} hash
+ * @returns {{ variant: "sha256" | "sha384" | "sha512" } | { sha1: true }}
+ */
+function hmacHashOf(hash) {
+  if (typeof hash === "object" && hash !== null) {
+    const named = /** @type {{ name?: unknown }} */ (hash).name;
+    if (typeof named === "string") hash = named;
+  }
+  if (typeof hash === "string" && hash.toUpperCase() === "SHA-1") {
+    return { sha1: true };
+  }
+  return { variant: sha2VariantOf(hash) };
+}
+
+/**
  * The WIT `sha2-variant` for a `hash` member (HMAC, the KDFs, `digest`):
  * the whole SHA-2 family the WIT carries; SHA-1 (which WPT sweeps) is not
  * in the package at all.
@@ -881,20 +903,28 @@ async function prepareInput(alg, baseKey) {
     }
   }
   if (alg.name === "HKDF") {
-    const variant = sha2VariantOf(alg.hash);
+    const route = hmacHashOf(alg.hash);
     const salt = bytesOf(alg.salt, "salt");
     const info = bytesOf(alg.info, "info");
-    return await callImport(hkdfIface.prepare(variant, handleOf(baseKey), salt, info));
+    return await callImport(
+      "sha1" in route
+        ? hkdfSha1Iface.prepare(handleOf(baseKey), salt, info)
+        : hkdfIface.prepare(route.variant, handleOf(baseKey), salt, info),
+    );
   }
   // PBKDF2. A zero iteration count fails at `prepare` with the WIT's
   // `other`, which maps onto the platform's own `OperationError`.
-  const variant = sha2VariantOf(alg.hash);
+  const route = hmacHashOf(alg.hash);
   const salt = bytesOf(alg.salt, "salt");
   const iterations = Number(alg.iterations);
   if (!Number.isInteger(iterations) || iterations < 0 || iterations > 0xffffffff) {
     throw new TypeError("PBKDF2 iterations must be a u32");
   }
-  return await callImport(pbkdf2Iface.prepare(variant, handleOf(baseKey), salt, iterations));
+  return await callImport(
+    "sha1" in route
+      ? pbkdf2Sha1Iface.prepare(handleOf(baseKey), salt, iterations)
+      : pbkdf2Iface.prepare(route.variant, handleOf(baseKey), salt, iterations),
+  );
 }
 
 /**
@@ -973,15 +1003,15 @@ function jwkForExport(jwkText, key) {
 
 /**
  * @param {() => unknown} start
- * @param {"sha256" | "sha384" | "sha512"} variant the mint-bound hash, for
- *   the projected `HmacKeyAlgorithm.hash`
+ * @param {string} hashName the mint-bound hash's registry name, for the
+ *   projected `HmacKeyAlgorithm.hash`
  * @param {number | undefined} requestedLength the `HmacKeyAlgorithm.length`
  *   to project, validated against the handle's material bits per the
  *   spec's shave window; `undefined` projects the handle's own length
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-async function mintHmacKey(start, variant, requestedLength, extractable, usages) {
+async function mintHmacKey(start, hashName, requestedLength, extractable, usages) {
   const handle = await callImport(start());
   const dataBits = /** @type {number} */ (handle.algorithmLength());
   let length = dataBits;
@@ -998,7 +1028,7 @@ async function mintHmacKey(start, variant, requestedLength, extractable, usages)
   /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
-    hash: Object.freeze({ name: SHA2_REGISTRY_NAMES[variant] }),
+    hash: Object.freeze({ name: hashName }),
     length,
   };
   return mintKey(handle, "secret", projected, extractable, usages);
@@ -1223,22 +1253,19 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   const usages = normalizeUsages(keyUsages, alg.name);
 
   if (alg.name === "HMAC") {
-    const variant = sha2VariantOf(alg.hash);
-    return await mintHmacKey(
+    const route = hmacHashOf(alg.hash);
+    const options = () => hmacMintOptions(usages, !!extractable);
+    const start =
       format === "jwk"
-        ? () =>
-            hmacSha2.importKeyJwk(
-              variant,
-              jwkForImport(keyData, "sig", usages),
-              hmacMintOptions(usages, !!extractable),
-            )
-        : () =>
-            hmacSha2.importKeyRaw(
-              variant,
-              bytesOf(keyData, "keyData"),
-              hmacMintOptions(usages, !!extractable),
-            ),
-      variant,
+        ? "sha1" in route
+          ? () => hmacSha1Iface.importKeyJwk(jwkForImport(keyData, "sig", usages), options())
+          : () => hmacSha2.importKeyJwk(route.variant, jwkForImport(keyData, "sig", usages), options())
+        : "sha1" in route
+          ? () => hmacSha1Iface.importKeyRaw(bytesOf(keyData, "keyData"), options())
+          : () => hmacSha2.importKeyRaw(route.variant, bytesOf(keyData, "keyData"), options());
+    return await mintHmacKey(
+      start,
+      "sha1" in route ? "SHA-1" : SHA2_REGISTRY_NAMES[route.variant],
       alg.length === undefined ? undefined : Number(alg.length),
       !!extractable,
       usages,
@@ -1362,7 +1389,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
   }
 
   if (alg.name === "HMAC") {
-    const variant = sha2VariantOf(alg.hash);
+    const route = hmacHashOf(alg.hash);
     // The spec's get-key-length: absent means the hash's block size (the
     // WIT default); zero is an `OperationError` before any key exists.
     if (alg.length === 0) {
@@ -1370,8 +1397,10 @@ async function generateKey(algorithm, extractable, keyUsages) {
     }
     const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
-      () => hmacSha2.generateKey(variant, length, hmacMintOptions(usages, !!extractable)),
-      variant,
+      "sha1" in route
+        ? () => hmacSha1Iface.generateKey(length, hmacMintOptions(usages, !!extractable))
+        : () => hmacSha2.generateKey(route.variant, length, hmacMintOptions(usages, !!extractable)),
+      "sha1" in route ? "SHA-1" : SHA2_REGISTRY_NAMES[route.variant],
       undefined,
       !!extractable,
       usages,
@@ -1732,14 +1761,17 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
   const usages = normalizeUsages(keyUsages, target.name);
 
   if (target.name === "HMAC") {
-    const variant = sha2VariantOf(target.hash);
+    const route = hmacHashOf(target.hash);
     if (target.length === 0) {
       throw dom("OperationError", "HMAC length cannot be 0");
     }
     const length = target.length === undefined ? undefined : Number(target.length);
     return await mintHmacKey(
-      () => hmacSha2.deriveKey(variant, input, length, hmacMintOptions(usages, !!extractable)),
-      variant,
+      "sha1" in route
+        ? () => hmacSha1Iface.deriveKey(input, length, hmacMintOptions(usages, !!extractable))
+        : () =>
+            hmacSha2.deriveKey(route.variant, input, length, hmacMintOptions(usages, !!extractable)),
+      "sha1" in route ? "SHA-1" : SHA2_REGISTRY_NAMES[route.variant],
       undefined,
       !!extractable,
       usages,

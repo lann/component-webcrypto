@@ -23,8 +23,8 @@ use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha2,
-    x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha1,
+    hmac_sha2, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -109,6 +109,11 @@ pub async fn import_ikm(raw: Vec<u8>, bits: bool, key: bool) -> Result<Ikm, Erro
 /// Import a PBKDF2 password with the given grants.
 pub async fn import_password(raw: Vec<u8>, bits: bool, key: bool) -> Result<Password, Error> {
     pbkdf2::import_password(raw, derive_options(bits, key)).await
+}
+
+/// Import raw material as an HMAC-SHA-1 key with both usages.
+pub async fn import_hmac_sha1_key(raw: Vec<u8>, extractable: bool) -> Result<MacKey, Error> {
+    hmac_sha1::import_key_raw(raw, mac_options(extractable)).await
 }
 
 pub async fn import_hmac_key(

@@ -4,7 +4,10 @@ package lann:webcrypto@0.1.0;
 /// the RustCrypto packaging of the Stevens–Karpman counter-cryptanalysis
 /// that Git ships as sha1dc).
 ///
-/// This package never serves *plain* SHA-1. Both constructors mint a
+/// This package never serves a *plain* SHA-1 digest (the HMAC-SHA-1
+/// family runs the hash inside its construction, where collision
+/// resistance is not load-bearing and no digest is exposed). Both
+/// constructors mint a
 /// `digest` whose `compute` runs standard SHA-1 *plus* detection of the
 /// disturbance-vector patterns every known collision attack requires, and
 /// each constructor fixes what happens when detection fires. On honest

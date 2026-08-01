@@ -47,14 +47,15 @@ import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group
 // --- the subset definition, one classifier per group ---------------------------
 
 /**
- * sign_verify/hmac: the served SHA-2 family; SHA-1 rows are unserved, and
- * the wrong-algorithm tests need ECDSA.
+ * sign_verify/hmac: the served hashes (SHA-1 through the package's
+ * `hmac-sha1` interface, and the SHA-2 family); the wrong-algorithm tests
+ * need ECDSA generation (class D).
  */
 function hmacInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  return /SHA-(256|384|512)/.test(name) && !/wrong algorithm|generate wrong key/.test(name);
+  return /SHA-(1|256|384|512)\b/.test(name) && !/wrong algorithm|generate wrong key/.test(name);
 }
 
 /**
@@ -94,7 +95,7 @@ function importKeyInSubset(name) {
   if (name.startsWith("Empty Usages:")) {
     return true;
   }
-  if (/\{hash: SHA-(256|384|512), name: HMAC\}/.test(name)) {
+  if (/\{hash: SHA-(1|256|384|512), name: HMAC\}/.test(name)) {
     return true;
   }
   if (/\{name: AES-(GCM|CBC|CTR)\}/.test(name)) {
@@ -112,7 +113,7 @@ function importKeyInSubset(name) {
  */
 function generateKeyInSubset(name) {
   if (/name: hmac/i.test(name)) {
-    return /hash: SHA-(256|384|512)/.test(name);
+    return /hash: SHA-(1|256|384|512)\b/.test(name);
   }
   if (/name: aes-(gcm|cbc|ctr)/i.test(name)) {
     return /length: (128|256)/.test(name);
@@ -164,10 +165,9 @@ function okpEd25519FailuresInSubset() {
  *
  * Excluded, in match order: subtests needing an ECDH key (`generateKey`
  * does not serve ECDH, so the fixture is null); the empty HKDF base key
- * (WIT-forced — `import-ikm` rejects empty material by ruling); unserved
- * derived-key targets; then SHA-1 rows — except the subtests whose
- * checks precede the hash (bad hash names, missing usages), which are
- * hash-independent and served for every row.
+ * (WIT-forced — `import-ikm` rejects empty material by ruling); and
+ * unserved derived-key targets. The SHA-1 rows are served (the
+ * `hkdf-sha1`/`pbkdf2-sha1` interfaces).
  *
  * The exclusions are whole-row, so the census pins a large `outPassed`
  * for these groups: an unserved-target row's bad-hash and missing-usage
@@ -190,7 +190,7 @@ function kdfDeriveInSubset(name) {
   if (name.startsWith("Derived key of type")) {
     const served =
       /^Derived key of type name: AES-(GCM|CBC|CTR) length: (128|256)/.test(name) ||
-      /^Derived key of type name: HMAC hash: SHA-(256|384|512)/.test(name);
+      /^Derived key of type name: HMAC hash: SHA-(1|256|384|512)\b/.test(name);
     if (!served) {
       return false;
     }
@@ -198,7 +198,7 @@ function kdfDeriveInSubset(name) {
   if (/bad hash name|missing deriveBits usage|missing deriveKey usage/.test(name)) {
     return true;
   }
-  return !name.includes(", SHA-1, ");
+  return true;
 }
 
 /**
@@ -324,13 +324,7 @@ export const GROUPS = [
     kdfDeriveInSubset,
   ],
   ["digest/digest", () => runDigest(), digestInSubset],
-  [
-    "sign_verify/eddsa (Ed25519)",
-    () => runEddsa("Ed25519"),
-    // The wrong-algorithm-name pair is out: its wrong-key fixture is an
-    // HMAC-SHA-1 key, and SHA-1 is not in the package.
-    (name) => !name.includes("wrong algorithm name"),
-  ],
+  ["sign_verify/eddsa (Ed25519)", () => runEddsa("Ed25519"), () => true],
   ["sign_verify/eddsa_small_order_points", () => runEddsaSmallOrder(), () => true],
   ["sign_verify/ecdsa", () => runEcdsa(), classDGatedInSubset],
   ["import_export/okp_importKey (Ed25519)", () => runOkpImportKey("Ed25519"), okpEd25519ImportInSubset],

@@ -4,7 +4,8 @@
 use zeroize::Zeroizing;
 
 use crate::{
-    hash::Sha2, not_permitted, random_bytes, served_sha2, Error, MacPolicy, RngError, Sha2Variant,
+    hash::HmacHash, hash::Sha2, not_permitted, random_bytes, served_sha2, Error, MacPolicy,
+    RngError, Sha2Variant,
 };
 
 /// The material behind a `mac.mac-key` resource: raw HMAC key bytes
@@ -15,8 +16,8 @@ pub struct MacKeyMaterial {
     /// The raw key material, retained for `sign`/`verify` and (when
     /// extractable) `export-key-raw`; zeroized on drop.
     raw: Zeroizing<Vec<u8>>,
-    /// The SHA-2 variant this key is bound to.
-    variant: Sha2,
+    /// The hash this key is bound to.
+    variant: HmacHash,
     /// The mint-time policy: usages and extractability.
     policy: MacPolicy,
 }
@@ -27,8 +28,18 @@ impl MacKeyMaterial {
     /// accepted (RFC 2104; longer-than-block keys are hashed first), empty
     /// material is `invalid-key`, and unserved variants are `unsupported`.
     pub fn import(variant: Sha2Variant, raw: Vec<u8>, policy: MacPolicy) -> Result<Self, Error> {
+        Self::import_hash(HmacHash::Sha2(served_sha2(variant)?), raw, policy)
+    }
+
+    /// Import raw key material as an HMAC-SHA-1 key (the
+    /// `hmac-sha1.import-key-raw` contract; key-length policy as
+    /// [`import`](Self::import)).
+    pub fn import_sha1(raw: Vec<u8>, policy: MacPolicy) -> Result<Self, Error> {
+        Self::import_hash(HmacHash::Sha1, raw, policy)
+    }
+
+    fn import_hash(hash: HmacHash, raw: Vec<u8>, policy: MacPolicy) -> Result<Self, Error> {
         policy.check_useful()?;
-        let variant = served_sha2(variant)?;
         if raw.is_empty() {
             return Err(Error::InvalidKey(
                 "HMAC key material must be non-empty".into(),
@@ -36,7 +47,7 @@ impl MacKeyMaterial {
         }
         Ok(Self {
             raw: Zeroizing::new(raw),
-            variant,
+            variant: hash,
             policy,
         })
     }
@@ -47,24 +58,28 @@ impl MacKeyMaterial {
     /// `HS*` name), then the decoded material is subject to
     /// [`import`](Self::import)'s contract.
     pub fn import_jwk(variant: Sha2Variant, jwk: &str, policy: MacPolicy) -> Result<Self, Error> {
-        let alg = match served_sha2(variant)? {
-            Sha2::Sha256 => "HS256",
-            Sha2::Sha384 => "HS384",
-            Sha2::Sha512 => "HS512",
-        };
-        let raw = crate::jwk::parse_oct(jwk, alg, policy.extractable)?;
-        Self::import(variant, raw, policy)
+        Self::import_jwk_hash(HmacHash::Sha2(served_sha2(variant)?), jwk, policy)
+    }
+
+    /// Import an RFC 7517 `oct` JWK as an HMAC-SHA-1 key (`alg`, when
+    /// present, must be `"HS1"`; the `hmac-sha1.import-key-jwk`
+    /// contract).
+    pub fn import_jwk_sha1(jwk: &str, policy: MacPolicy) -> Result<Self, Error> {
+        Self::import_jwk_hash(HmacHash::Sha1, jwk, policy)
+    }
+
+    fn import_jwk_hash(hash: HmacHash, jwk: &str, policy: MacPolicy) -> Result<Self, Error> {
+        let raw = crate::jwk::parse_oct(jwk, hmac_jwk_alg(hash), policy.extractable)?;
+        Self::import_hash(hash, raw, policy)
     }
 
     /// The key as an `oct` JWK (the `mac-key.export-key-jwk` contract):
     /// the same extractability gate as [`export`](Self::export).
     pub fn export_jwk(&self) -> Result<String, Error> {
-        let alg = match self.variant {
-            Sha2::Sha256 => "HS256",
-            Sha2::Sha384 => "HS384",
-            Sha2::Sha512 => "HS512",
-        };
-        Ok(crate::jwk::build_oct(&self.export()?, alg))
+        Ok(crate::jwk::build_oct(
+            &self.export()?,
+            hmac_jwk_alg(self.variant),
+        ))
     }
 
     /// Generate a fresh random HMAC key over the declared variant, per the
@@ -79,20 +94,39 @@ impl MacKeyMaterial {
         length: Option<u32>,
         policy: MacPolicy,
     ) -> Result<Result<Self, Error>, RngError> {
+        let hash = match served_sha2(variant) {
+            Ok(variant) => HmacHash::Sha2(variant),
+            Err(err) => return Ok(Err(err)),
+        };
+        Self::generate_hash(hash, length, policy)
+    }
+
+    /// Generate a fresh random HMAC-SHA-1 key (the
+    /// `hmac-sha1.generate-key` contract; `length` semantics as
+    /// [`generate`](Self::generate), `None` meaning SHA-1's 512-bit
+    /// block size).
+    pub fn generate_sha1(
+        length: Option<u32>,
+        policy: MacPolicy,
+    ) -> Result<Result<Self, Error>, RngError> {
+        Self::generate_hash(HmacHash::Sha1, length, policy)
+    }
+
+    fn generate_hash(
+        hash: HmacHash,
+        length: Option<u32>,
+        policy: MacPolicy,
+    ) -> Result<Result<Self, Error>, RngError> {
         if let Err(err) = policy.check_useful() {
             return Ok(Err(err));
         }
-        let byte_len = match hmac_length_bits(variant, length) {
+        let byte_len = match hmac_length_bits_hash(hash, length) {
             Ok(bits) => bits as usize / 8,
-            Err(err) => return Ok(Err(err)),
-        };
-        let variant = match served_sha2(variant) {
-            Ok(variant) => variant,
             Err(err) => return Ok(Err(err)),
         };
         Ok(Ok(Self {
             raw: Zeroizing::new(random_bytes(byte_len)?),
-            variant,
+            variant: hash,
             policy,
         }))
     }
@@ -181,20 +215,61 @@ impl std::fmt::Debug for MacKeyMaterial {
 /// `get key length`, §31.6.6): `none` is the hash's block size, zero is
 /// `invalid-key`, sub-byte lengths are declined.
 pub fn hmac_length_bits(variant: Sha2Variant, length: Option<u32>) -> Result<u32, Error> {
-    let served = served_sha2(variant)?;
+    hmac_length_bits_hash(HmacHash::Sha2(served_sha2(variant)?), length)
+}
+
+/// [`hmac_length_bits`] over any HMAC hash (the SHA-1 minting paths).
+pub fn hmac_length_bits_hash(hash: HmacHash, length: Option<u32>) -> Result<u32, Error> {
     match length {
-        None => Ok((served.block_len() * 8) as u32),
+        None => Ok((hash.block_len() * 8) as u32),
         Some(0) => Err(Error::InvalidKey("HMAC key length must be non-zero".into())),
-        Some(bits) if bits % 8 != 0 => Err(Error::Unsupported(format!(
+        Some(bits) if !bits.is_multiple_of(8) => Err(Error::Unsupported(format!(
             "HMAC key length {bits} is not a multiple of 8; sub-byte lengths are not served",
         ))),
         Some(bits) => Ok(bits),
     }
 }
 
+/// The JWK `alg` for an HMAC hash (WebCrypto's `"HS1"`/`"HS256"`/…).
+fn hmac_jwk_alg(hash: HmacHash) -> &'static str {
+    match hash {
+        HmacHash::Sha1 => "HS1",
+        HmacHash::Sha2(Sha2::Sha256) => "HS256",
+        HmacHash::Sha2(Sha2::Sha384) => "HS384",
+        HmacHash::Sha2(Sha2::Sha512) => "HS512",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // RFC 2202 test case 1: HMAC-SHA-1 known answer, pinning the SHA-1
+    // entry points end to end (import, sign, verify, JWK alg).
+    #[test]
+    fn hmac_sha1_rfc2202_known_answer() {
+        let key = MacKeyMaterial::import_sha1(vec![0x0b; 20], xp()).unwrap();
+        assert_eq!(key.hash_name(), "SHA-1");
+        let tag = key.sign(b"Hi There").unwrap();
+        assert_eq!(
+            tag,
+            hex_literal::hex!("b617318655057264e28bc0b6fb378c8ef146be00")
+        );
+        key.verify(b"Hi There", &tag).unwrap();
+        assert!(key.export_jwk().unwrap().contains("HS1"));
+        // The wrong-alg rejection: an HS256 JWK is not an HMAC-SHA-1 key.
+        let jwk = r#"{"kty":"oct","k":"AQID","alg":"HS256"}"#;
+        assert!(matches!(
+            MacKeyMaterial::import_jwk_sha1(jwk, xp()),
+            Err(Error::InvalidKey(_))
+        ));
+    }
+
+    #[test]
+    fn hmac_sha1_generate_defaults_to_the_block_size() {
+        let key = MacKeyMaterial::generate_sha1(None, xp()).unwrap().unwrap();
+        assert_eq!(key.length_bits(), 512);
+    }
 
     /// A full grant, non-extractable.
     fn mp() -> MacPolicy {

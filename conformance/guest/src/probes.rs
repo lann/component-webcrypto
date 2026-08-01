@@ -7,9 +7,9 @@ use crate::mint::{
     agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_x25519_key,
     generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
-    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_ikm, import_internal_nonce_key,
-    import_key_raw, import_password, import_x25519_public_key, import_x25519_secret_key,
-    import_xchacha_internal_nonce_key, x25519_secret_jwk,
+    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
+    import_internal_nonce_key, import_key_raw, import_password, import_x25519_public_key,
+    import_x25519_secret_key, import_xchacha_internal_nonce_key, x25519_secret_jwk,
 };
 use conformance_harness::stream::{
     ci_decrypt, ci_encrypt, compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify,
@@ -104,6 +104,7 @@ probes! {
     cipher_usage_policy,
     cipher_jwk_and_exports,
     cipher_derive_key,
+    hmac_sha1_family,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -3492,5 +3493,123 @@ async fn cipher_derive_key() -> Result<(), String> {
         let opened = opened.map_err(|e| describe("decrypt (imported bits)", &e))?;
         expect_bytes(&opened, payload, &format!("{mode} derive-key equivalence"))?;
     }
+    Ok(())
+}
+
+/// The SHA-1 construction surface the vectors cannot express: the HS1 JWK
+/// round trip, the generate default (SHA-1's 512-bit block), the
+/// `algorithm-hash` getter, HMAC-SHA-1 `derive-key`, and the SHA-1 KDF
+/// prepare steps over the shared `ikm`/`password` resources.
+async fn hmac_sha1_family() -> Result<(), String> {
+    use crate::mint::mac_options;
+    use lann_webcrypto_guest::bindings::{hkdf, hkdf_sha1, hmac_sha1, pbkdf2, pbkdf2_sha1};
+
+    // HS1 JWK round trip on the shared oct contract.
+    let key = hmac_sha1::import_key_jwk(
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"HS1"}}"#),
+        mac_options(true),
+    )
+    .await
+    .map_err(|e| describe("import-key-jwk", &e))?;
+    expect(
+        key.algorithm_hash(),
+        Some("SHA-1".to_string()),
+        "HMAC-SHA-1 algorithm-hash",
+    )?;
+    let jwk = key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    if !jwk.contains("HS1") || !jwk.contains(JWK_K_32) {
+        return Err(format!("exported JWK missing material members: {jwk}"));
+    }
+    // The wrong hash's alg is rejected.
+    expect_err(
+        "HS256 JWK on the SHA-1 import",
+        ErrKind::InvalidKey,
+        hmac_sha1::import_key_jwk(
+            format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"HS256"}}"#),
+            mac_options(false),
+        )
+        .await,
+        "imported a JWK bound to another hash",
+    )?;
+
+    // The generate default is SHA-1's block size.
+    let generated = hmac_sha1::generate_key(None, mac_options(false))
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect(generated.algorithm_length(), 512, "generated key length")?;
+
+    // A signature round trip between the generated key's halves of use.
+    let payload = b"sha1 family payload";
+    let (tag, fed) = sign(&generated, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    expect(tag.len(), 20, "HMAC-SHA-1 tag length")?;
+    let (verified, fed) = verify(&generated, payload, &tag, Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    verified.map_err(|e| describe("round-trip tag did not verify", &e))?;
+
+    // The SHA-1 KDF prepare steps ride the shared resources, and
+    // `derive-key` agrees with `derive-bits` + import.
+    let ikm = import_ikm(vec![0x0b; 22], true, true)
+        .await
+        .map_err(|e| describe("import-ikm", &e))?;
+    let input = hkdf_sha1::prepare(&ikm, b"salt".to_vec(), b"info".to_vec())
+        .await
+        .map_err(|e| describe("hkdf-sha1.prepare", &e))?;
+    let bits = input
+        .derive_bits(Some(160))
+        .await
+        .map_err(|e| describe("derive-bits", &e))?;
+    let derived = hmac_sha1::derive_key(&input, Some(160), mac_options(false))
+        .await
+        .map_err(|e| describe("hmac-sha1.derive-key", &e))?;
+    let imported = import_hmac_sha1_key(bits.clone(), false)
+        .await
+        .map_err(|e| describe("import of the derived bits", &e))?;
+    let (tag, fed) = sign(&derived, payload, Schedule::Whole).await;
+    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let (verified, fed) = verify(&imported, payload, &tag, Schedule::Whole).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    verified.map_err(|e| describe("derive-key disagreed with derive-bits + import", &e))?;
+
+    // Chaining: `hkdf-sha1.prepare-from` rejects a KDF source exactly as
+    // `hkdf.prepare-from` does (only agreements have a natural length).
+    expect_err(
+        "hkdf-sha1.prepare-from a KDF source",
+        ErrKind::Other,
+        hkdf_sha1::prepare_from(&input, b"s".to_vec(), b"i".to_vec()).await,
+        "chained from a source with no natural length",
+    )?;
+    // And the SHA-2 chain from the same resources still works: one ikm
+    // parameterizes either hash family.
+    hkdf::prepare(
+        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        &ikm,
+        b"salt".to_vec(),
+        b"info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("hkdf.prepare over the same ikm", &e))?;
+
+    // PBKDF2-SHA-1: the zero-iteration refusal, on the shared password.
+    let password = import_password(b"password".to_vec(), true, true)
+        .await
+        .map_err(|e| describe("import-password", &e))?;
+    expect_err(
+        "pbkdf2-sha1.prepare with zero iterations",
+        ErrKind::Other,
+        pbkdf2_sha1::prepare(&password, b"salt".to_vec(), 0).await,
+        "prepared a zero-iteration derivation",
+    )?;
+    pbkdf2::prepare(
+        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        &password,
+        b"salt".to_vec(),
+        1,
+    )
+    .await
+    .map_err(|e| describe("pbkdf2.prepare over the same password", &e))?;
     Ok(())
 }

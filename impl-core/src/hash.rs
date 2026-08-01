@@ -30,6 +30,71 @@ pub fn served_sha2(variant: Sha2Variant) -> Result<Sha2, Error> {
     }
 }
 
+/// The hash an HMAC-family construction (HMAC, HKDF, PBKDF2) is keyed
+/// over: SHA-1 or a served SHA-2 variant. SHA-1 appears here and nowhere
+/// else outside `sha1-checked` — the constructions run the hash
+/// internally, where collision resistance is not load-bearing and no
+/// digest is exposed (see the WIT `hmac-sha1` doc).
+#[derive(Clone, Copy, Debug)]
+pub enum HmacHash {
+    Sha1,
+    Sha2(Sha2),
+}
+
+impl HmacHash {
+    /// The hash name (`mac-key.algorithm-hash`, and the KDF inputs'
+    /// diagnostics).
+    pub fn hash_name(self) -> &'static str {
+        match self {
+            Self::Sha1 => "SHA-1",
+            Self::Sha2(variant) => variant.hash_name(),
+        }
+    }
+
+    /// The underlying hash's block length in bytes (the length of a
+    /// generated HMAC key, per WebCrypto's `generateKey` default).
+    pub(crate) fn block_len(self) -> usize {
+        match self {
+            Self::Sha1 => 64,
+            Self::Sha2(variant) => variant.block_len(),
+        }
+    }
+
+    /// One-shot HMAC over `data` with `key` material. See
+    /// [`Sha2::hmac_sign`].
+    pub(crate) fn hmac_sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
+        fn tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Vec<u8> {
+            let mut hmac =
+                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+            hmac.update(data);
+            hmac.finalize().into_bytes().to_vec()
+        }
+        match self {
+            Self::Sha1 => tag::<hmac::Hmac<sha1::Sha1>>(key, data),
+            Self::Sha2(variant) => variant.hmac_sign(key, data),
+        }
+    }
+
+    /// One-shot constant-time HMAC verification. See [`Sha2::hmac_verify`].
+    pub(crate) fn hmac_verify(self, key: &[u8], data: &[u8], tag: &[u8]) -> Result<(), Error> {
+        fn check<M: hmac::Mac + hmac::digest::KeyInit>(
+            key: &[u8],
+            data: &[u8],
+            tag: &[u8],
+        ) -> Result<(), Error> {
+            let mut hmac =
+                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+            hmac.update(data);
+            hmac.verify_slice(tag)
+                .map_err(|_| Error::AuthenticationFailed)
+        }
+        match self {
+            Self::Sha1 => check::<hmac::Hmac<sha1::Sha1>>(key, data, tag),
+            Self::Sha2(variant) => variant.hmac_verify(key, data, tag),
+        }
+    }
+}
+
 /// The algorithm a `digest` resource is bound to: a served SHA-2 variant,
 /// or checked SHA-1 in one of its collision postures (the `sha1-checked`
 /// minting interface; plain SHA-1 is deliberately unrepresentable).

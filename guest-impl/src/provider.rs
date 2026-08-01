@@ -45,6 +45,8 @@ use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as Ecdsa
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
 use crate::exports::lann::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
+use crate::exports::lann::webcrypto::hkdf_sha1::Guest as HkdfSha1Guest;
+use crate::exports::lann::webcrypto::hmac_sha1::Guest as HmacSha1Guest;
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::key_agreement::{
     self as key_agreement_iface, Guest as KeyAgreementGuest, GuestAgreementKeyOptions,
@@ -56,6 +58,7 @@ use crate::exports::lann::webcrypto::mac::{
 use crate::exports::lann::webcrypto::pbkdf2::{
     self as pbkdf2_iface, Guest as Pbkdf2Guest, GuestPassword,
 };
+use crate::exports::lann::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
 use crate::exports::lann::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
@@ -468,6 +471,92 @@ impl HmacSha2Guest for Component {
             policy,
         )?;
         Ok(mac::MacKey::new(MacKey { material }))
+    }
+}
+
+impl HmacSha1Guest for Component {
+    async fn import_key_raw(
+        raw: Vec<u8>,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = MacKeyMaterial::import_sha1(raw, policy)?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn import_key_jwk(
+        jwk: String,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = MacKeyMaterial::import_jwk_sha1(&jwk, policy)?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn generate_key(
+        length: Option<u32>,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = rng_infallible(MacKeyMaterial::generate_sha1(length, policy))?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn derive_key(
+        input: derivation::DeriveInputBorrow<'_>,
+        length: Option<u32>,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = webcrypto_impl_core::derive_mac_key_sha1(
+            &input.get::<DeriveInput>().material,
+            length,
+            policy,
+        )?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+}
+
+impl HkdfSha1Guest for Component {
+    async fn prepare(
+        input: hkdf_iface::IkmBorrow<'_>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare_sha1(
+            &input.get::<Ikm>().material,
+            &salt,
+            info,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+
+    async fn prepare_from(
+        input: derivation::DeriveInputBorrow<'_>,
+        salt: Vec<u8>,
+        info: Vec<u8>,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare_from_sha1(
+            &input.get::<DeriveInput>().material,
+            &salt,
+            info,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
+    }
+}
+
+impl Pbkdf2Sha1Guest for Component {
+    async fn prepare(
+        input: pbkdf2_iface::PasswordBorrow<'_>,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<derivation::DeriveInput, Error> {
+        let material = webcrypto_impl_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
+            &input.get::<Password>().material,
+            salt,
+            iterations,
+        )?;
+        Ok(derivation::DeriveInput::new(DeriveInput { material }))
     }
 }
 

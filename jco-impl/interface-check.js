@@ -44,7 +44,10 @@ import {
   ed25519Sign,
   ed25519Verify,
   hkdf,
+  hkdfSha1,
   pbkdf2,
+  pbkdf2Sha1,
+  hmacSha1,
   hmacSha2,
   sha2,
   sha1Checked,
@@ -152,6 +155,15 @@ const pbkdf2Interface = pbkdf2;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha2.js")} */
 const hmacSha2Interface = hmacSha2;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha1.js")} */
+const hmacSha1Interface = hmacSha1;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-hkdf-sha1.js")} */
+const hkdfSha1Interface = hkdfSha1;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-pbkdf2-sha1.js")} */
+const pbkdf2Sha1Interface = pbkdf2Sha1;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-sha2.js")} */
 const sha2Interface = sha2;

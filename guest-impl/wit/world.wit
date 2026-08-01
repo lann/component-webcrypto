@@ -32,6 +32,7 @@ world provider {
     export lann:webcrypto/sha2@0.1.0;
     export lann:webcrypto/sha1-checked@0.1.0;
     export lann:webcrypto/hmac-sha2@0.1.0;
+    export lann:webcrypto/hmac-sha1@0.1.0;
     export lann:webcrypto/aes-gcm@0.1.0;
     export lann:webcrypto/aes-cbc@0.1.0;
     export lann:webcrypto/aes-ctr@0.1.0;
@@ -41,7 +42,9 @@ world provider {
     export lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
     export lann:webcrypto/derivation@0.1.0;
     export lann:webcrypto/hkdf@0.1.0;
+    export lann:webcrypto/hkdf-sha1@0.1.0;
     export lann:webcrypto/pbkdf2@0.1.0;
+    export lann:webcrypto/pbkdf2-sha1@0.1.0;
     export lann:webcrypto/key-agreement@0.1.0;
     export lann:webcrypto/x25519@0.1.0;
     export lann:webcrypto/signature@0.1.0;

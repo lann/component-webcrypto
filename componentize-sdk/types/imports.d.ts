@@ -10,6 +10,7 @@
 // truth is that nothing here is verified except by componentizing and
 // running (`just test-webcrypto-componentize-wpt`).
 declare module "lann:webcrypto/hmac-sha2@0.1.0";
+declare module "lann:webcrypto/hmac-sha1@0.1.0";
 declare module "lann:webcrypto/aes-gcm@0.1.0";
 declare module "lann:webcrypto/aes-cbc@0.1.0";
 declare module "lann:webcrypto/aes-ctr@0.1.0";
@@ -18,7 +19,9 @@ declare module "lann:webcrypto/mac@0.1.0";
 declare module "lann:webcrypto/aead@0.1.0";
 declare module "lann:webcrypto/derivation@0.1.0";
 declare module "lann:webcrypto/hkdf@0.1.0";
+declare module "lann:webcrypto/hkdf-sha1@0.1.0";
 declare module "lann:webcrypto/pbkdf2@0.1.0";
+declare module "lann:webcrypto/pbkdf2-sha1@0.1.0";
 declare module "lann:webcrypto/key-agreement@0.1.0";
 declare module "lann:webcrypto/x25519@0.1.0";
 declare module "lann:webcrypto/sha2@0.1.0";

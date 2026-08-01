@@ -108,7 +108,7 @@ what marks where secrets flow.
 
 | Algorithm | Class | Implementation | Residual assumptions |
 | --- | --- | --- | --- |
-| HMAC-SHA-2 (256/384/512) | A | `hmac` + `sha2` (pure ARX-style arithmetic; constant-time `verify_slice`) | None beyond compiler correctness. |
+| HMAC-SHA-2 (256/384/512) and HMAC-SHA-1 | A | `hmac` + `sha2`/`sha1` (pure ARX-style arithmetic; constant-time `verify_slice`) | None beyond compiler correctness. SHA-1 appears only inside the HMAC-family constructions (`hmac-sha1`, `hkdf-sha1`, `pbkdf2-sha1`), where collision resistance is not load-bearing. |
 | AES-GCM (128/256) | C + B | `aes-gcm` with the soft **fixsliced** AES backend (bitsliced, table-free) + masked-multiply GHASH | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | AES-CBC / AES-CTR (128/256, the `cipher` kind) | C | The same fixsliced `aes` block cipher; CBC chaining, arbitrary-width wrapping CTR, and the branch-free PKCS#7 unpad are assembled here | As AES-GCM's AES half. The CBC padding *verdict* is API-visible by design (WebCrypto parity; one uniform error) — the unpad accumulates it without early exits, so timing adds nothing beyond the verdict itself. |
 | ChaCha20-Poly1305 / XChaCha20-Poly1305 | A + B | `chacha20poly1305` (portable software backend: ChaCha20 is pure ARX by construction; Poly1305 is limb-based multiply-accumulate) | Constant-latency integer multiply (Poly1305 only). |

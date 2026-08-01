@@ -16,10 +16,11 @@
 
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
+use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use zeroize::Zeroizing;
 
-use crate::hash::{served_sha2, Sha2};
+use crate::hash::{served_sha2, HmacHash, Sha2};
 use crate::policy::{not_permitted, DerivePolicy};
 use crate::{Error, Sha2Variant};
 
@@ -80,6 +81,7 @@ impl PasswordMaterial {
 
 /// The extracted PRK, held per hash so `expand` needs no re-dispatch.
 enum Prk {
+    Sha1(Hkdf<Sha1>),
     Sha256(Hkdf<Sha256>),
     Sha384(Hkdf<Sha384>),
     Sha512(Hkdf<Sha512>),
@@ -88,6 +90,7 @@ enum Prk {
 impl std::fmt::Debug for Prk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let hash = match self {
+            Prk::Sha1(_) => "SHA-1",
             Prk::Sha256(_) => "SHA-256",
             Prk::Sha384(_) => "SHA-384",
             Prk::Sha512(_) => "SHA-512",
@@ -99,6 +102,7 @@ impl std::fmt::Debug for Prk {
 /// The PBKDF2 PRF: HMAC keyed by the password (the key schedule computed
 /// at `prepare`, the raw password dropped), held per hash.
 enum PbkdfPrf {
+    Sha1(Hmac<Sha1>),
     Sha256(Hmac<Sha256>),
     Sha384(Hmac<Sha384>),
     Sha512(Hmac<Sha512>),
@@ -107,6 +111,7 @@ enum PbkdfPrf {
 impl std::fmt::Debug for PbkdfPrf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let hash = match self {
+            PbkdfPrf::Sha1(_) => "SHA-1",
             PbkdfPrf::Sha256(_) => "SHA-256",
             PbkdfPrf::Sha384(_) => "SHA-384",
             PbkdfPrf::Sha512(_) => "SHA-512",
@@ -152,9 +157,23 @@ impl DeriveInputMaterial {
         salt: &[u8],
         info: Vec<u8>,
     ) -> Result<Self, Error> {
+        Self::prepare_hash(HmacHash::Sha2(served_sha2(variant)?), ikm, salt, info)
+    }
+
+    /// Parameterize an HKDF-SHA-1 derivation (`hkdf-sha1.prepare`).
+    pub fn prepare_sha1(ikm: &IkmMaterial, salt: &[u8], info: Vec<u8>) -> Result<Self, Error> {
+        Self::prepare_hash(HmacHash::Sha1, ikm, salt, info)
+    }
+
+    fn prepare_hash(
+        hash: HmacHash,
+        ikm: &IkmMaterial,
+        salt: &[u8],
+        info: Vec<u8>,
+    ) -> Result<Self, Error> {
         Ok(Self {
             realized: Realized::Hkdf {
-                prk: extract(variant, salt, &ikm.raw)?,
+                prk: extract(hash, salt, &ikm.raw),
                 info,
             },
             policy: ikm.policy,
@@ -173,16 +192,46 @@ impl DeriveInputMaterial {
         salt: Vec<u8>,
         iterations: u32,
     ) -> Result<Self, Error> {
+        Self::prepare_pbkdf2_hash(
+            HmacHash::Sha2(served_sha2(variant)?),
+            password,
+            salt,
+            iterations,
+        )
+    }
+
+    /// Parameterize a PBKDF2-HMAC-SHA-1 derivation (`pbkdf2-sha1.prepare`).
+    pub fn prepare_pbkdf2_sha1(
+        password: &PasswordMaterial,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<Self, Error> {
+        Self::prepare_pbkdf2_hash(HmacHash::Sha1, password, salt, iterations)
+    }
+
+    fn prepare_pbkdf2_hash(
+        hash: HmacHash,
+        password: &PasswordMaterial,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Result<Self, Error> {
         if iterations == 0 {
             return Err(Error::Other(
                 "PBKDF2 requires a positive iteration count".into(),
             ));
         }
         let keyed = "HMAC accepts any key length";
-        let prf = match served_sha2(variant)? {
-            Sha2::Sha256 => PbkdfPrf::Sha256(Hmac::new_from_slice(&password.raw).expect(keyed)),
-            Sha2::Sha384 => PbkdfPrf::Sha384(Hmac::new_from_slice(&password.raw).expect(keyed)),
-            Sha2::Sha512 => PbkdfPrf::Sha512(Hmac::new_from_slice(&password.raw).expect(keyed)),
+        let prf = match hash {
+            HmacHash::Sha1 => PbkdfPrf::Sha1(Hmac::new_from_slice(&password.raw).expect(keyed)),
+            HmacHash::Sha2(Sha2::Sha256) => {
+                PbkdfPrf::Sha256(Hmac::new_from_slice(&password.raw).expect(keyed))
+            }
+            HmacHash::Sha2(Sha2::Sha384) => {
+                PbkdfPrf::Sha384(Hmac::new_from_slice(&password.raw).expect(keyed))
+            }
+            HmacHash::Sha2(Sha2::Sha512) => {
+                PbkdfPrf::Sha512(Hmac::new_from_slice(&password.raw).expect(keyed))
+            }
         };
         Ok(Self {
             realized: Realized::Pbkdf2 {
@@ -215,13 +264,32 @@ impl DeriveInputMaterial {
         salt: &[u8],
         info: Vec<u8>,
     ) -> Result<Self, Error> {
+        Self::prepare_from_hash(HmacHash::Sha2(served_sha2(variant)?), upstream, salt, info)
+    }
+
+    /// Chain an HKDF-SHA-1 derivation from another derivation's output
+    /// (`hkdf-sha1.prepare-from`).
+    pub fn prepare_from_sha1(
+        upstream: &DeriveInputMaterial,
+        salt: &[u8],
+        info: Vec<u8>,
+    ) -> Result<Self, Error> {
+        Self::prepare_from_hash(HmacHash::Sha1, upstream, salt, info)
+    }
+
+    fn prepare_from_hash(
+        hash: HmacHash,
+        upstream: &DeriveInputMaterial,
+        salt: &[u8],
+        info: Vec<u8>,
+    ) -> Result<Self, Error> {
         if !upstream.policy.derive_key {
             return Err(not_permitted("derive-key"));
         }
         let ikm = upstream.natural_output()?;
         Ok(Self {
             realized: Realized::Hkdf {
-                prk: extract(variant, salt, &ikm)?,
+                prk: extract(hash, salt, &ikm),
                 info,
             },
             policy: upstream.policy,
@@ -293,6 +361,7 @@ impl DeriveInputMaterial {
             }
             Realized::Hkdf { prk, info } => {
                 let expanded = match prk {
+                    Prk::Sha1(hk) => hk.expand(info, &mut okm),
                     Prk::Sha256(hk) => hk.expand(info, &mut okm),
                     Prk::Sha384(hk) => hk.expand(info, &mut okm),
                     Prk::Sha512(hk) => hk.expand(info, &mut okm),
@@ -309,6 +378,7 @@ impl DeriveInputMaterial {
                 salt,
                 iterations,
             } => match prf {
+                PbkdfPrf::Sha1(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
                 PbkdfPrf::Sha256(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
                 PbkdfPrf::Sha384(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
                 PbkdfPrf::Sha512(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
@@ -347,6 +417,19 @@ pub fn derive_mac_key(
     let bits = crate::mac::hmac_length_bits(variant, length)?;
     let okm = input.derive_for_key(bits, policy.extractable)?;
     crate::MacKeyMaterial::import(variant, okm.to_vec(), policy)
+}
+
+/// Mint an HMAC-SHA-1 key from a parameterized derivation (the
+/// `hmac-sha1.derive-key` contract; see [`derive_mac_key`]).
+pub fn derive_mac_key_sha1(
+    input: &DeriveInputMaterial,
+    length: Option<u32>,
+    policy: crate::MacPolicy,
+) -> Result<crate::MacKeyMaterial, Error> {
+    policy.check_useful()?;
+    let bits = crate::mac::hmac_length_bits_hash(HmacHash::Sha1, length)?;
+    let okm = input.derive_for_key(bits, policy.extractable)?;
+    crate::MacKeyMaterial::import_sha1(okm.to_vec(), policy)
 }
 
 /// Mint an AES-GCM key from a parameterized derivation (the
@@ -412,19 +495,67 @@ fn pbkdf2_blocks<M: Mac + Clone>(prf: &M, salt: &[u8], iterations: u32, out: &mu
     }
 }
 
-/// HKDF-Extract with `salt` over `ikm`, per the declared variant.
-fn extract(variant: Sha2Variant, salt: &[u8], ikm: &[u8]) -> Result<Prk, Error> {
+/// HKDF-Extract with `salt` over `ikm`, per the declared hash.
+fn extract(hash: HmacHash, salt: &[u8], ikm: &[u8]) -> Prk {
     let salt = (!salt.is_empty()).then_some(salt);
-    Ok(match served_sha2(variant)? {
-        Sha2::Sha256 => Prk::Sha256(Hkdf::new(salt, ikm)),
-        Sha2::Sha384 => Prk::Sha384(Hkdf::new(salt, ikm)),
-        Sha2::Sha512 => Prk::Sha512(Hkdf::new(salt, ikm)),
-    })
+    match hash {
+        HmacHash::Sha1 => Prk::Sha1(Hkdf::new(salt, ikm)),
+        HmacHash::Sha2(Sha2::Sha256) => Prk::Sha256(Hkdf::new(salt, ikm)),
+        HmacHash::Sha2(Sha2::Sha384) => Prk::Sha384(Hkdf::new(salt, ikm)),
+        HmacHash::Sha2(Sha2::Sha512) => Prk::Sha512(Hkdf::new(salt, ikm)),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn full() -> DerivePolicy {
+        DerivePolicy {
+            derive_bits: true,
+            derive_key: true,
+        }
+    }
+
+    // RFC 5869 A.4: the HKDF-SHA-1 known answer through the SHA-1 prepare
+    // entry point.
+    #[test]
+    fn hkdf_sha1_rfc5869_a4() {
+        let ikm = IkmMaterial::import(vec![0x0b; 11], full()).unwrap();
+        let salt: Vec<u8> = (0..=0x0c).collect();
+        let info: Vec<u8> = (0xf0..=0xf9).collect();
+        let input = DeriveInputMaterial::prepare_sha1(&ikm, &salt, info).unwrap();
+        let okm = input.derive_bits(Some(42 * 8)).unwrap();
+        assert_eq!(
+            okm.as_slice(),
+            hex_literal::hex!(
+                "085a01ea1b10f36933068b56efa5ad81a4f14b822f5b091568a9cdd4f155fda2c22e422478d305f3f896"
+            )
+        );
+    }
+
+    // RFC 6070 cases 1 and 3: PBKDF2-HMAC-SHA1 known answers through the
+    // SHA-1 prepare entry point.
+    #[test]
+    fn pbkdf2_sha1_rfc6070() {
+        let password = PasswordMaterial::import(b"password".to_vec(), full()).unwrap();
+        for (iterations, expected) in [
+            (
+                1u32,
+                hex_literal::hex!("0c60c80f961f0e71f3a9b524af6012062fe037a6"),
+            ),
+            (
+                4096,
+                hex_literal::hex!("4b007901b765489abead49d926f721d065a429c1"),
+            ),
+        ] {
+            let input =
+                DeriveInputMaterial::prepare_pbkdf2_sha1(&password, b"salt".to_vec(), iterations)
+                    .unwrap();
+            let okm = input.derive_bits(Some(160)).unwrap();
+            assert_eq!(okm.as_slice(), expected);
+        }
+    }
 
     fn policy_both() -> DerivePolicy {
         DerivePolicy {

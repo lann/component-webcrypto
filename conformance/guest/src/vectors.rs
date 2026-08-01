@@ -2,7 +2,7 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::mint::{
-    import_cbc_key, import_chacha_key, import_hmac_key, import_ikm,
+    import_cbc_key, import_chacha_key, import_hmac_key, import_hmac_sha1_key, import_ikm,
     import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_password,
     import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
@@ -61,14 +61,13 @@ pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
 
 /// Run one HMAC vector under its schedule.
 pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
-    let variant = match case.alg {
-        HmacAlg::Sha256 => Sha2Variant::Sha256,
-        HmacAlg::Sha384 => Sha2Variant::Sha384,
-        HmacAlg::Sha512 => Sha2Variant::Sha512,
-    };
-    let key = import_hmac_key(variant, case.key.clone(), false)
-        .await
-        .map_err(|e| describe("import-key-raw", &e))?;
+    let key = match case.alg {
+        HmacAlg::Sha1 => import_hmac_sha1_key(case.key.clone(), false).await,
+        HmacAlg::Sha256 => import_hmac_key(Sha2Variant::Sha256, case.key.clone(), false).await,
+        HmacAlg::Sha384 => import_hmac_key(Sha2Variant::Sha384, case.key.clone(), false).await,
+        HmacAlg::Sha512 => import_hmac_key(Sha2Variant::Sha512, case.key.clone(), false).await,
+    }
+    .map_err(|e| describe("import-key-raw", &e))?;
     if case.valid {
         let (tag, fed) = sign(&key, &case.msg, case.schedule).await;
         fed.map_err(|e| format!("sign data feeder: {e}"))?;
@@ -94,17 +93,28 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
 /// invalid (`SizeTooLarge`) vectors — expect the RFC 5869 output bound to
 /// fail with `error.other`.
 pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
+    // The SHA-1 arm never reads this (its prepare has no variant); any
+    // served variant placates the initializer.
     let variant = match case.alg {
-        HkdfAlg::Sha256 => Sha2Variant::Sha256,
+        HkdfAlg::Sha1 | HkdfAlg::Sha256 => Sha2Variant::Sha256,
         HkdfAlg::Sha384 => Sha2Variant::Sha384,
         HkdfAlg::Sha512 => Sha2Variant::Sha512,
     };
     let ikm = import_ikm(case.ikm.clone(), true, true)
         .await
         .map_err(|e| describe("import-ikm", &e))?;
-    let input = hkdf::prepare(variant, &ikm, case.salt.clone(), case.info.clone())
-        .await
-        .map_err(|e| describe("prepare", &e))?;
+    let input = match case.alg {
+        HkdfAlg::Sha1 => {
+            lann_webcrypto_guest::bindings::hkdf_sha1::prepare(
+                &ikm,
+                case.salt.clone(),
+                case.info.clone(),
+            )
+            .await
+        }
+        _ => hkdf::prepare(variant, &ikm, case.salt.clone(), case.info.clone()).await,
+    }
+    .map_err(|e| describe("prepare", &e))?;
     let derived = input.derive_bits(Some(case.size * 8)).await;
     if case.valid {
         let okm = derived.map_err(|e| describe("derive-bits", &e))?;
@@ -157,16 +167,25 @@ pub async fn run_x25519_case(case: &X25519Case) -> Result<(), String> {
 /// Run one PBKDF2 vector: derive the declared size and compare.
 pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
     let variant = match case.alg {
-        Pbkdf2Alg::Sha256 => Sha2Variant::Sha256,
+        Pbkdf2Alg::Sha1 | Pbkdf2Alg::Sha256 => Sha2Variant::Sha256,
         Pbkdf2Alg::Sha384 => Sha2Variant::Sha384,
         Pbkdf2Alg::Sha512 => Sha2Variant::Sha512,
     };
     let password = import_password(case.password.clone(), true, true)
         .await
         .map_err(|e| describe("import-password", &e))?;
-    let input = pbkdf2::prepare(variant, &password, case.salt.clone(), case.iterations)
-        .await
-        .map_err(|e| describe("prepare", &e))?;
+    let input = match case.alg {
+        Pbkdf2Alg::Sha1 => {
+            lann_webcrypto_guest::bindings::pbkdf2_sha1::prepare(
+                &password,
+                case.salt.clone(),
+                case.iterations,
+            )
+            .await
+        }
+        _ => pbkdf2::prepare(variant, &password, case.salt.clone(), case.iterations).await,
+    }
+    .map_err(|e| describe("prepare", &e))?;
     let derived = input.derive_bits(Some(case.dk_len * 8)).await;
     if case.valid {
         let dk = derived.map_err(|e| describe("derive-bits", &e))?;
