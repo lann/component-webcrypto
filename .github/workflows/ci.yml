@@ -48,12 +48,14 @@ jobs:
       - name: Run rust checks
         run: just rust-checks
 
-  # The WPT WebCryptoAPI suites against the webcrypto-componentize JS guest
-  # library: componentizes the runner with the pinned componentize-js
-  # (downloaded — see the componentize-js-toolchain workflow), composes it
-  # with a freshly built in-guest provider and driver, and runs it under
-  # wasmtime. Componentizing takes seconds, so the runner is always built
-  # from the tree under test.
+  # The webcrypto-componentize JS guest library's gates: the composed demo
+  # (the JS guest's checks against the in-guest provider, including the
+  # extension-error transport the WPT suites cannot observe) and the WPT
+  # WebCryptoAPI suites. Both componentize from the tree with the pinned
+  # componentize-js (downloaded — see the componentize-js-toolchain
+  # workflow), compose with a freshly built in-guest provider and driver,
+  # and run under wasmtime. Componentizing takes seconds, so the guests are
+  # always built from the tree under test.
   componentize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
