@@ -43,4 +43,6 @@ export const EXPECTED = {
   "import_export/ec_importKey_failures (ECDSA)": { inPassed: 276, inFailed: 0, outPassed: 0, outFailed: 344 },
   "getRandomValues": { inPassed: 39, inFailed: 0, outPassed: 0, outFailed: 0 },
   "randomUUID": { inPassed: 3, inFailed: 0, outPassed: 0, outFailed: 0 },
+  "normalize-algorithm-name": { inPassed: 3, inFailed: 0, outPassed: 0, outFailed: 1 },
+  "crypto_key_cached_slots": { inPassed: 2, inFailed: 0, outPassed: 0, outFailed: 0 },
 };

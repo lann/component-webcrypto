@@ -5733,6 +5733,7 @@ export const KNOWN_LOSSES = [
   "import_export/symmetric_importKey (HMAC, AES-GCM) :: Key data altered during call: 192 bits (raw, {0: 1, 1: 2, 10: 11, 11: 12, 12: 13, 13: 14, 14: 15, 15: 16, 16: 17, 17: 18, 18: 19, 19: 20, 2: 3, 20: 21, 21: 22, 22: 23, 23: 24, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: AES-GCM}, true, [decrypt])",
   "import_export/symmetric_importKey (HMAC, AES-GCM) :: Key data altered during call: 192 bits (raw, {0: 1, 1: 2, 10: 11, 11: 12, 12: 13, 13: 14, 14: 15, 15: 16, 16: 17, 17: 18, 18: 19, 19: 20, 2: 3, 20: 21, 21: 22, 22: 23, 23: 24, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: AES-GCM}, true, [encrypt, decrypt, encrypt, decrypt])",
   "import_export/symmetric_importKey (HMAC, AES-GCM) :: Key data altered during call: 192 bits (raw, {0: 1, 1: 2, 10: 11, 11: 12, 12: 13, 13: 14, 14: 15, 15: 16, 16: 17, 17: 18, 18: 19, 19: 20, 2: 3, 20: 21, 21: 22, 22: 23, 23: 24, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: AES-GCM}, true, [encrypt])",
+  "normalize-algorithm-name :: \"H<U+212A>DF\" does not match \"HKDF\"",
   "sign_verify/ecdsa :: ECDSA P-256 with SHA-1 - Signature has excess padding verification",
   "sign_verify/ecdsa :: ECDSA P-256 with SHA-1 - The signature is all zeroes verification",
   "sign_verify/ecdsa :: ECDSA P-256 with SHA-1 - The signature is empty verification",
