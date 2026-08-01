@@ -140,13 +140,13 @@ is sensitive to the platform only where the platform itself is.
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the
 suites' entry points directly with this library's algorithms (`HMAC`,
-`AES-GCM`, `X25519`), exactly as those drivers do among others. The derive
-groups' subsets follow what the library serves (`runner.js`'s classifiers
-are the authoritative definition): the KDF and OKP-import groups assert
-their served slices, while the cfrg derive suites and the X25519
-generateKey successes stay empty-subset — every test in them crosses
-pkcs8/spki (formats the WIT defers) or the WIT-forced private-key export
-(see the shim header's deviations list), so they meter that gap.
+`AES-GCM`, `X25519`), exactly as those drivers do among others. Each
+group's subset follows what the library serves (`runner.js`'s classifiers
+are the authoritative definition): most groups assert their served slices
+whole, the KDF groups exclude their SHA-1 and unserved-target rows, and
+`sign_verify/ecdsa` stays empty-subset — every test in it needs ECDSA
+signing or a generated pair, which is class D and unserved by composition
+(see the shim header's deviations list), so it meters that gap.
 
 ## How it runs
 

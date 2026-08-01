@@ -1303,6 +1303,17 @@ export class AgreementPublicKey {
     const jwk = await platformCall("jwk public-key export", () => subtle.exportKey("jwk", key));
     return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x });
   }
+
+  /**
+   * The SubjectPublicKeyInfo form, with `exportKeyRaw`'s fallibility.
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeySpki() {
+    const { key } = agreementPublicOf(this);
+    return new Uint8Array(
+      await platformCall("spki public-key export", () => subtle.exportKey("spki", key)),
+    );
+  }
 }
 
 /** @type {WeakMap<AgreementSecretKey, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean, extractable: boolean } }>} */
@@ -1390,6 +1401,31 @@ export class AgreementSecretKey {
 
   extractable() {
     return agreementSecretOf(this).policy.extractable;
+  }
+
+  /**
+   * The private OKP JWK, material members only, behind the
+   * extractability gate.
+   */
+  async exportKeyJwk() {
+    const state = agreementSecretOf(this);
+    if (!state.policy.extractable) throw errNotExtractable();
+    const jwk = await platformCall("jwk secret-key export", () =>
+      subtle.exportKey("jwk", state.key),
+    );
+    return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d });
+  }
+
+  /**
+   * The PKCS#8 form, behind the same gate.
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeyPkcs8() {
+    const state = agreementSecretOf(this);
+    if (!state.policy.extractable) throw errNotExtractable();
+    return new Uint8Array(
+      await platformCall("pkcs8 secret-key export", () => subtle.exportKey("pkcs8", state.key)),
+    );
   }
 }
 
@@ -1479,10 +1515,71 @@ async function generateX25519Key(options) {
 /** The `lann:webcrypto/key-agreement` interface: its resource classes. */
 export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey, SecretKey: AgreementSecretKey };
 
+/**
+ * Import an X25519 public key from a SubjectPublicKeyInfo — a platform
+ * pass-through (the platform validates the DER); the embedded point is
+ * admitted as permissively as the raw import's.
+ * @param {Uint8Array} spki
+ */
+async function importX25519PublicKeySpki(spki) {
+  let key;
+  try {
+    key = await subtle.importKey("spki", asBufferSource(spki), "X25519", true, []);
+  } catch (err) {
+    invalidKey(err, "X25519 spki");
+  }
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an X25519 public key from an OKP public JWK — a platform
+ * pass-through of the material members; strictness of the base64url `x`
+ * is pinned host-side.
+ * @param {string} jwkText
+ */
+async function importX25519PublicKeyJwk(jwkText) {
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  let key;
+  try {
+    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "X25519", true, []);
+  } catch (err) {
+    invalidKey(err, "X25519 public JWK");
+  }
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an X25519 secret key from a PKCS#8 PrivateKeyInfo — a platform
+ * pass-through; the platform owns the DER validation.
+ * @param {Uint8Array} pkcs8
+ * @param {AgreementKeyOptions} options
+ */
+async function importX25519SecretKeyPkcs8(pkcs8, options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "pkcs8",
+      asBufferSource(pkcs8),
+      "X25519",
+      policy.extractable,
+      AGREEMENT_PLATFORM_USAGES,
+    );
+  } catch (err) {
+    invalidKey(err, "X25519 pkcs8");
+  }
+  return new AgreementSecretKey(MINT, key, { ...policy });
+}
+
 /** The `lann:webcrypto/x25519` interface. */
 export const x25519 = {
   importPublicKeyRaw: importX25519PublicKey,
+  importPublicKeySpki: importX25519PublicKeySpki,
+  importPublicKeyJwk: importX25519PublicKeyJwk,
   importSecretKeyJwk: importX25519SecretKeyJwk,
+  importSecretKeyPkcs8: importX25519SecretKeyPkcs8,
   generateKey: generateX25519Key,
 };
 
@@ -1633,6 +1730,48 @@ function aesMinting(Ctor, readPolicy) {
     },
 
     /**
+     * Import an `oct` JWK as the declared AES variant (the
+     * `import-key-jwk` contract of both minting interfaces). The platform
+     * validates the JWK's internal consistency (`kty`, strict base64url
+     * `k`, `alg` against `k`'s length, `ext` against the options'
+     * extractability); the variant check is against the imported key's
+     * platform-computed length, since the platform cannot know the
+     * declared variant.
+     * @param {string} variant
+     * @param {string} jwk
+     * @param {O} options
+     */
+    async importKeyJwk(variant, jwk, options) {
+      const policy = readPolicy(options);
+      const usages = aeadUsages(policy);
+      const lengthBits = aesVariantByteLength(variant) * 8;
+      const material = jwkMaterial(jwk);
+      requireStrictBase64url(material.k);
+      let key;
+      try {
+        key = await subtle.importKey(
+          "jwk",
+          material,
+          { name: "AES-GCM" },
+          policy.extractable,
+          usages,
+        );
+      } catch (err) {
+        invalidKey(err, `${variant} JWK`);
+      }
+      // The variant check derives from `k` (exact once the platform
+      // accepted the encoding), not `key.algorithm.length`, which an
+      // engine may omit for an imported key (see `MacKey`'s field doc).
+      const gotBits = jwkKeyBytes(material.k) * 8;
+      if (gotBits !== lengthBits) {
+        throw errInvalidKey(
+          `JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`,
+        );
+      }
+      return new Ctor(key, lengthBits);
+    },
+
+    /**
      * Generate a fresh random AES key of the declared variant. A variant
      * this implementation declines throws `{ tag: 'unsupported', val }`.
      * @param {string} variant
@@ -1650,52 +1789,12 @@ function aesMinting(Ctor, readPolicy) {
   };
 }
 
-/**
- * Import an `oct` JWK as an AES-GCM key of the declared variant (the
- * `aes-gcm.import-key-jwk` contract). The platform validates the JWK's
- * internal consistency (`kty`, strict base64url `k`, `alg` against `k`'s
- * length, `ext` against the options' extractability); the variant check is
- * against the imported key's platform-computed length, since the platform
- * cannot know the declared variant.
- * @param {string} variant
- * @param {string} jwk
- * @param {AeadKeyOptions} options
- */
-async function importAesKeyJwk(variant, jwk, options) {
-  const policy = aeadPolicy(options);
-  const usages = aeadUsages(policy);
-  const lengthBits = aesVariantByteLength(variant) * 8;
-  const material = jwkMaterial(jwk);
-  requireStrictBase64url(material.k);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      material,
-      { name: "AES-GCM" },
-      policy.extractable,
-      usages,
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} JWK`);
-  }
-  // The variant check derives from `k` (exact once the platform accepted
-  // the encoding), not `key.algorithm.length`, which an engine may omit
-  // for an imported key (see `MacKey`'s field doc).
-  const gotBits = jwkKeyBytes(material.k) * 8;
-  if (gotBits !== lengthBits) {
-    throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
-  }
-  return new AeadKey(key, lengthBits);
-}
-
 /** The `lann:webcrypto/aead` interface: its resource classes. */
 export const aead = { AeadKey, AeadKeyOptions };
 
 /** The `lann:webcrypto/aes-gcm` interface. */
 export const aesGcm = {
   ...aesMinting(AeadKey, aeadPolicy),
-  importKeyJwk: importAesKeyJwk,
   /**
    * Mint an AES-GCM key from a parameterized derivation (the
    * `aes-gcm.derive-key` contract): the platform's `deriveKey` chain, at
@@ -1930,6 +2029,14 @@ export class InternalNonceKey {
    */
   async exportKeyRaw() {
     return exportRawGated(this.#key);
+  }
+
+  /**
+   * The key as an `oct` JWK (the `internal-nonce-key.export-key-jwk`
+   * contract), behind the same extractability gate as `exportKeyRaw`.
+   */
+  async exportKeyJwk() {
+    return exportJwkGated(this.#key);
   }
 }
 
@@ -2218,6 +2325,49 @@ function jwkKeyBytes(k) {
 const B64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /**
+ * Decode strict unpadded base64url (validated by
+ * `requireStrictBase64url` first), for the JWK members whose bytes this
+ * host's own predicates need (the Ed25519 strict point check).
+ * @param {string} text
+ * @returns {Uint8Array}
+ */
+function b64urlDecode(text) {
+  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let buffer = 0;
+  let bits = 0;
+  let at = 0;
+  for (const ch of text) {
+    buffer = (buffer << 6) | B64URL_ALPHABET.indexOf(ch);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[at++] = (buffer >> bits) & 0xff;
+    }
+  }
+  return out;
+}
+
+/**
+ * The fixed 12-byte SubjectPublicKeyInfo prefix of an RFC 8410 key
+ * (SEQUENCE, algorithm OID, 33-byte BIT STRING with zero unused bits):
+ * the whole structure is constant-shape, so extraction is a prefix
+ * compare, not a DER parser. The last byte is the OID's — 0x6e X25519,
+ * 0x70 Ed25519.
+ * @param {number} oidTail
+ * @param {Uint8Array} spki
+ * @param {string} what
+ * @returns {Uint8Array} the embedded 32-byte public key
+ */
+function rfc8410SpkiKey(oidTail, spki, what) {
+  const prefix = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, oidTail, 0x03, 0x21, 0x00];
+  const ok = spki.length === 44 && prefix.every((byte, i) => spki[i] === byte);
+  if (!ok) {
+    throw errInvalidKey(`${what}: not an RFC 8410 SubjectPublicKeyInfo`);
+  }
+  return spki.slice(12);
+}
+
+/**
  * Enforce the contract's strict unpadded base64url on a JWK `k` before the
  * platform sees it: some platforms are lenient here (Node accepts padding),
  * and the WIT contract pins strictness so implementations cannot diverge
@@ -2386,10 +2536,42 @@ const ECDSA_VARIANTS = Object.assign(Object.create(null), {
     scalarLength: 32,
     signatureLength: 64,
   },
+  "p256-sha384": {
+    name: "ECDSA",
+    namedCurve: "P-256",
+    hash: "SHA-384",
+    publicLength: 65,
+    scalarLength: 32,
+    signatureLength: 64,
+  },
+  "p256-sha512": {
+    name: "ECDSA",
+    namedCurve: "P-256",
+    hash: "SHA-512",
+    publicLength: 65,
+    scalarLength: 32,
+    signatureLength: 64,
+  },
+  "p384-sha256": {
+    name: "ECDSA",
+    namedCurve: "P-384",
+    hash: "SHA-256",
+    publicLength: 97,
+    scalarLength: 48,
+    signatureLength: 96,
+  },
   "p384-sha384": {
     name: "ECDSA",
     namedCurve: "P-384",
     hash: "SHA-384",
+    publicLength: 97,
+    scalarLength: 48,
+    signatureLength: 96,
+  },
+  "p384-sha512": {
+    name: "ECDSA",
+    namedCurve: "P-384",
+    hash: "SHA-512",
     publicLength: 97,
     scalarLength: 48,
     signatureLength: 96,
@@ -2525,6 +2707,29 @@ export class VerifyingKey {
       await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
     );
   }
+
+  /**
+   * The SubjectPublicKeyInfo form, with `exportKeyRaw`'s fallibility.
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeySpki() {
+    return new Uint8Array(
+      await platformCall("spki key export", () => subtle.exportKey("spki", this.#key)),
+    );
+  }
+
+  /**
+   * The public JWK (OKP for Ed25519, EC for ECDSA), material members only
+   * per the package-wide JWK contract.
+   */
+  async exportKeyJwk() {
+    const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", this.#key));
+    return JSON.stringify(
+      jwk.kty === "OKP"
+        ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x }
+        : { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+    );
+  }
 }
 
 /**
@@ -2631,6 +2836,33 @@ export class SigningKey {
   /** The `sign` grant: a projection of the `CryptoKey`'s own usage list. */
   canSign() {
     return this.#privateKey.usages.includes("sign");
+  }
+
+  /**
+   * The private JWK, material members only, behind the extractability
+   * gate (checked on the `CryptoKey` itself, like `exportRawGated`).
+   */
+  async exportKeyJwk() {
+    if (!this.#privateKey.extractable) throw errNotExtractable();
+    const jwk = await platformCall("jwk key export", () =>
+      subtle.exportKey("jwk", this.#privateKey),
+    );
+    return JSON.stringify(
+      jwk.kty === "OKP"
+        ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d }
+        : { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d },
+    );
+  }
+
+  /**
+   * The PKCS#8 form, behind the same gate.
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeyPkcs8() {
+    if (!this.#privateKey.extractable) throw errNotExtractable();
+    return new Uint8Array(
+      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", this.#privateKey)),
+    );
   }
 }
 
@@ -2767,8 +2999,55 @@ async function importEd25519VerifyingKey(raw) {
 /** The `lann:webcrypto/signature` interface: its resource classes. */
 export const signature = { VerifyingKey, SigningKey, SigningKeyOptions };
 
+/**
+ * Import an Ed25519 public key from a SubjectPublicKeyInfo: the embedded
+ * point runs the same strict predicate as the raw import, then the
+ * original DER goes to the platform verbatim.
+ * @param {Uint8Array} spki
+ */
+async function importEd25519VerifyingKeySpki(spki) {
+  const point = rfc8410SpkiKey(0x70, spki, "Ed25519");
+  if (!ed25519PointStrict(point)) {
+    throw errInvalidKey("non-canonical or small-order Ed25519 public key");
+  }
+  let key;
+  try {
+    key = await subtle.importKey("spki", asBufferSource(spki), "Ed25519", true, ["verify"]);
+  } catch (err) {
+    invalidKey(err, "Ed25519 spki");
+  }
+  return new VerifyingKey(key, ED25519_ALGORITHM);
+}
+
+/**
+ * Import an Ed25519 public key from an OKP public JWK: `x` is decoded for
+ * the strict predicate; the JWK itself goes to the platform (which owns
+ * the kty/crv/ext validation), stripped of the consumer-policy members.
+ * @param {string} jwkText
+ */
+async function importEd25519VerifyingKeyJwk(jwkText) {
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  if (typeof jwk.x !== "string" || !ed25519PointStrict(b64urlDecode(jwk.x))) {
+    throw errInvalidKey("non-canonical or small-order Ed25519 public key");
+  }
+  let key;
+  try {
+    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "Ed25519", true, [
+      "verify",
+    ]);
+  } catch (err) {
+    invalidKey(err, "Ed25519 public JWK");
+  }
+  return new VerifyingKey(key, ED25519_ALGORITHM);
+}
+
 /** The `lann:webcrypto/ed25519-verify` interface. */
-export const ed25519Verify = { importVerifyingKeyRaw: importEd25519VerifyingKey };
+export const ed25519Verify = {
+  importVerifyingKeyRaw: importEd25519VerifyingKey,
+  importVerifyingKeySpki: importEd25519VerifyingKeySpki,
+  importVerifyingKeyJwk: importEd25519VerifyingKeyJwk,
+};
 
 /**
  * Generate a fresh Ed25519 signing key, returning `[signing, verifying]`.
@@ -2789,8 +3068,63 @@ async function generateEd25519Key(options) {
   ];
 }
 
+/**
+ * Import an Ed25519 signing key from a PKCS#8 PrivateKeyInfo — a platform
+ * pass-through; the platform owns the DER validation.
+ * @param {Uint8Array} pkcs8
+ * @param {SigningKeyOptions} options
+ */
+async function importEd25519SigningKeyPkcs8(pkcs8, options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  let key;
+  try {
+    key = await subtle.importKey("pkcs8", asBufferSource(pkcs8), "Ed25519", policy.extractable, [
+      "sign",
+    ]);
+  } catch (err) {
+    invalidKey(err, "Ed25519 pkcs8");
+  }
+  return new SigningKey(key, ED25519_ALGORITHM);
+}
+
+/**
+ * Import an Ed25519 signing key from an OKP private JWK. The platform
+ * cannot promise the `x`-matches-`d` consistency check (the WIT MAY);
+ * strictness of the base64url members is pinned host-side.
+ * @param {string} jwkText
+ * @param {SigningKeyOptions} options
+ */
+async function importEd25519SigningKeyJwk(jwkText, options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.d);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      "Ed25519",
+      policy.extractable,
+      ["sign"],
+    );
+  } catch (err) {
+    invalidKey(err, "Ed25519 private JWK");
+  }
+  if (key.type !== "private") {
+    throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
+  }
+  return new SigningKey(key, ED25519_ALGORITHM);
+}
+
 /** The `lann:webcrypto/ed25519-sign` interface. */
-export const ed25519Sign = { generateKey: generateEd25519Key };
+export const ed25519Sign = {
+  generateKey: generateEd25519Key,
+  importSigningKeyPkcs8: importEd25519SigningKeyPkcs8,
+  importSigningKeyJwk: importEd25519SigningKeyJwk,
+};
 
 /**
  * Import an uncompressed-SEC1 ECDSA public key of the declared variant.
@@ -2819,8 +3153,63 @@ async function importEcdsaVerifyingKey(variant, raw) {
   return new VerifyingKey(key, entry);
 }
 
+/**
+ * Import an ECDSA public key from a SubjectPublicKeyInfo — a platform
+ * pass-through; the platform validates the DER and rejects a curve that
+ * disagrees with the declared variant's.
+ * @param {string} variant
+ * @param {Uint8Array} spki
+ */
+async function importEcdsaVerifyingKeySpki(variant, spki) {
+  const entry = ecdsaVariant(variant);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "spki",
+      asBufferSource(spki),
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      true,
+      ["verify"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} spki`);
+  }
+  return new VerifyingKey(key, entry);
+}
+
+/**
+ * Import an ECDSA public key from an EC public JWK — a platform
+ * pass-through of the material members; the platform owns the kty/crv/
+ * coordinate validation (including on-curve).
+ * @param {string} variant
+ * @param {string} jwkText
+ */
+async function importEcdsaVerifyingKeyJwk(variant, jwkText) {
+  const entry = ecdsaVariant(variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.y);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      true,
+      ["verify"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} public JWK`);
+  }
+  return new VerifyingKey(key, entry);
+}
+
 /** The `lann:webcrypto/ecdsa-verify` interface. */
-export const ecdsaVerify = { importVerifyingKeyRaw: importEcdsaVerifyingKey };
+export const ecdsaVerify = {
+  importVerifyingKeyRaw: importEcdsaVerifyingKey,
+  importVerifyingKeySpki: importEcdsaVerifyingKeySpki,
+  importVerifyingKeyJwk: importEcdsaVerifyingKeyJwk,
+};
 
 /**
  * Generate a fresh ECDSA signing key of the declared variant, returning
@@ -2842,5 +3231,69 @@ async function generateEcdsaKey(variant, options) {
   return [new SigningKey(pair.privateKey, entry), new VerifyingKey(pair.publicKey, entry)];
 }
 
+/**
+ * Import an ECDSA signing key from a PKCS#8 PrivateKeyInfo of the declared
+ * variant's curve — a platform pass-through.
+ * @param {string} variant
+ * @param {Uint8Array} pkcs8
+ * @param {SigningKeyOptions} options
+ */
+async function importEcdsaSigningKeyPkcs8(variant, pkcs8, options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const entry = ecdsaVariant(variant);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "pkcs8",
+      asBufferSource(pkcs8),
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      policy.extractable,
+      ["sign"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} pkcs8`);
+  }
+  return new SigningKey(key, entry);
+}
+
+/**
+ * Import an ECDSA signing key from an EC private JWK — a platform
+ * pass-through; the platform owns the d-in-range and point-consistency
+ * validation the WIT requires of EC private JWKs.
+ * @param {string} variant
+ * @param {string} jwkText
+ * @param {SigningKeyOptions} options
+ */
+async function importEcdsaSigningKeyJwk(variant, jwkText, options) {
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const entry = ecdsaVariant(variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.y);
+  requireStrictBase64url(jwk.d);
+  let key;
+  try {
+    key = await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      { name: "ECDSA", namedCurve: entry.namedCurve },
+      policy.extractable,
+      ["sign"],
+    );
+  } catch (err) {
+    invalidKey(err, `${variant} private JWK`);
+  }
+  if (key.type !== "private") {
+    throw errInvalidKey("EC private JWK must carry `d` (base64url private scalar)");
+  }
+  return new SigningKey(key, entry);
+}
+
 /** The `lann:webcrypto/ecdsa-sign` interface. */
-export const ecdsaSign = { generateKey: generateEcdsaKey };
+export const ecdsaSign = {
+  generateKey: generateEcdsaKey,
+  importSigningKeyPkcs8: importEcdsaSigningKeyPkcs8,
+  importSigningKeyJwk: importEcdsaSigningKeyJwk,
+};

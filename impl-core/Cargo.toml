@@ -39,12 +39,19 @@ chacha20poly1305 = "0.10"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
 # guest-impl's README timing-channel classification).
-ed25519-dalek = "2"
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
 # X25519 agreement; static_secrets because imported/held secret keys are the
 # point of the key-agreement kind (dalek gates non-ephemeral use behind it).
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
-p256 = { version = "0.13", features = ["ecdsa"] }
-p384 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+# The DER carriers for the spki/pkcs8 key formats: the EC paths ride the
+# curve crates' own encoders, while the RFC 8410 forms (Ed25519, X25519)
+# are assembled here — the crates' exports write v2 keypairs, and the
+# interchange form every platform accepts is v1.
+pkcs8 = { version = "0.10", features = ["alloc"] }
+spki = { version = "0.7", features = ["alloc"] }
+der = { version = "0.7", features = ["alloc"] }
 # Key and nonce generation (native OS entropy, or the target's WASI random
 # backend in-guest).
 getrandom = "0.3"

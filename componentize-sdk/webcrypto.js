@@ -5,7 +5,8 @@
 //
 // The surface mirrors `crypto.subtle` for the supported algorithms:
 //
-//   - `importKey` / `exportKey` ("raw" and "jwk" formats)
+//   - `importKey` / `exportKey` ("raw", "jwk", "spki", and "pkcs8"
+//     formats)
 //   - `generateKey`
 //   - `sign` / `verify`         (HMAC over SHA-256/384/512; Ed25519;
 //     ECDSA P-256/P-384 verification)
@@ -38,34 +39,16 @@
 //     `NotSupportedError` — including SHA-1 as a KDF hash, AES-192 (which
 //     every implementation of the package declines), and the derived-key
 //     targets the WIT's `derive-key` mints do not span (AES-CBC/CTR/KW).
-//   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
-//     others throw `NotSupportedError`. X25519 public keys import as
-//     `"raw"` only (the WIT's public format); a public OKP JWK import
-//     throws `NotSupportedError`. Signature public keys likewise import
-//     and export as `"raw"` only (the WIT verifying-key's format).
-//   - Unserved by composition: ECDSA signing and key generation. The
-//     interface exists (`ecdsa-sign`), but it is class D and the in-guest
-//     provider this library composes with withholds it, so the world
-//     cannot import it without failing every composition at `wac plug`
-//     time. `NotSupportedError`, with the reason in the message.
+//   - Unserved by composition: ECDSA signing, key generation, and
+//     private-key import. The interface exists (`ecdsa-sign`), but it is
+//     class D and the in-guest provider this library composes with
+//     withholds it, so the world cannot import it without failing every
+//     composition at `wac plug` time. `NotSupportedError`, with the
+//     reason in the message.
 //   - WIT-forced: an empty HKDF key imports on the platform but not here —
 //     `hkdf.import-ikm` rejects empty input keying material by ruling
 //     (`wit/README.md`, "Design notes": a zero-entropy IKM is never what a
 //     caller meant), so it fails with `DataError` instead.
-//   - WIT-forced: an extractable private key does not export, and Ed25519
-//     private keys do not import either — the package's signing and
-//     agreement private keys are deliberately generate-only surfaces
-//     (`wit/README.md`, "Design notes"; X25519's OKP JWK import is the
-//     one recorded exception, and a fallible export can return
-//     additively). `exportKey("jwk", privateKey)` throws
-//     `NotSupportedError` where the platform returns the JWK.
-//     (`exportKey("raw", privateKey)` throws `InvalidAccessError` exactly
-//     as the platform does: raw export is public-only by spec.)
-//   - WIT-forced: ECDSA binds curve and hash at mint (`wit/README.md`,
-//     "Design notes": a granted key cannot be downgraded to a weaker
-//     digest), so `verify` with a per-operation hash other than the
-//     mint-bound one throws `NotSupportedError` where the platform
-//     computes it.
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
@@ -74,7 +57,11 @@
 //     "QuotaExceededError").
 //
 // AES-GCM's per-call IV lengths and `tagLength`s are carried by
-// `aead-key.seal`/`open`'s parameters, so they are not deviations. The WIT
+// `aead-key.seal`/`open`'s parameters, so they are not deviations. Neither
+// is ECDSA's per-operation `verify` hash: the WIT binds curve and hash at
+// mint, and the `ecdsa-variant` enum carries the SHA-2 cross pairings of
+// the served curves, so this library keeps a verifying key's public point
+// and mints the (curve, hash) binding a `verify` call asks for on demand. The WIT
 // grants do not ride this library's derive mints: a WIT `derive-input`'s
 // grants gate `derive-bits` and cap extractable `derive-key` mints, while
 // the platform's usage checks live on the *base key* and carry no cap — so
@@ -561,19 +548,65 @@ const USAGES = {
 };
 
 /**
- * The WIT `ecdsa-variant` (and its mint-bound hash) for each WebCrypto
- * named curve: the WIT binds curve and hash at mint — a deliberate
- * departure from WebCrypto's per-operation hash, recorded in
- * `wit/README.md`'s design notes — so each curve carries its natural
- * pairing. P-521 is declared by the WIT and served by no implementation;
+ * The WIT `ecdsa-variant` curve tags and each curve's natural hash (the
+ * binding used where an operation carries no hash of its own: key
+ * import). P-521 is declared by the WIT and served by no implementation;
  * it is passed through so the WIT's own `unsupported` renders it.
- * @type {Readonly<Record<string, { variant: string, hash: string } | undefined>>}
+ * @type {Readonly<Record<string, { tag: string, hash: string } | undefined>>}
  */
 const ECDSA_CURVES = {
-  "P-256": { variant: "p256-sha256", hash: "SHA-256" },
-  "P-384": { variant: "p384-sha384", hash: "SHA-384" },
-  "P-521": { variant: "p521-sha512", hash: "SHA-512" },
+  "P-256": { tag: "p256", hash: "SHA-256" },
+  "P-384": { tag: "p384", hash: "SHA-384" },
+  "P-521": { tag: "p521", hash: "SHA-512" },
 };
+
+/**
+ * The WIT `ecdsa-variant` for a (curve, hash) pairing. The enum carries
+ * the SHA-2 cross products of P-256/P-384 and `p521-sha512` only; a hash
+ * outside the pairing set is `NotSupportedError` (the WIT cannot mint the
+ * binding).
+ * @param {{ tag: string }} curve
+ * @param {string} hashName a registry-spelled hash name
+ * @returns {string}
+ */
+function ecdsaVariantFor(curve, hashName) {
+  const suffix = { "SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512" }[hashName];
+  if (suffix === undefined || (curve.tag === "p521" && suffix !== "sha512")) {
+    throw dom("NotSupportedError", `unsupported ECDSA hash ${hashName} for this curve`);
+  }
+  return `${curve.tag}-${suffix}`;
+}
+
+/**
+ * The per-hash reminting state of an ECDSA public `CryptoKey`: the WIT
+ * binds curve and hash at mint, so serving WebCrypto's per-operation
+ * `verify` hash means holding the public point and minting the (curve,
+ * hash) binding a call asks for, cached per hash. `handles` starts with
+ * the import-time binding under the curve's natural hash.
+ * @type {WeakMap<CryptoKey, { point: Uint8Array, curve: { tag: string }, handles: Map<string, any> }>}
+ */
+const ECDSA_PUBLIC_STATE = new WeakMap();
+
+/**
+ * The WIT verifying-key handle of an ECDSA public key under `hashName`,
+ * minted from the stored point on first use.
+ * @param {CryptoKey} key
+ * @param {string} hashName
+ * @returns {Promise<any>}
+ */
+async function ecdsaHandleFor(key, hashName) {
+  const state = ECDSA_PUBLIC_STATE.get(key);
+  if (state === undefined) {
+    throw new TypeError("not an ECDSA public CryptoKey minted by this library");
+  }
+  let handle = state.handles.get(hashName);
+  if (handle === undefined) {
+    const variant = ecdsaVariantFor(state.curve, hashName);
+    handle = await callImport(ecdsaVerify.importVerifyingKeyRaw(variant, state.point));
+    state.handles.set(hashName, handle);
+  }
+  return handle;
+}
 
 /**
  * The registry name of a per-operation hash, for the ECDSA mint-bound
@@ -843,6 +876,12 @@ function jwkForImport(keyData, use, usages) {
  */
 function jwkForExport(jwkText, key) {
   const jwk = /** @type {JsonWebKey} */ (JSON.parse(jwkText));
+  if (key.algorithm.name === "Ed25519") {
+    // The one algorithm whose JWK export carries `alg` — always the
+    // algorithm name, whatever alg the import carried (w3c/webcrypto#401;
+    // ECDH-family and ECDSA exports set none).
+    jwk.alg = "Ed25519";
+  }
   jwk.key_ops = [...key.usages];
   jwk.ext = key.extractable;
   return jwk;
@@ -930,11 +969,8 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   // Algorithm normalization precedes the format gate, the spec's order: a
   // malformed algorithm is a TypeError even alongside an unserved format.
   const alg = normalizeAlgorithm(algorithm);
-  if (format !== "raw" && format !== "jwk") {
-    throw dom(
-      "NotSupportedError",
-      `unsupported key format ${format}; only "raw" and "jwk" are served`,
-    );
+  if (format !== "raw" && format !== "jwk" && format !== "spki" && format !== "pkcs8") {
+    throw new TypeError(`${format} is not a KeyFormat`);
   }
 
   if (alg.name === "HKDF" || alg.name === "PBKDF2") {
@@ -957,26 +993,41 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   }
 
   if (alg.name === "X25519") {
-    if (format === "raw") {
-      // The platform's raw X25519 import is public-only, and public keys
-      // carry no usages.
+    if (format === "raw" || format === "spki") {
+      // Both public formats: public keys carry no usages.
       const requested = normalizeUsageSequence(keyUsages);
       if (requested.length !== 0) {
         throw dom("SyntaxError", "X25519 public keys take no usages");
       }
-      const handle = await callImport(x25519Iface.importPublicKeyRaw(bytesOf(keyData, "keyData")));
+      const raw = bytesOf(keyData, "keyData");
+      const handle = await callImport(
+        format === "raw"
+          ? x25519Iface.importPublicKeyRaw(raw)
+          : x25519Iface.importPublicKeySpki(raw),
+      );
       return mintKey(handle, "public", { name: "X25519" }, !!extractable, []);
+    }
+    if (format === "pkcs8") {
+      const usages = normalizeUsages(keyUsages, "X25519");
+      const handle = await callImport(
+        x25519Iface.importSecretKeyPkcs8(
+          bytesOf(keyData, "keyData"),
+          agreementMintOptions(!!extractable),
+        ),
+      );
+      return mintKey(handle, "private", { name: "X25519" }, !!extractable, usages);
     }
     if (typeof keyData !== "object" || keyData === null) {
       throw new TypeError("JWK key data must be an object");
     }
     const jwk = /** @type {JsonWebKey} */ (keyData);
     if (jwk.d === undefined) {
-      // Unserved: the WIT's public import format is the raw u-coordinate.
-      throw dom(
-        "NotSupportedError",
-        "X25519 public keys import as \"raw\"; the public OKP JWK form is not served",
-      );
+      const requested = normalizeUsageSequence(keyUsages);
+      if (requested.length !== 0) {
+        throw dom("SyntaxError", "X25519 public keys take no usages");
+      }
+      const handle = await callImport(x25519Iface.importPublicKeyJwk(jwkForImport(jwk, "enc", [])));
+      return mintKey(handle, "public", { name: "X25519" }, !!extractable, []);
     }
     const usages = normalizeUsages(keyUsages, "X25519");
     const handle = await callImport(
@@ -989,32 +1040,91 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   }
 
   if (alg.name === "Ed25519" || alg.name === "ECDSA") {
-    // Only public verifying keys import: signing keys are generate-only
-    // surfaces (WIT-forced; see the header), and the WIT's public format
-    // is raw (32-byte Ed25519 point; uncompressed SEC1 for ECDSA).
-    if (format !== "raw") {
-      throw dom(
-        "NotSupportedError",
-        `${alg.name} keys import as "raw" public keys only; ${format} is not served`,
-      );
+    /** @type {string | undefined} */
+    let namedCurve;
+    /** @type {{ tag: string, hash: string } | undefined} */
+    let curve;
+    if (alg.name === "ECDSA") {
+      namedCurve = typeof alg.namedCurve === "string" ? alg.namedCurve : undefined;
+      curve = namedCurve === undefined ? undefined : ECDSA_CURVES[namedCurve];
+      if (namedCurve === undefined || curve === undefined) {
+        throw dom("NotSupportedError", `unsupported ECDSA namedCurve ${alg.namedCurve}`);
+      }
     }
+
+    // A JWK carrying `d` and the PKCS#8 format are private imports; the
+    // other forms are public.
+    /** @type {JsonWebKey | undefined} */
+    let jwk;
+    if (format === "jwk") {
+      if (typeof keyData !== "object" || keyData === null) {
+        throw new TypeError("JWK key data must be an object");
+      }
+      jwk = /** @type {JsonWebKey} */ (keyData);
+    }
+    if (format === "pkcs8" || jwk?.d !== undefined) {
+      if (alg.name === "ECDSA") {
+        // Unserved by composition: `ecdsa-sign` is class D, withheld by
+        // the in-guest provider this library composes with (see the
+        // header).
+        throw dom(
+          "NotSupportedError",
+          "ECDSA private-key import is not served: ecdsa-sign is class D",
+        );
+      }
+      const usages = normalizeUsages(keyUsages, "Ed25519");
+      if (usages.includes("verify")) {
+        throw dom("SyntaxError", "verify is not valid for private signature keys");
+      }
+      const options = new SigningKeyOptions();
+      options.canSign(true);
+      options.extractable(!!extractable);
+      const handle = await callImport(
+        format === "pkcs8"
+          ? ed25519Sign.importSigningKeyPkcs8(bytesOf(keyData, "keyData"), options)
+          : ed25519Sign.importSigningKeyJwk(jwkForImport(jwk, "sig", usages), options),
+      );
+      return mintKey(handle, "private", { name: "Ed25519" }, !!extractable, usages);
+    }
+
     const usages = verifyOnlyUsages(keyUsages);
-    const raw = bytesOf(keyData, "keyData");
     if (alg.name === "Ed25519") {
-      const handle = await callImport(ed25519Verify.importVerifyingKeyRaw(raw));
+      const handle = await callImport(
+        format === "jwk"
+          ? ed25519Verify.importVerifyingKeyJwk(jwkForImport(jwk, "sig", usages))
+          : format === "spki"
+            ? ed25519Verify.importVerifyingKeySpki(bytesOf(keyData, "keyData"))
+            : ed25519Verify.importVerifyingKeyRaw(bytesOf(keyData, "keyData")),
+      );
       return mintKey(handle, "public", { name: "Ed25519" }, !!extractable, usages);
     }
-    const namedCurve = typeof alg.namedCurve === "string" ? alg.namedCurve : undefined;
-    const curve = namedCurve === undefined ? undefined : ECDSA_CURVES[namedCurve];
-    if (namedCurve === undefined || curve === undefined) {
-      throw dom("NotSupportedError", `unsupported ECDSA namedCurve ${alg.namedCurve}`);
-    }
-    const handle = await callImport(ecdsaVerify.importVerifyingKeyRaw(curve.variant, raw));
+    // ECDSA public keys keep their point for per-operation-hash reminting
+    // (see `ECDSA_PUBLIC_STATE`); the import-time binding uses the curve's
+    // natural hash.
+    const boundCurve = /** @type {{ tag: string, hash: string }} */ (curve);
+    const variant = ecdsaVariantFor(boundCurve, boundCurve.hash);
+    const handle = await callImport(
+      format === "jwk"
+        ? ecdsaVerify.importVerifyingKeyJwk(variant, jwkForImport(jwk, "sig", usages))
+        : format === "spki"
+          ? ecdsaVerify.importVerifyingKeySpki(variant, bytesOf(keyData, "keyData"))
+          : ecdsaVerify.importVerifyingKeyRaw(variant, bytesOf(keyData, "keyData")),
+    );
+    const point = /** @type {Uint8Array} */ (await callImport(handle.exportKeyRaw()));
     /** @type {EcKeyAlgorithm} */
-    const projected = { name: "ECDSA", namedCurve };
-    return mintKey(handle, "public", projected, !!extractable, usages);
+    const projected = { name: "ECDSA", namedCurve: /** @type {string} */ (namedCurve) };
+    const key = mintKey(handle, "public", projected, !!extractable, usages);
+    ECDSA_PUBLIC_STATE.set(key, {
+      point,
+      curve: boundCurve,
+      handles: new Map([[boundCurve.hash, handle]]),
+    });
+    return key;
   }
 
+  if (format === "spki" || format === "pkcs8") {
+    throw dom("NotSupportedError", `${alg.name} keys do not use the ${format} format`);
+  }
   const usages = normalizeUsages(keyUsages, alg.name);
 
   if (alg.name === "HMAC") {
@@ -1182,11 +1292,8 @@ async function generateKey(algorithm, extractable, keyUsages) {
  * @returns {Promise<ArrayBuffer | JsonWebKey>}
  */
 async function exportKey(format, key) {
-  if (format !== "raw" && format !== "jwk") {
-    throw dom(
-      "NotSupportedError",
-      `unsupported key format ${format}; only "raw" and "jwk" are served`,
-    );
+  if (format !== "raw" && format !== "jwk" && format !== "spki" && format !== "pkcs8") {
+    throw new TypeError(`${format} is not a KeyFormat`);
   }
   if (!(key instanceof CryptoKey)) {
     throw new TypeError("key must be a CryptoKey");
@@ -1194,27 +1301,32 @@ async function exportKey(format, key) {
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
   }
-  if (key.type === "private") {
-    if (format === "raw") {
-      // The spec's raw export is public-only for every asymmetric family.
-      throw dom("InvalidAccessError", "raw export serves public keys only");
+  if (format === "spki" || format === "pkcs8") {
+    if (key.type === "secret") {
+      // The spec defines neither DER format for the symmetric families.
+      throw dom("NotSupportedError", `${key.algorithm.name} keys do not use the ${format} format`);
     }
-    // WIT-forced (see the header): private keys are generate-only surfaces,
-    // so there is no export path behind this call.
-    throw dom(
-      "NotSupportedError",
-      "private-key export is not served: the package's private keys are generate-only",
-    );
-  }
-  if (format === "jwk") {
-    if (key.algorithm.name === "Ed25519" || key.algorithm.name === "ECDSA") {
-      // Unserved: the WIT verifying-key exports its raw public format only
-      // (a JWK export can return additively).
+    // Each DER format serves exactly one half of a pair, by spec.
+    if (format === "spki" ? key.type !== "public" : key.type !== "private") {
       throw dom(
-        "NotSupportedError",
-        `${key.algorithm.name} public keys export as "raw" only; the JWK form is not served`,
+        "InvalidAccessError",
+        format === "spki"
+          ? "spki export serves public keys only"
+          : "pkcs8 export serves private keys only",
       );
     }
+    const der = /** @type {Uint8Array} */ (
+      await callImport(
+        format === "spki" ? handleOf(key).exportKeySpki() : handleOf(key).exportKeyPkcs8(),
+      )
+    );
+    return toArrayBuffer(der);
+  }
+  if (format === "raw" && key.type === "private") {
+    // The spec's raw export is public-only for every asymmetric family.
+    throw dom("InvalidAccessError", "raw export serves public keys only");
+  }
+  if (format === "jwk") {
     const jwkText = /** @type {string} */ (await callImport(handleOf(key).exportKeyJwk()));
     return jwkForExport(jwkText, key);
   }
@@ -1265,20 +1377,11 @@ async function verify(algorithm, key, signature, data) {
       throw dom("InvalidAccessError", "verification requires a public key");
     }
     requireUsage(key, "verify");
-    const handle = handleOf(key);
-    if (alg.name === "ECDSA") {
-      // The WIT binds curve and hash at mint (a recorded design ruling —
-      // WIT-forced, see the header), so a per-operation hash other than
-      // the key's bound one is not servable.
-      const requested = hashNameOf(alg.hash);
-      const bound = /** @type {string | undefined} */ (handle.algorithmHash());
-      if (requested !== bound) {
-        throw dom(
-          "NotSupportedError",
-          `this key verifies with its mint-bound ${bound}; per-operation ${requested} is not served`,
-        );
-      }
-    }
+    // The WIT binds curve and hash at mint, so ECDSA's per-operation hash
+    // is served by minting the requested (curve, hash) binding from the
+    // key's stored point (see `ecdsaHandleFor`).
+    const handle =
+      alg.name === "ECDSA" ? await ecdsaHandleFor(key, hashNameOf(alg.hash)) : handleOf(key);
     const sig = bytesOf(signature, "signature");
     try {
       await callFed((rx) => handle.verify(rx, sig), bytesOf(data, "data"));

@@ -21,14 +21,24 @@ interface ecdsa-verify {
     use types.{error};
     use signature.{verifying-key};
 
-    /// The served curve/digest pairings — the matched pairs of FIPS 186-5
-    /// deployment practice. Mixed pairings (e.g. P-256 with SHA-384) are
-    /// deliberately unrepresentable.
+    /// The served curve/digest pairings. Every variant still binds its
+    /// hash at mint — a key can never be used with a digest its minter did
+    /// not choose — but the cross pairings of the served curves and SHA-2
+    /// digests are representable, as WebCrypto's per-operation hash makes
+    /// them on the platform.
     enum ecdsa-variant {
         /// NIST P-256 (secp256r1) with SHA-256.
         p256-sha256,
+        /// NIST P-256 with SHA-384.
+        p256-sha384,
+        /// NIST P-256 with SHA-512.
+        p256-sha512,
+        /// NIST P-384 with SHA-256.
+        p384-sha256,
         /// NIST P-384 (secp384r1) with SHA-384.
         p384-sha384,
+        /// NIST P-384 with SHA-512.
+        p384-sha512,
         /// NIST P-521 (secp521r1) with SHA-512. Declared because the
         /// WebCrypto registry serves it and enum growth is breaking; no
         /// current implementation of this package serves it — expect
@@ -43,6 +53,24 @@ interface ecdsa-verify {
     /// curve — fails with `error.invalid-key`. `verifying-key.export-key-raw`
     /// returns this same form.
     import-verifying-key-raw: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
+
+    /// Import a public key as an X.509 SubjectPublicKeyInfo (DER). The
+    /// encoded curve must match the declared variant's, or the import
+    /// fails with `error.invalid-key`; a point not on the curve is always
+    /// rejected. An uncompressed point is always accepted; whether a
+    /// *compressed* encoding is accepted is implementation-defined, as it
+    /// is across WebCrypto engines — do not rely on either behavior.
+    import-verifying-key-spki: async func(%variant: ecdsa-variant, spki: list<u8>) -> result<verifying-key, error>;
+
+    /// Import a public key as an EC JWK (`kty: "EC"`, with `crv`, `x`,
+    /// and `y`). `jwk` is the JWK as JSON text; see
+    /// `mac-key.export-key-jwk` for the package-wide JWK contract. The
+    /// JWK's `crv` must match the declared variant's curve
+    /// (`error.invalid-key` otherwise), and an `alg` member, when
+    /// present, must be the curve's JOSE signature alg (`"ES256"` for
+    /// P-256, `"ES384"` for P-384) — curve-determined, so it does not
+    /// vary with the variant's mint-bound hash.
+    import-verifying-key-jwk: async func(%variant: ecdsa-variant, jwk: string) -> result<verifying-key, error>;
 }
 
 /// ECDSA signing-key minting (FIPS 186-5).
@@ -54,12 +82,12 @@ interface ecdsa-verify {
 ///   then fail at composition time (see `README.md`, "Timing-channel
 ///   policy"). Host-backed providers serve it.
 ///
-/// Signing keys are generate-only: there is deliberately no raw-scalar
-/// import or export. Bare scalars are not real interchange, and they force
-/// platform-backed hosts onto private-only PKCS#8 import, the one EC
-/// import shape whose platform behavior is unspecified and inconsistent
-/// across engines (w3c/webcrypto#356). Private-key import returns with the
-/// PKCS#8/JWK format work (see `README.md`, "Design notes").
+/// Signing keys import as PKCS#8 or an EC private JWK — the platform
+/// pass-through formats — and never as bare scalars (no platform door;
+/// see `README.md`, "Design notes", the format-admission rule). Imports
+/// return only the signing key: the public half is never derived from a
+/// private import (the w3c/webcrypto#356 gap), so importers needing it
+/// supply it separately via `ecdsa-verify`.
 ///
 /// Note the signature is not deterministic across implementations: RFC
 /// 6979 (deterministic) and randomized-k implementations both verify, but
@@ -73,4 +101,18 @@ interface ecdsa-sign {
     /// returning both halves — the only point at which every provider is
     /// guaranteed to have the public key on hand.
     generate-key: async func(%variant: ecdsa-variant, options: signing-key-options) -> result<tuple<signing-key, verifying-key>, error>;
+
+    /// Import a signing key as a PKCS#8 PrivateKeyInfo (DER, the SEC1
+    /// private-key body). The encoded curve must match the declared
+    /// variant's (`error.invalid-key`); an embedded public key, when
+    /// present, is validated against the scalar and never trusted on its
+    /// own. Returns only the signing key (see the interface doc).
+    import-signing-key-pkcs8: async func(%variant: ecdsa-variant, pkcs8: list<u8>, options: signing-key-options) -> result<signing-key, error>;
+
+    /// Import a signing key as an EC private JWK (`kty: "EC"`, with
+    /// `crv`, `d`, and the mandatory public coordinates `x`/`y`, which
+    /// implementations MAY validate against `d` and MUST NOT trust).
+    /// `crv` and `alg` are validated as in `import-verifying-key-jwk`.
+    /// See `mac-key.export-key-jwk` for the package-wide JWK contract.
+    import-signing-key-jwk: async func(%variant: ecdsa-variant, jwk: string, options: signing-key-options) -> result<signing-key, error>;
 }

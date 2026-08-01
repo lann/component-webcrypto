@@ -408,6 +408,12 @@ interface aead-internal-nonce {
         /// does not travel with the material; see the minting interfaces'
         /// import docs.
         export-key-raw: async func() -> result<list<u8>, error>;
+
+        /// The key as an `oct` JWK, behind the same extractability gate
+        /// as `export-key-raw`; algorithms without a registered JWK `alg`
+        /// fail `error.unsupported`, as on `aead-key.export-key-jwk`. The
+        /// nonce budget does not travel with the material.
+        export-key-jwk: async func() -> result<string, error>;
     }
 }
 
@@ -537,6 +543,16 @@ interface signature {
         /// its encoding fails with `error.other` (see `README.md`,
         /// "Extractability").
         export-key-raw: async func() -> result<list<u8>, error>;
+
+        /// The public key as an X.509 SubjectPublicKeyInfo (DER), with
+        /// the same fallibility as `export-key-raw`.
+        export-key-spki: async func() -> result<list<u8>, error>;
+
+        /// The public key as a JWK (an RFC 8037 OKP public key for
+        /// Ed25519, an EC public key for ECDSA). See
+        /// `mac-key.export-key-jwk` for the package-wide JWK contract;
+        /// the same fallibility as `export-key-raw` applies.
+        export-key-jwk: async func() -> result<string, error>;
     }
 
     /// A private key. `sign` is one-shot on the immutable key, mirroring
@@ -558,14 +574,25 @@ interface signature {
         /// See `verifying-key.algorithm-hash`.
         algorithm-hash: func() -> option<string>;
 
-        /// Whether the private key material may be exported. There is no
-        /// export operation on this resource today; the getter records
-        /// mint-time policy that future format-specific exports and
-        /// platform-backed key storage honor.
+        /// Whether the export functions may return this key's material.
+        /// Mint-time recorded policy, which platform-backed key storage
+        /// also honors.
         extractable: func() -> bool;
 
         /// Whether this key permits `sign`. A refused operation fails
         /// `error.not-permitted`.
         can-sign: func() -> bool;
+
+        /// The private key as a JWK (an RFC 8037 OKP private key for
+        /// Ed25519, an EC private key for ECDSA). Fails
+        /// `error.not-extractable` unless the key was minted extractable;
+        /// fallible beyond the gate like every export (`README.md`,
+        /// "Extractability"). See `mac-key.export-key-jwk` for the
+        /// package-wide JWK contract.
+        export-key-jwk: async func() -> result<string, error>;
+
+        /// The private key as a PKCS#8 PrivateKeyInfo (DER), behind the
+        /// same extractability gate as `export-key-jwk`.
+        export-key-pkcs8: async func() -> result<list<u8>, error>;
     }
 }

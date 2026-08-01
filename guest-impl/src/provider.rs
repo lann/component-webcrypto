@@ -654,6 +654,10 @@ impl GuestPublicKey for AgreementPublicKey {
     async fn export_key_jwk(&self) -> Result<String, Error> {
         Ok(self.material.export_jwk())
     }
+
+    async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export_spki())
+    }
 }
 
 /// An exported `key-agreement.secret-key`: the shared core's X25519 secret
@@ -689,12 +693,47 @@ impl GuestSecretKey for AgreementSecretKey {
     fn extractable(&self) -> bool {
         self.material.policy().extractable
     }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
+
+    async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export_pkcs8()?)
+    }
 }
 
 impl X25519Guest for Component {
     async fn import_public_key_raw(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
         let material = webcrypto_impl_core::AgreementPublicMaterial::import(&raw)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_public_key_spki(
+        spki: Vec<u8>,
+    ) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import_spki(&spki)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_public_key_jwk(jwk: String) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import_jwk(&jwk)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_secret_key_pkcs8(
+        pkcs8: Vec<u8>,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = webcrypto_impl_core::AgreementSecretMaterial::import_pkcs8(&pkcs8, policy)?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
     }
@@ -927,6 +966,10 @@ impl GuestInternalNonceKey for InternalNonceKey {
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
 }
 
 // --- aes-gcm-internal-nonce (key minting) ----------------------------------------
@@ -939,6 +982,18 @@ impl AesGcmInternalNonceGuest for Component {
     ) -> Result<ExportedInternalNonceKey, Error> {
         let policy = options.get::<InternalNonceKeyOptions>().policy.get();
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into())?;
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
+    }
+
+    async fn import_key_jwk(
+        variant: AesVariant,
+        jwk: String,
+        options: ExportedInternalNonceKeyOptions,
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy.into())?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
         )))
@@ -1052,6 +1107,14 @@ impl GuestVerifyingKey for VerifyingKey {
         // in-process, so it never errs.
         Ok(self.public.export())
     }
+
+    async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.public.export_spki())
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.public.export_jwk())
+    }
 }
 
 /// An exported `signing-key`: the shared core's signing-key material. On
@@ -1088,6 +1151,14 @@ impl GuestSigningKey for SigningKey {
     fn can_sign(&self) -> bool {
         self.material.can_sign()
     }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
+
+    async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export_pkcs8()?)
+    }
 }
 
 // --- ed25519 (key minting) -----------------------------------------------------
@@ -1097,6 +1168,18 @@ impl Ed25519VerifyGuest for Component {
         raw: Vec<u8>,
     ) -> Result<signature_iface::VerifyingKey, Error> {
         let public = SigPublic::import_ed25519(&raw)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_spki(
+        spki: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_ed25519_spki(&spki)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_jwk(jwk: String) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_ed25519_jwk(&jwk)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
 }
@@ -1113,6 +1196,24 @@ impl Ed25519SignGuest for Component {
             signature_iface::VerifyingKey::new(VerifyingKey { public }),
         ))
     }
+
+    async fn import_signing_key_pkcs8(
+        pkcs8: Vec<u8>,
+        options: signature_iface::SigningKeyOptions,
+    ) -> Result<signature_iface::SigningKey, Error> {
+        let policy = options.get::<SigningKeyOptions>().policy.get();
+        let material = SigningKeyMaterial::import_ed25519_pkcs8(&pkcs8, policy)?;
+        Ok(signature_iface::SigningKey::new(SigningKey { material }))
+    }
+
+    async fn import_signing_key_jwk(
+        jwk: String,
+        options: signature_iface::SigningKeyOptions,
+    ) -> Result<signature_iface::SigningKey, Error> {
+        let policy = options.get::<SigningKeyOptions>().policy.get();
+        let material = SigningKeyMaterial::import_ed25519_jwk(&jwk, policy)?;
+        Ok(signature_iface::SigningKey::new(SigningKey { material }))
+    }
 }
 
 // --- ecdsa (verification-key minting only; signing is class D) ------------------
@@ -1123,6 +1224,22 @@ impl EcdsaVerifyGuest for Component {
         raw: Vec<u8>,
     ) -> Result<signature_iface::VerifyingKey, Error> {
         let public = SigPublic::import_ecdsa(variant.into(), &raw)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_spki(
+        variant: EcdsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_ecdsa_spki(variant.into(), &spki)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_jwk(
+        variant: EcdsaVariant,
+        jwk: String,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_ecdsa_jwk(variant.into(), &jwk)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
 }

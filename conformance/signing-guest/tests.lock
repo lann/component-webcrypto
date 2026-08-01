@@ -7,4 +7,7 @@ cases = [
     { name = "probe/ecdsa-p384-generate-roundtrip" },
     { name = "probe/ecdsa-sign-extractable-getter" },
     { name = "probe/ecdsa-p521-unsupported" },
+    { name = "probe/ecdsa-private-format-imports" },
+    { name = "probe/ecdsa-signing-key-exports" },
+    { name = "probe/ecdsa-cross-hash-sign-roundtrip" },
 ]

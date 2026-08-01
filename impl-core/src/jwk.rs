@@ -59,7 +59,8 @@ pub struct OkpPrivate {
 }
 
 /// Parse an OKP private JWK (RFC 8037 §2), validate it against the
-/// declared curve and the requested extractability, and return the
+/// declared curve, `allowed_algs` (see `check_alg`), and the requested
+/// extractability, and return the
 /// decoded `x`/`d` pair (every failure is `invalid-key`). Curve-specific
 /// validation — lengths, `x`-matches-`d` — stays with the caller, which
 /// knows the curve.
@@ -67,9 +68,11 @@ pub fn parse_okp_private(
     jwk: &str,
     expected_crv: &str,
     extractable: bool,
+    allowed_algs: Option<&[&str]>,
 ) -> Result<OkpPrivate, Error> {
     let jwk = parse_object(jwk)?;
     require_kty(&jwk, "OKP")?;
+    check_alg(&jwk, allowed_algs)?;
 
     match jwk.get("crv") {
         Some(Value::String(crv)) if crv == expected_crv => {}
@@ -99,6 +102,136 @@ pub fn parse_okp_private(
     })
 }
 
+/// Parse an OKP *public* JWK (RFC 8037 §2: `kty`, `crv`, `x`; a present
+/// `d` is rejected — a caller holding private material meant the private
+/// import), validated against the declared curve and `allowed_algs` (see
+/// `check_alg`), returning the decoded public coordinate (every failure
+/// is `invalid-key`). A public JWK carrying `"ext": false` is rejected:
+/// the minted public-key resources are unconditionally exportable, so
+/// admitting one would violate the JWK's own restriction.
+pub fn parse_okp_public(
+    jwk: &str,
+    expected_crv: &str,
+    allowed_algs: Option<&[&str]>,
+) -> Result<Vec<u8>, Error> {
+    let jwk = parse_object(jwk)?;
+    require_kty(&jwk, "OKP")?;
+    require_crv(&jwk, expected_crv)?;
+    check_alg(&jwk, allowed_algs)?;
+    check_ext(&jwk, true)?;
+    if jwk.get("d").is_some() {
+        return Err(Error::InvalidKey(
+            "JWK carries `d`; import it as a private key".into(),
+        ));
+    }
+    let Some(Value::String(x)) = jwk.get("x") else {
+        return Err(Error::InvalidKey(
+            "OKP JWK must carry `x` (base64url public key)".into(),
+        ));
+    };
+    decode_member("x", x)
+}
+
+/// The decoded members of an EC JWK (RFC 7518 §6.2): the public
+/// coordinates, and `d` for the private form.
+#[derive(Debug)]
+pub struct EcJwk {
+    pub x: Vec<u8>,
+    pub y: Vec<u8>,
+    /// Unread on wasm targets: the sole consumer is ECDSA private import,
+    /// whose code is compiled out there (class D — see the crate doc).
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    pub d: Option<zeroize::Zeroizing<Vec<u8>>>,
+}
+
+/// Parse an EC JWK, validated against the declared curve and — for the
+/// private form — the requested extractability. `private` selects the
+/// form: the public form rejects a present `d`, the private form requires
+/// it. Coordinate lengths and curve membership stay with the caller,
+/// which knows the curve.
+pub fn parse_ec(
+    jwk: &str,
+    expected_crv: &str,
+    private: bool,
+    extractable: bool,
+    allowed_algs: Option<&[&str]>,
+) -> Result<EcJwk, Error> {
+    let jwk = parse_object(jwk)?;
+    require_kty(&jwk, "EC")?;
+    require_crv(&jwk, expected_crv)?;
+    check_alg(&jwk, allowed_algs)?;
+    // The public form takes the same `"ext": false` rejection as
+    // `parse_okp_public`, and for the same reason.
+    check_ext(&jwk, if private { extractable } else { true })?;
+    let Some(Value::String(x)) = jwk.get("x") else {
+        return Err(Error::InvalidKey(
+            "EC JWK must carry `x` (base64url coordinate)".into(),
+        ));
+    };
+    let Some(Value::String(y)) = jwk.get("y") else {
+        return Err(Error::InvalidKey(
+            "EC JWK must carry `y` (base64url coordinate)".into(),
+        ));
+    };
+    let d = match (private, jwk.get("d")) {
+        (false, None) => None,
+        (false, Some(_)) => {
+            return Err(Error::InvalidKey(
+                "JWK carries `d`; import it as a private key".into(),
+            ))
+        }
+        (true, Some(Value::String(d))) => Some(zeroize::Zeroizing::new(decode_member("d", d)?)),
+        (true, _) => {
+            return Err(Error::InvalidKey(
+                "EC private JWK must carry `d` (base64url private key)".into(),
+            ))
+        }
+    };
+    Ok(EcJwk {
+        x: decode_member("x", x)?,
+        y: decode_member("y", y)?,
+        d,
+    })
+}
+
+/// Build the EC public JWK (RFC 7518 §6.2.1): exactly the material-bearing
+/// members.
+pub fn build_ec_public(crv: &str, x: &[u8], y: &[u8]) -> String {
+    serde_json::json!({
+        "kty": "EC",
+        "crv": crv,
+        "x": URL_SAFE_NO_PAD.encode(x),
+        "y": URL_SAFE_NO_PAD.encode(y),
+    })
+    .to_string()
+}
+
+/// Build the EC private JWK (RFC 7518 §6.2.2): the public members plus `d`.
+/// Unused on wasm targets: the sole caller is ECDSA private export, whose
+/// code is compiled out there (class D — see the crate doc).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub fn build_ec_private(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
+    serde_json::json!({
+        "kty": "EC",
+        "crv": crv,
+        "x": URL_SAFE_NO_PAD.encode(x),
+        "y": URL_SAFE_NO_PAD.encode(y),
+        "d": URL_SAFE_NO_PAD.encode(d),
+    })
+    .to_string()
+}
+
+/// Require the JWK's `crv` member to be exactly `expected`.
+fn require_crv(jwk: &serde_json::Map<String, Value>, expected: &str) -> Result<(), Error> {
+    match jwk.get("crv") {
+        Some(Value::String(crv)) if crv == expected => Ok(()),
+        Some(Value::String(crv)) => Err(Error::InvalidKey(format!(
+            "JWK crv is {crv:?}, not {expected:?}"
+        ))),
+        _ => Err(Error::InvalidKey("JWK must carry a string `crv`".into())),
+    }
+}
+
 /// Parse the JWK's JSON envelope: a JSON object, by `JSON.parse` semantics.
 fn parse_object(jwk: &str) -> Result<serde_json::Map<String, Value>, Error> {
     let jwk: Value = serde_json::from_str(jwk)
@@ -122,6 +255,24 @@ fn require_kty(jwk: &serde_json::Map<String, Value>, expected: &str) -> Result<(
 
 /// Validate `ext` against the requested extractability (the import
 /// contract: `ext: false` conflicts with an extractable import).
+/// Validate a JWK `alg` member against the algorithm interface's accepted
+/// values. `None` means the member is ignored entirely (the WebCrypto rule
+/// for ECDH-family imports, which X25519 follows); `Some` accepts an
+/// absent member or any listed value, case-sensitively.
+fn check_alg(jwk: &serde_json::Map<String, Value>, allowed: Option<&[&str]>) -> Result<(), Error> {
+    let Some(allowed) = allowed else {
+        return Ok(());
+    };
+    match jwk.get("alg") {
+        None => Ok(()),
+        Some(Value::String(alg)) if allowed.contains(&alg.as_str()) => Ok(()),
+        Some(Value::String(alg)) => Err(Error::InvalidKey(format!(
+            "JWK alg is {alg:?}, not one of {allowed:?}"
+        ))),
+        Some(_) => Err(Error::InvalidKey("JWK `alg` must be a string".into())),
+    }
+}
+
 fn check_ext(jwk: &serde_json::Map<String, Value>, extractable: bool) -> Result<(), Error> {
     match jwk.get("ext") {
         None => Ok(()),
@@ -163,9 +314,6 @@ pub fn build_okp_public(crv: &str, x: &[u8]) -> String {
 }
 
 /// Build the OKP private JWK (RFC 8037 §2): the public members plus `d`.
-/// Test-only: the package defines no secret-key export, so production code
-/// only ever parses this form.
-#[cfg(test)]
 pub fn build_okp_private(crv: &str, x: &[u8], d: &[u8]) -> String {
     serde_json::json!({
         "kty": "OKP",
@@ -263,16 +411,51 @@ mod tests {
                 Err(Error::InvalidKey(_))
             ));
             assert!(matches!(
-                parse_okp_private(jwk, "X25519", false),
+                parse_okp_private(jwk, "X25519", false, None),
                 Err(Error::InvalidKey(_))
             ));
         }
     }
 
     #[test]
+    fn public_jwk_ext_false_is_rejected() {
+        // Minted public keys are unconditionally exportable, so a public
+        // JWK restricting extractability cannot be honored.
+        let okp = r#"{"kty":"OKP","crv":"X25519","x":"AQID","ext":false}"#;
+        assert!(matches!(
+            parse_okp_public(okp, "X25519", None),
+            Err(Error::InvalidKey(_))
+        ));
+        let ec = r#"{"kty":"EC","crv":"P-256","x":"AQID","y":"AQID","ext":false}"#;
+        assert!(matches!(
+            parse_ec(ec, "P-256", false, false, None),
+            Err(Error::InvalidKey(_))
+        ));
+    }
+
+    #[test]
+    fn alg_validates_against_the_allowed_list() {
+        for alg in ["Ed25519", "EdDSA"] {
+            let jwk = format!(r#"{{"kty":"OKP","crv":"Ed25519","x":"AQID","alg":"{alg}"}}"#);
+            assert!(parse_okp_public(&jwk, "Ed25519", Some(&["Ed25519", "EdDSA"])).is_ok());
+        }
+        // Wrong case and wrong value are both rejected, case-sensitively.
+        for alg in ["ed25519", "ED25519", "ES256"] {
+            let jwk = format!(r#"{{"kty":"OKP","crv":"Ed25519","x":"AQID","alg":"{alg}"}}"#);
+            assert!(matches!(
+                parse_okp_public(&jwk, "Ed25519", Some(&["Ed25519", "EdDSA"])),
+                Err(Error::InvalidKey(_))
+            ));
+        }
+        // `None` ignores the member entirely (the ECDH-family import rule).
+        let jwk = r#"{"kty":"OKP","crv":"X25519","x":"AQID","alg":"anything"}"#;
+        assert!(parse_okp_public(jwk, "X25519", None).is_ok());
+    }
+
+    #[test]
     fn okp_round_trip() {
         let jwk = build_okp_private("X25519", &[1; 32], &[2; 32]);
-        let okp = parse_okp_private(&jwk, "X25519", true).unwrap();
+        let okp = parse_okp_private(&jwk, "X25519", true, None).unwrap();
         assert_eq!(okp.x, vec![1; 32]);
         assert_eq!(okp.d.as_slice(), &[2; 32]);
     }
@@ -282,14 +465,15 @@ mod tests {
         // Wrong curve, wrong kty, missing x, missing d, ext conflict.
         let jwk = build_okp_private("Ed25519", &[1; 32], &[2; 32]);
         assert!(matches!(
-            parse_okp_private(&jwk, "X25519", false),
+            parse_okp_private(&jwk, "X25519", false, None),
             Err(Error::InvalidKey(_))
         ));
         assert!(matches!(
             parse_okp_private(
                 r#"{"kty":"oct","crv":"X25519","x":"AQID","d":"AQID"}"#,
                 "X25519",
-                false
+                false,
+                None
             ),
             Err(Error::InvalidKey(_))
         ));
@@ -297,7 +481,8 @@ mod tests {
             parse_okp_private(
                 r#"{"kty":"OKP","crv":"X25519","d":"AQID"}"#,
                 "X25519",
-                false
+                false,
+                None
             ),
             Err(Error::InvalidKey(_))
         ));
@@ -305,7 +490,8 @@ mod tests {
             parse_okp_private(
                 r#"{"kty":"OKP","crv":"X25519","x":"AQID"}"#,
                 "X25519",
-                false
+                false,
+                None
             ),
             Err(Error::InvalidKey(_))
         ));
@@ -313,7 +499,8 @@ mod tests {
             parse_okp_private(
                 r#"{"kty":"OKP","crv":"X25519","x":"AQID","d":"AQID","ext":false}"#,
                 "X25519",
-                true
+                true,
+                None
             ),
             Err(Error::InvalidKey(_))
         ));
@@ -322,7 +509,8 @@ mod tests {
             parse_okp_private(
                 r#"{"kty":"OKP","crv":"X25519","x":"AQI=","d":"AQID"}"#,
                 "X25519",
-                false
+                false,
+                None
             ),
             Err(Error::InvalidKey(_))
         ));

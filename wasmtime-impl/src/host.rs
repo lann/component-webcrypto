@@ -677,6 +677,13 @@ impl<T: Send> HostPublicKeyWithStore<T> for WasiWebcrypto {
         with_resource(accessor, self_, |key| Ok(key.material.export_jwk())).await
     }
 
+    async fn export_key_spki(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementPublicKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.material.export_spki())).await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<AgreementPublicKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -715,6 +722,26 @@ impl<T: Send> HostSecretKeyWithStore<T> for WasiWebcrypto {
         mint(accessor, material.map(|material| DeriveInput { material })).await
     }
 
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementSecretKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<AgreementSecretKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_pkcs8().map_err(Error::from)
+        })
+        .await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<AgreementSecretKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -733,6 +760,44 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         mint(
             accessor,
             material.map(|material| AgreementPublicKey { material }),
+        )
+        .await
+    }
+
+    async fn import_public_key_spki(
+        accessor: &Accessor<T, Self>,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import_spki(&spki);
+        mint(
+            accessor,
+            material.map(|material| AgreementPublicKey { material }),
+        )
+        .await
+    }
+
+    async fn import_public_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material = webcrypto_impl_core::AgreementPublicMaterial::import_jwk(&jwk);
+        mint(
+            accessor,
+            material.map(|material| AgreementPublicKey { material }),
+        )
+        .await
+    }
+
+    async fn import_secret_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = webcrypto_impl_core::AgreementSecretMaterial::import_pkcs8(&pkcs8, policy);
+        mint(
+            accessor,
+            material.map(|material| AgreementSecretKey { material }),
         )
         .await
     }
@@ -1095,6 +1160,16 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<InternalNonceKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<InternalNonceKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -1113,6 +1188,24 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into());
+        mint(
+            accessor,
+            material.map(|material| InternalNonceKey {
+                material,
+                sealed: 0,
+            }),
+        )
+        .await
+    }
+
+    async fn import_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: aes_gcm_iface::AesVariant,
+        jwk: String,
+        options: Resource<crate::InternalNonceKeyOptions>,
+    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy.into());
         mint(
             accessor,
             material.map(|material| InternalNonceKey {
@@ -1223,6 +1316,20 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         with_resource(accessor, self_, |key| Ok(key.public.export())).await
     }
 
+    async fn export_key_spki(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<VerifyingKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.public.export_spki())).await
+    }
+
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<VerifyingKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.public.export_jwk())).await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<VerifyingKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -1291,6 +1398,26 @@ impl<T: Send> signature_iface::HostSigningKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<SigningKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<SigningKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_pkcs8().map_err(Error::from)
+        })
+        .await
+    }
+
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<SigningKey>) -> Result<()> {
         drop_resource(accessor, rep).await
     }
@@ -1309,6 +1436,22 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
         let public = SigPublic::import_ed25519(&raw);
         mint(accessor, public.map(|public| VerifyingKey { public })).await
     }
+
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_ed25519_spki(&spki);
+        mint(accessor, public.map(|public| VerifyingKey { public })).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_ed25519_jwk(&jwk);
+        mint(accessor, public.map(|public| VerifyingKey { public })).await
+    }
 }
 
 impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
@@ -1324,6 +1467,26 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
             Err(err) => return Ok(Err(err.into())),
         };
         mint_key_pair(accessor, material).await
+    }
+
+    async fn import_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_ed25519_pkcs8(&pkcs8, policy);
+        mint(accessor, material.map(|material| SigningKey { material })).await
+    }
+
+    async fn import_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_ed25519_jwk(&jwk, policy);
+        mint(accessor, material.map(|material| SigningKey { material })).await
     }
 }
 
@@ -1355,6 +1518,24 @@ impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
         let public = SigPublic::import_ecdsa(variant.into(), &raw);
         mint(accessor, public.map(|public| VerifyingKey { public })).await
     }
+
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_ecdsa_spki(variant.into(), &spki);
+        mint(accessor, public.map(|public| VerifyingKey { public })).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_ecdsa_jwk(variant.into(), &jwk);
+        mint(accessor, public.map(|public| VerifyingKey { public })).await
+    }
 }
 
 impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
@@ -1371,6 +1552,28 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
             Err(err) => return Ok(Err(err.into())),
         };
         mint_key_pair(accessor, material).await
+    }
+
+    async fn import_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_ecdsa_pkcs8(variant.into(), &pkcs8, policy);
+        mint(accessor, material.map(|material| SigningKey { material })).await
+    }
+
+    async fn import_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: ecdsa_verify_iface::EcdsaVariant,
+        jwk: String,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_ecdsa_jwk(variant.into(), &jwk, policy);
+        mint(accessor, material.map(|material| SigningKey { material })).await
     }
 }
 
