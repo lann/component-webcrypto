@@ -140,6 +140,7 @@ relative path.
 | --- | --- |
 | `sign_verify/hmac` | `hmac.https.any.js` (reference), `hmac.js`, `hmac_vectors.js` |
 | `encrypt_decrypt/aes_gcm` (96-bit iv) | `aes_gcm.https.any.js` (reference), `aes.js`, `aes_gcm_vectors.js`, `aes_gcm_96_iv_fixtures.js` |
+| `encrypt_decrypt/aes_gcm` (256-bit iv) | `aes_gcm_256_iv.https.any.js` (reference), `aes_gcm_256_iv_fixtures.js` (the shared `aes.js` runner and `aes_gcm_vectors.js`) |
 | `encrypt_decrypt/aes_cbc` | `aes_cbc.https.any.js` (reference), `aes_cbc_vectors.js` (the shared `aes.js` runner) |
 | `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |

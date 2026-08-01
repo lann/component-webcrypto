@@ -149,6 +149,8 @@ gen_suites() {
     cat "$V"/helpers.js "$V"/hmac_vectors.js "$V"/hmac.js > "$B"/group-hmac.js
     echo 'export { run_test };' >> "$B"/group-hmac.js
     cat "$V"/helpers.js "$V"/aes_gcm_96_iv_fixtures.js "$V"/aes_gcm_vectors.js "$V"/aes.js > "$B"/group-aes-gcm.js
+    cat "$V"/helpers.js "$V"/aes_gcm_256_iv_fixtures.js "$V"/aes_gcm_vectors.js "$V"/aes.js > "$B"/group-aes-gcm-256-iv.js
+    echo 'export { run_test };' >> "$B"/group-aes-gcm-256-iv.js
     cat "$V"/helpers.js "$V"/aes_cbc_vectors.js "$V"/aes.js > "$B"/group-aes-cbc.js
     echo 'export { run_test };' >> "$B"/group-aes-cbc.js
     cat "$V"/helpers.js "$V"/aes_ctr_vectors.js "$V"/aes.js > "$B"/group-aes-ctr.js
