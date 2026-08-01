@@ -156,6 +156,8 @@ just wpt-parity              # the WPT suites against the platform's own
                              #   crypto.subtle and through the jco round trip;
                              #   holds the round trip to the platform's pass set
                              #   (see js/componentize/wpt/README.md)
+just wpt-web                 # serve the browser WPT parity page locally: the
+                             #   same two legs run live in your browser
 just conformance             # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
 just conformance-web         # serve the conformance results viewer locally

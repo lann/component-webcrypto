@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>lann:webcrypto WPT parity</title>
+<!-- The jco-transpiled parity runner imports its wasi shims by bare
+     specifier; this map resolves them to the browser build vendored by
+     `just wpt-web-artifacts` (sockets to a local stub: the browser build's
+     sockets module predates the resource-class shape jco expects, and the
+     runner never opens one). Import maps apply to the document only, not
+     to module workers, which is why the page runs both legs on the main
+     thread (see app.mjs). -->
+<script type="importmap">
+{
+  "imports": {
+    "@bytecodealliance/preview2-shim/cli": "./preview2-shim/cli.js",
+    "@bytecodealliance/preview2-shim/clocks": "./preview2-shim/clocks.js",
+    "@bytecodealliance/preview2-shim/filesystem": "./preview2-shim/filesystem.js",
+    "@bytecodealliance/preview2-shim/io": "./preview2-shim/io.js",
+    "@bytecodealliance/preview2-shim/random": "./preview2-shim/random.js",
+    "@bytecodealliance/preview2-shim/sockets": "./sockets-stub.js"
+  }
+}
+</script>
+<style>
+  :root {
+    --pass: #1a7f37;
+    --fail: #cf222e;
+    --skip: #9a6700;
+    --dim: #656d76;
+    --line: #d0d7de;
+    --hover: #f6f8fa;
+  }
+  body {
+    font: 14px/1.45 system-ui, sans-serif;
+    margin: 0;
+    color: #1f2328;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    padding: 0.6rem 1rem;
+    z-index: 2;
+  }
+  h1 {
+    font-size: 1.1rem;
+    margin: 0 0 0.4rem;
+  }
+  h1 code { font-size: 1rem; }
+  #intro {
+    color: var(--dim);
+    max-width: 60rem;
+    margin: 0 0 0.4rem;
+  }
+  #controls {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  button {
+    font: inherit;
+    padding: 0.25rem 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #f6f8fa;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #eef1f4; }
+  button:disabled { color: var(--dim); cursor: default; }
+  #status { color: var(--dim); }
+  label { color: var(--dim); }
+  .warning {
+    background: #fff8c5;
+    border: 1px solid #d4a72c66;
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    margin-top: 0.5rem;
+    white-space: pre-wrap;
+  }
+  main { padding: 0 1rem 2rem; }
+  table {
+    border-collapse: collapse;
+    margin-top: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 0.15rem 0.6rem;
+    text-align: right;
+    white-space: nowrap;
+  }
+  th { position: sticky; top: 5.4rem; background: #fff; z-index: 1; }
+  td.name, th.name {
+    text-align: left;
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  tr.branch td.name { cursor: pointer; }
+  tr.branch:hover { background: var(--hover); }
+  .toggle {
+    display: inline-block;
+    width: 1em;
+    color: var(--dim);
+  }
+  .pass { color: var(--pass); }
+  .fail { color: var(--fail); font-weight: 600; }
+  .skip { color: var(--skip); }
+  .none { color: var(--dim); }
+  td[title] { cursor: help; text-decoration: underline dotted var(--dim); }
+  tr.total td { border-top: 2px solid var(--line); font-weight: 600; }
+  #summary { padding: 0 1rem 2rem; max-width: 72rem; }
+  #summary h2 { font-size: 1rem; margin-bottom: 0.4rem; }
+  #summary details { margin: 0.15rem 0 0.15rem 1.2rem; }
+  #summary > details { margin-left: 0; }
+  #summary summary {
+    cursor: pointer;
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+  }
+  #summary summary .count { color: var(--fail); font-weight: 600; }
+  #summary pre {
+    margin: 0.3rem 0 0.5rem 1.2rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--hover);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  #summary .note { color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1><code>lann:webcrypto</code> WPT parity — this browser</h1>
+  <p id="intro">
+    The vendored web-platform-tests WebCryptoAPI suites run twice, right
+    here: directly against this browser's own <code>crypto.subtle</code>
+    (the baseline), and through the full carrier stack — the
+    <code>crypto.subtle</code> shim, the WIT interface, the component ABI,
+    and the jco host — ending at the same browser crypto (the round trip).
+    A test the baseline passes and the round trip loses is a cost of the
+    stack in the middle.
+  </p>
+  <div id="controls">
+    <button id="run">Run the suites</button>
+    <button id="download" hidden>Download results</button>
+    <label><input type="checkbox" id="show-all"> show all tests</label>
+    <span id="status"></span>
+  </div>
+  <div id="warnings"></div>
+</header>
+<main id="main"></main>
+<section id="summary" hidden></section>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>

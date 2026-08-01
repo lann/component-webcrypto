@@ -81,7 +81,9 @@ js/                     # the JS library surface (directory = npm name minus
                         #   gates in CI, componentizing its runner from the
                         #   tree with a digest-pinned componentize-js build
                         #   (wpt/component.sh, componentize-js.sha256); the
-                        #   run's census is pinned by wpt/expected.js
+                        #   run's census is pinned by wpt/expected.js;
+                        #   wpt/web/ is the browser parity page on the
+                        #   Pages site (serve with `just wpt-web`)
 examples/
   crypto-demo/          # guest component exercising the primitive kinds end
                         #   to end (reaches lann:webcrypto via lann-webcrypto-guest)
@@ -463,8 +465,10 @@ closed numbers remain stable references.
   then any future WIT-forced deviations, each of which needs an explicit
   ruling (the historical example, the GCM IV/tag contract, was resolved
   by enriching the `aead` kind with per-call parameters). Class D is not implicated: the crypto runs host-side on the
-  platform. A browser leg (the same two runs in Chromium, baseline = the
-  browser's own `crypto.subtle`) remains unbuilt.
+  platform. A browser leg exists as the live parity page on the Pages
+  site (js/componentize/wpt/web/ — see that README's "The browser parity
+  page"); a *gating* Chromium leg, with its own pinned loss set recorded
+  from the browser baseline, remains unbuilt.
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium

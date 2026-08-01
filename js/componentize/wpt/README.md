@@ -113,6 +113,23 @@ platform itself is.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
+## The browser parity page (web/)
+
+`web/` is the same two legs run live in a visiting browser, published on
+the GitHub Pages site: the baseline against that browser's own
+`crypto.subtle`, the round trip through the same jco-transpiled parity
+runner the Node leg uses, resolving its wasi imports through the page's
+import map (the preview2-shim browser build, vendored beside the page by
+`just wpt-web-artifacts`). The round trip needs JSPI; without it the page
+runs the baseline alone. Nothing on the page gates, and the pinned loss
+ratchet does not apply to it: `losses.js` records the *Node* baseline's
+losses, and a browser's baseline legitimately differs. Serve it locally
+with `just wpt-web`.
+
+Like the conformance viewer, the page's serving tree must mirror the
+repository layout: the transpiled runner imports `js/jco/webcrypto.js` by
+relative path.
+
 ## What is vendored
 
 `vendor/` holds unmodified files from WPT revision
