@@ -63,6 +63,64 @@ function cipherInSubset(name) {
 }
 
 /**
+ * encrypt_decrypt/chacha20_poly1305: the whole group — the fixed-vector
+ * encryptions and decryptions over "raw-secret" imports, the generated-key
+ * round trips, the tamper rejections, and the 12-byte-nonce rule (the
+ * WIT's `invalid-nonce` renders the expected `OperationError`).
+ */
+function chachaEncryptDecryptInSubset() {
+  return true;
+}
+
+/**
+ * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
+ * rows are served whole, and so are the empty-usages rows for every
+ * format (usages are validated before the format is considered). The
+ * "Good parameters" jwk rows stay out: the package serves no ChaCha JWK
+ * path (WIT-forced — see the shim header's deviations list).
+ * @param {string} name
+ */
+function chachaImportKeyInSubset(name) {
+  if (name.startsWith("Empty Usages:")) {
+    return true;
+  }
+  return name.includes("(raw-secret, ");
+}
+
+/**
+ * generateKey/successes (ChaCha20-Poly1305): the non-extractable rows are
+ * served whole. The extractable rows also export the generated key as a
+ * JWK, which the package declines for the ChaCha constructions
+ * (WIT-forced — see the shim header's deviations list), so they stay
+ * out-of-subset until a ChaCha JWK path exists.
+ * @param {string} name
+ */
+function chachaGenerateKeyInSubset(name) {
+  return name.includes(", false, [");
+}
+
+/**
+ * generateKey/failures (ChaCha20-Poly1305): the ChaCha vector rows are
+ * served (bad and empty usages render this library's own `SyntaxError`s),
+ * and so are the suite's fixed rows — the empty-algorithm `TypeError`s
+ * and the bad-algorithm rows for names this library does not serve at all
+ * (`NotSupportedError` from algorithm normalization). Out: the HMAC
+ * bad-hash rows. The spec rejects an unsupported hash during algorithm
+ * normalization, before usage validation; this library resolves the hash
+ * in the HMAC branch after `normalizeUsages`, so the rows pairing MD5
+ * with a usage outside HMAC's vocabulary render `SyntaxError` instead.
+ * The sign-only rows in that slice pass for the right reason but travel
+ * with it, pinned as `outPassed`.
+ * @param {string} name
+ */
+function generateKeyFailuresInSubset(name) {
+  if (name.startsWith("Bad algorithm:")) {
+    return !name.includes("HMAC");
+  }
+  return true;
+}
+
+/**
  * import_export/symmetric_importKey: the "raw" and "jwk" formats;
  * HMAC-SHA-256 at any key size, the AES family at 128/256 bits.
  * Empty-usages tests are in for any parameters (usages are validated
@@ -284,6 +342,12 @@ export const GROUPS = [
     inSubset: cipherInSubset,
   },
   {
+    name: "encrypt_decrypt/chacha20_poly1305",
+    module: "group-chacha20-poly1305.js",
+    start: (ns) => ns.run_chacha20_poly1305_tests(),
+    inSubset: chachaEncryptDecryptInSubset,
+  },
+  {
     name: "import_export/symmetric_importKey (HMAC, AES-GCM)",
     module: "group-import-key.js",
     start: (ns) => {
@@ -293,10 +357,28 @@ export const GROUPS = [
     inSubset: importKeyInSubset,
   },
   {
+    name: "import_export/symmetric_importKey (ChaCha20-Poly1305)",
+    module: "group-import-key.js",
+    start: (ns) => ns.runTests("ChaCha20-Poly1305"),
+    inSubset: chachaImportKeyInSubset,
+  },
+  {
     name: "generateKey/successes (HMAC, AES-GCM)",
     module: "group-generate-key.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM"]),
     inSubset: generateKeyInSubset,
+  },
+  {
+    name: "generateKey/successes (ChaCha20-Poly1305)",
+    module: "group-generate-key.js",
+    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
+    inSubset: chachaGenerateKeyInSubset,
+  },
+  {
+    name: "generateKey/failures (ChaCha20-Poly1305)",
+    module: "group-generate-key-failures.js",
+    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
+    inSubset: generateKeyFailuresInSubset,
   },
   {
     name: "derive_bits_keys/cfrg_curves_bits (X25519)",

@@ -158,6 +158,15 @@ gen_suites() {
     echo 'export { runTests };' >> "$B"/group-import-key.js
     cat "$V"/helpers.js "$V"/successes.js > "$B"/group-generate-key.js
     echo 'export { run_test };' >> "$B"/group-generate-key.js
+    cat "$V"/helpers.js "$V"/failures.js > "$B"/group-generate-key-failures.js
+    echo 'export { run_test };' >> "$B"/group-generate-key-failures.js
+    # chacha20_poly1305.tentative.https.any.js registers its tests at top
+    # level, like digest below: wrap it in a callable, helpers outside the
+    # wrapper.
+    cat "$V"/helpers.js > "$B"/group-chacha20-poly1305.js
+    echo 'function run_chacha20_poly1305_tests() {' >> "$B"/group-chacha20-poly1305.js
+    cat "$V"/chacha20_poly1305.tentative.https.any.js >> "$B"/group-chacha20-poly1305.js
+    printf '}\nexport { run_chacha20_poly1305_tests };\n' >> "$B"/group-chacha20-poly1305.js
     # The cfrg helpers assign their key tables as sloppy-mode implicit
     # globals; a concatenated module is strict, so declare them here (the
     # vendored sources stay pristine, like the appended exports).
