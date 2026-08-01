@@ -199,6 +199,10 @@ JS
     echo 'function run_get_random_values_tests() {' >> "$B"/group-get-random-values.js
     cat "$V"/getRandomValues.any.js >> "$B"/group-get-random-values.js
     printf '}\nexport { run_get_random_values_tests };\n' >> "$B"/group-get-random-values.js
+    cat "$V"/helpers.js > "$B"/group-random-uuid.js
+    echo 'function run_random_uuid_tests() {' >> "$B"/group-random-uuid.js
+    cat "$V"/randomUUID.https.any.js >> "$B"/group-random-uuid.js
+    printf '}\nexport { run_random_uuid_tests };\n' >> "$B"/group-random-uuid.js
     cat "$V"/helpers.js "$V"/hkdf_vectors.js "$V"/hkdf.js > "$B"/group-hkdf-derive.js
     echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
     cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js

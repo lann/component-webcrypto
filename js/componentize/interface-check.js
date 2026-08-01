@@ -30,7 +30,7 @@ import { CryptoKey, crypto, subtle } from "./webcrypto.js";
 /** @type {Pick<SubtleCrypto, ServedMethods>} */
 const subtleServesWebCrypto = subtle;
 
-/** @type {{ subtle: Pick<SubtleCrypto, ServedMethods>, getRandomValues: Crypto["getRandomValues"] }} */
+/** @type {{ subtle: Pick<SubtleCrypto, ServedMethods>, getRandomValues: Crypto["getRandomValues"], randomUUID: Crypto["randomUUID"] }} */
 const cryptoServesWebCrypto = crypto;
 
 /**

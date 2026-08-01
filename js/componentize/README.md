@@ -12,7 +12,7 @@ knows — `crypto.subtle`.
 ## Surface
 
 `webcrypto.js` exports `subtle` and a `crypto`-shaped
-`{ subtle, getRandomValues }` namespace. The served surface — the
+`{ subtle, getRandomValues, randomUUID }` namespace. The served surface — the
 algorithms, operations, and key formats — is enumerated at the top of
 `webcrypto.js`, alongside the deviations registry it gates.
 
