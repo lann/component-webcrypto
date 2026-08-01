@@ -14,13 +14,14 @@
 //     X25519 key agreement; derived-key targets HMAC over the same
 //     hashes and AES-256-GCM)
 //   - `digest`                  (SHA-256/384/512)
+//   - `getRandomValues`         (from the host's `wasi:random` entropy)
 //   - `generateKey`             (the secret-key algorithms, X25519, and
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
 // `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, `x25519`,
 // `sha2`, `digest`, `signature`, `ed25519-verify`, `ed25519-sign`, and
-// `ecdsa-verify`
+// `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
 // elaboration). Module specifiers here name those imports directly, so this
 // file needs no bundler: componentize-js resolves them against the world at
@@ -69,7 +70,8 @@
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
 //     ("OperationError", "InvalidAccessError", "NotSupportedError",
-//     "DataError", "SyntaxError").
+//     "DataError", "SyntaxError", "TypeMismatchError",
+//     "QuotaExceededError").
 //
 // AES-GCM's per-call IV lengths and `tagLength`s are carried by
 // `aead-key.seal`/`open`'s parameters, so they are not deviations. The WIT
@@ -91,6 +93,7 @@ import * as ecdsaVerify from "lann:webcrypto/ecdsa-verify@0.1.0";
 // Imported for evaluation only: `make-digest` returns `digest` resources,
 // whose generated class lives in this module (see the note below).
 import "lann:webcrypto/digest@0.1.0";
+import * as wasiRandom from "wasi:random/random@0.2.0";
 import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
 // generated resource classes to exist: componentize-js builds each returned
@@ -1477,5 +1480,42 @@ export const subtle = Object.freeze({
   digest,
 });
 
+/**
+ * The integer TypedArray types `getRandomValues` fills (subclasses pass
+ * `instanceof`); everything else — floats, `DataView`, non-views — is the
+ * spec's `TypeMismatchError`.
+ */
+const INTEGER_ARRAY_TYPES = [
+  Int8Array,
+  Int16Array,
+  Int32Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Uint16Array,
+  Uint32Array,
+  BigInt64Array,
+  BigUint64Array,
+];
+
+/**
+ * Fill an integer TypedArray with cryptographically secure random bytes
+ * from the host's entropy (`wasi:random/random`), per the spec: the type
+ * check precedes the 65536-byte quota, and the array itself is returned.
+ * @template {ArrayBufferView} T
+ * @param {T} array
+ * @returns {T}
+ */
+function getRandomValues(array) {
+  if (!INTEGER_ARRAY_TYPES.some((type) => array instanceof type)) {
+    throw dom("TypeMismatchError", "getRandomValues fills integer TypedArrays only");
+  }
+  if (array.byteLength > 65536) {
+    throw dom("QuotaExceededError", `getRandomValues fills at most 65536 bytes, not ${array.byteLength}`);
+  }
+  const bytes = /** @type {Uint8Array} */ (wasiRandom.getRandomBytes(BigInt(array.byteLength)));
+  new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(bytes);
+  return array;
+}
+
 /** A `crypto`-shaped namespace for code expecting `crypto.subtle`. */
-export const crypto = Object.freeze({ subtle });
+export const crypto = Object.freeze({ subtle, getRandomValues });

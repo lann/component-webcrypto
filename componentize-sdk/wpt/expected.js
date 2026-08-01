@@ -36,4 +36,5 @@ export const EXPECTED = {
   "generateKey/successes (Ed25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 36 },
   "import_export/ec_importKey": { inPassed: 12, inFailed: 0, outPassed: 0, outFailed: 252 },
   "import_export/ec_importKey_failures (ECDSA)": { inPassed: 142, inFailed: 0, outPassed: 0, outFailed: 478 },
+  "getRandomValues": { inPassed: 39, inFailed: 0, outPassed: 0, outFailed: 0 },
 };
