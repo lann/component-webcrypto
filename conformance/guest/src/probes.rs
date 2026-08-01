@@ -1634,9 +1634,10 @@ async fn mac_usage_policy() -> Result<(), String> {
 }
 
 /// The wrap grants on `aead-key`: recorded ahead of the wrap operations
-/// existing, they mint a key on their own but permit neither operation.
-/// (The seal/open grants' enforcement and getters are the contract
-/// battery's `usage` area, per family.)
+/// existing, each mints a key on its own, reports through its getter in
+/// both directions, and permits neither seal nor open. (The seal/open
+/// grants' enforcement and getters are the contract battery's `usage`
+/// area, per family.)
 async fn aead_wrap_grants() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
@@ -1647,6 +1648,7 @@ async fn aead_wrap_grants() -> Result<(), String> {
         .await
         .map_err(|e| describe("wrap-only import-key", &e))?;
     expect(wrap_only.can_wrap(), true, "wrap-only key can-wrap")?;
+    expect(wrap_only.can_unwrap(), false, "wrap-only key can-unwrap")?;
     expect(wrap_only.can_seal(), false, "wrap-only key can-seal")?;
     let (refused, fed) = seal(
         &wrap_only,
@@ -1663,6 +1665,30 @@ async fn aead_wrap_grants() -> Result<(), String> {
         ErrKind::NotPermitted,
         refused,
         "wrap-only key sealed",
+    )?;
+
+    let options = AeadKeyOptions::new();
+    options.can_unwrap(true);
+    let unwrap_only = aes_gcm::import_key(AesVariant::Aes256, vec![0xa5u8; 32], options)
+        .await
+        .map_err(|e| describe("unwrap-only import-key", &e))?;
+    expect(unwrap_only.can_unwrap(), true, "unwrap-only key can-unwrap")?;
+    expect(unwrap_only.can_wrap(), false, "unwrap-only key can-wrap")?;
+    let (refused, fed) = open(
+        &unwrap_only,
+        &[3u8; 12],
+        b"",
+        None,
+        &[0u8; 16],
+        Schedule::Whole,
+    )
+    .await;
+    fed.map_err(|e| format!("open input feeder: {e}"))?;
+    expect_err(
+        "open on an unwrap-only key",
+        ErrKind::NotPermitted,
+        refused,
+        "unwrap-only key opened",
     )
 }
 
@@ -1886,9 +1912,29 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
     let key_only = import_ikm(vec![3; 32], false, true)
         .await
         .map_err(|e| describe("key-only import-ikm", &e))?;
+    expect(
+        key_only.can_derive_bits(),
+        false,
+        "key-only ikm can-derive-bits",
+    )?;
+    expect(
+        key_only.can_derive_key(),
+        true,
+        "key-only ikm can-derive-key",
+    )?;
     let input = hkdf::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), Vec::new())
         .await
         .map_err(|e| describe("prepare (key-only)", &e))?;
+    expect(
+        input.can_derive_bits(),
+        false,
+        "key-only input copies can-derive-bits",
+    )?;
+    expect(
+        input.can_derive_key(),
+        true,
+        "key-only input copies can-derive-key",
+    )?;
     expect_err(
         "derive-bits without the grant",
         ErrKind::NotPermitted,
@@ -2007,7 +2053,21 @@ async fn pbkdf2_contract() -> Result<(), String> {
         .await
         .map_err(|e| describe("derive-bits (empty password)", &e))?;
 
-    // Grants copy; chaining from a PBKDF2 input refuses like any KDF's.
+    // Grants copy; both getter directions report; chaining from a PBKDF2
+    // input refuses like any KDF's.
+    let bits_only = import_password(b"bits-only".to_vec(), true, false)
+        .await
+        .map_err(|e| describe("bits-only import-password", &e))?;
+    expect(
+        bits_only.can_derive_bits(),
+        true,
+        "bits-only password can-derive-bits",
+    )?;
+    expect(
+        bits_only.can_derive_key(),
+        false,
+        "bits-only password can-derive-key",
+    )?;
     let key_only = import_password(b"key-only".to_vec(), false, true)
         .await
         .map_err(|e| describe("key-only import-password", &e))?;
