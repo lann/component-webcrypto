@@ -111,8 +111,9 @@ pub enum Error {
 
 /// The WIT `types.extension-error` record: a named condition outside the
 /// `error` variant's closed set, identified by the (`origin`, `name`)
-/// pair. The conditions this crate produces are constructed through the
-/// helpers below, so the pinned pairs are spelled exactly once.
+/// pair; `message` is human-readable prose, never contract. The
+/// conditions this crate produces are constructed through the helpers
+/// below, so the pinned pairs are spelled exactly once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionError {
     pub origin: String,

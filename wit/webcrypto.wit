@@ -13,18 +13,25 @@ interface types {
     /// A named error condition defined outside `error`'s closed set: by an
     /// algorithm interface's contract (the first is `sha1-checked`'s
     /// `collision-detected`), a future feature's, or a third-party
-    /// provider's. Callers may branch on the (`origin`, `name`) pair; the
-    /// defining interface documents when its conditions occur. See
-    /// `README.md`, "Error contract".
+    /// provider's. The (`origin`, `name`) pair is the condition's only
+    /// branchable identity; the defining interface documents when the
+    /// condition occurs. Conditions are nominal: the pair identifies, the
+    /// message elaborates for humans, and no field carries machine-readable
+    /// data. See `README.md`, "Error contract", including the rule for
+    /// pairs a caller does not recognize.
     record extension-error {
-        /// The package that defines the condition, e.g. `"lann:webcrypto"`.
-        /// Namespacing: third-party providers mint conditions under their
-        /// own package name, so names cannot collide.
+        /// The namespace the condition is defined under: an opaque string
+        /// owned by the defining party, by convention its package name,
+        /// e.g. `"lann:webcrypto"`. Ownership means names cannot collide:
+        /// third-party providers mint conditions under their own
+        /// namespace, never under another party's.
         origin: string,
         /// The condition's name within `origin`, kebab-case by convention,
         /// e.g. `"collision-detected"`.
         name: string,
-        /// Human-readable detail. Empty where the condition's contract is
+        /// Human-readable prose for logs and diagnostics only. Never
+        /// branch on it: its content is not contract and may differ
+        /// across providers. Empty where the condition's contract is
         /// deliberately detail-free.
         message: string,
     }
@@ -77,7 +84,9 @@ interface types {
         /// external keystore that cannot complete the operation now, or an
         /// input exceeding an implementation's buffering limit (the stream
         /// is still fully drained first). The string is human-readable.
-        /// Never a semantic condition a caller must branch on.
+        /// Never a semantic condition a caller must branch on: a
+        /// condition that turns out to need branching migrates to a named
+        /// `extension` pair (see `README.md`, "Error contract").
         other(string),
         /// A named condition outside this variant's closed set (see
         /// `extension-error`). Unlike `other`, callers may branch on it:

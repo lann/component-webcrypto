@@ -3062,8 +3062,9 @@ async fn sha1_checked_postures() -> Result<(), String> {
     let m2 = unhex(SHATTERED_2);
 
     // The rejecting posture: the exact extension condition, pinned
-    // cross-target — (origin, name) is the branchable pair, the message
-    // is pinned like every other message string.
+    // cross-target. (origin, name) is the branchable pair; the message is
+    // human-only, and its pin is implementation-convergence hygiene, like
+    // every other message-string pin — not consumer contract.
     for m in [&m1, &m2] {
         let (got, fed) = compute(&rejecting, m, Schedule::Whole).await;
         fed.map_err(|e| format!("compute data feeder: {e}"))?;
