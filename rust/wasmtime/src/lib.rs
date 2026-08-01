@@ -293,25 +293,33 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Retained<T> {
 /// bindgen `with` option takes plain paths, so each wrapped payload type
 /// needs one.
 pub mod retained {
-    pub type MacKey = super::Retained<super::MacKey>;
-    pub type MacKeyOptions = super::Retained<super::MacKeyOptions>;
-    pub type AeadKey = super::Retained<super::AeadKey>;
-    pub type AeadKeyOptions = super::Retained<super::AeadKeyOptions>;
-    pub type CipherKey = super::Retained<super::CipherKey>;
-    pub type CipherKeyOptions = super::Retained<super::CipherKeyOptions>;
-    pub type InternalNonceKey = super::Retained<super::InternalNonceKey>;
-    pub type InternalNonceKeyOptions = super::Retained<super::InternalNonceKeyOptions>;
-    pub type Digest = super::Retained<super::Digest>;
-    pub type VerifyingKey = super::Retained<super::VerifyingKey>;
-    pub type SigningKey = super::Retained<super::SigningKey>;
-    pub type SigningKeyOptions = super::Retained<super::SigningKeyOptions>;
-    pub type Ikm = super::Retained<super::Ikm>;
-    pub type Password = super::Retained<super::Password>;
-    pub type DeriveInput = super::Retained<super::DeriveInput>;
-    pub type DeriveOptions = super::Retained<super::DeriveOptions>;
-    pub type AgreementKeyOptions = super::Retained<super::AgreementKeyOptions>;
-    pub type AgreementPublicKey = super::Retained<super::AgreementPublicKey>;
-    pub type AgreementSecretKey = super::Retained<super::AgreementSecretKey>;
+    macro_rules! retained_aliases {
+        ($($name:ident),* $(,)?) => {
+            $(pub type $name = super::Retained<super::$name>;)*
+        };
+    }
+
+    retained_aliases!(
+        MacKey,
+        MacKeyOptions,
+        AeadKey,
+        AeadKeyOptions,
+        CipherKey,
+        CipherKeyOptions,
+        InternalNonceKey,
+        InternalNonceKeyOptions,
+        Digest,
+        VerifyingKey,
+        SigningKey,
+        SigningKeyOptions,
+        Ikm,
+        Password,
+        DeriveInput,
+        DeriveOptions,
+        AgreementKeyOptions,
+        AgreementPublicKey,
+        AgreementSecretKey,
+    );
 }
 
 /// A `mac-key-options` resource: mint-time policy under construction.
