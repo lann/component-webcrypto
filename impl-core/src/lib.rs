@@ -272,4 +272,24 @@ mod tests {
         assert!(!constant_time_equal(b"abc", b"abd"));
         assert!(!constant_time_equal(b"abc", b"abcd"));
     }
+
+    /// The RNG entry points actually fill their buffers with fresh
+    /// randomness: output is nonzero and differs across calls. A 32-byte
+    /// buffer fails either check with probability 2^-256 — a broken RNG
+    /// (the all-zero or constant output this guards against) fails it
+    /// always.
+    #[test]
+    fn rng_output_is_fresh() {
+        let mut a = [0u8; 32];
+        let mut b = [0u8; 32];
+        fill_random(&mut a).unwrap();
+        fill_random(&mut b).unwrap();
+        assert_ne!(a, [0u8; 32]);
+        assert_ne!(a, b);
+
+        let c = random_bytes(32).unwrap();
+        let d = random_bytes(32).unwrap();
+        assert_ne!(c, vec![0u8; 32]);
+        assert_ne!(c, d);
+    }
 }
