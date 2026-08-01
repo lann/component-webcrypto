@@ -90,6 +90,21 @@ globalThis.assert_in_array = function (actual, expected, message) {
   }
 };
 
+globalThis.assert_array_equals = function (actual, expected, message) {
+  if (actual.length !== expected.length) {
+    fail(
+      `assert_array_equals: ${message ?? ""} (lengths differ: got ${actual.length}, expected ${expected.length})`,
+    );
+  }
+  for (let i = 0; i < actual.length; i += 1) {
+    if (actual[i] !== expected[i]) {
+      fail(
+        `assert_array_equals: ${message ?? ""} (index ${i}: got ${String(actual[i])}, expected ${String(expected[i])})`,
+      );
+    }
+  }
+};
+
 globalThis.assert_throws_dom = function (name, fn, description) {
   try {
     fn();

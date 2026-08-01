@@ -48,6 +48,7 @@ import * as groupGetRandomValues from "./js/componentize/wpt/build/group-get-ran
 import * as groupRandomUuid from "./js/componentize/wpt/build/group-random-uuid.js";
 import * as groupHkdfDerive from "./js/componentize/wpt/build/group-hkdf-derive.js";
 import * as groupPbkdf2Derive from "./js/componentize/wpt/build/group-pbkdf2-derive.js";
+import * as groupDerivedBitsLength from "./js/componentize/wpt/build/group-derived-bits-length.js";
 
 /** The statically imported suite modules, keyed as groups.js names them. */
 const MODULES = {
@@ -73,6 +74,7 @@ const MODULES = {
   "group-random-uuid.js": groupRandomUuid,
   "group-hkdf-derive.js": groupHkdfDerive,
   "group-pbkdf2-derive.js": groupPbkdf2Derive,
+  "group-derived-bits-length.js": groupDerivedBitsLength,
 };
 
 // --- runner -----------------------------------------------------------------------

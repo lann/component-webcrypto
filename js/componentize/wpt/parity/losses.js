@@ -9,6 +9,13 @@
 export const KNOWN_LOSSES = [
   "derive_bits_keys/cfrg_curves_bits (X25519) :: X25519 mismatched algorithms",
   "derive_bits_keys/cfrg_curves_keys (X25519) :: X25519 mismatched algorithms",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with 0 as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with 230 as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with 256 as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with 384 as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with null as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with omitted as 'length' parameter",
+  "derive_bits_keys/derived_bits_length :: ECDH derivation with undefined as 'length' parameter",
   "derive_bits_keys/hkdf :: Derived key of type name: AES-CBC length: 128  using empty derivedKey, empty salt, SHA-1, with empty info",
   "derive_bits_keys/hkdf :: Derived key of type name: AES-CBC length: 128  using empty derivedKey, empty salt, SHA-1, with empty info with missing deriveKey usage",
   "derive_bits_keys/hkdf :: Derived key of type name: AES-CBC length: 128  using empty derivedKey, empty salt, SHA-1, with empty info with wrong (ECDH) key",
