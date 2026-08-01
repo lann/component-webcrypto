@@ -7,11 +7,11 @@
 //
 //   - `importKey` / `exportKey` ("raw" and "jwk" formats)
 //   - `generateKey`
-//   - `sign` / `verify`         (HMAC-SHA-256)
+//   - `sign` / `verify`         (HMAC over SHA-256/384/512)
 //   - `encrypt` / `decrypt`     (AES-256-GCM)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
-//     X25519 key agreement; derived-key targets HMAC-SHA-256 and
-//     AES-256-GCM)
+//     X25519 key agreement; derived-key targets HMAC over the same
+//     hashes and AES-256-GCM)
 //   - `digest`                  (SHA-256/384/512)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
@@ -32,7 +32,7 @@
 //   - Unserved: beyond the algorithms above, everything throws
 //     `NotSupportedError` — including SHA-1 as a KDF hash, non-256 AES-GCM
 //     key sizes, and the derived-key targets the WIT's `derive-key` mints
-//     do not span (AES-CBC/CTR/KW, HMAC over other hashes).
+//     do not span (AES-CBC/CTR/KW).
 //   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
 //     others throw `NotSupportedError`. X25519 public keys import as
 //     `"raw"` only (the WIT's public format); a public OKP JWK import
@@ -483,27 +483,16 @@ function normalizeAlgorithm(algorithm) {
 }
 
 /**
- * @param {unknown} hash
- * @returns {"SHA-256"}
+ * The registry spelling for each served WIT `sha2-variant` (the projected
+ * `HmacKeyAlgorithm.hash` and the digest family).
+ * @type {Readonly<Record<"sha256" | "sha384" | "sha512", "SHA-256" | "SHA-384" | "SHA-512">>}
  */
-function normalizeHash(hash) {
-  if (typeof hash === "object" && hash !== null) {
-    const named = /** @type {{ name?: unknown }} */ (hash).name;
-    if (typeof named === "string") hash = named;
-  }
-  if (typeof hash !== "string") {
-    throw new TypeError("HMAC requires a `hash` member (a string or { name })");
-  }
-  if (hash.toUpperCase() !== "SHA-256") {
-    throw dom("NotSupportedError", `unsupported hash ${hash}; only SHA-256 is served`);
-  }
-  return "SHA-256";
-}
+const SHA2_REGISTRY_NAMES = { sha256: "SHA-256", sha384: "SHA-384", sha512: "SHA-512" };
 
 /**
- * The WIT `sha2-variant` for a KDF's `hash` member. Wider than HMAC's
- * `normalizeHash`: the KDFs are served over the whole SHA-2 family the WIT
- * carries; SHA-1 (which WPT sweeps) is not in the package at all.
+ * The WIT `sha2-variant` for a `hash` member (HMAC, the KDFs, `digest`):
+ * the whole SHA-2 family the WIT carries; SHA-1 (which WPT sweeps) is not
+ * in the package at all.
  * @param {unknown} hash
  * @returns {"sha256" | "sha384" | "sha512"}
  */
@@ -784,13 +773,15 @@ function jwkForExport(jwkText, key) {
 
 /**
  * @param {() => unknown} start
+ * @param {"sha256" | "sha384" | "sha512"} variant the mint-bound hash, for
+ *   the projected `HmacKeyAlgorithm.hash`
  * @param {number | undefined} requestedLength the `HmacKeyAlgorithm.length`
  *   to project, validated against the handle's material bits per the
  *   spec's shave window; `undefined` projects the handle's own length
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-async function mintHmacKey(start, requestedLength, extractable, usages) {
+async function mintHmacKey(start, variant, requestedLength, extractable, usages) {
   const handle = await callImport(start());
   const dataBits = /** @type {number} */ (handle.algorithmLength());
   let length = dataBits;
@@ -807,7 +798,7 @@ async function mintHmacKey(start, requestedLength, extractable, usages) {
   /** @type {HmacKeyAlgorithm} */
   const projected = {
     name: "HMAC",
-    hash: Object.freeze({ name: "SHA-256" }),
+    hash: Object.freeze({ name: SHA2_REGISTRY_NAMES[variant] }),
     length,
   };
   return mintKey(handle, "secret", projected, extractable, usages);
@@ -898,21 +889,22 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   const usages = normalizeUsages(keyUsages, alg.name);
 
   if (alg.name === "HMAC") {
-    normalizeHash(alg.hash);
+    const variant = sha2VariantOf(alg.hash);
     return await mintHmacKey(
       format === "jwk"
         ? () =>
             hmacSha2.importKeyJwk(
-              "sha256",
+              variant,
               jwkForImport(keyData, "sig", usages),
               hmacMintOptions(usages, !!extractable),
             )
         : () =>
             hmacSha2.importKey(
-              "sha256",
+              variant,
               bytesOf(keyData, "keyData"),
               hmacMintOptions(usages, !!extractable),
             ),
+      variant,
       alg.length === undefined ? undefined : Number(alg.length),
       !!extractable,
       usages,
@@ -968,7 +960,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
   }
 
   if (alg.name === "HMAC") {
-    normalizeHash(alg.hash);
+    const variant = sha2VariantOf(alg.hash);
     // The spec's get-key-length: absent means the hash's block size (the
     // WIT default); zero is an `OperationError` before any key exists.
     if (alg.length === 0) {
@@ -976,7 +968,8 @@ async function generateKey(algorithm, extractable, keyUsages) {
     }
     const length = alg.length === undefined ? undefined : Number(alg.length);
     return await mintHmacKey(
-      () => hmacSha2.generateKey("sha256", length, hmacMintOptions(usages, !!extractable)),
+      () => hmacSha2.generateKey(variant, length, hmacMintOptions(usages, !!extractable)),
+      variant,
       undefined,
       !!extractable,
       usages,
@@ -1229,13 +1222,14 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
   const input = await prepareInput(alg, baseKey);
 
   if (target.name === "HMAC") {
-    normalizeHash(target.hash);
+    const variant = sha2VariantOf(target.hash);
     if (target.length === 0) {
       throw dom("OperationError", "HMAC length cannot be 0");
     }
     const length = target.length === undefined ? undefined : Number(target.length);
     return await mintHmacKey(
-      () => hmacSha2.deriveKey("sha256", input, length, hmacMintOptions(usages, !!extractable)),
+      () => hmacSha2.deriveKey(variant, input, length, hmacMintOptions(usages, !!extractable)),
+      variant,
       undefined,
       !!extractable,
       usages,

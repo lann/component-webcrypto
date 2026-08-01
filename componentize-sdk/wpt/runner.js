@@ -38,12 +38,15 @@ import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group
 
 // --- the subset definition, one classifier per group ---------------------------
 
-/** sign_verify/hmac: SHA-256 vectors; the wrong-algorithm tests need ECDSA. */
+/**
+ * sign_verify/hmac: the served SHA-2 family; SHA-1 rows are unserved, and
+ * the wrong-algorithm tests need ECDSA.
+ */
 function hmacInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  return name.includes("SHA-256") && !/wrong algorithm|generate wrong key/.test(name);
+  return /SHA-(256|384|512)/.test(name) && !/wrong algorithm|generate wrong key/.test(name);
 }
 
 /**
@@ -72,7 +75,7 @@ function importKeyInSubset(name) {
   if (name.startsWith("Empty Usages:")) {
     return true;
   }
-  if (name.includes("{hash: SHA-256, name: HMAC}")) {
+  if (/\{hash: SHA-(256|384|512), name: HMAC\}/.test(name)) {
     return true;
   }
   if (name.includes("{name: AES-GCM}")) {
@@ -90,7 +93,7 @@ function importKeyInSubset(name) {
  */
 function generateKeyInSubset(name) {
   if (/name: hmac/i.test(name)) {
-    return name.includes("hash: SHA-256");
+    return /hash: SHA-(256|384|512)/.test(name);
   }
   if (/name: aes-gcm/i.test(name)) {
     return name.includes("length: 256");
@@ -144,7 +147,7 @@ function kdfDeriveInSubset(name) {
   if (name.startsWith("Derived key of type")) {
     const served =
       name.startsWith("Derived key of type name: AES-GCM length: 256") ||
-      name.startsWith("Derived key of type name: HMAC hash: SHA-256");
+      /^Derived key of type name: HMAC hash: SHA-(256|384|512)/.test(name);
     if (!served) {
       return false;
     }
