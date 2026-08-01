@@ -15,5 +15,5 @@
 # Regenerate with `just update-toolchain-digest` when the revision changes:
 # it verifies the attestation before recording, so adding a line here is the
 # deliberate, reviewable act of trusting a new binary.
-linux-x86_64  9954f2a66d5165ca86c425c297d6b7b98f8760c5e97cf910b9e0fc3afd23121d  bbf7be7397518def75f030821d759f15765bd13cdb20416e009c1e68bef64dc7
-linux-aarch64  8ce76bd96feaf68fb2439f7b49d631adba7cdfc930442baf2eea77142d6d74c8  fe8b00ff3ca78ea99563bfdc1a7371fc7b839ede3070a7c9437d2b3858989ae1
+linux-aarch64  043b3695a82fef4114454fa3e7195d8bfcaf704ac8e3880ba53e27526d2620ee  e64592d1009bf7eed52d2d3efe33420c5c4c8d323bd9c3062db4fffe75cb713c
+linux-x86_64  9a38c0a6b82f0bab9ac63cfc65d3a4218f65c96c68fe43998e0053762d1697cd  69b9b79f422abf26b0836a5ddd653ce751c433adf944d465b71f89cca31ff927
