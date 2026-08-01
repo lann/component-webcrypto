@@ -9,10 +9,10 @@
 //   - `generateKey`
 //   - `sign` / `verify`         (HMAC over SHA-256/384/512; Ed25519;
 //     ECDSA P-256/P-384 verification)
-//   - `encrypt` / `decrypt`     (AES-256-GCM)
+//   - `encrypt` / `decrypt`     (AES-GCM, 128- and 256-bit keys)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
 //     X25519 key agreement; derived-key targets HMAC over the same
-//     hashes and AES-256-GCM)
+//     hashes and AES-GCM)
 //   - `digest`                  (SHA-256/384/512)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
 //   - `generateKey`             (the secret-key algorithms, X25519, and
@@ -35,9 +35,9 @@
 // first-class design constraint":
 //
 //   - Unserved: beyond the algorithms above, everything throws
-//     `NotSupportedError` — including SHA-1 as a KDF hash, non-256 AES-GCM
-//     key sizes, and the derived-key targets the WIT's `derive-key` mints
-//     do not span (AES-CBC/CTR/KW).
+//     `NotSupportedError` — including SHA-1 as a KDF hash, AES-192 (which
+//     every implementation of the package declines), and the derived-key
+//     targets the WIT's `derive-key` mints do not span (AES-CBC/CTR/KW).
 //   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
 //     others throw `NotSupportedError`. X25519 public keys import as
 //     `"raw"` only (the WIT's public format); a public OKP JWK import
@@ -884,6 +884,27 @@ async function mintHmacKey(start, variant, requestedLength, extractable, usages)
 }
 
 /**
+ * The WIT `aes-variant` for an AES key length in bits. 128 and 256 are
+ * served; 192 is representable and passed through, so the WIT's own
+ * package-wide decline (`unsupported`) renders it; anything else is the
+ * spec's `OperationError` (the get-key-length step).
+ * @param {number} bits
+ * @returns {"aes128" | "aes192" | "aes256"}
+ */
+function aesVariantOf(bits) {
+  switch (bits) {
+    case 128:
+      return "aes128";
+    case 192:
+      return "aes192";
+    case 256:
+      return "aes256";
+    default:
+      throw dom("OperationError", `AES key length must be 128, 192, or 256 bits, got ${bits}`);
+  }
+}
+
+/**
  * @param {() => unknown} start
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
@@ -891,7 +912,7 @@ async function mintHmacKey(start, variant, requestedLength, extractable, usages)
 async function mintAesGcmKey(start, extractable, usages) {
   const handle = await callImport(start());
   /** @type {AesKeyAlgorithm} */
-  const projected = { name: "AES-GCM", length: 256 };
+  const projected = { name: "AES-GCM", length: /** @type {number} */ (handle.algorithmLength()) };
   return mintKey(handle, "secret", projected, extractable, usages);
 }
 
@@ -1018,23 +1039,45 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
       usages,
     );
   } else {
-    // The library serves AES-256-GCM only, so key material is always minted
-    // as the aes256 variant; other lengths fail with `DataError` (from the
-    // WIT contract's `invalid-key`).
+    // The WIT binds the AES variant at mint, so the shim picks it from
+    // what the caller supplied: the raw material's length, or the JWK's
+    // `alg` (falling back to `k`'s decoded length when `alg` is absent —
+    // metadata arithmetic; the material itself parses behind the WIT,
+    // which re-validates the pairing either way). A length with no
+    // variant maps to `DataError`, the platform's own import error.
+    if (format === "jwk") {
+      if (typeof keyData !== "object" || keyData === null) {
+        throw new TypeError("JWK key data must be an object");
+      }
+      const jwk = /** @type {JsonWebKey} */ (keyData);
+      let bits;
+      if (typeof jwk.alg === "string" && /^A(128|192|256)GCM$/.test(jwk.alg)) {
+        bits = Number(jwk.alg.slice(1, 4));
+      } else if (typeof jwk.k === "string") {
+        bits = Math.floor((jwk.k.length * 3) / 4) * 8;
+      }
+      if (bits !== 128 && bits !== 192 && bits !== 256) {
+        throw dom("DataError", "JWK carries no AES-GCM key of a known length");
+      }
+      const variant = aesVariantOf(bits);
+      return await mintAesGcmKey(
+        () =>
+          aesGcm.importKeyJwk(
+            variant,
+            jwkForImport(keyData, "enc", usages),
+            aesGcmMintOptions(usages, !!extractable),
+          ),
+        !!extractable,
+        usages,
+      );
+    }
+    const raw = bytesOf(keyData, "keyData");
+    if (raw.length !== 16 && raw.length !== 24 && raw.length !== 32) {
+      throw dom("DataError", `AES-GCM keys are 16, 24, or 32 bytes, got ${raw.length}`);
+    }
+    const variant = aesVariantOf(raw.length * 8);
     return await mintAesGcmKey(
-      format === "jwk"
-        ? () =>
-            aesGcm.importKeyJwk(
-              "aes256",
-              jwkForImport(keyData, "enc", usages),
-              aesGcmMintOptions(usages, !!extractable),
-            )
-        : () =>
-            aesGcm.importKey(
-              "aes256",
-              bytesOf(keyData, "keyData"),
-              aesGcmMintOptions(usages, !!extractable),
-            ),
+      () => aesGcm.importKey(variant, raw, aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1112,11 +1155,9 @@ async function generateKey(algorithm, extractable, keyUsages) {
       usages,
     );
   } else {
-    if (alg.length !== 256) {
-      throw dom("NotSupportedError", `unsupported AES-GCM length ${alg.length}; only 256 is served`);
-    }
+    const variant = aesVariantOf(Number(alg.length));
     return await mintAesGcmKey(
-      () => aesGcm.generateKey("aes256", aesGcmMintOptions(usages, !!extractable)),
+      () => aesGcm.generateKey(variant, aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1423,11 +1464,9 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
       usages,
     );
   }
-  if (target.length !== 256) {
-    throw dom("NotSupportedError", `unsupported AES-GCM length ${target.length}; only 256 is served`);
-  }
+  const variant = aesVariantOf(Number(target.length));
   return await mintAesGcmKey(
-    () => aesGcm.deriveKey("aes256", input, aesGcmMintOptions(usages, !!extractable)),
+    () => aesGcm.deriveKey(variant, input, aesGcmMintOptions(usages, !!extractable)),
     !!extractable,
     usages,
   );
