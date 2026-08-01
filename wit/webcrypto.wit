@@ -442,6 +442,133 @@ interface aead-internal-nonce {
     }
 }
 
+/// The `cipher` primitive kind: unauthenticated symmetric encryption
+/// (confidentiality only), served for compatibility with
+/// WebCrypto-committed formats. See `README.md`, "Design notes",
+/// "Unauthenticated modes are in, for compatibility".
+///
+/// Security:
+/// - Nothing here authenticates. Ciphertext is malleable — an attacker
+///   can make targeted edits to the decrypted plaintext without the key —
+///   and a successful `decrypt` is not evidence the ciphertext is
+///   untampered. Default to the `aead` kind; use this one only where an
+///   existing format fixes the mode.
+/// - `decrypt` failures are deliberately uniform: every malformed-input
+///   condition (for AES-CBC, a bad final padding block among them) fails
+///   `error.other` with no distinguishing detail. Implementations MUST
+///   NOT reveal *why* a decryption failed — a distinguishable padding
+///   verdict is a padding-oracle amplifier.
+/// - IV discipline is the algorithm's contract (unpredictability for CBC,
+///   per-key uniqueness for CTR counter blocks); the minting interface
+///   documents it. The caller owns it, as with `aead` nonces.
+interface cipher {
+    use types.{error};
+
+    /// Mint-time policy for a `cipher-key`. Grants nothing by default; see
+    /// `README.md`, "Key-options contract". `wrap`/`unwrap` are vocabulary
+    /// ahead of operations, as on `aead-key-options`.
+    resource cipher-key-options {
+        constructor();
+        /// Whether the minted key may `encrypt`. Disabled by default.
+        can-encrypt: func(allowed: bool);
+        /// Whether the minted key may `decrypt`. Disabled by default.
+        can-decrypt: func(allowed: bool);
+        /// Whether the minted key may wrap keys (no operation yet; the
+        /// usage is recorded and enforced by platform backends). Disabled
+        /// by default.
+        can-wrap: func(allowed: bool);
+        /// Whether the minted key may unwrap keys (see `can-wrap`).
+        /// Disabled by default.
+        can-unwrap: func(allowed: bool);
+        /// Whether the minted key's material may be exported. Disabled by
+        /// default.
+        extractable: func(allowed: bool);
+    }
+
+    /// An unauthenticated-cipher key: an unforgeable capability, bound to
+    /// one algorithm at creation. The streaming, extractability, and
+    /// getter contracts in `README.md` apply, and so do this interface's
+    /// Security notes — nothing this key does authenticates.
+    resource cipher-key {
+        /// Encrypt `plaintext` under `iv`. The returned stream carries
+        /// exactly the ciphertext (the `crypto.subtle.encrypt` wire
+        /// format; for padded modes that includes the final padding
+        /// block).
+        ///
+        /// `iv` must be the algorithm's block-sized IV (the `iv-size`
+        /// getter), else `error.invalid-nonce`. `counter-length` is the
+        /// counter width in bits for counter-mode algorithms (AES-CTR:
+        /// required, 1 to 128); algorithms without a counter reject a
+        /// supplied value, and counter-mode algorithms reject `none` —
+        /// both `error.invalid-nonce`. Callers of non-counter algorithms
+        /// pass `none` and never match on `algorithm-name`.
+        ///
+        /// Security:
+        /// - The caller owns the IV discipline (see the interface doc and
+        ///   the minting interface). Getting it wrong loses
+        ///   confidentiality, not just integrity.
+        ///
+        /// The plaintext stream is fully drained even when the result is
+        /// an error.
+        encrypt: async func(iv: list<u8>, counter-length: option<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
+
+        /// Decrypt `ciphertext` under `iv`. See `encrypt` for the `iv`
+        /// and `counter-length` contracts.
+        ///
+        /// Security:
+        /// - The plaintext is unauthenticated: treat it as
+        ///   attacker-influenced data even when decryption succeeds.
+        /// - Malformed input fails `error.other`, deliberately uniform
+        ///   across conditions (see the interface doc).
+        ///
+        /// The ciphertext stream is fully drained even when the result is
+        /// an error.
+        decrypt: async func(iv: list<u8>, counter-length: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
+
+        /// The registry name of the algorithm family this key is bound
+        /// to, e.g. `"AES-CBC"` (WebCrypto's `KeyAlgorithm.name`).
+        /// Parameters are separate getters, as for
+        /// `mac-key.algorithm-name`.
+        algorithm-name: func() -> string;
+
+        /// The key length in bits, e.g. `256` (WebCrypto's
+        /// `AesKeyAlgorithm.length`).
+        algorithm-length: func() -> u32;
+
+        /// The algorithm's IV size in bytes, e.g. `16` for the AES modes
+        /// (the CBC IV, or the CTR initial counter block). `encrypt` and
+        /// `decrypt` accept exactly this length.
+        iv-size: func() -> u32;
+
+        /// Whether the key material may be exported.
+        extractable: func() -> bool;
+
+        /// Whether this key permits `encrypt`. A refused operation fails
+        /// `error.not-permitted`.
+        can-encrypt: func() -> bool;
+
+        /// Whether this key permits `decrypt`. See `can-encrypt`.
+        can-decrypt: func() -> bool;
+
+        /// Whether this key permits wrapping keys — recorded usage; no
+        /// operation in this package yet. See
+        /// `cipher-key-options.can-wrap`.
+        can-wrap: func() -> bool;
+
+        /// Whether this key permits unwrapping keys. See `can-wrap`.
+        can-unwrap: func() -> bool;
+
+        /// The raw key material. Fails with `error.not-extractable` unless
+        /// the key was created with `extractable` true.
+        export-key-raw: async func() -> result<list<u8>, error>;
+
+        /// The key as an RFC 7517 JSON Web Key, behind the same
+        /// extractability gate as `export-key-raw`. See `README.md`,
+        /// "JWK contract".
+        export-key-jwk: async func() -> result<string, error>;
+    }
+}
+
 /// The `digest` primitive kind: cryptographic hash functions.
 ///
 /// `mac` minus keys: there is no key material, so no extractability and no

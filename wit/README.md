@@ -249,6 +249,17 @@ short:
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one
   fails at composition time rather than at minting.
+- **Unauthenticated modes are in, for compatibility.** AES-CBC and
+  AES-CTR are WebCrypto-committed formats real systems must read and
+  write, so the package carries them — quarantined in the `cipher` kind,
+  which exists so their contract (confidentiality only, uniform `decrypt`
+  failure) is stated once and cannot bleed into `aead`: the authenticated
+  kind is unchanged, remains the default, and nothing ever falls back
+  from one kind to the other. The uniform-failure rule is load-bearing —
+  a CBC decryption error names no cause, because a distinguishable
+  padding verdict is a padding-oracle amplifier. AES-KW is not part of
+  this ruling: it belongs to the wrap direction (`wrap-key`/`unwrap-key`
+  operations), not to a cipher kind.
 - **FIPS 140-3 stays possible, not implemented.** The internal-nonce kind
   carries the approved-mode seal; interfaces deliberately permit
   policy-based rejection (short HMAC keys, imported internal-nonce

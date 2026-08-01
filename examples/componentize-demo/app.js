@@ -214,8 +214,25 @@ async function gcmRejectsMalformed() {
   await expectDomException("OperationError", "empty iv", () =>
     subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(0) }, key, HMAC_DATA),
   );
-  await expectDomException("NotSupportedError", "AES-CBC", () =>
-    subtle.importKey("raw", unhex(GCM_KEY), "AES-CBC", false, ["encrypt"]),
+  await expectDomException("NotSupportedError", "AES-KW", () =>
+    subtle.importKey("raw", unhex(GCM_KEY), "AES-KW", false, ["wrapKey"]),
+  );
+  // The unauthenticated modes are served through the cipher kind: a CBC
+  // round trip, and its uniform decrypt failure on a corrupted padding
+  // block.
+  const cbc = await subtle.importKey("raw", unhex(GCM_KEY), "AES-CBC", false, [
+    "encrypt",
+    "decrypt",
+  ]);
+  const iv = crypto.getRandomValues(new Uint8Array(16));
+  const sealed = new Uint8Array(await subtle.encrypt({ name: "AES-CBC", iv }, cbc, HMAC_DATA));
+  const opened = new Uint8Array(await subtle.decrypt({ name: "AES-CBC", iv }, cbc, sealed));
+  if (opened.length !== HMAC_DATA.length || opened.some((b, i) => b !== HMAC_DATA[i])) {
+    throw new Error("AES-CBC round trip disagreed");
+  }
+  sealed[sealed.length - 1] ^= 0x01;
+  await expectDomException("OperationError", "corrupt CBC padding", () =>
+    subtle.decrypt({ name: "AES-CBC", iv }, cbc, sealed),
   );
 }
 

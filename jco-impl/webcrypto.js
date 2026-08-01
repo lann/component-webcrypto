@@ -1837,6 +1837,319 @@ export const aesGcm = {
   },
 };
 
+/** @type {WeakMap<CipherKeyOptions, { encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
+const cipherPolicies = new WeakMap();
+
+/** @param {CipherKeyOptions} options */
+function cipherPolicy(options) {
+  const policy = cipherPolicies.get(options);
+  if (policy === undefined) {
+    throw errOther("cipher-key-options minted by another provider");
+  }
+  return policy;
+}
+
+export class CipherKeyOptions {
+  constructor() {
+    cipherPolicies.set(this, {
+      encrypt: false,
+      decrypt: false,
+      wrap: false,
+      unwrap: false,
+      extractable: false,
+    });
+  }
+
+  /** @param {boolean} allowed */
+  canEncrypt(allowed) {
+    cipherPolicy(this).encrypt = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canDecrypt(allowed) {
+    cipherPolicy(this).decrypt = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canWrap(allowed) {
+    cipherPolicy(this).wrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canUnwrap(allowed) {
+    cipherPolicy(this).unwrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    cipherPolicy(this).extractable = allowed;
+  }
+}
+
+/**
+ * The WebCrypto usages granted by a cipher mint policy (encrypt/decrypt
+ * map directly; wrap/unwrap onto wrapKey/unwrapKey), throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant.
+ * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} policy
+ */
+function cipherUsages(policy) {
+  return grantedUsages([
+    ["encrypt", policy.encrypt],
+    ["decrypt", policy.decrypt],
+    ["wrapKey", policy.wrap],
+    ["unwrapKey", policy.unwrap],
+  ]);
+}
+
+/**
+ * Validate a `cipher-key` operation's per-call parameters against the
+ * key's mode (the WIT `cipher-key.encrypt` contract) and build the
+ * platform params object.
+ * @param {"AES-CBC" | "AES-CTR"} name
+ * @param {Uint8Array} iv
+ * @param {number | undefined} counterLength
+ * @returns {AesCbcParams | AesCtrParams}
+ */
+function cipherParams(name, iv, counterLength) {
+  if (name === "AES-CBC" && counterLength !== undefined) {
+    throw errInvalidNonce("AES-CBC takes no counter length");
+  }
+  if (name === "AES-CTR") {
+    if (counterLength === undefined) {
+      throw errInvalidNonce("AES-CTR requires a counter length");
+    }
+    if (counterLength === 0 || counterLength > 128) {
+      throw errInvalidNonce(`the counter length must be 1 to 128 bits, got ${counterLength}`);
+    }
+  }
+  if (iv.length !== 16) {
+    throw errInvalidNonce(`${name} requires a 16-byte IV, got ${iv.length} bytes`);
+  }
+  return name === "AES-CBC"
+    ? { name, iv: asBufferSource(iv) }
+    : { name, counter: asBufferSource(iv), length: /** @type {number} */ (counterLength) };
+}
+
+/**
+ * The `cipher-key` resource: an unauthenticated AES-CBC or AES-CTR key
+ * (see the WIT `cipher` interface's Security notes — nothing here
+ * authenticates). Holds a `CryptoKey` imported with exactly the usages
+ * its mint options granted; instances are minted only by the `aes-cbc`
+ * and `aes-ctr` interface functions below.
+ */
+export class CipherKey {
+  #key;
+  /** @type {"AES-CBC" | "AES-CTR"} */
+  #name;
+  /** The key length in bits, fixed at mint (see `AeadKey.#lengthBits`). */
+  #lengthBits;
+
+  /**
+   * @param {CryptoKey} key
+   * @param {"AES-CBC" | "AES-CTR"} name
+   * @param {number} lengthBits
+   */
+  constructor(key, name, lengthBits) {
+    this.#key = key;
+    this.#name = name;
+    this.#lengthBits = lengthBits;
+  }
+
+  /**
+   * Encrypt the plaintext stream under `iv` (the WIT
+   * `cipher-key.encrypt` contract). The plaintext stream is drained
+   * before any failure is raised.
+   * @param {Uint8Array} iv
+   * @param {number | undefined} counterLength
+   * @param {AsyncIterable<unknown> | ReadableStream} plaintext
+   */
+  async encrypt(iv, counterLength, plaintext) {
+    return withCollectedInputToStream(plaintext, async (message) => {
+      if (!this.canEncrypt()) throw notPermitted("encrypt");
+      const params = cipherParams(this.#name, iv, counterLength);
+      const sealed = await platformCall(`${this.#name} encrypt`, () =>
+        subtle.encrypt(params, this.#key, message),
+      );
+      return new Uint8Array(sealed);
+    });
+  }
+
+  /**
+   * Decrypt the ciphertext stream under `iv`. Every malformed-input
+   * failure is one uniform `{ tag: 'other' }` per the WIT contract: a
+   * distinguishable padding verdict is a padding-oracle amplifier, so
+   * nothing separates bad padding from any other malformation. The
+   * ciphertext stream is drained before any failure is raised.
+   * @param {Uint8Array} iv
+   * @param {number | undefined} counterLength
+   * @param {AsyncIterable<unknown> | ReadableStream} ciphertext
+   */
+  async decrypt(iv, counterLength, ciphertext) {
+    return withCollectedInputToStream(ciphertext, async (message) => {
+      if (!this.canDecrypt()) throw notPermitted("decrypt");
+      const params = cipherParams(this.#name, iv, counterLength);
+      let opened;
+      try {
+        opened = await subtle.decrypt(params, this.#key, message);
+      } catch {
+        throw errOther(`${this.#name} decryption failed`);
+      }
+      return new Uint8Array(opened);
+    });
+  }
+
+  algorithmName() {
+    return this.#name;
+  }
+
+  algorithmLength() {
+    return this.#lengthBits;
+  }
+
+  ivSize() {
+    return 16;
+  }
+
+  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
+  extractable() {
+    return this.#key.extractable;
+  }
+
+  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
+  canEncrypt() {
+    return this.#key.usages.includes("encrypt");
+  }
+
+  canDecrypt() {
+    return this.#key.usages.includes("decrypt");
+  }
+
+  canWrap() {
+    return this.#key.usages.includes("wrapKey");
+  }
+
+  canUnwrap() {
+    return this.#key.usages.includes("unwrapKey");
+  }
+
+  /**
+   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
+   * key was created with `extractable` true (see `exportRawGated`).
+   */
+  async exportKeyRaw() {
+    return exportRawGated(this.#key);
+  }
+
+  /**
+   * The key as an `oct` JWK, behind the same extractability gate as
+   * `exportKeyRaw`.
+   */
+  async exportKeyJwk() {
+    return exportJwkGated(this.#key);
+  }
+}
+
+/**
+ * The `aes-cbc` / `aes-ctr` minting pair over one mode name: the two
+ * interfaces share the whole minting contract and differ only in the
+ * algorithm the platform keys bind (the `aesMinting` pattern).
+ * @param {"AES-CBC" | "AES-CTR"} name
+ */
+function cipherMinting(name) {
+  return {
+    /**
+     * Import raw key material as the declared AES variant (the shared
+     * `import-key-raw` contract; see `aesMinting`'s).
+     * @param {string} variant
+     * @param {Uint8Array} raw
+     * @param {CipherKeyOptions} options
+     */
+    async importKeyRaw(variant, raw, options) {
+      const policy = cipherPolicy(options);
+      const usages = cipherUsages(policy);
+      const expected = aesVariantByteLength(variant);
+      if (raw.length !== expected) {
+        throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
+      }
+      let key;
+      try {
+        key = await subtle.importKey("raw", asBufferSource(raw), { name }, policy.extractable, usages);
+      } catch (err) {
+        invalidKey(err, `${variant} key`);
+      }
+      return new CipherKey(key, name, expected * 8);
+    },
+
+    /**
+     * Import an `oct` JWK as the declared AES variant (the shared
+     * `import-key-jwk` contract; see `aesMinting`'s).
+     * @param {string} variant
+     * @param {string} jwk
+     * @param {CipherKeyOptions} options
+     */
+    async importKeyJwk(variant, jwk, options) {
+      const policy = cipherPolicy(options);
+      const usages = cipherUsages(policy);
+      const lengthBits = aesVariantByteLength(variant) * 8;
+      const material = jwkMaterial(jwk);
+      requireStrictBase64url(material.k);
+      let key;
+      try {
+        key = await subtle.importKey("jwk", material, { name }, policy.extractable, usages);
+      } catch (err) {
+        invalidKey(err, `${variant} JWK`);
+      }
+      const gotBits = jwkKeyBytes(material.k) * 8;
+      if (gotBits !== lengthBits) {
+        throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
+      }
+      return new CipherKey(key, name, lengthBits);
+    },
+
+    /**
+     * Generate a fresh random AES key of the declared variant.
+     * @param {string} variant
+     * @param {CipherKeyOptions} options
+     */
+    async generateKey(variant, options) {
+      const policy = cipherPolicy(options);
+      const usages = cipherUsages(policy);
+      const bits = aesVariantByteLength(variant) * 8;
+      const key = /** @type {CryptoKey} */ (
+        await platformCall(`${variant} key generation`, () =>
+          subtle.generateKey({ name, length: bits }, policy.extractable, usages),
+        )
+      );
+      return new CipherKey(key, name, bits);
+    },
+
+    /**
+     * Mint a key from a parameterized derivation (the shared `derive-key`
+     * contract): the platform's `deriveKey` chain, at the variant's key
+     * length.
+     * @param {string} variant
+     * @param {DeriveInput} input
+     * @param {CipherKeyOptions} options
+     */
+    async deriveKey(variant, input, options) {
+      const policy = cipherPolicy(options);
+      const usages = cipherUsages(policy);
+      const bits = aesVariantByteLength(variant) * 8;
+      const key = await deriveKeyFrom(input, { name, length: bits }, policy.extractable, usages);
+      return new CipherKey(key, name, bits);
+    },
+  };
+}
+
+/** The `lann:webcrypto/cipher` interface: its resource classes. */
+export const cipher = { CipherKey, CipherKeyOptions };
+
+/** The `lann:webcrypto/aes-cbc` interface. */
+export const aesCbc = cipherMinting("AES-CBC");
+
+/** The `lann:webcrypto/aes-ctr` interface. */
+export const aesCtr = cipherMinting("AES-CTR");
+
 /**
  * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
  * WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is

@@ -666,6 +666,24 @@ struct HmacTest {
 }
 
 #[derive(Deserialize)]
+struct CbcGroup {
+    #[serde(rename = "keySize")]
+    key_size: u32,
+    tests: Vec<CbcTest>,
+}
+
+#[derive(Deserialize)]
+struct CbcTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    key: String,
+    iv: String,
+    msg: String,
+    ct: String,
+    result: String,
+}
+
+#[derive(Deserialize)]
 struct AeadGroup {
     #[serde(rename = "keySize")]
     key_size: u32,
@@ -910,6 +928,73 @@ fn translate_aead(
         (AeadExpectation::AuthenticationFailed, ct_tag.len())
     };
     ((key, iv, aad, msg, ct_tag), expectation, max_input_len)
+}
+
+/// One executed AES-CBC vector under one schedule (Wycheproof
+/// `aes_cbc_pkcs5_test.json`; PKCS5 and PKCS7 padding coincide for AES's
+/// 16-byte blocks).
+pub struct CbcCase {
+    /// The key size in bits (128 or 256; AES-192 is declined at minting,
+    /// covered by probes).
+    pub key_bits: u32,
+    pub tc_id: u64,
+    pub schedule: Schedule,
+    pub key: Vec<u8>,
+    pub iv: Vec<u8>,
+    pub msg: Vec<u8>,
+    pub ct: Vec<u8>,
+    /// Upstream's verdict: a valid vector round-trips both ways; an
+    /// invalid one (bad or absent padding) must fail `decrypt` with the
+    /// kind's uniform error.
+    pub valid: bool,
+}
+
+impl CbcCase {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    pub fn case_id(&self) -> String {
+        format!(
+            "aes-cbc/wycheproof/tc{}/{}",
+            self.tc_id,
+            self.schedule.name()
+        )
+    }
+}
+
+/// The normalized AES-CBC cases: every keySize-128 and -256 vector,
+/// expanded over its schedule set.
+pub fn cbc_cases() -> Vec<CbcCase> {
+    let file: VectorFile<CbcGroup> =
+        serde_json::from_str(include_str!("../../vectors/aes_cbc_pkcs5_test.json"))
+            .unwrap_or_else(|err| panic!("parsing aes-cbc vectors: {err}"));
+    let mut cases = Vec::new();
+    for group in &file.test_groups {
+        if group.key_size == 192 {
+            continue;
+        }
+        for test in &group.tests {
+            let field = format!("aes-cbc tc{}", test.tc_id);
+            let key = unhex(&field, &test.key);
+            let iv = unhex(&field, &test.iv);
+            let msg = unhex(&field, &test.msg);
+            let ct = unhex(&field, &test.ct);
+            let valid = is_valid(&field, &test.result);
+            let max_input_len = msg.len().max(ct.len());
+            for schedule in schedules(max_input_len, valid, test.tc_id) {
+                cases.push(CbcCase {
+                    key_bits: group.key_size,
+                    tc_id: test.tc_id,
+                    schedule,
+                    key: key.clone(),
+                    iv: iv.clone(),
+                    msg: msg.clone(),
+                    ct: ct.clone(),
+                    valid,
+                });
+            }
+        }
+    }
+    cases
 }
 
 /// The normalized SHA-2 digest cases: every NIST CAVP ShortMsg vector,

@@ -26,6 +26,8 @@ import { EXPECTED } from "./componentize-sdk/wpt/expected.js";
 import { drain, takeResults } from "./componentize-sdk/wpt/harness.js";
 import { run_test as runHmac } from "./componentize-sdk/wpt/build/group-hmac.js";
 import { run_test as runAesGcm } from "./componentize-sdk/wpt/build/group-aes-gcm.js";
+import { run_test as runAesCbc } from "./componentize-sdk/wpt/build/group-aes-cbc.js";
+import { run_test as runAesCtr } from "./componentize-sdk/wpt/build/group-aes-ctr.js";
 import { runTests as runImportKey } from "./componentize-sdk/wpt/build/group-import-key.js";
 import { run_test as runGenerateKey } from "./componentize-sdk/wpt/build/group-generate-key.js";
 import { define_tests_25519 as defineCfrgBits } from "./componentize-sdk/wpt/build/group-cfrg-bits.js";
@@ -58,22 +60,32 @@ function hmacInSubset(name) {
 /**
  * encrypt_decrypt/aes_gcm (96-bit iv): 128- and 256-bit keys at every
  * legal tag length (per-call `tag-size` carries them all), plus the
- * illegal-tag-length rejections; AES-192 is declined package-wide, and
- * the mismatched-key test is out (it needs AES-CBC normalization to
- * succeed before the key check).
+ * illegal-tag-length rejections and the mismatched-key tests (their
+ * AES-CBC fixture is served); AES-192 is declined package-wide.
  */
 function gcmInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  return /(128|256)-bit key/.test(name) && !name.includes("mismatched key and algorithm");
+  return /(128|256)-bit key/.test(name);
+}
+
+/**
+ * encrypt_decrypt/{aes_cbc,aes_ctr}: 128- and 256-bit keys; AES-192 is
+ * declined package-wide, and the mismatched-key test needs the *other*
+ * unauthenticated mode's fixture to import (it does — both are served —
+ * so it is in).
+ * @param {string} name
+ */
+function cipherInSubset(name) {
+  return name === "setup" || /(128|256)-bit key/.test(name);
 }
 
 /**
  * import_export/symmetric_importKey: the "raw" and "jwk" formats;
- * HMAC-SHA-256 at any key size, AES-GCM at 256 bits. Empty-usages tests
- * are in for any parameters (usages are validated before key material
- * either way).
+ * HMAC-SHA-256 at any key size, the AES family at 128/256 bits.
+ * Empty-usages tests are in for any parameters (usages are validated
+ * before key material either way).
  */
 function importKeyInSubset(name) {
   if (!name.includes("(raw, ") && !name.includes("(jwk, ")) {
@@ -85,7 +97,7 @@ function importKeyInSubset(name) {
   if (/\{hash: SHA-(256|384|512), name: HMAC\}/.test(name)) {
     return true;
   }
-  if (name.includes("{name: AES-GCM}")) {
+  if (/\{name: AES-(GCM|CBC|CTR)\}/.test(name)) {
     return / (128|256) bits /.test(name);
   }
   return false;
@@ -102,7 +114,7 @@ function generateKeyInSubset(name) {
   if (/name: hmac/i.test(name)) {
     return /hash: SHA-(256|384|512)/.test(name);
   }
-  if (/name: aes-gcm/i.test(name)) {
+  if (/name: aes-(gcm|cbc|ctr)/i.test(name)) {
     return /length: (128|256)/.test(name);
   }
   return false;
@@ -120,15 +132,13 @@ function classDGatedInSubset() {
 }
 
 /**
- * derive_bits_keys/cfrg_curves_bits (X25519): served except the two tests
- * whose fixtures need algorithms outside this library — "mismatched
- * algorithms" needs an imported ECDH public key (its fixture is null
- * here, so the failure is the wrong `TypeError`), and "public property
- * value is a secret key" generates an AES-CBC key.
+ * derive_bits_keys/cfrg_curves_bits (X25519): served except "mismatched
+ * algorithms", whose fixture needs an imported ECDH public key (null
+ * here, so the failure is the wrong `TypeError`).
  * @param {string} name
  */
 function cfrgBitsInSubset(name) {
-  return !/mismatched algorithms|public property value is a secret key/.test(name);
+  return !name.includes("mismatched algorithms");
 }
 
 /**
@@ -179,7 +189,7 @@ function kdfDeriveInSubset(name) {
   }
   if (name.startsWith("Derived key of type")) {
     const served =
-      /^Derived key of type name: AES-GCM length: (128|256)/.test(name) ||
+      /^Derived key of type name: AES-(GCM|CBC|CTR) length: (128|256)/.test(name) ||
       /^Derived key of type name: HMAC hash: SHA-(256|384|512)/.test(name);
     if (!served) {
       return false;
@@ -271,6 +281,8 @@ function okpImportFailuresInSubset() {
 export const GROUPS = [
   ["sign_verify/hmac", () => runHmac(), hmacInSubset],
   ["encrypt_decrypt/aes_gcm (96-bit iv)", () => runAesGcm(), gcmInSubset],
+  ["encrypt_decrypt/aes_cbc", () => runAesCbc(), cipherInSubset],
+  ["encrypt_decrypt/aes_ctr", () => runAesCtr(), cipherInSubset],
   [
     "import_export/symmetric_importKey (HMAC, AES-GCM)",
     () => {

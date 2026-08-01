@@ -13,8 +13,9 @@
 use std::cell::Cell;
 
 use webcrypto_impl_core::{
-    served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, InternalNoncePolicy, MacKeyMaterial,
-    MacPolicy, SigPublic, SigningKeyMaterial, SigningPolicy, HMAC_NAME,
+    served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, CipherKeyMaterial, CipherMode,
+    CipherPolicy, InternalNoncePolicy, MacKeyMaterial, MacPolicy, SigPublic, SigningKeyMaterial,
+    SigningPolicy, HMAC_NAME,
 };
 
 use crate::exports::lann::webcrypto::aead::{
@@ -26,10 +27,16 @@ use crate::exports::lann::webcrypto::aead_internal_nonce::{
     InternalNonceKey as ExportedInternalNonceKey,
     InternalNonceKeyOptions as ExportedInternalNonceKeyOptions,
 };
+use crate::exports::lann::webcrypto::aes_cbc::Guest as AesCbcGuest;
+use crate::exports::lann::webcrypto::aes_ctr::Guest as AesCtrGuest;
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
 use crate::exports::lann::webcrypto::chacha20_poly1305::Guest as ChaChaPoly1305Guest;
+use crate::exports::lann::webcrypto::cipher::{
+    CipherKey as ExportedCipherKey, CipherKeyOptions as ExportedCipherKeyOptions,
+    Guest as CipherGuest, GuestCipherKey, GuestCipherKeyOptions,
+};
 use crate::exports::lann::webcrypto::derivation::{
     self, Guest as DerivationGuest, GuestDeriveInput, GuestDeriveOptions,
 };
@@ -839,6 +846,195 @@ impl AesGcmGuest for Component {
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
+
+// --- cipher (the unauthenticated-mode kind) --------------------------------------
+
+impl CipherGuest for Component {
+    type CipherKey = CipherKey;
+    type CipherKeyOptions = CipherKeyOptions;
+}
+
+/// An exported `cipher-key-options`. See [`MacKeyOptions`].
+pub struct CipherKeyOptions {
+    policy: Cell<CipherPolicy>,
+}
+
+impl GuestCipherKeyOptions for CipherKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(CipherPolicy::default()),
+        }
+    }
+
+    fn can_encrypt(&self, allowed: bool) {
+        self.policy.set(CipherPolicy {
+            encrypt: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_decrypt(&self, allowed: bool) {
+        self.policy.set(CipherPolicy {
+            decrypt: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_wrap(&self, allowed: bool) {
+        self.policy.set(CipherPolicy {
+            wrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_unwrap(&self, allowed: bool) {
+        self.policy.set(CipherPolicy {
+            unwrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(CipherPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
+}
+
+/// An exported `cipher-key`: the shared core's unauthenticated-mode key
+/// material.
+pub struct CipherKey {
+    material: CipherKeyMaterial,
+}
+
+impl GuestCipherKey for CipherKey {
+    async fn encrypt(
+        &self,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        plaintext: wit_bindgen::StreamReader<u8>,
+    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
+        let msg = drain_stream(plaintext).await?;
+        Ok(stream_of(self.material.encrypt(
+            &iv,
+            counter_length,
+            &msg,
+        )?))
+    }
+
+    async fn decrypt(
+        &self,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        ciphertext: wit_bindgen::StreamReader<u8>,
+    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
+        let msg = drain_stream(ciphertext).await?;
+        Ok(stream_of(self.material.decrypt(
+            &iv,
+            counter_length,
+            &msg,
+        )?))
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.material.name().to_string()
+    }
+
+    fn algorithm_length(&self) -> u32 {
+        self.material.length_bits()
+    }
+
+    fn iv_size(&self) -> u32 {
+        16
+    }
+
+    fn extractable(&self) -> bool {
+        self.material.policy().extractable
+    }
+
+    fn can_encrypt(&self) -> bool {
+        self.material.policy().encrypt
+    }
+
+    fn can_decrypt(&self) -> bool {
+        self.material.policy().decrypt
+    }
+
+    fn can_wrap(&self) -> bool {
+        self.material.policy().wrap
+    }
+
+    fn can_unwrap(&self) -> bool {
+        self.material.policy().unwrap
+    }
+
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export()?)
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
+}
+
+// --- aes-cbc / aes-ctr (key minting) ----------------------------------------------
+
+/// The shared minting body of the two unauthenticated-mode interfaces:
+/// they differ only in the `CipherMode` they bind.
+macro_rules! cipher_minting {
+    ($guest:path, $mode:expr) => {
+        impl $guest for Component {
+            async fn import_key_raw(
+                variant: AesVariant,
+                raw: Vec<u8>,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material = CipherKeyMaterial::import($mode, variant.into(), raw, policy)?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
+
+            async fn import_key_jwk(
+                variant: AesVariant,
+                jwk: String,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material = CipherKeyMaterial::import_jwk($mode, variant.into(), &jwk, policy)?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
+
+            async fn generate_key(
+                variant: AesVariant,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material =
+                    rng_infallible(CipherKeyMaterial::generate($mode, variant.into(), policy))?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
+
+            async fn derive_key(
+                variant: AesVariant,
+                input: derivation::DeriveInputBorrow<'_>,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material = webcrypto_impl_core::derive_cipher_key(
+                    &input.get::<DeriveInput>().material,
+                    $mode,
+                    variant.into(),
+                    policy,
+                )?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
+        }
+    };
+}
+
+cipher_minting!(AesCbcGuest, CipherMode::Cbc);
+cipher_minting!(AesCtrGuest, CipherMode::Ctr);
 
 // --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 

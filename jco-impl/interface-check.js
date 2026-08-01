@@ -33,6 +33,8 @@ import {
   Password,
   SigningKey,
   VerifyingKey,
+  aesCbc,
+  aesCtr,
   aesGcm,
   aesGcmInternalNonce,
   bytes,
@@ -162,6 +164,12 @@ const bytesInterface = bytes;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-gcm.js")} */
 const aesGcmInterface = aesGcm;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-cbc.js")} */
+const aesCbcInterface = aesCbc;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-ctr.js")} */
+const aesCtrInterface = aesCtr;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-gcm-internal-nonce.js")} */
 const aesGcmInternalNonceInterface = aesGcmInternalNonce;

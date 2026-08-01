@@ -10,10 +10,13 @@
 //   - `generateKey`
 //   - `sign` / `verify`         (HMAC over SHA-256/384/512; Ed25519;
 //     ECDSA P-256/P-384 verification)
-//   - `encrypt` / `decrypt`     (AES-GCM, 128- and 256-bit keys)
+//   - `encrypt` / `decrypt`     (AES-GCM, and the unauthenticated
+//     AES-CBC/AES-CTR through the package's `cipher` kind — see
+//     `wit/README.md`, "Unauthenticated modes are in, for compatibility";
+//     128- and 256-bit keys)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
 //     X25519 key agreement; derived-key targets HMAC over the same
-//     hashes and AES-GCM)
+//     hashes and AES-GCM/CBC/CTR)
 //   - `digest`                  (SHA-256/384/512; SHA-1 through the
 //     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
@@ -21,7 +24,8 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, `x25519`,
+// `aes-gcm`, `aes-cbc`, `aes-ctr`, `derivation`, `hkdf`, `pbkdf2`,
+// `key-agreement`, `x25519`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
 // `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
@@ -39,8 +43,8 @@
 //
 //   - Unserved: beyond the algorithms above, everything throws
 //     `NotSupportedError` — including SHA-1 as a KDF hash, AES-192 (which
-//     every implementation of the package declines), and the derived-key
-//     targets the WIT's `derive-key` mints do not span (AES-CBC/CTR/KW).
+//     every implementation of the package declines), and AES-KW (parked
+//     with the package's wrap direction).
 //   - Unserved by composition: ECDSA signing, key generation, and
 //     private-key import. The interface exists (`ecdsa-sign`), but it is
 //     class D and the in-guest provider this library composes with
@@ -81,6 +85,8 @@
 
 import * as hmacSha2 from "lann:webcrypto/hmac-sha2@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
+import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
+import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
 import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
@@ -101,6 +107,7 @@ import * as witWorld from "wit-world";
 // resources, constructed here per mint.
 import { MacKeyOptions } from "lann:webcrypto/mac@0.1.0";
 import { AeadKeyOptions } from "lann:webcrypto/aead@0.1.0";
+import { CipherKeyOptions } from "lann:webcrypto/cipher@0.1.0";
 import { DeriveOptions } from "lann:webcrypto/derivation@0.1.0";
 import { AgreementKeyOptions } from "lann:webcrypto/key-agreement@0.1.0";
 import { SigningKeyOptions } from "lann:webcrypto/signature@0.1.0";
@@ -494,7 +501,17 @@ function handleOf(key) {
  */
 
 /** The algorithm names this library serves, in their registry spellings. */
-const SERVED_ALGORITHMS = ["HMAC", "AES-GCM", "HKDF", "PBKDF2", "X25519", "Ed25519", "ECDSA"];
+const SERVED_ALGORITHMS = [
+  "HMAC",
+  "AES-GCM",
+  "AES-CBC",
+  "AES-CTR",
+  "HKDF",
+  "PBKDF2",
+  "X25519",
+  "Ed25519",
+  "ECDSA",
+];
 
 /**
  * @param {unknown} algorithm
@@ -564,6 +581,10 @@ const USAGES = {
   // even though this library exposes no wrap operations yet: usages are
   // key metadata, validated at use.
   "AES-GCM": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
+  // The unauthenticated modes share AES-GCM's usage vocabulary (the WIT
+  // `cipher` kind records wrap/unwrap as vocabulary ahead of operations).
+  "AES-CBC": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
+  "AES-CTR": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
   // The derive sources share WebCrypto's usage pair. X25519's entry is the
   // *private* key's vocabulary; public keys carry no usages and are
   // validated at their import site.
@@ -758,6 +779,33 @@ function aesGcmMintOptions(usages, extractable) {
   options.extractable(extractable);
   return options;
 }
+
+/**
+ * The `cipher-key-options` resource for the unauthenticated AES modes.
+ * See `hmacMintOptions`.
+ * @param {readonly KeyUsage[]} usages
+ * @param {boolean} extractable
+ */
+function cipherMintOptions(usages, extractable) {
+  const options = new CipherKeyOptions();
+  options.canEncrypt(usages.includes("encrypt"));
+  options.canDecrypt(usages.includes("decrypt"));
+  options.canWrap(usages.includes("wrapKey"));
+  options.canUnwrap(usages.includes("unwrapKey"));
+  options.extractable(extractable);
+  return options;
+}
+
+/**
+ * The WIT minting interface and JWK `alg` suffix for each served
+ * unauthenticated mode (the `cipher` kind; see the header's design-note
+ * pointer — nothing these keys do authenticates).
+ * @type {Readonly<Record<string, { iface: any, jwkTag: string } | undefined>>}
+ */
+const CIPHER_MODES = {
+  "AES-CBC": { iface: aesCbcIface, jwkTag: "CBC" },
+  "AES-CTR": { iface: aesCtrIface, jwkTag: "CTR" },
+};
 
 /**
  * The `derive-options` resource for a KDF base-secret mint. Both grants,
@@ -988,6 +1036,19 @@ async function mintAesGcmKey(start, extractable, usages) {
   return mintKey(handle, "secret", projected, extractable, usages);
 }
 
+/**
+ * @param {() => unknown} start
+ * @param {string} name the mode's registry name, for the projected algorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
+async function mintCipherKey(start, name, extractable, usages) {
+  const handle = await callImport(start());
+  /** @type {AesKeyAlgorithm} */
+  const projected = { name, length: /** @type {number} */ (handle.algorithmLength()) };
+  return mintKey(handle, "secret", projected, extractable, usages);
+}
+
 // --- subtle --------------------------------------------------------------------------
 
 /**
@@ -1182,45 +1243,62 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
       usages,
     );
   } else {
-    // The WIT binds the AES variant at mint, so the shim picks it from
-    // what the caller supplied: the raw material's length, or the JWK's
-    // `alg` (falling back to `k`'s decoded length when `alg` is absent —
-    // metadata arithmetic; the material itself parses behind the WIT,
-    // which re-validates the pairing either way). A length with no
-    // variant maps to `DataError`, the platform's own import error.
+    // The AES family (GCM through the aead kind; CBC/CTR through the
+    // cipher kind). The WIT binds the AES variant at mint, so the shim
+    // picks it from what the caller supplied: the raw material's length,
+    // or the JWK's `alg` (falling back to `k`'s decoded length when `alg`
+    // is absent — metadata arithmetic; the material itself parses behind
+    // the WIT, which re-validates the pairing either way). A length with
+    // no variant maps to `DataError`, the platform's own import error.
+    const mode = CIPHER_MODES[alg.name];
+    const jwkTag = mode === undefined ? "GCM" : mode.jwkTag;
+    /** @type {string | Uint8Array} */
+    let material;
+    let variant;
     if (format === "jwk") {
       if (typeof keyData !== "object" || keyData === null) {
         throw new TypeError("JWK key data must be an object");
       }
       const jwk = /** @type {JsonWebKey} */ (keyData);
       let bits;
-      if (typeof jwk.alg === "string" && /^A(128|192|256)GCM$/.test(jwk.alg)) {
+      if (
+        typeof jwk.alg === "string" &&
+        new RegExp(`^A(128|192|256)${jwkTag}$`).test(jwk.alg)
+      ) {
         bits = Number(jwk.alg.slice(1, 4));
       } else if (typeof jwk.k === "string") {
         bits = Math.floor((jwk.k.length * 3) / 4) * 8;
       }
       if (bits !== 128 && bits !== 192 && bits !== 256) {
-        throw dom("DataError", "JWK carries no AES-GCM key of a known length");
+        throw dom("DataError", `JWK carries no ${alg.name} key of a known length`);
       }
-      const variant = aesVariantOf(bits);
-      return await mintAesGcmKey(
+      variant = aesVariantOf(bits);
+      material = jwkForImport(keyData, "enc", usages);
+    } else {
+      const raw = bytesOf(keyData, "keyData");
+      if (raw.length !== 16 && raw.length !== 24 && raw.length !== 32) {
+        throw dom("DataError", `${alg.name} keys are 16, 24, or 32 bytes, got ${raw.length}`);
+      }
+      variant = aesVariantOf(raw.length * 8);
+      material = raw;
+    }
+    if (mode !== undefined) {
+      const options = () => cipherMintOptions(usages, !!extractable);
+      return await mintCipherKey(
         () =>
-          aesGcm.importKeyJwk(
-            variant,
-            jwkForImport(keyData, "enc", usages),
-            aesGcmMintOptions(usages, !!extractable),
-          ),
+          format === "jwk"
+            ? mode.iface.importKeyJwk(variant, material, options())
+            : mode.iface.importKeyRaw(variant, material, options()),
+        alg.name,
         !!extractable,
         usages,
       );
     }
-    const raw = bytesOf(keyData, "keyData");
-    if (raw.length !== 16 && raw.length !== 24 && raw.length !== 32) {
-      throw dom("DataError", `AES-GCM keys are 16, 24, or 32 bytes, got ${raw.length}`);
-    }
-    const variant = aesVariantOf(raw.length * 8);
     return await mintAesGcmKey(
-      () => aesGcm.importKeyRaw(variant, raw, aesGcmMintOptions(usages, !!extractable)),
+      () =>
+        format === "jwk"
+          ? aesGcm.importKeyJwk(variant, material, aesGcmMintOptions(usages, !!extractable))
+          : aesGcm.importKeyRaw(variant, material, aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1299,6 +1377,15 @@ async function generateKey(algorithm, extractable, keyUsages) {
     );
   } else {
     const variant = aesVariantOf(Number(alg.length));
+    const mode = CIPHER_MODES[alg.name];
+    if (mode !== undefined) {
+      return await mintCipherKey(
+        () => mode.iface.generateKey(variant, cipherMintOptions(usages, !!extractable)),
+        alg.name,
+        !!extractable,
+        usages,
+      );
+    }
     return await mintAesGcmKey(
       () => aesGcm.generateKey(variant, aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
@@ -1457,11 +1544,37 @@ async function verify(algorithm, key, signature, data) {
 const GCM_LEGAL_TAG_LENGTHS = [32, 64, 96, 104, 112, 120, 128];
 
 /**
- * @param {unknown} algorithm
+ * The per-operation parameters of the unauthenticated modes, validated as
+ * the spec's encrypt/decrypt operations do: AES-CBC takes a 16-byte `iv`;
+ * AES-CTR a 16-byte `counter` block and a 1–128-bit counter `length` —
+ * violations are `OperationError`, the operations' own error.
+ * @param {NormalizedAlgorithm} alg
+ * @returns {{ iv: Uint8Array, counterLength: number | undefined }}
+ */
+function cipherOpParams(alg) {
+  if (alg.name === "AES-CBC") {
+    const iv = bytesOf(alg.iv, "iv");
+    if (iv.length !== 16) {
+      throw dom("OperationError", `AES-CBC requires a 16-byte iv, got ${iv.length} bytes`);
+    }
+    return { iv, counterLength: undefined };
+  }
+  const counter = bytesOf(/** @type {{ counter?: unknown }} */ (alg).counter, "counter");
+  if (counter.length !== 16) {
+    throw dom("OperationError", `AES-CTR requires a 16-byte counter, got ${counter.length} bytes`);
+  }
+  const length = Number(/** @type {{ length?: unknown }} */ (alg).length);
+  if (!Number.isInteger(length) || length < 1 || length > 128) {
+    throw dom("OperationError", `AES-CTR counter length must be 1 to 128 bits, got ${length}`);
+  }
+  return { iv: counter, counterLength: length };
+}
+
+/**
+ * @param {NormalizedAlgorithm} alg
  * @returns {{ iv: Uint8Array, aad: Uint8Array, tagSize: number | undefined }}
  */
-function gcmParams(algorithm) {
-  const alg = normalizeAlgorithm(algorithm);
+function gcmParams(alg) {
   if (alg.name !== "AES-GCM") {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
@@ -1487,7 +1600,19 @@ function gcmParams(algorithm) {
  * @returns {Promise<ArrayBuffer>}
  */
 async function encrypt(algorithm, key, data) {
-  const { iv, aad, tagSize } = gcmParams(algorithm);
+  const alg = normalizeAlgorithm(algorithm);
+  if (CIPHER_MODES[alg.name] !== undefined) {
+    const { iv, counterLength } = cipherOpParams(alg);
+    requireKeyAlgorithm(key, alg.name);
+    requireUsage(key, "encrypt");
+    const handle = handleOf(key);
+    const sealed = await callFedCollect(
+      (rx) => handle.encrypt(iv, counterLength, rx),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(sealed);
+  }
+  const { iv, aad, tagSize } = gcmParams(alg);
   requireKeyAlgorithm(key, "AES-GCM");
   requireUsage(key, "encrypt");
   const handle = handleOf(key);
@@ -1506,7 +1631,19 @@ async function encrypt(algorithm, key, data) {
  * @returns {Promise<ArrayBuffer>}
  */
 async function decrypt(algorithm, key, data) {
-  const { iv, aad, tagSize } = gcmParams(algorithm);
+  const alg = normalizeAlgorithm(algorithm);
+  if (CIPHER_MODES[alg.name] !== undefined) {
+    const { iv, counterLength } = cipherOpParams(alg);
+    requireKeyAlgorithm(key, alg.name);
+    requireUsage(key, "decrypt");
+    const handle = handleOf(key);
+    const plaintext = await callFedCollect(
+      (rx) => handle.decrypt(iv, counterLength, rx),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(plaintext);
+  }
+  const { iv, aad, tagSize } = gcmParams(alg);
   requireKeyAlgorithm(key, "AES-GCM");
   requireUsage(key, "decrypt");
   const handle = handleOf(key);
@@ -1525,7 +1662,7 @@ async function decrypt(algorithm, key, data) {
  */
 async function deriveBits(algorithm, baseKey, length) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name === "AES-GCM") {
+  if (alg.name === "HMAC" || alg.name.startsWith("AES-")) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   requireKeyAlgorithm(baseKey, alg.name);
@@ -1572,19 +1709,26 @@ async function deriveBits(algorithm, baseKey, length) {
  */
 async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsages) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name === "AES-GCM") {
+  if (alg.name === "HMAC" || alg.name.startsWith("AES-")) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   const target = normalizeAlgorithm(derivedKeyType);
-  if (target.name !== "HMAC" && target.name !== "AES-GCM") {
+  if (target.name !== "HMAC" && !target.name.startsWith("AES-")) {
     // Deriving a KDF or agreement key is not among the WIT's `derive-key`
     // mints (chaining is `hkdf.prepare-from`'s, below the subtle surface).
     throw dom("NotSupportedError", `unsupported derived key type ${target.name}`);
   }
-  const usages = normalizeUsages(keyUsages, target.name);
+  // The sequence-and-emptiness usage check precedes the derivation, but
+  // the *vocabulary* check belongs to the final import step (the spec's
+  // order — WPT observes a derive failure outranking a bad usage name),
+  // so `normalizeUsages` runs after `prepareInput`.
+  if (normalizeUsageSequence(keyUsages).length === 0) {
+    throw dom("SyntaxError", "usages cannot be empty for secret or private keys");
+  }
   requireKeyAlgorithm(baseKey, alg.name);
   requireUsage(baseKey, "deriveKey");
   const input = await prepareInput(alg, baseKey);
+  const usages = normalizeUsages(keyUsages, target.name);
 
   if (target.name === "HMAC") {
     const variant = sha2VariantOf(target.hash);
@@ -1601,6 +1745,15 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
     );
   }
   const variant = aesVariantOf(Number(target.length));
+  const mode = CIPHER_MODES[target.name];
+  if (mode !== undefined) {
+    return await mintCipherKey(
+      () => mode.iface.deriveKey(variant, input, cipherMintOptions(usages, !!extractable)),
+      target.name,
+      !!extractable,
+      usages,
+    );
+  }
   return await mintAesGcmKey(
     () => aesGcm.deriveKey(variant, input, aesGcmMintOptions(usages, !!extractable)),
     !!extractable,

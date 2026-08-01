@@ -10,6 +10,7 @@
 
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
+use lann_webcrypto_guest::bindings::cipher::CipherKey;
 use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::mac::MacKey;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
@@ -150,6 +151,37 @@ pub async fn verify(
     schedule: Schedule,
 ) -> (Result<(), Error>, Result<(), String>) {
     run_split(schedule.chunks(data), |rx| key.verify(rx, tag.to_vec())).await
+}
+
+/// `cipher-key.encrypt`, feeding the plaintext per `schedule` concurrently
+/// with the call; same outcome split as [`seal`].
+pub async fn ci_encrypt(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    plaintext: &[u8],
+    schedule: Schedule,
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    let (sealed, fed) = run_split(schedule.chunks(plaintext), |rx| {
+        key.encrypt(iv.to_vec(), counter_length, rx)
+    })
+    .await;
+    (collect(sealed).await, fed)
+}
+
+/// `cipher-key.decrypt`; same outcome split as [`seal`].
+pub async fn ci_decrypt(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    ciphertext: &[u8],
+    schedule: Schedule,
+) -> (Result<Vec<u8>, Error>, Result<(), String>) {
+    let (opened, fed) = run_split(schedule.chunks(ciphertext), |rx| {
+        key.decrypt(iv.to_vec(), counter_length, rx)
+    })
+    .await;
+    (collect(opened).await, fed)
 }
 
 /// `digest.compute`, feeding `data` per `schedule` concurrently with the

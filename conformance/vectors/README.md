@@ -28,6 +28,12 @@ commit
   parameter space, and the invalid vectors (`SizeTooLarge`) map onto the
   RFC 5869 output bound, reported as `error.other`.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
+- `aes_cbc_pkcs5_test.json` — AES-CBC vectors for the unauthenticated
+  `cipher` kind (PKCS5 and PKCS7 padding coincide for AES's 16-byte
+  blocks). Valid vectors round-trip both ways; invalid ones (bad or
+  absent padding) must fail `decrypt` with the kind's one uniform error.
+  There is no upstream CTR file; AES-CTR is pinned by probes (NIST SP
+  800-38A F.5 known answers plus the wrapping-counter contract).
 - `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
   ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.
 - `ed25519_test.json` — Ed25519 signature-verification vectors.

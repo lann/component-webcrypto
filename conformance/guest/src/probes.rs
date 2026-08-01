@@ -6,14 +6,14 @@
 use crate::mint::{
     agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_x25519_key,
-    generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key, import_hmac_key,
-    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key_raw, import_password,
-    import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
-    x25519_secret_jwk,
+    generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
+    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_ikm, import_internal_nonce_key,
+    import_key_raw, import_password, import_x25519_public_key, import_x25519_secret_key,
+    import_xchacha_internal_nonce_key, x25519_secret_jwk,
 };
 use conformance_harness::stream::{
-    compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify, sign, try_sign, verify,
-    Schedule,
+    ci_decrypt, ci_encrypt, compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify,
+    sign, try_sign, verify, Schedule,
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
@@ -98,6 +98,12 @@ probes! {
     x25519_format_roundtrips,
     internal_nonce_jwk,
     sha1_checked_postures(sha1_checked),
+    ctr_known_answers,
+    cipher_params_contract,
+    cbc_uniform_failure,
+    cipher_usage_policy,
+    cipher_jwk_and_exports,
+    cipher_derive_key,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -3123,4 +3129,367 @@ async fn sha1_checked_minting_declined() -> Result<String, String> {
     )
     .map_err(|detail| format!("sha1-checked decline: {detail}"))?;
     Ok("asserted both sha1-checked constructors decline unsupported".into())
+}
+
+// NIST SP 800-38A F.5: the CTR known-answer inputs (the same plaintext
+// and initial counter block at both served key sizes).
+const SP800_38A_CTR_IV: &str = "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
+const SP800_38A_PLAINTEXT: &str = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
+
+/// AES-CTR known answers (NIST SP 800-38A F.5.1/F.5.5) plus the wrapping
+/// counter contract, self-consistently: a message enciphered under a
+/// narrow counter must equal its blocks enciphered one at a time at the
+/// wrapped counter values, so the two implementations cannot disagree on
+/// the wrap without disagreeing here.
+async fn ctr_known_answers() -> Result<(), String> {
+    let iv = unhex(SP800_38A_CTR_IV);
+    let plaintext = unhex(SP800_38A_PLAINTEXT);
+    for (variant, key, expected) in [
+        (
+            AesVariant::Aes128,
+            unhex("2b7e151628aed2a6abf7158809cf4f3c"),
+            unhex("874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee"),
+        ),
+        (
+            AesVariant::Aes256,
+            unhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4"),
+            unhex("601ec313775789a5b7a7f504bbf3d228f443e3ca4d62b59aca84e990cacaf5c52b0930daa23de94ce87017ba2d84988ddfc9c58db67aada613c2dd08457941a6"),
+        ),
+    ] {
+        let key = import_ctr_key(variant, key, false)
+            .await
+            .map_err(|e| describe("import-key-raw", &e))?;
+        for schedule in [Schedule::Whole, Schedule::Straddle] {
+            let (sealed, fed) = ci_encrypt(&key, &iv, Some(128), &plaintext, schedule).await;
+            fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+            let sealed = sealed.map_err(|e| describe("encrypt", &e))?;
+            expect_bytes(&sealed, &expected, "SP 800-38A ciphertext")?;
+        }
+        let (opened, fed) = ci_decrypt(&key, &iv, Some(128), &expected, Schedule::Whole).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe("decrypt", &e))?;
+        expect_bytes(&opened, &plaintext, "SP 800-38A round trip")?;
+    }
+
+    // The wrap: a 2-bit counter starting at 3 covers counters 3, 0, 1, 2
+    // without carrying into the fixed portion.
+    let key = import_ctr_key(AesVariant::Aes256, vec![3; 32], false)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let mut iv = [0xabu8; 16];
+    iv[15] = 0xff;
+    let (sealed, fed) = ci_encrypt(&key, &iv, Some(2), &[0; 64], Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("encrypt (2-bit counter)", &e))?;
+    for (i, low) in [0xffu8, 0xfc, 0xfd, 0xfe].into_iter().enumerate() {
+        let mut counter = [0xabu8; 16];
+        counter[15] = low;
+        let (block, fed) = ci_encrypt(&key, &counter, Some(128), &[0; 16], Schedule::Whole).await;
+        fed.map_err(|e| format!("encrypt block feeder: {e}"))?;
+        let block = block.map_err(|e| describe("encrypt (single block)", &e))?;
+        expect_bytes(
+            &sealed[i * 16..(i + 1) * 16],
+            &block,
+            &format!("wrapped counter block {i}"),
+        )?;
+    }
+
+    // And a message needing more blocks than the counter space holds
+    // fails rather than reuse counter values.
+    let (sealed, fed) = ci_encrypt(&key, &iv, Some(2), &[0; 80], Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    expect_err(
+        "encrypt past the counter space",
+        ErrKind::Other,
+        sealed,
+        "enciphered more blocks than the counter width holds",
+    )
+}
+
+/// The per-call parameter contract on both modes: IV length, and the
+/// counter-length presence, absence, and range rules — all
+/// `invalid-nonce`.
+async fn cipher_params_contract() -> Result<(), String> {
+    let cbc = import_cbc_key(AesVariant::Aes256, vec![1; 32], false)
+        .await
+        .map_err(|e| describe("import-key-raw (cbc)", &e))?;
+    let ctr = import_ctr_key(AesVariant::Aes256, vec![1; 32], false)
+        .await
+        .map_err(|e| describe("import-key-raw (ctr)", &e))?;
+
+    expect(
+        cbc.algorithm_name(),
+        "AES-CBC".to_string(),
+        "cbc algorithm-name",
+    )?;
+    expect(
+        ctr.algorithm_name(),
+        "AES-CTR".to_string(),
+        "ctr algorithm-name",
+    )?;
+    expect(cbc.algorithm_length(), 256, "cbc algorithm-length")?;
+    expect(cbc.iv_size(), 16, "cbc iv-size")?;
+    expect(ctr.iv_size(), 16, "ctr iv-size")?;
+
+    for (what, key, iv_len, counter) in [
+        ("15-byte cbc iv", &cbc, 15usize, None),
+        ("17-byte cbc iv", &cbc, 17, None),
+        ("cbc with a counter length", &cbc, 16, Some(64u8)),
+        ("ctr without a counter length", &ctr, 16, None),
+        ("ctr counter length 0", &ctr, 16, Some(0)),
+        ("ctr counter length 129", &ctr, 16, Some(129)),
+        ("15-byte ctr counter block", &ctr, 15, Some(64)),
+    ] {
+        let (sealed, fed) = ci_encrypt(key, &vec![0; iv_len], counter, b"x", Schedule::Whole).await;
+        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+        expect_err(
+            what,
+            ErrKind::InvalidNonce,
+            sealed,
+            "accepted bad parameters",
+        )?;
+        let (opened, fed) =
+            ci_decrypt(key, &vec![0; iv_len], counter, &[0; 16], Schedule::Whole).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        expect_err(
+            what,
+            ErrKind::InvalidNonce,
+            opened,
+            "accepted bad parameters",
+        )?;
+    }
+    Ok(())
+}
+
+/// The cipher kind's uniform-failure rule, pinned to the byte: an empty
+/// ciphertext, a misaligned one, and one whose padding is corrupt render
+/// the *identical* error — kind and message — because any second
+/// rendering would be a distinguishable padding verdict.
+async fn cbc_uniform_failure() -> Result<(), String> {
+    let key = import_cbc_key(AesVariant::Aes256, vec![7; 32], false)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let iv = [0u8; 16];
+
+    // A ciphertext with valid shape but corrupt padding: encrypt, then
+    // flip a bit in the final block.
+    let (sealed, fed) =
+        ci_encrypt(&key, &iv, None, b"uniform failure payload", Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    let mut corrupted = sealed.map_err(|e| describe("encrypt", &e))?;
+    let last = corrupted.len() - 1;
+    corrupted[last] ^= 0x01;
+
+    for (what, ciphertext) in [
+        ("empty ciphertext", vec![]),
+        ("misaligned ciphertext", vec![1; 15]),
+        ("corrupt padding", corrupted),
+    ] {
+        let (opened, fed) = ci_decrypt(&key, &iv, None, &ciphertext, Schedule::Whole).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        match opened {
+            Err(Error::Other(detail)) if detail == "AES-CBC decryption failed" => {}
+            Err(other) => {
+                return Err(describe(
+                    &format!("{what}: expected the uniform failure, got"),
+                    &other,
+                ))
+            }
+            Ok(_) => return Err(format!("{what} decrypted")),
+        }
+    }
+    Ok(())
+}
+
+/// Usage policy on `cipher-key`: the zero-usage mint refusal, per-operation
+/// enforcement, and the usage getters (wrap/unwrap are recorded
+/// vocabulary).
+async fn cipher_usage_policy() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aes_cbc;
+    use lann_webcrypto_guest::bindings::cipher::CipherKeyOptions;
+
+    expect_err(
+        "zero-usage import-key-raw",
+        ErrKind::NotPermitted,
+        aes_cbc::import_key_raw(AesVariant::Aes256, vec![1; 32], CipherKeyOptions::new()).await,
+        "minted a key with no enabled usage",
+    )?;
+
+    let options = CipherKeyOptions::new();
+    options.can_encrypt(true);
+    options.can_wrap(true);
+    let encrypt_only = aes_cbc::import_key_raw(AesVariant::Aes256, vec![1; 32], options)
+        .await
+        .map_err(|e| describe("encrypt-only import-key-raw", &e))?;
+    expect(encrypt_only.can_encrypt(), true, "encrypt-only can-encrypt")?;
+    expect(
+        encrypt_only.can_decrypt(),
+        false,
+        "encrypt-only can-decrypt",
+    )?;
+    expect(encrypt_only.can_wrap(), true, "encrypt-only can-wrap")?;
+    expect(encrypt_only.can_unwrap(), false, "encrypt-only can-unwrap")?;
+
+    let iv = [0u8; 16];
+    let (sealed, fed) = ci_encrypt(&encrypt_only, &iv, None, b"payload", Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("encrypt", &e))?;
+    let (opened, fed) = ci_decrypt(&encrypt_only, &iv, None, &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+    expect_err(
+        "decrypt on an encrypt-only key",
+        ErrKind::NotPermitted,
+        opened,
+        "an ungranted operation ran",
+    )?;
+
+    let options = CipherKeyOptions::new();
+    options.can_decrypt(true);
+    let decrypt_only = aes_cbc::import_key_raw(AesVariant::Aes256, vec![7; 32], options)
+        .await
+        .map_err(|e| describe("decrypt-only import-key-raw", &e))?;
+    let (sealed, fed) = ci_encrypt(&decrypt_only, &iv, None, b"payload", Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    expect_err(
+        "encrypt on a decrypt-only key",
+        ErrKind::NotPermitted,
+        sealed,
+        "an ungranted operation ran",
+    )
+}
+
+/// The cipher JWK and export surface: mode-specific `alg` values round-trip
+/// on both modes, the wrong mode's `alg` is rejected, and the
+/// extractability gate holds on both export forms.
+async fn cipher_jwk_and_exports() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr};
+
+    let raw: Vec<u8> = (1..=32).collect();
+    for (what, alg, wrong_alg) in [("cbc", "A256CBC", "A256CTR"), ("ctr", "A256CTR", "A256CBC")] {
+        let jwk = format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"{alg}"}}"#);
+        let import_jwk = |jwk: String, extractable: bool| async move {
+            match what {
+                "cbc" => {
+                    aes_cbc::import_key_jwk(
+                        AesVariant::Aes256,
+                        jwk,
+                        crate::mint::cipher_options(extractable),
+                    )
+                    .await
+                }
+                _ => {
+                    aes_ctr::import_key_jwk(
+                        AesVariant::Aes256,
+                        jwk,
+                        crate::mint::cipher_options(extractable),
+                    )
+                    .await
+                }
+            }
+        };
+        let key = import_jwk(jwk, true)
+            .await
+            .map_err(|e| describe(&format!("{what} import-key-jwk"), &e))?;
+        let exported = key
+            .export_key_raw()
+            .await
+            .map_err(|e| describe("export-key-raw", &e))?;
+        expect_bytes(&exported, &raw, "material from the JWK")?;
+        let jwk = key
+            .export_key_jwk()
+            .await
+            .map_err(|e| describe("export-key-jwk", &e))?;
+        if !jwk.contains(alg) || !jwk.contains(JWK_K_32) {
+            return Err(format!(
+                "exported {what} JWK missing material members: {jwk}"
+            ));
+        }
+
+        let wrong = format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"{wrong_alg}"}}"#);
+        expect_err(
+            &format!("{what} JWK with the other mode's alg"),
+            ErrKind::InvalidKey,
+            import_jwk(wrong, false).await,
+            "imported a JWK bound to the other mode",
+        )?;
+    }
+
+    let key = import_cbc_key(AesVariant::Aes256, vec![9; 32], false)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    expect(key.extractable(), false, "non-extractable getter")?;
+    expect_err(
+        "export-key-raw",
+        ErrKind::NotExtractable,
+        key.export_key_raw().await,
+        "exported a non-extractable key",
+    )?;
+    expect_err(
+        "export-key-jwk",
+        ErrKind::NotExtractable,
+        key.export_key_jwk().await,
+        "exported a non-extractable key",
+    )
+}
+
+/// `derive-key` on both cipher minting interfaces agrees with
+/// `derive-bits` + `import-key-raw` over the same HKDF derivation (the
+/// `hkdf_derive_key_equivalence` pattern).
+async fn cipher_derive_key() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr, hkdf};
+
+    let ikm = import_ikm(vec![0x0b; 22], true, true)
+        .await
+        .map_err(|e| describe("import-ikm", &e))?;
+    let input = hkdf::prepare(
+        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        &ikm,
+        b"salt".to_vec(),
+        b"info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("hkdf.prepare", &e))?;
+    let bits = input
+        .derive_bits(Some(256))
+        .await
+        .map_err(|e| describe("derive-bits", &e))?;
+
+    let iv = [5u8; 16];
+    let payload = b"derive-key equivalence payload";
+    for mode in ["cbc", "ctr"] {
+        let derived = match mode {
+            "cbc" => {
+                aes_cbc::derive_key(
+                    AesVariant::Aes256,
+                    &input,
+                    crate::mint::cipher_options(false),
+                )
+                .await
+            }
+            _ => {
+                aes_ctr::derive_key(
+                    AesVariant::Aes256,
+                    &input,
+                    crate::mint::cipher_options(false),
+                )
+                .await
+            }
+        }
+        .map_err(|e| describe(&format!("{mode} derive-key"), &e))?;
+        let imported = match mode {
+            "cbc" => import_cbc_key(AesVariant::Aes256, bits.clone(), false).await,
+            _ => import_ctr_key(AesVariant::Aes256, bits.clone(), false).await,
+        }
+        .map_err(|e| describe("import-key-raw of the derived bits", &e))?;
+
+        let counter = if mode == "ctr" { Some(64) } else { None };
+        let (sealed, fed) = ci_encrypt(&derived, &iv, counter, payload, Schedule::Whole).await;
+        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+        let sealed = sealed.map_err(|e| describe("encrypt (derived key)", &e))?;
+        let (opened, fed) = ci_decrypt(&imported, &iv, counter, &sealed, Schedule::Whole).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe("decrypt (imported bits)", &e))?;
+        expect_bytes(&opened, payload, &format!("{mode} derive-key equivalence"))?;
+    }
+    Ok(())
 }

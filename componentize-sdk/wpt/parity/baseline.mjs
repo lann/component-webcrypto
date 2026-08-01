@@ -16,6 +16,8 @@
 import { drain, takeResults } from "../harness.js";
 import { run_test as runHmac } from "../build/group-hmac.js";
 import { run_test as runAesGcm } from "../build/group-aes-gcm.js";
+import { run_test as runAesCbc } from "../build/group-aes-cbc.js";
+import { run_test as runAesCtr } from "../build/group-aes-ctr.js";
 import { runTests as runImportKey } from "../build/group-import-key.js";
 import { run_test as runGenerateKey } from "../build/group-generate-key.js";
 import { define_tests_25519 as defineCfrgBits } from "../build/group-cfrg-bits.js";
@@ -35,6 +37,8 @@ import { define_tests as definePbkdf2 } from "../build/group-pbkdf2-derive.js";
 const GROUPS = [
   ["sign_verify/hmac", () => runHmac()],
   ["encrypt_decrypt/aes_gcm (96-bit iv)", () => runAesGcm()],
+  ["encrypt_decrypt/aes_cbc", () => runAesCbc()],
+  ["encrypt_decrypt/aes_ctr", () => runAesCtr()],
   [
     "import_export/symmetric_importKey (HMAC, AES-GCM)",
     () => {
