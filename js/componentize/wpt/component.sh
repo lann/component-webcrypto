@@ -211,6 +211,10 @@ JS
     echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
     cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js
     echo 'export { define_tests };' >> "$B"/group-pbkdf2-derive.js
+    # The length vectors must precede the test cases: the case table reads
+    # `algorithms` while it evaluates.
+    cat "$V"/helpers.js "$V"/derived_bits_length.js "$V"/derived_bits_length_vectors.js "$V"/derived_bits_length_testcases.js > "$B"/group-derived-bits-length.js
+    echo 'export { define_tests };' >> "$B"/group-derived-bits-length.js
 }
 
 case "${1:-}" in

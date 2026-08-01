@@ -198,6 +198,19 @@ function kdfDeriveInSubset(name) {
 }
 
 /**
+ * derive_bits_keys/derived_bits_length: the `length` parameter's edge
+ * semantics — explicit sizes, zero (an empty output), sub-byte lengths
+ * (the KDFs reject, X25519 truncates and masks), and null/undefined/
+ * omitted (the KDFs reject, an agreement yields its natural output) —
+ * for the served HKDF, PBKDF2, and X25519 rows. The ECDH rows need a
+ * P-curve agreement no implementation serves.
+ * @param {string} name
+ */
+function derivedBitsLengthInSubset(name) {
+  return !name.startsWith("ECDH");
+}
+
+/**
  * import_export/ec_importKey: the public ECDSA P-256/P-384 forms are
  * served — raw and spki uncompressed points and public EC JWKs. Out: the
  * compressed-point rows (an optional feature: `assert_implements_optional`
@@ -367,6 +380,12 @@ export const GROUPS = [
     module: "group-pbkdf2-derive.js",
     start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
     inSubset: kdfDeriveInSubset,
+  },
+  {
+    name: "derive_bits_keys/derived_bits_length",
+    module: "group-derived-bits-length.js",
+    start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
+    inSubset: derivedBitsLengthInSubset,
   },
   {
     name: "digest/digest",

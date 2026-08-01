@@ -31,6 +31,7 @@ export const EXPECTED = {
   "generateKey/successes (X25519)": { inPassed: 32, inFailed: 0, outPassed: 0, outFailed: 0 },
   "derive_bits_keys/hkdf": { inPassed: 1449, inFailed: 0, outPassed: 532, outFailed: 1680 },
   "derive_bits_keys/pbkdf2": { inPassed: 4474, inFailed: 0, outPassed: 1242, outFailed: 2916 },
+  "derive_bits_keys/derived_bits_length": { inPassed: 22, inFailed: 0, outPassed: 0, outFailed: 7 },
   "digest/digest": { inPassed: 116, inFailed: 0, outPassed: 0, outFailed: 0 },
   "sign_verify/eddsa (Ed25519)": { inPassed: 19, inFailed: 0, outPassed: 0, outFailed: 0 },
   "sign_verify/eddsa_small_order_points": { inPassed: 14, inFailed: 0, outPassed: 0, outFailed: 0 },
