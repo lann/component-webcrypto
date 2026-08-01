@@ -22,6 +22,7 @@ import { define_tests_25519 as defineCfrgBits } from "../build/group-cfrg-bits.j
 import { define_tests_25519 as defineCfrgKeys } from "../build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "../build/group-okp-import-key.js";
 import { run_test as runOkpImportKeyFailures } from "../build/group-okp-import-key-failures.js";
+import { run_digest_tests as runDigest } from "../build/group-digest.js";
 import { define_tests as defineHkdf } from "../build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "../build/group-pbkdf2-derive.js";
 
@@ -49,6 +50,7 @@ const GROUPS = [
   ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"])],
   ["derive_bits_keys/hkdf", () => promise_test(defineHkdf, "setup - define tests")],
   ["derive_bits_keys/pbkdf2", () => promise_test(definePbkdf2, "setup - define tests")],
+  ["digest/digest", () => runDigest()],
 ];
 
 const records = [];

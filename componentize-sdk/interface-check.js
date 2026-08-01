@@ -24,7 +24,7 @@ import { CryptoKey, crypto, subtle } from "./webcrypto.js";
  * and one listed but unimplemented fails the assignment below.
  *
  * `generateKey` and `exportKey` are absent deliberately — see below.
- * @typedef {"importKey" | "sign" | "verify" | "encrypt" | "decrypt" | "deriveBits" | "deriveKey"} ServedMethods
+ * @typedef {"importKey" | "sign" | "verify" | "encrypt" | "decrypt" | "deriveBits" | "deriveKey" | "digest"} ServedMethods
  */
 
 /** @type {Pick<SubtleCrypto, ServedMethods>} */

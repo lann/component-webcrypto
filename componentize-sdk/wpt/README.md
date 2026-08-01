@@ -129,6 +129,7 @@ is sensitive to the platform only where the platform itself is.
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
 | `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
+| `digest/digest` | `digest.https.any.js` (wrapped callable — see `component.sh`) |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | shared | `util/helpers.js` |
 

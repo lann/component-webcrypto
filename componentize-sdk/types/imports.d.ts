@@ -18,4 +18,6 @@ declare module "lann:webcrypto/hkdf@0.1.0";
 declare module "lann:webcrypto/pbkdf2@0.1.0";
 declare module "lann:webcrypto/key-agreement@0.1.0";
 declare module "lann:webcrypto/x25519@0.1.0";
+declare module "lann:webcrypto/sha2@0.1.0";
+declare module "lann:webcrypto/digest@0.1.0";
 declare module "wit-world";

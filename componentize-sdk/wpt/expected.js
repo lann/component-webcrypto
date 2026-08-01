@@ -27,4 +27,5 @@ export const EXPECTED = {
   "generateKey/successes (X25519)": { inPassed: 0, inFailed: 0, outPassed: 0, outFailed: 32 },
   "derive_bits_keys/hkdf": { inPassed: 385, inFailed: 0, outPassed: 932, outFailed: 2344 },
   "derive_bits_keys/pbkdf2": { inPassed: 1216, inFailed: 0, outPassed: 2565, outFailed: 4851 },
+  "digest/digest": { inPassed: 92, inFailed: 0, outPassed: 0, outFailed: 24 },
 };
