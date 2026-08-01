@@ -30,6 +30,8 @@ import { run_test as runAesCbc } from "./js/componentize/wpt/build/group-aes-cbc
 import { run_test as runAesCtr } from "./js/componentize/wpt/build/group-aes-ctr.js";
 import { runTests as runImportKey } from "./js/componentize/wpt/build/group-import-key.js";
 import { run_test as runGenerateKey } from "./js/componentize/wpt/build/group-generate-key.js";
+import { run_test as runGenerateKeyFailures } from "./js/componentize/wpt/build/group-generate-key-failures.js";
+import { run_chacha20_poly1305_tests as runChacha } from "./js/componentize/wpt/build/group-chacha20-poly1305.js";
 import { define_tests_25519 as defineCfrgBits } from "./js/componentize/wpt/build/group-cfrg-bits.js";
 import { define_tests_25519 as defineCfrgKeys } from "./js/componentize/wpt/build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "./js/componentize/wpt/build/group-okp-import-key.js";
@@ -130,6 +132,64 @@ function generateKeyInSubset(name) {
  */
 function classDGatedInSubset() {
   return false;
+}
+
+/**
+ * encrypt_decrypt/chacha20_poly1305: the whole group — the fixed-vector
+ * encryptions and decryptions over "raw-secret" imports, the generated-key
+ * round trips, the tamper rejections, and the 12-byte-nonce rule (the
+ * WIT's `invalid-nonce` renders the expected `OperationError`).
+ */
+function chachaEncryptDecryptInSubset() {
+  return true;
+}
+
+/**
+ * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
+ * rows are served whole, and so are the empty-usages rows for every
+ * format (usages are validated before the format is considered). The
+ * "Good parameters" jwk rows stay out: the package serves no ChaCha JWK
+ * path (WIT-forced — see the shim header's deviations list).
+ * @param {string} name
+ */
+function chachaImportKeyInSubset(name) {
+  if (name.startsWith("Empty Usages:")) {
+    return true;
+  }
+  return name.includes("(raw-secret, ");
+}
+
+/**
+ * generateKey/successes (ChaCha20-Poly1305): the non-extractable rows are
+ * served whole. The extractable rows also export the generated key as a
+ * JWK, which the package declines for the ChaCha constructions
+ * (WIT-forced — see the shim header's deviations list), so they stay
+ * out-of-subset until a ChaCha JWK path exists.
+ * @param {string} name
+ */
+function chachaGenerateKeyInSubset(name) {
+  return name.includes(", false, [");
+}
+
+/**
+ * generateKey/failures (ChaCha20-Poly1305): the ChaCha vector rows are
+ * served (bad and empty usages render this library's own `SyntaxError`s),
+ * and so are the suite's fixed rows — the empty-algorithm `TypeError`s
+ * and the bad-algorithm rows for names this library does not serve at all
+ * (`NotSupportedError` from algorithm normalization). Out: the HMAC
+ * bad-hash rows. The spec rejects an unsupported hash during algorithm
+ * normalization, before usage validation; this library resolves the hash
+ * in the HMAC branch after `normalizeUsages`, so the rows pairing MD5
+ * with a usage outside HMAC's vocabulary render `SyntaxError` instead.
+ * The sign-only rows in that slice pass for the right reason but travel
+ * with it, pinned as `outPassed`.
+ * @param {string} name
+ */
+function generateKeyFailuresInSubset(name) {
+  if (name.startsWith("Bad algorithm:")) {
+    return !name.includes("HMAC");
+  }
+  return true;
 }
 
 /**
@@ -283,6 +343,7 @@ export const GROUPS = [
   ["encrypt_decrypt/aes_gcm (96-bit iv)", () => runAesGcm(), gcmInSubset],
   ["encrypt_decrypt/aes_cbc", () => runAesCbc(), cipherInSubset],
   ["encrypt_decrypt/aes_ctr", () => runAesCtr(), cipherInSubset],
+  ["encrypt_decrypt/chacha20_poly1305", () => runChacha(), chachaEncryptDecryptInSubset],
   [
     "import_export/symmetric_importKey (HMAC, AES-GCM)",
     () => {
@@ -292,9 +353,24 @@ export const GROUPS = [
     importKeyInSubset,
   ],
   [
+    "import_export/symmetric_importKey (ChaCha20-Poly1305)",
+    () => runImportKey("ChaCha20-Poly1305"),
+    chachaImportKeyInSubset,
+  ],
+  [
     "generateKey/successes (HMAC, AES-GCM)",
     () => runGenerateKey(["HMAC", "AES-GCM"]),
     generateKeyInSubset,
+  ],
+  [
+    "generateKey/successes (ChaCha20-Poly1305)",
+    () => runGenerateKey(["ChaCha20-Poly1305"]),
+    chachaGenerateKeyInSubset,
+  ],
+  [
+    "generateKey/failures (ChaCha20-Poly1305)",
+    () => runGenerateKeyFailures(["ChaCha20-Poly1305"]),
+    generateKeyFailuresInSubset,
   ],
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",

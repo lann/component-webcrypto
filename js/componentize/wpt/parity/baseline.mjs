@@ -20,6 +20,8 @@ import { run_test as runAesCbc } from "../build/group-aes-cbc.js";
 import { run_test as runAesCtr } from "../build/group-aes-ctr.js";
 import { runTests as runImportKey } from "../build/group-import-key.js";
 import { run_test as runGenerateKey } from "../build/group-generate-key.js";
+import { run_test as runGenerateKeyFailures } from "../build/group-generate-key-failures.js";
+import { run_chacha20_poly1305_tests as runChacha } from "../build/group-chacha20-poly1305.js";
 import { define_tests_25519 as defineCfrgBits } from "../build/group-cfrg-bits.js";
 import { define_tests_25519 as defineCfrgKeys } from "../build/group-cfrg-keys.js";
 import { runTests as runOkpImportKey } from "../build/group-okp-import-key.js";
@@ -39,6 +41,7 @@ const GROUPS = [
   ["encrypt_decrypt/aes_gcm (96-bit iv)", () => runAesGcm()],
   ["encrypt_decrypt/aes_cbc", () => runAesCbc()],
   ["encrypt_decrypt/aes_ctr", () => runAesCtr()],
+  ["encrypt_decrypt/chacha20_poly1305", () => runChacha()],
   [
     "import_export/symmetric_importKey (HMAC, AES-GCM)",
     () => {
@@ -46,7 +49,10 @@ const GROUPS = [
       runImportKey("AES-GCM");
     },
   ],
+  ["import_export/symmetric_importKey (ChaCha20-Poly1305)", () => runImportKey("ChaCha20-Poly1305")],
   ["generateKey/successes (HMAC, AES-GCM)", () => runGenerateKey(["HMAC", "AES-GCM"])],
+  ["generateKey/successes (ChaCha20-Poly1305)", () => runGenerateKey(["ChaCha20-Poly1305"])],
+  ["generateKey/failures (ChaCha20-Poly1305)", () => runGenerateKeyFailures(["ChaCha20-Poly1305"])],
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",
     () => promise_test(defineCfrgBits, "setup - define tests"),
