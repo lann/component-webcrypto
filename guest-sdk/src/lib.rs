@@ -141,9 +141,10 @@ pub enum Error {
     /// limit, …). The string is human-readable.
     Other(String),
     /// A named condition outside the WIT `error` variant's closed set,
-    /// identified by the (`origin`, `name`) pair; the defining interface's
-    /// contract says when it occurs. Known pairs have constants in
-    /// [`extension`].
+    /// identified by the (`origin`, `name`) pair — the only branchable
+    /// identity; `message` is human-readable prose, never contract.
+    /// Handle an unrecognized pair as [`Error::Other`]. Known pairs have
+    /// constants in [`extension`].
     Extension(bindings::types::ExtensionError),
     /// A caller-supplied [`DataSource`] producer failed while being fed into
     /// the operation (see `DataSource::from_reader`). The operation's own

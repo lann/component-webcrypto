@@ -167,8 +167,9 @@ function isWitError(e) {
 
 /**
  * The `DOMException` names for the known extension conditions, by
- * (`origin`, `name`); a pair not listed here is treated as an operational
- * failure.
+ * (`origin`, `name`); a pair not listed here is handled as an operational
+ * failure (the package's rule for unrecognized pairs). The full WIT
+ * payload rides in the `DOMException`'s `cause`.
  * @type {Readonly<Record<string, Readonly<Record<string, string>> | undefined>>}
  */
 const EXTENSION_ERRORS = {

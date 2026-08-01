@@ -167,21 +167,41 @@ and accidental corruption are indistinguishable in principle.
 
 **`other(string)`** carries operational conditions (a keystore that cannot
 complete the operation now, an implementation's buffering limit). It never
-carries semantic conditions a caller must branch on.
+carries semantic conditions a caller must branch on — and callers must
+never branch on its string. A condition that turns out to need branching
+or asserting does not stay in `other`: it migrates to a named `extension`
+pair, which is a behavioral change for the producing implementation but
+never a type change.
 
 **`extension(extension-error)` carries named conditions outside the closed
 set.** The closed cases are the conditions the *generic kinds'* contracts
 name — universal across operation families; `extension` carries algorithm-
 and feature-specific conditions, identified by the (`origin`, `name`) pair
 and defined by the interface that produces them (the first is
-`sha1-checked`'s `("lann:webcrypto", "collision-detected")`). The
-distinction from `other` is the contract: `extension` is a named condition
-a caller may branch on, `other` is operational noise a caller must not — so
-a condition can graduate from `other` to a named extension case without a
-type change, and the closed set never has to grow again. Third-party
-providers mint conditions under their own package `origin`. SDKs expose
-constants for known pairs, and the conformance suites pin exact pairs
-cross-implementation exactly as they pin message strings.
+`sha1-checked`'s `("lann:webcrypto", "collision-detected")`). The record's
+fields have two fixed roles:
+
+- the (`origin`, `name`) **pair** is the condition's only branchable
+  identity;
+- **`message`** is human-readable prose for logs and diagnostics — never
+  contract, never branched on.
+
+Conditions are *nominal*: the pair identifies, the message elaborates for
+humans, and no field carries machine-readable data. Errors in this package
+are verdicts — a condition that would need machine-readable parameters
+indicates data that belongs on the resource surface (getters, results),
+and admitting one would be a deliberate, semver-major redesign of the
+error contract.
+
+A consumer MUST handle a pair it does not recognize exactly as it handles
+`other`: an operational failure. This rule is what makes migration from
+`other` safe — a consumer that predates the named pair observes no change
+in kind — and it means the closed set never has to grow again. `origin` is
+an opaque namespace owned by the defining party (by convention its package
+name; this package defines all of its conditions under
+`"lann:webcrypto"`). Third-party providers mint conditions under their own
+`origin`. SDKs expose constants for known pairs, and the conformance
+suites pin exact pairs cross-implementation.
 
 **Verification returns `result<_, error>`, not `bool`.** An ignored boolean
 fails open; a dropped `result` does not.
