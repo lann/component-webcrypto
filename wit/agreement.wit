@@ -56,11 +56,11 @@ interface key-agreement {
         /// public format. Fallible with `error.other` even though this
         /// resource has no extractability gate: a provider may hold the
         /// key as a handle it can use but not read.
-        export-key: async func() -> result<list<u8>, error>;
+        export-key-raw: async func() -> result<list<u8>, error>;
 
         /// The public key as a JWK, e.g. an RFC 8037 OKP public key for
         /// X25519. See `mac-key.export-key-jwk` for the package-wide JWK
-        /// contract; the same handle-not-bytes fallibility as `export-key`
+        /// contract; the same handle-not-bytes fallibility as `export-key-raw`
         /// applies.
         export-key-jwk: async func() -> result<string, error>;
     }

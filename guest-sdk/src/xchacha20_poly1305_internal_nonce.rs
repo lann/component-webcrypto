@@ -4,12 +4,12 @@
 use crate::{bindings, AeadInternalNonce, Error, InternalNonceKeyOptions};
 
 /// Import 32 bytes of raw key material as an internal-nonce key.
-pub async fn import_key(
+pub async fn import_key_raw(
     raw_material: Vec<u8>,
     options: InternalNonceKeyOptions,
 ) -> Result<AeadInternalNonce, Error> {
     Ok(AeadInternalNonce::from_raw(
-        bindings::xchacha20_poly1305_internal_nonce::import_key(raw_material, options.lower())
+        bindings::xchacha20_poly1305_internal_nonce::import_key_raw(raw_material, options.lower())
             .await?,
     ))
 }

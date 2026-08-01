@@ -699,11 +699,11 @@ impl Mac {
         self.0.algorithm_length()
     }
 
-    /// Whether [`export_key`](Self::export_key) may return the key
+    /// Whether [`export_key_raw`](Self::export_key_raw) may return the key
     /// material.
     ///
     /// Asking is not the same as exporting: interrogating extractability
-    /// through [`export_key`](Self::export_key) alone would hand you the
+    /// through [`export_key_raw`](Self::export_key_raw) alone would hand you the
     /// material whenever the answer is yes.
     pub fn extractable(&self) -> bool {
         self.0.extractable()
@@ -725,12 +725,12 @@ impl Mac {
     /// key was minted extractable. Extractability is an API property, not a
     /// physical one: the guarantee is that components holding only the
     /// handle cannot obtain the material through this API.
-    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key().await.map_err(Error::from)
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
     }
 
     /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
-    /// same extractability gate as [`export_key`](Self::export_key).
+    /// same extractability gate as [`export_key_raw`](Self::export_key_raw).
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
         self.0.export_key_jwk().await.map_err(Error::from)
     }
@@ -851,7 +851,7 @@ impl Aead {
         self.0.tag_size()
     }
 
-    /// Whether [`export_key`](Self::export_key) may return the key material
+    /// Whether [`export_key_raw`](Self::export_key_raw) may return the key material
     /// (see [`Mac::extractable`]).
     pub fn extractable(&self) -> bool {
         self.0.extractable()
@@ -882,13 +882,13 @@ impl Aead {
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
     /// key was minted extractable (an API property, not a physical one —
-    /// see [`Mac::export_key`]).
-    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key().await.map_err(Error::from)
+    /// see [`Mac::export_key_raw`]).
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
     }
 
     /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
-    /// same extractability gate as [`export_key`](Self::export_key);
+    /// same extractability gate as [`export_key_raw`](Self::export_key_raw);
     /// algorithms without a registered JWK `alg` (the ChaCha
     /// constructions) fail [`Error::Unsupported`].
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
@@ -969,7 +969,7 @@ impl AeadInternalNonce {
         self.0.seals_remaining()
     }
 
-    /// Whether [`export_key`](Self::export_key) may return the key material
+    /// Whether [`export_key_raw`](Self::export_key_raw) may return the key material
     /// (see [`Mac::extractable`]).
     pub fn extractable(&self) -> bool {
         self.0.extractable()
@@ -989,10 +989,10 @@ impl AeadInternalNonce {
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
     /// key was minted extractable (an API property, not a physical one —
-    /// see [`Mac::export_key`]). The nonce budget does not travel with the
+    /// see [`Mac::export_key_raw`]). The nonce budget does not travel with the
     /// material.
-    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key().await.map_err(Error::from)
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
     }
 }
 
@@ -1078,8 +1078,8 @@ impl VerifyingKey {
     /// [`Error::Other`]: a provider may hold the key as a handle it can
     /// *use* but not *read*, so verifying succeeds while recovering the
     /// encoding does not.
-    pub async fn export_key(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key().await.map_err(Error::from)
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
     }
 }
 

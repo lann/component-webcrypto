@@ -40,9 +40,9 @@ interface ecdsa-verify {
     /// Import a public key as an uncompressed SEC1 point (`04 ‖ x ‖ y`;
     /// 65 bytes for P-256, 97 bytes for P-384 — WebCrypto's `raw` format).
     /// Anything else — including compressed points and points not on the
-    /// curve — fails with `error.invalid-key`. `verifying-key.export-key`
+    /// curve — fails with `error.invalid-key`. `verifying-key.export-key-raw`
     /// returns this same form.
-    import-verifying-key: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
+    import-verifying-key-raw: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
 }
 
 /// ECDSA signing-key minting (FIPS 186-5).

@@ -29,7 +29,7 @@ interface chacha20-poly1305 {
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
-    import-key: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
+    import-key-raw: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
@@ -51,7 +51,7 @@ interface xchacha20-poly1305 {
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
-    import-key: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
+    import-key-raw: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
@@ -77,9 +77,9 @@ interface xchacha20-poly1305-internal-nonce {
 
     /// Import exactly 32 bytes of raw key material as an internal-nonce
     /// key; anything else fails with `error.invalid-key`. See
-    /// `aes-gcm-internal-nonce.import-key` for the shared-material caveat
+    /// `aes-gcm-internal-nonce.import-key-raw` for the shared-material caveat
     /// and policy-rejection allowance, which apply identically here.
-    import-key: async func(raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+    import-key-raw: async func(raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce key.
     generate-key: async func(options: internal-nonce-key-options) -> result<internal-nonce-key, error>;

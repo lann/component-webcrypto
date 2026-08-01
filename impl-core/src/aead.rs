@@ -72,7 +72,7 @@ impl AeadCipher {
 pub struct AeadKeyMaterial {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
     cipher: AeadCipher,
-    /// The raw key material, retained for `export-key` on extractable keys;
+    /// The raw key material, retained for `export-key-raw` on extractable keys;
     /// zeroized on drop.
     raw: Zeroizing<Vec<u8>>,
     /// The mint-time policy: usages and extractability (internal-nonce
@@ -118,7 +118,7 @@ fn import_chacha_like<C: KeyInit>(
 
 impl AeadKeyMaterial {
     /// Import raw key material as the declared AES-GCM variant, per the
-    /// `aes-gcm.import-key` contract: material whose length disagrees with
+    /// `aes-gcm.import-key-raw` contract: material whose length disagrees with
     /// the variant is `invalid-key`; AES-192 is `unsupported`.
     pub fn import_aes_gcm(
         variant: AesVariant,
@@ -516,7 +516,7 @@ impl AeadKeyMaterial {
         self.policy.unwrap
     }
 
-    /// The raw material, or `not-extractable` (the `export-key` contract on
+    /// The raw material, or `not-extractable` (the `export-key-raw` contract on
     /// either key resource).
     ///
     /// The copy returned is *not* protected: see the note on

@@ -964,7 +964,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
       if (requested.length !== 0) {
         throw dom("SyntaxError", "X25519 public keys take no usages");
       }
-      const handle = await callImport(x25519Iface.importPublicKey(bytesOf(keyData, "keyData")));
+      const handle = await callImport(x25519Iface.importPublicKeyRaw(bytesOf(keyData, "keyData")));
       return mintKey(handle, "public", { name: "X25519" }, !!extractable, []);
     }
     if (typeof keyData !== "object" || keyData === null) {
@@ -1001,7 +1001,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     const usages = verifyOnlyUsages(keyUsages);
     const raw = bytesOf(keyData, "keyData");
     if (alg.name === "Ed25519") {
-      const handle = await callImport(ed25519Verify.importVerifyingKey(raw));
+      const handle = await callImport(ed25519Verify.importVerifyingKeyRaw(raw));
       return mintKey(handle, "public", { name: "Ed25519" }, !!extractable, usages);
     }
     const namedCurve = typeof alg.namedCurve === "string" ? alg.namedCurve : undefined;
@@ -1009,7 +1009,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     if (namedCurve === undefined || curve === undefined) {
       throw dom("NotSupportedError", `unsupported ECDSA namedCurve ${alg.namedCurve}`);
     }
-    const handle = await callImport(ecdsaVerify.importVerifyingKey(curve.variant, raw));
+    const handle = await callImport(ecdsaVerify.importVerifyingKeyRaw(curve.variant, raw));
     /** @type {EcKeyAlgorithm} */
     const projected = { name: "ECDSA", namedCurve };
     return mintKey(handle, "public", projected, !!extractable, usages);
@@ -1028,7 +1028,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
               hmacMintOptions(usages, !!extractable),
             )
         : () =>
-            hmacSha2.importKey(
+            hmacSha2.importKeyRaw(
               variant,
               bytesOf(keyData, "keyData"),
               hmacMintOptions(usages, !!extractable),
@@ -1077,7 +1077,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     }
     const variant = aesVariantOf(raw.length * 8);
     return await mintAesGcmKey(
-      () => aesGcm.importKey(variant, raw, aesGcmMintOptions(usages, !!extractable)),
+      () => aesGcm.importKeyRaw(variant, raw, aesGcmMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1218,7 +1218,7 @@ async function exportKey(format, key) {
     const jwkText = /** @type {string} */ (await callImport(handleOf(key).exportKeyJwk()));
     return jwkForExport(jwkText, key);
   }
-  return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKey())));
+  return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKeyRaw())));
 }
 
 /**

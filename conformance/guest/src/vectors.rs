@@ -3,7 +3,7 @@
 
 use crate::mint::{
     import_chacha_key, import_hmac_key, import_ikm,
-    import_internal_nonce_key as import_gcm_internal_key, import_key, import_password,
+    import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_password,
     import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
 };
@@ -20,9 +20,9 @@ use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
-    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+    import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hkdf;
 use lann_webcrypto_guest::bindings::pbkdf2;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
@@ -66,7 +66,7 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
     };
     let key = import_hmac_key(variant, case.key.clone(), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     if case.valid {
         let (tag, fed) = sign(&key, &case.msg, case.schedule).await;
         fed.map_err(|e| format!("sign data feeder: {e}"))?;
@@ -125,7 +125,7 @@ pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
 pub async fn run_x25519_case(case: &X25519Case) -> Result<(), String> {
     let peer = import_x25519_public_key(case.public.clone())
         .await
-        .map_err(|e| describe("import-public-key", &e))?;
+        .map_err(|e| describe("import-public-key-raw", &e))?;
     let secret = import_x25519_secret_key(&case.private_public, &case.private, true, true)
         .await
         .map_err(|e| describe("import-secret-key-jwk", &e))?;
@@ -183,11 +183,13 @@ pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
 /// Run one caller-nonce AEAD vector (any algorithm) under its schedule.
 pub async fn run_aead_case(case: &AeadCase) -> Result<(), String> {
     let key = match case.alg {
-        AeadAlg::AesGcm => import_key(aes_variant(case.key_bits)?, case.key.clone(), false).await,
+        AeadAlg::AesGcm => {
+            import_key_raw(aes_variant(case.key_bits)?, case.key.clone(), false).await
+        }
         AeadAlg::ChaCha20Poly1305 => import_chacha_key(case.key.clone(), false).await,
         AeadAlg::XChaCha20Poly1305 => import_xchacha_key(case.key.clone(), false).await,
     }
-    .map_err(|e| describe("import-key", &e))?;
+    .map_err(|e| describe("import-key-raw", &e))?;
     run_aead_expectation(
         &key,
         case.expectation,
@@ -263,11 +265,11 @@ pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), Str
         InternalNonceAlg::AesGcm => {
             import_gcm_internal_key(aes_variant(case.key_bits)?, case.key.clone(), false)
                 .await
-                .map_err(|e| describe("import-key", &e))?
+                .map_err(|e| describe("import-key-raw", &e))?
         }
         InternalNonceAlg::XChaCha20Poly1305 => import_xchacha_internal_key(case.key.clone(), false)
             .await
-            .map_err(|e| describe("import-key", &e))?,
+            .map_err(|e| describe("import-key-raw", &e))?,
     };
     let (opened, fed) = in_open(&key, &case.aad, &case.sealed, case.schedule).await;
     fed.map_err(|e| format!("open sealed feeder: {e}"))?;
@@ -301,7 +303,7 @@ pub async fn run_speccheck_case(case: &SpeccheckCase) -> Result<(), String> {
     let key = match import_ed25519_verifying_key(case.public.clone()).await {
         Ok(key) => key,
         Err(Error::InvalidKey(_)) if !case.valid => return Ok(()),
-        Err(err) => return Err(describe("import-verifying-key", &err)),
+        Err(err) => return Err(describe("import-verifying-key-raw", &err)),
     };
     let (verified, fed) = sig_verify(&key, &case.msg, &case.sig, case.schedule).await;
     fed.map_err(|e| format!("verify data feeder: {e}"))?;
@@ -322,16 +324,16 @@ pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
     let key = match case.alg {
         SigAlg::Ed25519 => import_ed25519_verifying_key(case.public.clone())
             .await
-            .map_err(|e| describe("import-verifying-key", &e))?,
+            .map_err(|e| describe("import-verifying-key-raw", &e))?,
         SigAlg::EcdsaP256Sha256 => {
             import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, case.public.clone())
                 .await
-                .map_err(|e| describe("import-verifying-key", &e))?
+                .map_err(|e| describe("import-verifying-key-raw", &e))?
         }
         SigAlg::EcdsaP384Sha384 => {
             import_ecdsa_verifying_key(EcdsaVariant::P384Sha384, case.public.clone())
                 .await
-                .map_err(|e| describe("import-verifying-key", &e))?
+                .map_err(|e| describe("import-verifying-key-raw", &e))?
         }
     };
     let (verified, fed) = sig_verify(&key, &case.msg, &case.sig, case.schedule).await;

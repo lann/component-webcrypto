@@ -258,7 +258,7 @@ pub struct DeriveInput {
 /// Holds the shared core's HMAC key material (raw bytes zeroized on drop,
 /// the bound SHA-2 variant, and extractability); `sign`/`verify` are
 /// one-shot and stateless per call, so the key carries no per-operation
-/// state. `extractable` gates `export-key` only — the material necessarily
+/// state. `extractable` gates `export-key-raw` only — the material necessarily
 /// lives host-side either way.
 #[derive(Debug)]
 pub struct MacKey {

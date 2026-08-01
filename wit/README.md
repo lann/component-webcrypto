@@ -96,7 +96,7 @@ that holds it.
 
 A platform-resident key can be usable but unreadable. Export operations are
 therefore fallible even where no extractability gate applies (see
-`signature.verifying-key.export-key`).
+`signature.verifying-key.export-key-raw`).
 
 ## Getter conventions
 
@@ -108,6 +108,17 @@ therefore fallible even where no extractability gate applies (see
 - `can-*` getters report the usage recorded at mint (or carried by a
   platform keystore key). An operation the key refuses fails with
   `error.not-permitted`.
+
+## Format naming convention
+
+Key-material functions are suffixed with the encoding they carry —
+`-raw`, `-jwk`, and future formats alike — whenever a key's format family
+has more than one admissible member. No format is privileged by an
+unsuffixed name: this mirrors the Web Cryptography API, where the format
+is spelled at every call site, and stays coherent for algorithm families
+that have no raw form at all. Single-format-by-platform secrets
+(`hkdf.import-ikm`, `pbkdf2.import-password` — WebCrypto accepts only raw
+material for both) stay unsuffixed: theirs is not a format choice.
 
 ## JWK contract
 

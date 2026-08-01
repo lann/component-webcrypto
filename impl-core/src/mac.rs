@@ -13,7 +13,7 @@ use crate::{
 #[derive(Clone)]
 pub struct MacKeyMaterial {
     /// The raw key material, retained for `sign`/`verify` and (when
-    /// extractable) `export-key`; zeroized on drop.
+    /// extractable) `export-key-raw`; zeroized on drop.
     raw: Zeroizing<Vec<u8>>,
     /// The SHA-2 variant this key is bound to.
     variant: Sha2,
@@ -23,7 +23,7 @@ pub struct MacKeyMaterial {
 
 impl MacKeyMaterial {
     /// Import raw key material as an HMAC key over the declared variant,
-    /// per the `hmac-sha2.import-key` contract: any non-empty length is
+    /// per the `hmac-sha2.import-key-raw` contract: any non-empty length is
     /// accepted (RFC 2104; longer-than-block keys are hashed first), empty
     /// material is `invalid-key`, and unserved variants are `unsupported`.
     pub fn import(variant: Sha2Variant, raw: Vec<u8>, policy: MacPolicy) -> Result<Self, Error> {
@@ -122,7 +122,7 @@ impl MacKeyMaterial {
 
     /// The key length in bits (`mac-key.algorithm-length`).
     ///
-    /// `import-key` accepts any non-empty length, so the bit count can
+    /// `import-key-raw` accepts any non-empty length, so the bit count can
     /// exceed `u32`. The getter is total in the WIT, so it saturates rather
     /// than trapping.
     pub fn length_bits(&self) -> u32 {
@@ -144,7 +144,7 @@ impl MacKeyMaterial {
         self.policy.verify
     }
 
-    /// The raw material, or `not-extractable` (the `mac-key.export-key`
+    /// The raw material, or `not-extractable` (the `mac-key.export-key-raw`
     /// contract).
     ///
     /// The copy returned is *not* protected: see the note on

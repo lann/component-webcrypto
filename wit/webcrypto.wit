@@ -150,10 +150,10 @@ interface mac {
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
-        export-key: async func() -> result<list<u8>, error>;
+        export-key-raw: async func() -> result<list<u8>, error>;
 
         /// The key as an RFC 7517 JSON Web Key, behind the same
-        /// extractability gate as `export-key`. See `README.md`,
+        /// extractability gate as `export-key-raw`. See `README.md`,
         /// "JWK contract".
         export-key-jwk: async func() -> result<string, error>;
     }
@@ -294,10 +294,10 @@ interface aead {
 
         /// The raw key material. Fails with `error.not-extractable` unless
         /// the key was created with `extractable` true.
-        export-key: async func() -> result<list<u8>, error>;
+        export-key-raw: async func() -> result<list<u8>, error>;
 
         /// The key as an RFC 7517 JSON Web Key, behind the same
-        /// extractability gate as `export-key`. See `README.md`,
+        /// extractability gate as `export-key-raw`. See `README.md`,
         /// "JWK contract"; algorithms without a registered JWK `alg` (the
         /// ChaCha constructions) fail `error.unsupported`.
         export-key-jwk: async func() -> result<string, error>;
@@ -407,7 +407,7 @@ interface aead-internal-nonce {
         /// the key was created with `extractable` true. The nonce budget
         /// does not travel with the material; see the minting interfaces'
         /// import docs.
-        export-key: async func() -> result<list<u8>, error>;
+        export-key-raw: async func() -> result<list<u8>, error>;
     }
 }
 
@@ -475,7 +475,7 @@ interface bytes {
 ///
 /// There is deliberately no way to derive a `verifying-key` from a
 /// `signing-key`: `generate-key` returns the pair, and importers supply the
-/// public half via `import-verifying-key`. See `README.md`, "Design notes".
+/// public half via `import-verifying-key-raw`. See `README.md`, "Design notes".
 ///
 /// The streaming contract in `README.md` applies to `sign` and `verify`.
 interface signature {
@@ -536,7 +536,7 @@ interface signature {
         /// but not *read* — verifying with it succeeds while recovering
         /// its encoding fails with `error.other` (see `README.md`,
         /// "Extractability").
-        export-key: async func() -> result<list<u8>, error>;
+        export-key-raw: async func() -> result<list<u8>, error>;
     }
 
     /// A private key. `sign` is one-shot on the immutable key, mirroring

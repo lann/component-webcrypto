@@ -204,7 +204,7 @@ impl GuestMacKey for MacKey {
         self.material.can_verify()
     }
 
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
 
@@ -335,7 +335,7 @@ impl GuestAeadKey for AeadKey {
         self.material.can_unwrap()
     }
 
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
 
@@ -393,7 +393,7 @@ impl Sha2Guest for Component {
 // --- hmac-sha2 (key minting) -----------------------------------------------------
 
 impl HmacSha2Guest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         variant: Sha2Variant,
         raw: Vec<u8>,
         options: mac::MacKeyOptions,
@@ -647,7 +647,7 @@ impl GuestPublicKey for AgreementPublicKey {
         self.material.name().to_string()
     }
 
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export())
     }
 
@@ -692,7 +692,7 @@ impl GuestSecretKey for AgreementSecretKey {
 }
 
 impl X25519Guest for Component {
-    async fn import_public_key(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
+    async fn import_public_key_raw(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
         let material = webcrypto_impl_core::AgreementPublicMaterial::import(&raw)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
@@ -733,7 +733,7 @@ impl X25519Guest for Component {
 // --- aes-gcm (key minting) -------------------------------------------------------
 
 impl AesGcmGuest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         variant: AesVariant,
         raw: Vec<u8>,
         options: ExportedAeadKeyOptions,
@@ -780,7 +780,7 @@ impl AesGcmGuest for Component {
 // --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
 
 impl ChaChaPoly1305Guest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         raw: Vec<u8>,
         options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
@@ -797,7 +797,7 @@ impl ChaChaPoly1305Guest for Component {
 }
 
 impl XChaChaPoly1305Guest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         raw: Vec<u8>,
         options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
@@ -924,7 +924,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
         self.material.can_open()
     }
 
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
 }
@@ -932,7 +932,7 @@ impl GuestInternalNonceKey for InternalNonceKey {
 // --- aes-gcm-internal-nonce (key minting) ----------------------------------------
 
 impl AesGcmInternalNonceGuest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         variant: AesVariant,
         raw: Vec<u8>,
         options: ExportedInternalNonceKeyOptions,
@@ -962,7 +962,7 @@ impl AesGcmInternalNonceGuest for Component {
 // --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
 
 impl XChachaInternalNonceGuest for Component {
-    async fn import_key(
+    async fn import_key_raw(
         raw: Vec<u8>,
         options: ExportedInternalNonceKeyOptions,
     ) -> Result<ExportedInternalNonceKey, Error> {
@@ -1046,7 +1046,7 @@ impl GuestVerifyingKey for VerifyingKey {
         self.public.hash().map(str::to_string)
     }
 
-    async fn export_key(&self) -> Result<Vec<u8>, Error> {
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         // The WIT `err` case exists for providers holding the key as an
         // unreadable handle; this implementation holds the encoding
         // in-process, so it never errs.
@@ -1093,7 +1093,9 @@ impl GuestSigningKey for SigningKey {
 // --- ed25519 (key minting) -----------------------------------------------------
 
 impl Ed25519VerifyGuest for Component {
-    async fn import_verifying_key(raw: Vec<u8>) -> Result<signature_iface::VerifyingKey, Error> {
+    async fn import_verifying_key_raw(
+        raw: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
         let public = SigPublic::import_ed25519(&raw)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
@@ -1116,7 +1118,7 @@ impl Ed25519SignGuest for Component {
 // --- ecdsa (verification-key minting only; signing is class D) ------------------
 
 impl EcdsaVerifyGuest for Component {
-    async fn import_verifying_key(
+    async fn import_verifying_key_raw(
         variant: EcdsaVariant,
         raw: Vec<u8>,
     ) -> Result<signature_iface::VerifyingKey, Error> {

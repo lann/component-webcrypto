@@ -257,7 +257,7 @@ impl<T: Send> HostMacKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
-    async fn export_key(
+    async fn export_key_raw(
         accessor: &Accessor<T, Self>,
         self_: Resource<MacKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -399,7 +399,7 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
-    async fn export_key(
+    async fn export_key_raw(
         accessor: &Accessor<T, Self>,
         self_: Resource<AeadKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -663,7 +663,7 @@ impl HostPublicKey for WasiWebcryptoCtxView<'_> {
 }
 
 impl<T: Send> HostPublicKeyWithStore<T> for WasiWebcrypto {
-    async fn export_key(
+    async fn export_key_raw(
         accessor: &Accessor<T, Self>,
         self_: Resource<AgreementPublicKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -725,7 +725,7 @@ impl<T: Send> HostSecretKeyWithStore<T> for WasiWebcrypto {
 impl x25519_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_public_key(
+    async fn import_public_key_raw(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
@@ -825,7 +825,7 @@ impl sha2_iface::Host for WasiWebcryptoCtxView<'_> {
 impl hmac_sha2_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         variant: hmac_sha2_iface::Sha2Variant,
         raw: Vec<u8>,
@@ -880,7 +880,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
 impl aes_gcm_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
         raw: Vec<u8>,
@@ -934,7 +934,7 @@ impl chacha_iface::Host for WasiWebcryptoCtxView<'_> {}
 impl xchacha_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
         options: Resource<crate::AeadKeyOptions>,
@@ -956,7 +956,7 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
 }
 
 impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
         options: Resource<crate::AeadKeyOptions>,
@@ -1085,7 +1085,7 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
-    async fn export_key(
+    async fn export_key_raw(
         accessor: &Accessor<T, Self>,
         self_: Resource<InternalNonceKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -1105,7 +1105,7 @@ impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
 impl aes_gcm_in_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         variant: aes_gcm_iface::AesVariant,
         raw: Vec<u8>,
@@ -1147,7 +1147,7 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
 impl xchacha_in_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key(
+    async fn import_key_raw(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
         options: Resource<crate::InternalNonceKeyOptions>,
@@ -1213,7 +1213,7 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         .await
     }
 
-    async fn export_key(
+    async fn export_key_raw(
         accessor: &Accessor<T, Self>,
         self_: Resource<VerifyingKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
@@ -1302,7 +1302,7 @@ impl ed25519_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
 impl ed25519_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_verifying_key(
+    async fn import_verifying_key_raw(
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
@@ -1347,7 +1347,7 @@ impl ecdsa_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
 impl ecdsa_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_verifying_key(
+    async fn import_verifying_key_raw(
         accessor: &Accessor<T, Self>,
         variant: ecdsa_verify_iface::EcdsaVariant,
         raw: Vec<u8>,

@@ -428,7 +428,7 @@ export class MacKey {
     return this.#lengthBits;
   }
 
-  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
   extractable() {
     return this.#key.extractable;
   }
@@ -446,13 +446,13 @@ export class MacKey {
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
    * was created with `extractable` true (see `exportRawGated`).
    */
-  async exportKey() {
+  async exportKeyRaw() {
     return exportRawGated(this.#key);
   }
 
   /**
    * The key as an `oct` JWK (JSON text; the `mac-key.export-key-jwk`
-   * contract), behind the same extractability gate as `exportKey`.
+   * contract), behind the same extractability gate as `exportKeyRaw`.
    */
   async exportKeyJwk() {
     return exportJwkGated(this.#key);
@@ -649,7 +649,7 @@ export class AeadKey {
     return 16;
   }
 
-  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
   extractable() {
     return this.#key.extractable;
   }
@@ -675,14 +675,14 @@ export class AeadKey {
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
    * was created with `extractable` true (see `exportRawGated`).
    */
-  async exportKey() {
+  async exportKeyRaw() {
     return exportRawGated(this.#key);
   }
 
   /**
    * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
    * the package-wide contract), behind the same extractability gate as
-   * `exportKey`.
+   * `exportKeyRaw`.
    */
   async exportKeyJwk() {
     return exportJwkGated(this.#key);
@@ -796,7 +796,7 @@ export const mac = { MacKey, MacKeyOptions };
 
 /** The `lann:webcrypto/hmac-sha2` interface. */
 export const hmacSha2 = {
-  importKey: importHmacKey,
+  importKeyRaw: importHmacKey,
   importKeyJwk: importHmacKeyJwk,
   generateKey: generateHmacKey,
   /**
@@ -1287,7 +1287,7 @@ export class AgreementPublicKey {
    * The raw u-coordinate (the minting interface's public format).
    * @returns {Promise<Uint8Array>}
    */
-  async exportKey() {
+  async exportKeyRaw() {
     const { key } = agreementPublicOf(this);
     return new Uint8Array(
       await platformCall("raw public-key export", () => subtle.exportKey("raw", key)),
@@ -1406,7 +1406,7 @@ function requireAgreementGrant(policy) {
 }
 
 /**
- * Import a raw 32-byte u-coordinate (the `x25519.import-public-key`
+ * Import a raw 32-byte u-coordinate (the `x25519.import-public-key-raw`
  * contract): deliberately permissive, as the platform's is — degenerate
  * keys surface at `agree`; a wrong length fails here.
  * @param {Uint8Array} raw
@@ -1481,7 +1481,7 @@ export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey
 
 /** The `lann:webcrypto/x25519` interface. */
 export const x25519 = {
-  importPublicKey: importX25519PublicKey,
+  importPublicKeyRaw: importX25519PublicKey,
   importSecretKeyJwk: importX25519SecretKeyJwk,
   generateKey: generateX25519Key,
 };
@@ -1610,7 +1610,7 @@ function aesMinting(Ctor, readPolicy) {
      * @param {Uint8Array} raw
      * @param {O} options
      */
-    async importKey(variant, raw, options) {
+    async importKeyRaw(variant, raw, options) {
       const policy = readPolicy(options);
       const usages = aeadUsages(policy);
       const expected = aesVariantByteLength(variant);
@@ -1738,19 +1738,19 @@ function unsupportedChacha(name) {
 
 /** The `lann:webcrypto/chacha20-poly1305` interface. */
 export const chacha20Poly1305 = {
-  importKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
+  importKeyRaw: async () => unsupportedChacha("ChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
 };
 
 /** The `lann:webcrypto/xchacha20-poly1305` interface. */
 export const xchacha20Poly1305 = {
-  importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
 
 /** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface. */
 export const xchacha20Poly1305InternalNonce = {
-  importKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
 };
 
@@ -1910,7 +1910,7 @@ export class InternalNonceKey {
     return remaining > 0n ? remaining : 0n;
   }
 
-  /** Whether `exportKey` may return the material: the `CryptoKey`'s own flag. */
+  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
   extractable() {
     return this.#key.extractable;
   }
@@ -1928,7 +1928,7 @@ export class InternalNonceKey {
    * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
    * key was created with `extractable` true (see `exportRawGated`).
    */
-  async exportKey() {
+  async exportKeyRaw() {
     return exportRawGated(this.#key);
   }
 }
@@ -2180,9 +2180,9 @@ async function withCollectedInputToStream(stream, op) {
 }
 
 /**
- * The shared raw `export-key` gate: throw `{ tag: 'not-extractable' }`
+ * The shared raw `export-key-raw` gate: throw `{ tag: 'not-extractable' }`
  * unless `key` was minted extractable (checked on the `CryptoKey` itself
- * rather than relying on the `DOMException` from `exportKey`), then export
+ * rather than relying on the `DOMException` from `exportKeyRaw`), then export
  * the raw material.
  * @param {CryptoKey} key
  */
@@ -2520,7 +2520,7 @@ export class VerifyingKey {
    * `OperationError` when the key material behind the `CryptoKey` cannot be
    * accessed, which `platformCall` renders as `other`.
    */
-  async exportKey() {
+  async exportKeyRaw() {
     return new Uint8Array(
       await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
     );
@@ -2576,7 +2576,7 @@ function requireSigningGrant(policy) {
  * The `signing-key` resource: a private `CryptoKey` and the mint-bound
  * algorithm record. The WIT `extractable` flag is carried by the platform
  * key itself (it is passed through at import/generation), so the platform
- * enforces non-extractability; the JS check in `exportKey` only lifts the
+ * enforces non-extractability; the JS check in `exportKeyRaw` only lifts the
  * WIT error shape. There is no stored public half: the WIT surface has no
  * derive — `generate-key` returns the pair, and importers mint the
  * verifying key from the public bytes they hold.
@@ -2768,7 +2768,7 @@ async function importEd25519VerifyingKey(raw) {
 export const signature = { VerifyingKey, SigningKey, SigningKeyOptions };
 
 /** The `lann:webcrypto/ed25519-verify` interface. */
-export const ed25519Verify = { importVerifyingKey: importEd25519VerifyingKey };
+export const ed25519Verify = { importVerifyingKeyRaw: importEd25519VerifyingKey };
 
 /**
  * Generate a fresh Ed25519 signing key, returning `[signing, verifying]`.
@@ -2820,7 +2820,7 @@ async function importEcdsaVerifyingKey(variant, raw) {
 }
 
 /** The `lann:webcrypto/ecdsa-verify` interface. */
-export const ecdsaVerify = { importVerifyingKey: importEcdsaVerifyingKey };
+export const ecdsaVerify = { importVerifyingKeyRaw: importEcdsaVerifyingKey };
 
 /**
  * Generate a fresh ECDSA signing key of the declared variant, returning
