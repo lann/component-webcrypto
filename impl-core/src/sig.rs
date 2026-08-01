@@ -447,6 +447,27 @@ mod tests {
         }
     }
 
+    /// The SEC1 shape guard renders the curated diagnostic for each of its
+    /// clauses alone — wrong length with the right leading byte, and the
+    /// right length with a compressed-point leading byte — rather than
+    /// deferring to the curve library's own rejection text.
+    #[test]
+    fn ecdsa_public_shape_is_validated_with_the_sec1_message() {
+        let wrong_length = vec![0x04u8; 64];
+        let mut compressed_prefix = vec![0x02u8];
+        compressed_prefix.extend_from_slice(&[0u8; 64]);
+        for raw in [wrong_length, compressed_prefix] {
+            match SigPublic::import_ecdsa(EcdsaVariant::P256Sha256, &raw) {
+                Err(Error::InvalidKey(msg)) => assert_eq!(
+                    msg,
+                    "P256Sha256 public keys are uncompressed SEC1 points \
+                     (65 bytes, leading 0x04)"
+                ),
+                other => panic!("expected the shape diagnostic, got {other:?}"),
+            }
+        }
+    }
+
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_sign_verify_round_trip() {

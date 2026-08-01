@@ -117,14 +117,20 @@ mod tests {
             parse_oct(&jwk, "A256GCM", false),
             Err(Error::InvalidKey(_))
         ));
-        assert!(matches!(
-            parse_oct(r#"{"kty":"EC","k":"AQID"}"#, "HS256", false),
-            Err(Error::InvalidKey(_))
-        ));
-        assert!(matches!(
-            parse_oct(r#"{"k":"AQID"}"#, "HS256", false),
-            Err(Error::InvalidKey(_))
-        ));
+        // A present-but-wrong kty names the expected value; only a missing
+        // or non-string kty falls to the carry-a-string diagnostic.
+        match parse_oct(r#"{"kty":"EC","k":"AQID"}"#, "HS256", false) {
+            Err(Error::InvalidKey(msg)) => {
+                assert_eq!(msg, r#"JWK kty must be "oct", got "EC""#)
+            }
+            _ => panic!("expected invalid-key"),
+        }
+        match parse_oct(r#"{"k":"AQID"}"#, "HS256", false) {
+            Err(Error::InvalidKey(msg)) => {
+                assert_eq!(msg, "JWK must carry a string `kty`")
+            }
+            _ => panic!("expected invalid-key"),
+        }
     }
 
     #[test]
