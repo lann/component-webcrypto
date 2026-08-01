@@ -820,6 +820,66 @@ mod tests {
         }
     }
 
+    /// A P-256 EC public JWK from the RFC 6979 A.2.5 key, with the given
+    /// coordinate lengths and an optional `alg` member.
+    fn ec_public_jwk(x_len: usize, y_len: usize, alg: Option<&str>) -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine as _;
+        use hex_literal::hex;
+
+        let x = hex!("60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6");
+        let y = hex!("7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299");
+        let alg = alg
+            .map(|alg| format!(r#","alg":"{alg}""#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"kty":"EC","crv":"P-256","x":"{}","y":"{}"{alg}}}"#,
+            URL_SAFE_NO_PAD.encode(&x[..x_len]),
+            URL_SAFE_NO_PAD.encode(&y[..y_len]),
+        )
+    }
+
+    /// The EC JWK `alg` policy: the curve-paired JOSE alg is accepted, and
+    /// any other value is refused with the allowlist diagnostic.
+    #[test]
+    fn ec_jwk_alg_policy() {
+        SigPublic::import_ecdsa_jwk(EcdsaVariant::P256Sha256, &ec_public_jwk(32, 32, None))
+            .unwrap();
+        SigPublic::import_ecdsa_jwk(
+            EcdsaVariant::P256Sha256,
+            &ec_public_jwk(32, 32, Some("ES256")),
+        )
+        .unwrap();
+        match SigPublic::import_ecdsa_jwk(
+            EcdsaVariant::P256Sha256,
+            &ec_public_jwk(32, 32, Some("ES384")),
+        ) {
+            Err(Error::InvalidKey(msg)) => {
+                assert_eq!(msg, r#"JWK alg is "ES384", not one of ["ES256"]"#)
+            }
+            other => panic!("expected the alg diagnostic, got {other:?}"),
+        }
+    }
+
+    /// The EC JWK coordinate-length guard renders its diagnostic for each
+    /// clause alone — one short coordinate at a time — rather than
+    /// deferring to the curve library's rejection of the assembled point.
+    #[test]
+    fn ec_jwk_coordinate_lengths_are_validated_with_the_message() {
+        for (x_len, y_len, got) in [(31, 32, "31/32"), (32, 31, "32/31")] {
+            match SigPublic::import_ecdsa_jwk(
+                EcdsaVariant::P256Sha256,
+                &ec_public_jwk(x_len, y_len, None),
+            ) {
+                Err(Error::InvalidKey(msg)) => assert_eq!(
+                    msg,
+                    format!("P-256 JWK coordinates are 32 bytes each, got {got}")
+                ),
+                other => panic!("expected the length diagnostic, got {other:?}"),
+            }
+        }
+    }
+
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_sign_verify_round_trip() {

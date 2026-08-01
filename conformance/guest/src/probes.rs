@@ -2522,8 +2522,8 @@ fn rfc8410_spki(oid_tail: u8, key: &[u8]) -> Vec<u8> {
 
 /// The SPKI and JWK verifying-key import/export formats agree with the raw
 /// form byte-for-byte, on both signature algorithms: raw → spki/jwk export
-/// → re-import → raw export is the identity, and a wrong-curve SPKI fails
-/// `invalid-key`.
+/// → re-import → raw export is the identity, a wrong-curve SPKI fails
+/// `invalid-key`, and the JWK `alg` allowlists hold on both algorithms.
 async fn sig_public_format_imports() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::ecdsa_verify;
     use lann_webcrypto_guest::bindings::ed25519_verify;
@@ -2653,6 +2653,25 @@ async fn sig_public_format_imports() -> Result<(), String> {
         ))
         .await,
         "imported an X25519 JWK as Ed25519",
+    )?;
+
+    // The EC side of the JWK `alg` policy: the curve-paired JOSE alg is
+    // accepted, and another curve's alg is `invalid-key`.
+    ecdsa_verify::import_verifying_key_jwk(
+        EcdsaVariant::P256Sha256,
+        format!(r#"{{"kty":"EC","crv":"P-256","x":"{x}","y":"{y}","alg":"ES256"}}"#),
+    )
+    .await
+    .map_err(|e| describe("EC import with alg ES256", &e))?;
+    expect_err(
+        "wrong-curve EC alg",
+        ErrKind::InvalidKey,
+        ecdsa_verify::import_verifying_key_jwk(
+            EcdsaVariant::P256Sha256,
+            format!(r#"{{"kty":"EC","crv":"P-256","x":"{x}","y":"{y}","alg":"ES384"}}"#),
+        )
+        .await,
+        "imported an EC JWK with another curve's alg",
     )?;
 
     // The JWK `alg` policy: Ed25519 accepts its two registered spellings
