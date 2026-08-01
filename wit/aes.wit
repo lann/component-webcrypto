@@ -66,7 +66,7 @@ interface aes-gcm {
     /// cannot silently mint a key of an unintended size. An implementation
     /// not serving the variant (for example, browsers decline AES-192)
     /// fails with `error.unsupported`.
-    import-key: async func(%variant: aes-variant, raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
+    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Import an RFC 7517 JSON Web Key as an AES-GCM key of the declared
     /// variant.
@@ -75,7 +75,7 @@ interface aes-gcm {
     /// (see `README.md`, "JWK contract"). The key must be an `oct` key
     /// whose `alg`, if present, names the declared variant
     /// (`"A128GCM"`/`"A192GCM"`/`"A256GCM"`); the decoded material is then
-    /// subject to `import-key`'s contract.
+    /// subject to `import-key-raw`'s contract.
     import-key-jwk: async func(%variant: aes-variant, jwk: string, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random key of the given AES variant. Fails with
@@ -86,7 +86,7 @@ interface aes-gcm {
     /// Mint a key from a parameterized derivation: the derivation runs
     /// at the variant's key length (WebCrypto's `deriveKey` chain — get
     /// key length, derive bits, import) and the result is subject to
-    /// `import-key`'s contract.
+    /// `import-key-raw`'s contract.
     ///
     /// Requires `can-derive-key` on the input, else `error.not-permitted`.
     /// Requesting an *extractable* key requires `can-derive-bits` too: an
@@ -116,7 +116,7 @@ interface aes-gcm-internal-nonce {
     use aes.{aes-variant};
 
     /// Import raw key material as an internal-nonce AES-GCM key of the
-    /// declared variant (see `aes-gcm.import-key` for the
+    /// declared variant (see `aes-gcm.import-key-raw` for the
     /// variant/`raw`-length contract, which applies identically here).
     ///
     /// Security:
@@ -129,7 +129,7 @@ interface aes-gcm-internal-nonce {
     /// policy (for example, a profile that cannot establish uniqueness for
     /// externally sourced material) with `error.invalid-key` or
     /// `error.unsupported`.
-    import-key: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce AES-GCM key of the declared
     /// variant. Fails with `error.unsupported` if this implementation does

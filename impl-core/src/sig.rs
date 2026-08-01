@@ -63,7 +63,7 @@ pub enum SigPublic {
 impl SigPublic {
     /// Import a 32-byte RFC 8032 public key, rendering `invalid-key` for
     /// wrong lengths and encodings the algorithm rejects (the
-    /// `ed25519-verify.import-verifying-key` contract).
+    /// `ed25519-verify.import-verifying-key-raw` contract).
     pub fn import_ed25519(raw: &[u8]) -> Result<Self, Error> {
         let bytes: &[u8; 32] = raw.try_into().map_err(|_| {
             Error::InvalidKey(format!(
@@ -79,7 +79,7 @@ impl SigPublic {
     /// Import an uncompressed SEC1 point for the declared variant,
     /// rendering `invalid-key` for anything else — including compressed
     /// encodings and points not on the curve (the
-    /// `ecdsa-verify.import-verifying-key` contract).
+    /// `ecdsa-verify.import-verifying-key-raw` contract).
     pub fn import_ecdsa(variant: EcdsaVariant, raw: &[u8]) -> Result<Self, Error> {
         let expected = match variant {
             EcdsaVariant::P256Sha256 => 65,
@@ -201,7 +201,7 @@ impl SigPrivate {
 /// bound to its algorithm at minting, and the key's extractability.
 pub struct SigningKeyMaterial {
     private: SigPrivate,
-    /// Whether `export-key` may return the private material.
+    /// Whether `export-key-raw` may return the private material.
     policy: SigningPolicy,
 }
 

@@ -44,7 +44,7 @@
 //! # Exported material
 //!
 //! Key material lives in [`zeroize::Zeroizing`], which scrubs the buffer on
-//! drop. The `export_key` operations are the one place it leaves that
+//! drop. The `export_key_raw` operations are the one place it leaves that
 //! protection, and they return a plain `Vec<u8>`.
 //!
 //! An extractable key's bytes are bound for guest memory, which the runtime

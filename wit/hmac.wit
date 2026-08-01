@@ -21,7 +21,7 @@ interface hmac-sha2 {
     /// requires keys of at least 112 bits) MAY reject shorter keys with
     /// `error.invalid-key`. An implementation not serving the variant
     /// fails with `error.unsupported`.
-    import-key: async func(%variant: sha2-variant, raw: list<u8>, options: mac-key-options) -> result<mac-key, error>;
+    import-key-raw: async func(%variant: sha2-variant, raw: list<u8>, options: mac-key-options) -> result<mac-key, error>;
 
     /// Import an RFC 7517 JSON Web Key as an HMAC key over the declared
     /// SHA-2 variant.
@@ -31,7 +31,7 @@ interface hmac-sha2 {
     /// whose `alg`, if present, names the declared variant
     /// (`"HS256"`/`"HS384"`/`"HS512"`), with `ext` validated against the
     /// options' extractability; the decoded material is then subject to
-    /// `import-key`'s contract.
+    /// `import-key-raw`'s contract.
     import-key-jwk: async func(%variant: sha2-variant, jwk: string, options: mac-key-options) -> result<mac-key, error>;
 
     /// Generate a fresh random HMAC key over the declared SHA-2 variant.
@@ -47,12 +47,12 @@ interface hmac-sha2 {
     /// - implementations MAY decline lengths that are not a multiple of 8
     ///   with `error.unsupported` (none of this package's implementations
     ///   serve sub-byte lengths);
-    /// - implementations MAY apply the same policy bounds as `import-key`;
+    /// - implementations MAY apply the same policy bounds as `import-key-raw`;
     /// - an unserved variant fails `error.unsupported`.
     generate-key: async func(%variant: sha2-variant, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
 
     /// Mint a key from a parameterized derivation: the derivation runs
-    /// at `length` bits and the result is subject to `import-key`'s
+    /// at `length` bits and the result is subject to `import-key-raw`'s
     /// contract.
     ///
     /// `length` follows `generate-key`'s contract exactly (WebCrypto's

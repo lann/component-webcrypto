@@ -26,7 +26,7 @@ wit_bindgen::generate!({
 use conformance_harness::stream::{sig_sign, sig_verify, Schedule};
 use conformance_harness::{describe, expect, expect_err, export_probe_suite, probes, ErrKind};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
-use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key, EcdsaVariant};
+use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -88,18 +88,18 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     // The generated point survives an export → ecdsa-verify import round
     // trip (65-byte uncompressed SEC1), and the re-imported key verifies.
     let point = public
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key (public)", &e))?;
+        .map_err(|e| describe("export-key-raw (public)", &e))?;
     if point.len() != 65 || point[0] != 0x04 {
         return Err(format!(
             "exported public key is not a 65-byte uncompressed SEC1 point ({} bytes)",
             point.len()
         ));
     }
-    let imported = import_verifying_key(EcdsaVariant::P256Sha256, point)
+    let imported = import_verifying_key_raw(EcdsaVariant::P256Sha256, point)
         .await
-        .map_err(|e| describe("import-verifying-key of the exported point", &e))?;
+        .map_err(|e| describe("import-verifying-key-raw of the exported point", &e))?;
     let (verified, fed) = sig_verify(&imported, payload, &sig, Schedule::Whole).await;
     fed?;
     verified.map_err(|e| describe("re-imported key did not verify", &e))?;
@@ -188,9 +188,9 @@ async fn ecdsa_p521_unsupported() -> Result<(), String> {
         "P-521 key generated",
     )?;
     expect_err(
-        "import-verifying-key",
+        "import-verifying-key-raw",
         ErrKind::Unsupported,
-        import_verifying_key(EcdsaVariant::P521Sha512, vec![0x04; 133]).await,
+        import_verifying_key_raw(EcdsaVariant::P521Sha512, vec![0x04; 133]).await,
         "P-521 public key imported",
     )
 }

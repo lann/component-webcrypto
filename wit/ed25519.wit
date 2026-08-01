@@ -33,7 +33,7 @@ interface ed25519-verify {
     /// any other length fails with `error.invalid-key`; a non-canonical or
     /// small-order encoding is rejected here or at verification, per the
     /// interface's verification criterion.
-    import-verifying-key: async func(raw: list<u8>) -> result<verifying-key, error>;
+    import-verifying-key-raw: async func(raw: list<u8>) -> result<verifying-key, error>;
 }
 
 /// Ed25519 signing-key minting (RFC 8032).

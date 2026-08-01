@@ -27,7 +27,7 @@ interface x25519 {
     /// small-order key surfaces at `agree` as `error.invalid-key` (the
     /// all-zero check); material of any other length fails
     /// `error.invalid-key` at import.
-    import-public-key: async func(raw: list<u8>) -> result<public-key, error>;
+    import-public-key-raw: async func(raw: list<u8>) -> result<public-key, error>;
 
     /// Import a static secret key as an RFC 8037 OKP private JWK
     /// (`kty: "OKP"`, `crv: "X25519"`, with `x` and `d` both required —

@@ -67,7 +67,7 @@ pub const AEAD_FAMILIES: &[AeadFamily] = &[
         bad_key_len: 32,
         nonce_len: 12,
         tag_len: 16,
-        import: |raw, options| Box::pin(aes_gcm::import_key(AesVariant::Aes128, raw, options)),
+        import: |raw, options| Box::pin(aes_gcm::import_key_raw(AesVariant::Aes128, raw, options)),
         generate: |options| Box::pin(aes_gcm::generate_key(AesVariant::Aes128, options)),
     },
     AeadFamily {
@@ -79,7 +79,7 @@ pub const AEAD_FAMILIES: &[AeadFamily] = &[
         bad_key_len: 16,
         nonce_len: 12,
         tag_len: 16,
-        import: |raw, options| Box::pin(aes_gcm::import_key(AesVariant::Aes256, raw, options)),
+        import: |raw, options| Box::pin(aes_gcm::import_key_raw(AesVariant::Aes256, raw, options)),
         generate: |options| Box::pin(aes_gcm::generate_key(AesVariant::Aes256, options)),
     },
     AeadFamily {
@@ -91,7 +91,7 @@ pub const AEAD_FAMILIES: &[AeadFamily] = &[
         bad_key_len: 16,
         nonce_len: 12,
         tag_len: 16,
-        import: |raw, options| Box::pin(chacha20_poly1305::import_key(raw, options)),
+        import: |raw, options| Box::pin(chacha20_poly1305::import_key_raw(raw, options)),
         generate: |options| Box::pin(chacha20_poly1305::generate_key(options)),
     },
     AeadFamily {
@@ -103,7 +103,7 @@ pub const AEAD_FAMILIES: &[AeadFamily] = &[
         bad_key_len: 16,
         nonce_len: 24,
         tag_len: 16,
-        import: |raw, options| Box::pin(xchacha20_poly1305::import_key(raw, options)),
+        import: |raw, options| Box::pin(xchacha20_poly1305::import_key_raw(raw, options)),
         generate: |options| Box::pin(xchacha20_poly1305::generate_key(options)),
     },
 ];
@@ -207,7 +207,7 @@ async fn getters(family: &AeadFamily) -> Result<(), String> {
 }
 
 /// The `extractable` getter reports the minted flag in both directions on
-/// both minting paths, `export-key` is gated by it, and import → export
+/// both minting paths, `export-key-raw` is gated by it, and import → export
 /// is the identity.
 async fn export(family: &AeadFamily) -> Result<(), String> {
     let raw = raw_key(family);
@@ -216,7 +216,7 @@ async fn export(family: &AeadFamily) -> Result<(), String> {
         .map_err(|e| describe("extractable import", &e))?;
     expect(key.extractable(), true, "extractable imported key's getter")?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("export of an extractable import", &e))?;
     expect_bytes(&exported, &raw, "exported key material")?;
@@ -225,7 +225,7 @@ async fn export(family: &AeadFamily) -> Result<(), String> {
         .await
         .map_err(|e| describe("extractable generate", &e))?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("export of an extractable generated key", &e))?;
     expect(
@@ -251,9 +251,9 @@ async fn export(family: &AeadFamily) -> Result<(), String> {
             &format!("non-extractable {how} key's getter"),
         )?;
         expect_err(
-            &format!("export-key on a non-extractable {how} key"),
+            &format!("export-key-raw on a non-extractable {how} key"),
             ErrKind::NotExtractable,
-            key.export_key().await,
+            key.export_key_raw().await,
             "non-extractable key exported",
         )?;
     }
@@ -265,7 +265,7 @@ async fn export(family: &AeadFamily) -> Result<(), String> {
 async fn reject_key(family: &AeadFamily) -> Result<(), String> {
     for len in [0, family.bad_key_len] {
         expect_err(
-            &format!("import-key ({len} bytes)"),
+            &format!("import-key-raw ({len} bytes)"),
             ErrKind::InvalidKey,
             (family.import)(vec![0u8; len], mint::aead_options(false)).await,
             "wrong-length key material imported",
@@ -283,7 +283,7 @@ async fn reject_key(family: &AeadFamily) -> Result<(), String> {
 async fn usage(family: &AeadFamily) -> Result<(), String> {
     let raw = raw_key(family);
     expect_err(
-        "zero-usage import-key",
+        "zero-usage import-key-raw",
         ErrKind::NotPermitted,
         (family.import)(raw.clone(), AeadKeyOptions::new()).await,
         "minted a key with no enabled usage",
@@ -293,7 +293,7 @@ async fn usage(family: &AeadFamily) -> Result<(), String> {
     options.can_seal(true);
     let seal_only = (family.import)(raw.clone(), options)
         .await
-        .map_err(|e| describe("seal-only import-key", &e))?;
+        .map_err(|e| describe("seal-only import-key-raw", &e))?;
     expect(seal_only.can_seal(), true, "seal-only key can-seal")?;
     expect(seal_only.can_open(), false, "seal-only key can-open")?;
     expect(seal_only.can_wrap(), false, "seal-only key can-wrap")?;
@@ -317,7 +317,7 @@ async fn usage(family: &AeadFamily) -> Result<(), String> {
     options.can_open(true);
     let open_only = (family.import)(raw, options)
         .await
-        .map_err(|e| describe("open-only import-key", &e))?;
+        .map_err(|e| describe("open-only import-key-raw", &e))?;
     expect(open_only.can_seal(), false, "open-only key can-seal")?;
     expect(open_only.can_open(), true, "open-only key can-open")?;
     let (opened, fed) = open(&open_only, &nonce, b"", None, &sealed, Schedule::Whole).await;

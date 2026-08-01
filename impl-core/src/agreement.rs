@@ -23,7 +23,7 @@ pub struct AgreementPublicMaterial {
 }
 
 impl AgreementPublicMaterial {
-    /// Import a raw 32-byte u-coordinate, per the `x25519.import-public-key`
+    /// Import a raw 32-byte u-coordinate, per the `x25519.import-public-key-raw`
     /// contract: any 32-byte string is accepted (degenerate keys surface at
     /// `agree`); any other length is `invalid-key`.
     pub fn import(raw: &[u8]) -> Result<Self, Error> {
@@ -43,7 +43,7 @@ impl AgreementPublicMaterial {
         ALGORITHM
     }
 
-    /// The raw u-coordinate (`public-key.export-key`).
+    /// The raw u-coordinate (`public-key.export-key-raw`).
     ///
     /// The copy returned is *not* protected — public material, so unlike
     /// the key exports there is nothing to protect.

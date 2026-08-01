@@ -416,7 +416,7 @@ mod tests {
     fn expect_err_distinguishes_all_three_arms() {
         assert_eq!(
             expect_err(
-                "import-key",
+                "import-key-raw",
                 ErrKind::InvalidKey,
                 Err::<(), _>(Error::InvalidKey("too short".into())),
                 "empty key imported",
@@ -425,21 +425,21 @@ mod tests {
         );
         assert_eq!(
             expect_err(
-                "import-key",
+                "import-key-raw",
                 ErrKind::InvalidKey,
                 Err::<(), _>(Error::Unsupported("no such variant".into())),
                 "empty key imported",
             ),
-            Err("import-key: expected invalid-key, got: unsupported: no such variant".into())
+            Err("import-key-raw: expected invalid-key, got: unsupported: no such variant".into())
         );
         assert_eq!(
             expect_err(
-                "import-key",
+                "import-key-raw",
                 ErrKind::InvalidKey,
                 Ok(()),
                 "empty key imported"
             ),
-            Err("import-key: empty key imported".into())
+            Err("import-key-raw: empty key imported".into())
         );
     }
 

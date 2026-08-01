@@ -86,7 +86,7 @@ pub async fn import_hmac_key(
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<MacKey, Error> {
-    hmac_sha2::import_key(variant, raw, mac_options(extractable)).await
+    hmac_sha2::import_key_raw(variant, raw, mac_options(extractable)).await
 }
 
 pub async fn import_hmac_key_jwk(
@@ -105,12 +105,12 @@ pub async fn generate_hmac_key(
     hmac_sha2::generate_key(variant, length, mac_options(extractable)).await
 }
 
-pub async fn import_key(
+pub async fn import_key_raw(
     variant: AesVariant,
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<AeadKey, Error> {
-    aes_gcm::import_key(variant, raw, aead_options(extractable)).await
+    aes_gcm::import_key_raw(variant, raw, aead_options(extractable)).await
 }
 
 pub async fn import_aes_key_jwk(
@@ -130,7 +130,7 @@ pub async fn import_internal_nonce_key(
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<InternalNonceKey, Error> {
-    aes_gcm_internal_nonce::import_key(variant, raw, internal_nonce_options(extractable)).await
+    aes_gcm_internal_nonce::import_key_raw(variant, raw, internal_nonce_options(extractable)).await
 }
 
 pub async fn generate_internal_nonce_key(
@@ -141,18 +141,19 @@ pub async fn generate_internal_nonce_key(
 }
 
 pub async fn import_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
-    chacha20_poly1305::import_key(raw, aead_options(extractable)).await
+    chacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
 }
 
 pub async fn import_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
-    xchacha20_poly1305::import_key(raw, aead_options(extractable)).await
+    xchacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
 }
 
 pub async fn import_xchacha_internal_nonce_key(
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<InternalNonceKey, Error> {
-    xchacha20_poly1305_internal_nonce::import_key(raw, internal_nonce_options(extractable)).await
+    xchacha20_poly1305_internal_nonce::import_key_raw(raw, internal_nonce_options(extractable))
+        .await
 }
 
 pub async fn generate_xchacha_internal_nonce_key(
@@ -202,7 +203,7 @@ pub fn x25519_secret_jwk(x: &[u8], d: &[u8]) -> String {
 }
 
 pub async fn import_x25519_public_key(raw: Vec<u8>) -> Result<AgreementPublicKey, Error> {
-    x25519::import_public_key(raw).await
+    x25519::import_public_key_raw(raw).await
 }
 
 pub async fn import_x25519_secret_key(

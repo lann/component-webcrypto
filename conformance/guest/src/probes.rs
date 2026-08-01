@@ -7,7 +7,7 @@ use crate::mint::{
     agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_x25519_key,
     generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_chacha_key, import_hmac_key,
-    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key, import_password,
+    import_hmac_key_jwk, import_ikm, import_internal_nonce_key, import_key_raw, import_password,
     import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
     x25519_secret_jwk,
 };
@@ -22,9 +22,9 @@ use conformance_harness::{
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
-    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+    import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -139,7 +139,7 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
 async fn chacha_minting_declined() -> Result<String, String> {
     for family in chacha_families() {
         expect_err(
-            &format!("{} import-key", family.name),
+            &format!("{} import-key-raw", family.name),
             ErrKind::Unsupported,
             (family.import)(
                 vec![0x42u8; family.key_len],
@@ -165,7 +165,7 @@ async fn chacha_minting_declined() -> Result<String, String> {
     // target free to decline five of the six entry points and still serve
     // this one, which is the hole this assertion exists to close.
     expect_err(
-        "xchacha internal-nonce import-key",
+        "xchacha internal-nonce import-key-raw",
         ErrKind::Unsupported,
         import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
         "minted a key for a feature declared missing",
@@ -185,7 +185,7 @@ async fn generate_key_256(
 /// Importing an empty HMAC key fails `invalid-key`.
 async fn hmac_import_empty_key() -> Result<(), String> {
     expect_err(
-        "import-key",
+        "import-key-raw",
         ErrKind::InvalidKey,
         import_hmac_key(Sha2Variant::Sha256, Vec::new(), false).await,
         "empty HMAC key imported",
@@ -207,7 +207,7 @@ async fn hmac_sha384_sha512() -> Result<(), String> {
     ] {
         let key = import_hmac_key(variant, KEY.to_vec(), false)
             .await
-            .map_err(|e| describe("import-key", &e))?;
+            .map_err(|e| describe("import-key-raw", &e))?;
         expect(
             key.algorithm_hash().as_deref(),
             Some(hash),
@@ -233,7 +233,7 @@ async fn sha2_truncated_unsupported() -> Result<(), String> {
         Sha2Variant::Sha512256,
     ] {
         expect_err(
-            &format!("import-key {variant:?}"),
+            &format!("import-key-raw {variant:?}"),
             ErrKind::Unsupported,
             import_hmac_key(variant, b"truncated".to_vec(), false).await,
             "key imported",
@@ -258,9 +258,9 @@ async fn sha2_truncated_unsupported() -> Result<(), String> {
 async fn aes_import_wrong_length() -> Result<(), String> {
     for len in [16usize, 24] {
         expect_err(
-            &format!("import-key ({len} bytes)"),
+            &format!("import-key-raw ({len} bytes)"),
             ErrKind::InvalidKey,
-            import_key(AesVariant::Aes256, vec![0u8; len], false).await,
+            import_key_raw(AesVariant::Aes256, vec![0u8; len], false).await,
             "imported as AES-256",
         )?;
     }
@@ -271,9 +271,9 @@ async fn aes_import_wrong_length() -> Result<(), String> {
 /// `aes-variant` doc): both minting paths fail `unsupported`.
 async fn aes192_unsupported() -> Result<(), String> {
     expect_err(
-        "import-key",
+        "import-key-raw",
         ErrKind::Unsupported,
-        import_key(AesVariant::Aes192, vec![0u8; 24], false).await,
+        import_key_raw(AesVariant::Aes192, vec![0u8; 24], false).await,
         "AES-192 key imported",
     )?;
     expect_err(
@@ -356,9 +356,9 @@ async fn key_export_roundtrip() -> Result<(), String> {
     let hmac_raw = b"key-export-roundtrip".to_vec();
     let key = import_hmac_key(Sha2Variant::Sha256, hmac_raw.clone(), true)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("hmac export", &e))?;
     expect_bytes(&exported, &hmac_raw, "exported HMAC key material")
@@ -369,11 +369,11 @@ async fn key_export_roundtrip() -> Result<(), String> {
 async fn not_extractable() -> Result<(), String> {
     let key = import_hmac_key(Sha2Variant::Sha256, b"not-extractable".to_vec(), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     expect_err(
-        "hmac export-key",
+        "hmac export-key-raw",
         ErrKind::NotExtractable,
-        key.export_key().await,
+        key.export_key_raw().await,
         "non-extractable HMAC key exported",
     )
 }
@@ -387,7 +387,7 @@ async fn generated_key_shape() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let exported = hmac_key
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("generated hmac export", &e))?;
     expect(
@@ -405,7 +405,7 @@ async fn generated_key_shape() -> Result<(), String> {
 
     let aes_key = generate_key_256(true).await?;
     let exported = aes_key
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("generated aes export", &e))?;
     expect(exported.len(), 32, "generated AES key export length")?;
@@ -443,7 +443,7 @@ async fn algorithm_names() -> Result<(), String> {
     let key_bits = raw.len() as u32 * 8;
     let imported = import_hmac_key(Sha2Variant::Sha256, raw, false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     expect(
         imported.algorithm_name(),
         "HMAC".to_string(),
@@ -478,9 +478,9 @@ async fn algorithm_names() -> Result<(), String> {
         "generated mac-key length",
     )?;
 
-    let imported = import_key(AesVariant::Aes256, vec![0x24u8; 32], false)
+    let imported = import_key_raw(AesVariant::Aes256, vec![0x24u8; 32], false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     expect(
         imported.algorithm_name(),
         "AES-GCM".to_string(),
@@ -508,7 +508,7 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
         false,
     )
     .await
-    .map_err(|e| describe("import-key", &e))?;
+    .map_err(|e| describe("import-key-raw", &e))?;
     let payload = b"truncated-tag payload";
 
     let (tag, fed) = sign(&key, payload, Schedule::Whole).await;
@@ -537,7 +537,7 @@ async fn sign_prefix_drop() -> Result<(), String> {
         false,
     )
     .await
-    .map_err(|e| describe("import-key", &e))?;
+    .map_err(|e| describe("import-key-raw", &e))?;
 
     let message: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let prefix_len = 700;
@@ -644,7 +644,7 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
             crate::mint::aead_options(false),
         )
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
         let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", None, msg, Schedule::Whole).await;
         fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
         expect_err(
@@ -741,7 +741,7 @@ async fn sig_key_metadata() -> Result<(), String> {
     )?;
     // The getter was only ever asserted in the `true` direction, so a
     // hardcoded `true` passed the whole suite. Mint the other kind and read
-    // it back: `export-key` failing is a separate contract, checked
+    // it back: `export-key-raw` failing is a separate contract, checked
     // elsewhere.
     let (non_extractable, _) = generate_ed25519_key(false)
         .await
@@ -778,7 +778,7 @@ async fn sig_key_metadata() -> Result<(), String> {
     ));
     let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
         .await
-        .map_err(|e| describe("import-verifying-key", &e))?;
+        .map_err(|e| describe("import-verifying-key-raw", &e))?;
     expect(
         key.algorithm_name(),
         "ECDSA".to_string(),
@@ -836,9 +836,9 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     fed?;
 
     let exported = public
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key (public)", &e))?;
+        .map_err(|e| describe("export-key-raw (public)", &e))?;
     expect(exported.len(), 32, "exported Ed25519 public key length")?;
     let reimported = import_ed25519_verifying_key(exported)
         .await
@@ -864,11 +864,11 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     ] {
         let key = import_ecdsa_verifying_key(variant, public.clone())
             .await
-            .map_err(|e| describe("import-verifying-key (ecdsa)", &e))?;
+            .map_err(|e| describe("import-verifying-key-raw (ecdsa)", &e))?;
         let exported = key
-            .export_key()
+            .export_key_raw()
             .await
-            .map_err(|e| describe("export-key (public)", &e))?;
+            .map_err(|e| describe("export-key-raw (public)", &e))?;
         expect_bytes(&exported, &public, "exported ECDSA public key")?;
     }
     Ok(())
@@ -877,11 +877,11 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
 /// The internal-nonce API contract the vectors cannot express: sealed
 /// messages carry the algorithm's wire format (nonce-prefix length), each
 /// seal draws a fresh nonce, minting validates key material, and
-/// extractability gates `export-key` exactly as for `aead-key`.
+/// extractability gates `export-key-raw` exactly as for `aead-key`.
 async fn internal_nonce_shape() -> Result<(), String> {
     // Wrong-length material is rejected at minting, as for `aes-gcm`.
     expect_err(
-        "import-key (16 bytes as AES-256)",
+        "import-key-raw (16 bytes as AES-256)",
         ErrKind::InvalidKey,
         import_internal_nonce_key(AesVariant::Aes256, vec![0u8; 16], false).await,
         "imported",
@@ -952,11 +952,11 @@ async fn internal_nonce_shape() -> Result<(), String> {
         "opened",
     )?;
 
-    // A non-extractable key refuses export-key.
+    // A non-extractable key refuses export-key-raw.
     expect_err(
-        "export-key",
+        "export-key-raw",
         ErrKind::NotExtractable,
-        key.export_key().await,
+        key.export_key_raw().await,
         "non-extractable key exported",
     )?;
 
@@ -965,9 +965,9 @@ async fn internal_nonce_shape() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key (extractable)", &e))?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     expect(exported.len(), 32, "exported key length")?;
     Ok(())
 }
@@ -991,19 +991,19 @@ async fn chacha_internal_nonce_roundtrip() -> Result<(), String> {
     // A non-extractable key refuses export; an extractable import
     // round-trips its 32 bytes.
     expect_err(
-        "export-key",
+        "export-key-raw",
         ErrKind::NotExtractable,
-        key.export_key().await,
+        key.export_key_raw().await,
         "non-extractable key exported",
     )?;
     let raw = vec![0x42u8; 32];
     let imported = import_xchacha_internal_nonce_key(raw.clone(), true)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     let exported = imported
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     expect_bytes(&exported, &raw, "exported key material")?;
 
     let plaintext = b"chacha internal-nonce payload".to_vec();
@@ -1104,7 +1104,7 @@ async fn large_stream() -> Result<(), String> {
 
     let key = import_hmac_key(Sha2Variant::Sha256, b"large-stream key".to_vec(), false)
         .await
-        .map_err(|e| describe("import-key", &e))?;
+        .map_err(|e| describe("import-key-raw", &e))?;
     let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
     let (chunked, fed) = futures::join!(key.sign(rx), feed(tx, boundary_chunks(&payload)));
     fed?;
@@ -1170,7 +1170,7 @@ async fn stream_empty_writes() -> Result<(), String> {
         false,
     )
     .await
-    .map_err(|e| describe("import-key", &e))?;
+    .map_err(|e| describe("import-key-raw", &e))?;
     let payload: Vec<u8> = (0..=255u8).cycle().take(512).collect();
 
     // The baseline: the same payload as a single write.
@@ -1230,10 +1230,10 @@ async fn stream_empty_writes() -> Result<(), String> {
 
 /// The `extractable` getter reports the flag each key was minted with, on
 /// every key resource carrying an extractability gate, and agrees with what
-/// `export-key` then does.
+/// `export-key-raw` then does.
 ///
 /// The getter is the only way to ask the question without taking the
-/// answer: a caller that interrogated extractability through `export-key`
+/// answer: a caller that interrogated extractability through `export-key-raw`
 /// alone would receive the material whenever the answer is yes.
 async fn extractable_getter() -> Result<(), String> {
     for extractable in [true, false] {
@@ -1243,21 +1243,21 @@ async fn extractable_getter() -> Result<(), String> {
             extractable,
         )
         .await
-        .map_err(|e| describe("import-key (hmac)", &e))?;
-        let aead = import_key(AesVariant::Aes256, vec![0x24u8; 32], extractable)
+        .map_err(|e| describe("import-key-raw (hmac)", &e))?;
+        let aead = import_key_raw(AesVariant::Aes256, vec![0x24u8; 32], extractable)
             .await
-            .map_err(|e| describe("import-key (aes-gcm)", &e))?;
+            .map_err(|e| describe("import-key-raw (aes-gcm)", &e))?;
         let internal = import_internal_nonce_key(AesVariant::Aes256, vec![0x42u8; 32], extractable)
             .await
-            .map_err(|e| describe("import-key (aes-gcm-internal-nonce)", &e))?;
+            .map_err(|e| describe("import-key-raw (aes-gcm-internal-nonce)", &e))?;
 
         let reported = [
-            ("mac-key", mac.extractable(), mac.export_key().await),
-            ("aead-key", aead.extractable(), aead.export_key().await),
+            ("mac-key", mac.extractable(), mac.export_key_raw().await),
+            ("aead-key", aead.extractable(), aead.export_key_raw().await),
             (
                 "internal-nonce-key",
                 internal.extractable(),
-                internal.export_key().await,
+                internal.export_key_raw().await,
             ),
         ];
         for (resource, getter, exported) in reported {
@@ -1302,9 +1302,9 @@ async fn hmac_generate_length() -> Result<(), String> {
         ));
     }
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     if exported.len() != 32 {
         return Err(format!(
             "exported material length: got {}, want 32",
@@ -1378,7 +1378,7 @@ async fn chacha_tag_size_fixed() -> Result<(), String> {
     let msg = b"chacha-tag-size";
     let chacha = import_chacha_key(vec![0x42u8; 32], false)
         .await
-        .map_err(|e| describe("chacha import-key", &e))?;
+        .map_err(|e| describe("chacha import-key-raw", &e))?;
     let (sealed, fed) = seal(&chacha, &[0u8; 12], b"", Some(12), msg, Schedule::Whole).await;
     fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
     expect_err(
@@ -1430,9 +1430,9 @@ async fn jwk_roundtrip() -> Result<(), String> {
     .await
     .map_err(|e| describe("hmac import-key-jwk", &e))?;
     let exported = hmac
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     expect_bytes(&exported, &raw, "hmac material from JWK")?;
     let jwk = hmac
         .export_key_jwk()
@@ -1442,9 +1442,9 @@ async fn jwk_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("re-import of exported JWK", &e))?;
     let exported = reimported
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     expect_bytes(&exported, &raw, "hmac material after JWK round trip")?;
 
     let aes = import_aes_key_jwk(
@@ -1541,9 +1541,9 @@ async fn jwk_semantics() -> Result<(), String> {
         .await
         .map_err(|e| describe("duplicate-member import", &e))?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("export-key", &e))?;
+        .map_err(|e| describe("export-key-raw", &e))?;
     expect_bytes(&exported, &raw, "last-wins material")?;
 
     let policy = format!(
@@ -1566,7 +1566,7 @@ async fn jwk_semantics() -> Result<(), String> {
 async fn chacha_jwk_unsupported() -> Result<(), String> {
     let key = import_chacha_key(vec![0x42u8; 32], true)
         .await
-        .map_err(|e| describe("chacha import-key", &e))?;
+        .map_err(|e| describe("chacha import-key-raw", &e))?;
     match key.export_key_jwk().await {
         Err(Error::Unsupported(_)) => Ok(()),
         Err(other) => Err(describe(
@@ -1587,17 +1587,17 @@ async fn mac_usage_policy() -> Result<(), String> {
 
     let raw = b"mac-usage-policy key".to_vec();
     expect_err(
-        "zero-usage import-key",
+        "zero-usage import-key-raw",
         ErrKind::NotPermitted,
-        hmac_sha2::import_key(Sha2Variant::Sha256, raw.clone(), MacKeyOptions::new()).await,
+        hmac_sha2::import_key_raw(Sha2Variant::Sha256, raw.clone(), MacKeyOptions::new()).await,
         "minted a key with no enabled usage",
     )?;
 
     let options = MacKeyOptions::new();
     options.can_sign(true);
-    let sign_only = hmac_sha2::import_key(Sha2Variant::Sha256, raw.clone(), options)
+    let sign_only = hmac_sha2::import_key_raw(Sha2Variant::Sha256, raw.clone(), options)
         .await
-        .map_err(|e| describe("sign-only import-key", &e))?;
+        .map_err(|e| describe("sign-only import-key-raw", &e))?;
     expect(sign_only.can_sign(), true, "sign-only key can-sign")?;
     expect(sign_only.can_verify(), false, "sign-only key can-verify")?;
 
@@ -1615,9 +1615,9 @@ async fn mac_usage_policy() -> Result<(), String> {
 
     let options = MacKeyOptions::new();
     options.can_verify(true);
-    let verify_only = hmac_sha2::import_key(Sha2Variant::Sha256, raw, options)
+    let verify_only = hmac_sha2::import_key_raw(Sha2Variant::Sha256, raw, options)
         .await
-        .map_err(|e| describe("verify-only import-key", &e))?;
+        .map_err(|e| describe("verify-only import-key-raw", &e))?;
     expect(verify_only.can_sign(), false, "verify-only key can-sign")?;
     expect(verify_only.can_verify(), true, "verify-only key can-verify")?;
     let (verified, fed) = verify(&verify_only, payload, &tag, Schedule::Whole).await;
@@ -1644,9 +1644,9 @@ async fn aead_wrap_grants() -> Result<(), String> {
 
     let options = AeadKeyOptions::new();
     options.can_wrap(true);
-    let wrap_only = aes_gcm::import_key(AesVariant::Aes256, vec![0x5au8; 32], options)
+    let wrap_only = aes_gcm::import_key_raw(AesVariant::Aes256, vec![0x5au8; 32], options)
         .await
-        .map_err(|e| describe("wrap-only import-key", &e))?;
+        .map_err(|e| describe("wrap-only import-key-raw", &e))?;
     expect(wrap_only.can_wrap(), true, "wrap-only key can-wrap")?;
     expect(wrap_only.can_unwrap(), false, "wrap-only key can-unwrap")?;
     expect(wrap_only.can_seal(), false, "wrap-only key can-seal")?;
@@ -1669,9 +1669,9 @@ async fn aead_wrap_grants() -> Result<(), String> {
 
     let options = AeadKeyOptions::new();
     options.can_unwrap(true);
-    let unwrap_only = aes_gcm::import_key(AesVariant::Aes256, vec![0xa5u8; 32], options)
+    let unwrap_only = aes_gcm::import_key_raw(AesVariant::Aes256, vec![0xa5u8; 32], options)
         .await
-        .map_err(|e| describe("unwrap-only import-key", &e))?;
+        .map_err(|e| describe("unwrap-only import-key-raw", &e))?;
     expect(unwrap_only.can_unwrap(), true, "unwrap-only key can-unwrap")?;
     expect(unwrap_only.can_wrap(), false, "unwrap-only key can-wrap")?;
     let (refused, fed) = open(
@@ -1701,9 +1701,9 @@ async fn internal_nonce_usage_policy() -> Result<(), String> {
 
     let raw = vec![0xc3u8; 32];
     expect_err(
-        "zero-usage import-key",
+        "zero-usage import-key-raw",
         ErrKind::NotPermitted,
-        aes_gcm_internal_nonce::import_key(
+        aes_gcm_internal_nonce::import_key_raw(
             AesVariant::Aes256,
             raw.clone(),
             InternalNonceKeyOptions::new(),
@@ -1714,9 +1714,10 @@ async fn internal_nonce_usage_policy() -> Result<(), String> {
 
     let options = InternalNonceKeyOptions::new();
     options.can_seal(true);
-    let seal_only = aes_gcm_internal_nonce::import_key(AesVariant::Aes256, raw.clone(), options)
-        .await
-        .map_err(|e| describe("seal-only import-key", &e))?;
+    let seal_only =
+        aes_gcm_internal_nonce::import_key_raw(AesVariant::Aes256, raw.clone(), options)
+            .await
+            .map_err(|e| describe("seal-only import-key-raw", &e))?;
     expect(seal_only.can_seal(), true, "seal-only key can-seal")?;
     expect(seal_only.can_open(), false, "seal-only key can-open")?;
 
@@ -1735,9 +1736,9 @@ async fn internal_nonce_usage_policy() -> Result<(), String> {
 
     let options = InternalNonceKeyOptions::new();
     options.can_open(true);
-    let open_only = aes_gcm_internal_nonce::import_key(AesVariant::Aes256, raw, options)
+    let open_only = aes_gcm_internal_nonce::import_key_raw(AesVariant::Aes256, raw, options)
         .await
-        .map_err(|e| describe("open-only import-key", &e))?;
+        .map_err(|e| describe("open-only import-key-raw", &e))?;
     expect(open_only.can_seal(), false, "open-only key can-seal")?;
     expect(open_only.can_open(), true, "open-only key can-open")?;
     let (opened, fed) = in_open(&open_only, b"", &sealed, Schedule::Whole).await;
@@ -1812,7 +1813,7 @@ async fn hkdf_derive_key_equivalence() -> Result<(), String> {
         .await
         .map_err(|e| describe("aes-gcm derive-key", &e))?;
     let exported = derived
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("export of derived AES key", &e))?;
     expect_bytes(&exported, &bits, "derive-key equals import(derive-bits)")?;
@@ -1835,7 +1836,7 @@ async fn hkdf_derive_key_equivalence() -> Result<(), String> {
         .await
         .map_err(|e| describe("aes-128 derive-key", &e))?;
     let exported = derived
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("export of derived AES-128 key", &e))?;
     expect_bytes(
@@ -2019,7 +2020,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
         .await
         .map_err(|e| describe("derive-key", &e))?;
     let exported = derived
-        .export_key()
+        .export_key_raw()
         .await
         .map_err(|e| describe("export of derived key", &e))?;
     expect_bytes(
@@ -2138,9 +2139,9 @@ async fn x25519_key_contract() -> Result<(), String> {
     // A generated public key exports as the raw 32-byte u-coordinate and
     // re-imports to an equivalent key: both peers derive the same secret.
     let raw = public
-        .export_key()
+        .export_key_raw()
         .await
-        .map_err(|e| describe("public-key export-key", &e))?;
+        .map_err(|e| describe("public-key export-key-raw", &e))?;
     expect(raw.len(), 32, "exported public-key length")?;
     let reimported = import_x25519_public_key(raw.clone())
         .await

@@ -150,7 +150,7 @@ The layering is a design invariant, not a convention:
   that way.
 - A key resource must not promise material the provider may not hold. A
   `signing-key` therefore cannot yield its public half: `generate-key`
-  returns the pair, importers use `import-verifying-key`. Browser WebCrypto
+  returns the pair, importers use `import-verifying-key-raw`. Browser WebCrypto
   has no derive operation (recovering the point from a private-only import
   is an unspecified spec gap, w3c/webcrypto#356) and keystore-resident keys
   sign without yielding anything else, so an infallible derive would make
@@ -480,7 +480,7 @@ closed numbers remain stable references.
   stable surface. A retrieved key is a *handle*, so it may be usable and
   unreadable at once — every WebCrypto export operation can fail with
   "key material cannot be accessed" where sign and verify cannot, which is
-  why `verifying-key.export-key` is fallible. And loading is a minting path
+  why `verifying-key.export-key-raw` is fallible. And loading is a minting path
   whose caller supplied no `extractable` argument, which is why every gated
   key resource exposes an `extractable` getter. Storage is also the first
   place where the implementations may differ in *capability* rather than in

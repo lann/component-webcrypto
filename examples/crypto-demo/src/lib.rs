@@ -26,9 +26,9 @@ use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
 use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
-    import_verifying_key as import_ecdsa_verifying_key, EcdsaVariant,
+    import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key as import_ed25519_verifying_key;
+use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::mac::MacKey;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
@@ -73,8 +73,12 @@ async fn import_hmac_key(
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<MacKey, Error> {
-    lann_webcrypto_guest::bindings::hmac_sha2::import_key(variant, raw, mac_options(extractable))
-        .await
+    lann_webcrypto_guest::bindings::hmac_sha2::import_key_raw(
+        variant,
+        raw,
+        mac_options(extractable),
+    )
+    .await
 }
 
 async fn generate_hmac_key(
@@ -90,12 +94,12 @@ async fn generate_hmac_key(
     .await
 }
 
-async fn import_key(
+async fn import_key_raw(
     variant: AesVariant,
     raw: Vec<u8>,
     extractable: bool,
 ) -> Result<AeadKey, Error> {
-    lann_webcrypto_guest::bindings::aes_gcm::import_key(variant, raw, aead_options(extractable))
+    lann_webcrypto_guest::bindings::aes_gcm::import_key_raw(variant, raw, aead_options(extractable))
         .await
 }
 
@@ -225,7 +229,7 @@ impl Guest for Component {
 async fn hmac_known_answer(chunk: usize) -> Result<()> {
     let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), true)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
     ensure!(
         key.algorithm_name() == "HMAC",
         "mac-key.algorithm-name: got {}",
@@ -251,7 +255,7 @@ async fn hmac_known_answer(chunk: usize) -> Result<()> {
 async fn hmac_verify() -> Result<()> {
     let key = import_hmac_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), false)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
 
     let mut tag = unhex(HMAC_TAG);
     verify_chunked(&key, HMAC_DATA, tag.clone(), usize::MAX)
@@ -281,7 +285,7 @@ async fn hmac_generated_key() -> Result<()> {
 
     // A non-extractable key must not export.
     expect_error!(
-        key.export_key().await,
+        key.export_key_raw().await,
         Error::NotExtractable,
         "non-extractable key exported",
     )
@@ -299,11 +303,11 @@ async fn hmac_key_export() -> Result<()> {
         verify: true,
         extractable: true,
     };
-    let key = hmac_sha2::import_key(Sha2Variant::Sha256, HMAC_KEY.to_vec(), full_grant)
+    let key = hmac_sha2::import_key_raw(Sha2Variant::Sha256, HMAC_KEY.to_vec(), full_grant)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
         .context("export of extractable key")?;
     ensure!(
@@ -337,7 +341,7 @@ async fn hmac_key_export() -> Result<()> {
         .await
         .context("generate-key")?;
     let exported = generated
-        .export_key()
+        .export_key_raw()
         .await
         .context("export of generated key")?;
     ensure!(
@@ -364,9 +368,9 @@ async fn aead_wrapper_seal() -> Result<()> {
         open: true,
         ..Default::default()
     };
-    let key = aes_gcm::import_key(AesVariant::Aes256, unhex(GCM_KEY), seal_open)
+    let key = aes_gcm::import_key_raw(AesVariant::Aes256, unhex(GCM_KEY), seal_open)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
     let nonce = unhex(GCM_IV);
     let plaintext = unhex(GCM_PLAINTEXT);
     let aad = unhex(GCM_AAD);
@@ -529,9 +533,9 @@ async fn bytes_equal() -> Result<()> {
 
 /// Seal the NIST vector's plaintext and compare against its ciphertext‖tag.
 async fn gcm_known_answer_seal() -> Result<()> {
-    let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
+    let key = import_key_raw(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
     ensure!(
         key.algorithm_name() == "AES-GCM",
         "aead-key.algorithm-name: got {}",
@@ -571,9 +575,9 @@ async fn gcm_known_answer_seal() -> Result<()> {
 /// Open the NIST vector's ciphertext‖tag (fed one byte at a time) and compare
 /// against its plaintext.
 async fn gcm_known_answer_open() -> Result<()> {
-    let key = import_key(AesVariant::Aes256, unhex(GCM_KEY), false)
+    let key = import_key_raw(AesVariant::Aes256, unhex(GCM_KEY), false)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
 
     let mut ciphertext = unhex(GCM_CIPHERTEXT);
     ciphertext.extend(unhex(GCM_TAG));
@@ -650,7 +654,7 @@ async fn gcm_wrong_aad() -> Result<()> {
 /// Importing wrong-length key material fails with `invalid-key`.
 async fn gcm_invalid_key() -> Result<()> {
     expect_error!(
-        import_key(AesVariant::Aes256, vec![0u8; 16], false).await,
+        import_key_raw(AesVariant::Aes256, vec![0u8; 16], false).await,
         Error::InvalidKey(_),
         "16-byte key imported as AES-256",
     )
@@ -672,11 +676,11 @@ async fn gcm_invalid_nonce() -> Result<()> {
 /// Extractability behaves for AEAD keys exactly as for MAC keys.
 async fn gcm_key_export() -> Result<()> {
     let raw = unhex(GCM_KEY);
-    let key = import_key(AesVariant::Aes256, raw.clone(), true)
+    let key = import_key_raw(AesVariant::Aes256, raw.clone(), true)
         .await
-        .context("import-key")?;
+        .context("import-key-raw")?;
     let exported = key
-        .export_key()
+        .export_key_raw()
         .await
         .context("export of extractable key")?;
     ensure!(
@@ -689,7 +693,7 @@ async fn gcm_key_export() -> Result<()> {
         .await
         .context("generate-key")?;
     expect_error!(
-        sealed_key.export_key().await,
+        sealed_key.export_key_raw().await,
         Error::NotExtractable,
         "non-extractable key exported",
     )
@@ -918,7 +922,7 @@ async fn sig_verify(key: &VerifyingKey, data: &[u8], sig: Vec<u8>) -> Result<Res
 async fn ed25519_verify_check() -> Result<()> {
     let key = import_ed25519_verifying_key(unhex(ED25519_PUBLIC))
         .await
-        .context("import-verifying-key")?;
+        .context("import-verifying-key-raw")?;
     ensure!(
         key.algorithm_name() == "Ed25519",
         "verifying-key.algorithm-name: got {}",
@@ -967,7 +971,7 @@ async fn ecdsa_verify_known_answer() -> Result<()> {
     point.extend(unhex(ECDSA_PUBLIC_Y));
     let key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point)
         .await
-        .context("import-verifying-key")?;
+        .context("import-verifying-key-raw")?;
     ensure!(
         key.algorithm_name() == "ECDSA",
         "verifying-key.algorithm-name: got {}",
