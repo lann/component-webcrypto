@@ -8,7 +8,13 @@
 // which the justfile recipe sets to the repository root — hence the
 // root-relative library path below.
 
-import { crypto, subtle, CryptoKey, DOMException } from "./js/componentize/webcrypto.js";
+import {
+  crypto,
+  subtle,
+  CryptoKey,
+  DOMException,
+  setSha1CollisionPolicy,
+} from "./js/componentize/webcrypto.js";
 
 const encoder = new TextEncoder();
 
@@ -30,6 +36,24 @@ const GCM_CIPHERTEXT =
   "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa" +
   "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
 const GCM_TAG = "76fc6ece0f4e1768cddf8853bb2d551b";
+
+// The first SHAttered message's five-block prefix: the shortest input on
+// which sha1dc's collision detection fires (shared with the Rust
+// conformance probe, which pins the same answers cross-target).
+const SHATTERED_PREFIX =
+  "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3c2f57696474" +
+  "682032203020522f4865696768742033203020522f547970652034203020522f" +
+  "537562747970652035203020522f46696c7465722036203020522f436f6c6f72" +
+  "53706163652037203020522f4c656e6774682038203020522f42697473506572" +
+  "436f6d706f6e656e7420383e3e0a73747265616d0affd8fffe00245348412d31" +
+  "20697320646561642121212121852fec092339759c39b1a1c63c4c97e1fffe01" +
+  "7346dc9166b67e118f029ab621b2560ff9ca67cca8c7f85ba84c79030c2b3de2" +
+  "18f86db3a90901d5df45c14f26fedfb3dc38e96ac22fe7bd728f0e45bce046d2" +
+  "3c570feb141398bb552ef5a0a82be331fea48037b8b5d71f0e332edf93ac3500" +
+  "eb4ddc0decc1a864790c782c76215660dd309791d06bd0af3f98cda4bc4629b1";
+// Its deterministic sha1dc safe hash, and the FIPS 180-1 SHA-1 of "abc".
+const SHATTERED_SAFE_HASH = "7117b3cb9225aaf0d8ef1a40e493957b0bf8693d";
+const ABC_SHA1 = "a9993e364706816aba3e25717850c26c9cd0d89d";
 
 // --- small helpers ------------------------------------------------------------
 
@@ -367,6 +391,50 @@ async function getRandomValuesCheck() {
   );
 }
 
+/**
+ * `digest("SHA-1")` and the collision policy, end to end: honest input
+ * digests to standard SHA-1 in both postures; input carrying a collision
+ * attack yields the deterministic sha1dc safe hash under the default
+ * mitigating posture, and under `setSha1CollisionPolicy("reject")` throws
+ * `OperationError` — the shim's mapping of the package's
+ * `("lann:webcrypto", "collision-detected")` extension condition, whose
+ * pair rides in the `DOMException`'s `cause`.
+ */
+async function sha1CollisionPolicy() {
+  const attacked = unhex(SHATTERED_PREFIX);
+  try {
+    // The default posture: mitigate.
+    expectEq(hex(await subtle.digest("SHA-1", encoder.encode("abc"))), ABC_SHA1, "mitigate: abc");
+    expectEq(hex(await subtle.digest("SHA-1", attacked)), SHATTERED_SAFE_HASH, "mitigate: attacked input safe hash");
+
+    setSha1CollisionPolicy("reject");
+    expectEq(hex(await subtle.digest("SHA-1", encoder.encode("abc"))), ABC_SHA1, "reject: abc");
+    let thrown;
+    try {
+      await subtle.digest("SHA-1", attacked);
+    } catch (e) {
+      thrown = e;
+    }
+    if (!(thrown instanceof DOMException) || thrown.name !== "OperationError") {
+      throw new Error(`reject: attacked input: expected OperationError, got ${thrown ?? "success"}`);
+    }
+    const ext = thrown.cause?.val;
+    expectEq(ext?.origin, "lann:webcrypto", "reject: cause origin");
+    expectEq(ext?.name, "collision-detected", "reject: cause condition name");
+  } finally {
+    setSha1CollisionPolicy("mitigate");
+  }
+  let badPolicy;
+  try {
+    setSha1CollisionPolicy("plain");
+  } catch (e) {
+    badPolicy = e;
+  }
+  if (!(badPolicy instanceof TypeError)) {
+    throw new Error(`invalid policy: expected TypeError, got ${badPolicy ?? "success"}`);
+  }
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -381,6 +449,7 @@ const CHECKS = [
   ["jwk-rejects-malformed", jwkRejectsMalformed],
   ["ed25519-sign-verify", ed25519SignVerify],
   ["get-random-values", getRandomValuesCheck],
+  ["sha1-collision-policy", sha1CollisionPolicy],
 ];
 
 // The `demo:webcrypto-demo/demo@0.1.0` export. `run` returns the ok summary
