@@ -7,22 +7,19 @@
 // record shape, same loss definition. Nothing here gates; the pinned loss
 // ratchet belongs to the Node legs.
 //
-// Both legs run on the main thread. The round trip's generated module
-// resolves its wasi imports through the document's import map (see
-// index.html), which module workers do not read; the harness awaits every
-// test, so the page stays responsive without them.
+// Both legs run in a Web Worker (worker.mjs), streaming results back as
+// they settle — the round trip's records arrive mid-run through the parity
+// runner's `wpt:parity/reporter` import — with a sequential main-thread
+// fallback over the same legs module (legs.mjs) if the worker path fails.
 //
 // Module paths resolve relative to this file, so the page works from any
-// base path; the transpiled runner resolves its own relative import of
-// js/jco/webcrypto.js the same way, so the serving tree must mirror the
-// repository layout (like the conformance viewer — see
-// conformance/web/harness.mjs).
+// base path; the transpiled runner resolves its own relative imports the
+// same way, so the serving tree must mirror the repository layout (like
+// the conformance viewer — see conformance/web/harness.mjs).
 
 import { GROUPS } from "../groups.js";
-import { drain, takeResults } from "../harness.js";
 
 const JSPI_SUPPORT_URL = "https://caniuse.com/wf-wasm-jspi";
-const RUNNER_URL = new URL("../parity/generated/parity-runner.js", import.meta.url).href;
 // Cap on failing rows given expandable detail blocks in the run summary.
 const FAILURE_DETAIL_LIMIT = 200;
 
@@ -35,70 +32,20 @@ function warn(message) {
   el("warnings").append(div);
 }
 
-// --- the legs ------------------------------------------------------------
-
-/**
- * The baseline leg: each group's suite module imported beside ../build/
- * and run against this browser's own crypto, reporting per group. The
- * explicit macrotask lets the table paint between groups (the harness's
- * own awaits may settle as microtasks for pure-JS tests).
- * @param {(group: string, results: { name: string, status: string, message?: string }[]) => void} onGroup
- */
-async function runBaseline(onGroup) {
-  for (const { name: group, module, start } of GROUPS) {
-    await new Promise((resolve) => setTimeout(resolve));
-    start(await import(new URL(`../build/${module}`, import.meta.url).href));
-    await drain();
-    onGroup(group, takeResults());
-  }
-}
-
-/**
- * Unwrap jco's representation of a WIT `result<string, string>` returned
- * by an exported function — a convention, not documented API (validated
- * against jco-transpile 0.5.x; see examples/jco-demo/src/run.mjs, where
- * the same convention is anchored).
- * @param {() => Promise<unknown>} call
- */
-async function unwrapResult(call) {
-  let value;
-  try {
-    value = await call();
-  } catch (err) {
-    throw new Error(`returned err: ${err?.payload ?? err?.val ?? err}`);
-  }
-  if (typeof value === "object" && value !== null && "tag" in value) {
-    if (value.tag !== "ok") {
-      throw new Error(`returned err: ${value.val}`);
-    }
-    value = value.val;
-  }
-  return value;
-}
-
-/**
- * The round-trip leg: one call into the transpiled parity runner, whose
- * records come back as the `WPT-PARITY-RESULTS` marker plus JSON (see
- * ../parity-runner.js). Imported on demand so a browser without JSPI never
- * fetches the component.
- * @returns {Promise<{ group: string, name: string, status: string, message?: string }[]>}
- */
-async function runRoundtrip() {
-  const { demo } = await import(RUNNER_URL);
-  const output = await unwrapResult(() => demo.run());
-  const marker = "WPT-PARITY-RESULTS\n";
-  if (typeof output !== "string" || !output.startsWith(marker)) {
-    throw new Error(`parity runner returned an unexpected shape: ${String(output).slice(0, 200)}`);
-  }
-  return JSON.parse(output.slice(marker.length));
-}
+// A leg failing somewhere the run's own try/catch cannot see (an event
+// handler, a detached promise chain) must still leave a trace.
+window.addEventListener("error", (event) => warn(`page error: ${event.message}`));
+window.addEventListener("unhandledrejection", (event) =>
+  warn(`unhandled rejection: ${String(event.reason?.stack ?? event.reason)}`),
+);
 
 // --- model -----------------------------------------------------------------
 
 /**
  * One group per ../groups.js entry, rows keyed like the parity comparator
  * (test name, registration-order duplicates disambiguated with ` #n` —
- * both legs run the suites sequentially, so order is stable).
+ * both legs run the suites sequentially, so order is stable; the counters
+ * in `seen` persist across streamed batches).
  */
 function makeModel() {
   const groups = GROUPS.map(({ name, inSubset }) => ({
@@ -115,23 +62,34 @@ function makeModel() {
     groups,
     byName: new Map(groups.map((group) => [group.name, group])),
     unknownGroups: new Set(),
+    seen: { baseline: new Map(), roundtrip: new Map() },
     baselineRecords: [],
     roundtripRecords: [],
-    ranRoundtrip: false,
+    // idle -> streaming -> done; skipped when the round trip cannot run.
+    roundtripState: "idle",
+    totalCells: null,
   };
 }
 
-/** Fold one leg's records for one group into its rows. */
-function addLeg(model, group, records, leg) {
-  const target = model.byName.get(group);
-  if (!target) {
-    model.unknownGroups.add(group);
-    return;
-  }
-  const seen = new Map();
+/**
+ * Fold one leg's records (each carrying its group) into the model's rows;
+ * returns the groups touched, for targeted refresh.
+ * @param {{ group: string, name: string, status: string, message?: string }[]} records
+ * @param {"baseline" | "roundtrip"} leg
+ */
+function addRecords(model, records, leg) {
+  const seen = model.seen[leg];
+  const touched = new Set();
   for (const record of records) {
-    const n = (seen.get(record.name) ?? 0) + 1;
-    seen.set(record.name, n);
+    const target = model.byName.get(record.group);
+    if (!target) {
+      model.unknownGroups.add(record.group);
+      continue;
+    }
+    touched.add(target);
+    const base = `${record.group} :: ${record.name}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
     const key = n === 1 ? record.name : `${record.name} #${n}`;
     let row = target.rows.get(key);
     if (!row) {
@@ -140,21 +98,24 @@ function addLeg(model, group, records, leg) {
     }
     row[leg] = { status: record.status, message: record.message };
   }
+  return touched;
 }
 
 /**
  * (Re)classify one group's rows and counts. A *loss* is a baseline pass
  * the round trip fails or never registers; a *gain* is the reverse — not
- * a loss, but the shim diverging from the platform. Neither is computed
- * until the round trip ran.
+ * a loss, but the shim diverging from the platform. Neither is knowable
+ * mid-stream ("never registers" needs the end of the run), so both wait
+ * for `roundtripState === "done"`.
  */
 function classifyGroup(model, group) {
-  const counts = { total: 0, in: 0, bPass: 0, rPass: 0, losses: 0, lossesIn: 0, gains: 0 };
+  const done = model.roundtripState === "done";
+  const counts = { total: 0, in: 0, bPass: 0, rPass: 0, rSeen: 0, losses: 0, lossesIn: 0, gains: 0 };
   for (const row of group.rows.values()) {
     row.inSubset = group.inSubset(row.name);
     const b = row.baseline?.status === "PASS";
     const r = row.roundtrip?.status === "PASS";
-    if (model.ranRoundtrip) {
+    if (done) {
       row.category = b && r ? "pass" : b ? "loss" : r ? "gain" : "fail";
     } else {
       row.category = b ? "pass" : "fail";
@@ -163,7 +124,8 @@ function classifyGroup(model, group) {
     if (row.inSubset) counts.in += 1;
     if (b) counts.bPass += 1;
     if (r) counts.rPass += 1;
-    if (model.ranRoundtrip) {
+    if (row.roundtrip) counts.rSeen += 1;
+    if (done) {
       if (b && !r) {
         counts.losses += 1;
         if (row.inSubset) counts.lossesIn += 1;
@@ -176,7 +138,7 @@ function classifyGroup(model, group) {
 
 /** Sum every group's counts. */
 function totalCounts(model) {
-  const total = { total: 0, in: 0, bPass: 0, rPass: 0, losses: 0, lossesIn: 0, gains: 0 };
+  const total = { total: 0, in: 0, bPass: 0, rPass: 0, rSeen: 0, losses: 0, lossesIn: 0, gains: 0 };
   for (const group of model.groups) {
     if (!group.counts) continue;
     for (const key of Object.keys(total)) total[key] += group.counts[key];
@@ -188,10 +150,10 @@ function totalCounts(model) {
 
 /** Whether a leaf row renders under the current filter: everything, or —
  *  the default — only the differences (losses and gains; the baseline's
- *  own failures when the round trip did not run). */
+ *  own failures until the round trip finished). */
 function rowVisible(model, row, showAll) {
   if (showAll) return true;
-  if (!model.ranRoundtrip) return row.category === "fail";
+  if (model.roundtripState !== "done") return row.category === "fail";
   return row.category === "loss" || row.category === "gain";
 }
 
@@ -211,37 +173,53 @@ function legCell(cell, leg, ran) {
   }
 }
 
-function groupCells(model, group) {
-  const { counts } = group;
-  const [subset, baseline, roundtrip, delta] = group.cells;
-  subset.textContent = counts.total === 0 ? "" : `${counts.in}/${counts.total} in`;
-  subset.className = "none";
-  baseline.textContent = counts.total === 0 ? "" : `${counts.bPass}/${counts.total}`;
-  baseline.className = counts.bPass === counts.total ? "pass" : "";
-  if (!model.ranRoundtrip) {
-    roundtrip.textContent = counts.total === 0 ? "" : "—";
-    roundtrip.className = "none";
-    delta.textContent = "";
-    delta.className = "";
+/** Fill a group's (or the total row's) four count cells. */
+function countCells(model, cells, counts) {
+  const [subset, baseline, roundtrip, delta] = cells;
+  if (counts.total === 0) {
+    for (const cell of cells) {
+      cell.textContent = "";
+      cell.className = "";
+    }
     return;
   }
-  roundtrip.textContent = `${counts.rPass}/${counts.total}`;
-  roundtrip.className = counts.rPass === counts.total ? "pass" : "";
-  let text = "";
-  if (counts.losses > 0) {
-    text = `✗${counts.losses}`;
-    if (counts.lossesIn > 0) text += ` (${counts.lossesIn} in)`;
+  subset.textContent = `${counts.in}/${counts.total} in`;
+  subset.className = "none";
+  baseline.textContent = `${counts.bPass}/${counts.total}`;
+  baseline.className = counts.bPass === counts.total ? "pass" : "";
+  switch (model.roundtripState) {
+    case "streaming":
+      roundtrip.textContent = counts.rSeen > 0 ? `${counts.rPass}/${counts.rSeen}…` : "…";
+      roundtrip.className = "none";
+      delta.textContent = "";
+      delta.className = "";
+      return;
+    case "done": {
+      roundtrip.textContent = `${counts.rPass}/${counts.total}`;
+      roundtrip.className = counts.rPass === counts.total ? "pass" : "";
+      let text = "";
+      if (counts.losses > 0) {
+        text = `✗${counts.losses}`;
+        if (counts.lossesIn > 0) text += ` (${counts.lossesIn} in)`;
+      }
+      if (counts.gains > 0) text += `${text ? " " : ""}+${counts.gains}`;
+      delta.textContent = text || "=";
+      delta.className = counts.lossesIn > 0 ? "fail" : counts.losses > 0 ? "skip" : "pass";
+      return;
+    }
+    default:
+      roundtrip.textContent = "—";
+      roundtrip.className = "none";
+      delta.textContent = "";
+      delta.className = "";
   }
-  if (counts.gains > 0) text += `${text ? " " : ""}+${counts.gains}`;
-  delta.textContent = text;
-  delta.className = counts.lossesIn > 0 ? "fail" : counts.losses > 0 ? "skip" : "pass";
-  if (counts.losses === 0 && counts.gains === 0 && counts.total > 0) delta.textContent = "=";
 }
 
 function renderLeafRows(model, group, showAll) {
   for (const row of group.leafRows) row.remove();
   group.leafRows = [];
   if (!group.expanded) return;
+  const ranRoundtrip = model.roundtripState !== "idle" && model.roundtripState !== "skipped";
   const fragment = document.createDocumentFragment();
   let hidden = 0;
   for (const row of group.rows.values()) {
@@ -264,7 +242,7 @@ function renderLeafRows(model, group, showAll) {
     legCell(baseline, row.baseline, true);
     tr.append(baseline);
     const roundtrip = document.createElement("td");
-    legCell(roundtrip, row.roundtrip, model.ranRoundtrip);
+    legCell(roundtrip, row.roundtrip, ranRoundtrip);
     tr.append(roundtrip);
     const delta = document.createElement("td");
     if (row.category === "loss") {
@@ -350,30 +328,13 @@ function renderTable(model) {
 }
 
 function refreshGroup(model, group) {
-  groupCells(model, group);
+  classifyGroup(model, group);
+  countCells(model, group.cells, group.counts);
   if (group.expanded) renderLeafRows(model, group, el("show-all").checked);
 }
 
 function refreshTotals(model) {
-  const counts = totalCounts(model);
-  const [subset, baseline, roundtrip, delta] = model.totalCells;
-  subset.textContent = counts.total === 0 ? "" : `${counts.in}/${counts.total} in`;
-  baseline.textContent = counts.total === 0 ? "" : `${counts.bPass}/${counts.total}`;
-  baseline.className = "";
-  if (!model.ranRoundtrip) {
-    roundtrip.textContent = "";
-    delta.textContent = "";
-    return;
-  }
-  roundtrip.textContent = `${counts.rPass}/${counts.total}`;
-  let text = "";
-  if (counts.losses > 0) {
-    text = `✗${counts.losses}`;
-    if (counts.lossesIn > 0) text += ` (${counts.lossesIn} in)`;
-  }
-  if (counts.gains > 0) text += `${text ? " " : ""}+${counts.gains}`;
-  delta.textContent = text || "=";
-  delta.className = counts.lossesIn > 0 ? "fail" : counts.losses > 0 ? "skip" : "pass";
+  countCells(model, model.totalCells, totalCounts(model));
 }
 
 // --- the run summary -------------------------------------------------------
@@ -390,13 +351,14 @@ function renderSummary(model) {
   heading.textContent = "This browser's parity";
   fragment.append(heading);
   const line = document.createElement("p");
-  line.textContent = model.ranRoundtrip
-    ? `Baseline: ${counts.bPass}/${counts.total} passed. Round trip: ${counts.rPass} passed; ` +
-      `${counts.losses} losses (${counts.lossesIn} in-subset), ${counts.gains} divergent passes.`
-    : `Baseline: ${counts.bPass}/${counts.total} passed. The round trip did not run.`;
+  line.textContent =
+    model.roundtripState === "done"
+      ? `Baseline: ${counts.bPass}/${counts.total} passed. Round trip: ${counts.rPass} passed; ` +
+        `${counts.losses} losses (${counts.lossesIn} in-subset), ${counts.gains} divergent passes.`
+      : `Baseline: ${counts.bPass}/${counts.total} passed. The round trip did not run.`;
   fragment.append(line);
 
-  if (model.ranRoundtrip) {
+  if (model.roundtripState === "done") {
     const losses = [];
     for (const group of model.groups) {
       for (const row of group.rows.values()) {
@@ -439,6 +401,53 @@ function renderSummary(model) {
 
 // --- the run ---------------------------------------------------------------
 
+/**
+ * Run both legs in a Web Worker, forwarding every message but the terminal
+ * `done`/`error` to `onMessage`. Resolves to null on completion or to the
+ * failure — callers discard partial results and fall back to the
+ * main-thread path.
+ * @param {boolean} runRoundtrip
+ * @param {(message: object) => void} onMessage
+ * @returns {Promise<string | null>}
+ */
+function runInWorker(runRoundtrip, onMessage) {
+  return new Promise((resolve) => {
+    let worker;
+    let settled = false;
+    const settle = (failure) => {
+      if (settled) return;
+      settled = true;
+      worker?.terminate();
+      resolve(failure);
+    };
+    try {
+      worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
+    } catch (err) {
+      settle(String(err));
+      return;
+    }
+    worker.onmessage = ({ data }) => {
+      if (settled) return;
+      if (data.kind === "error") settle(data.error);
+      else if (data.kind === "done") settle(null);
+      else onMessage(data);
+    };
+    worker.onerror = (event) => settle(String(event.message ?? "worker failed to start"));
+    worker.postMessage({ runRoundtrip });
+  });
+}
+
+/** The main-thread fallback: the same legs, run inline. */
+async function runInline(runRoundtrip, onMessage) {
+  const { runBaselineLeg, runRoundtripLeg } = await import("./legs.mjs");
+  await runBaselineLeg((group, results) => onMessage({ kind: "baseline-group", group, results }));
+  if (runRoundtrip) {
+    onMessage({ kind: "roundtrip-start" });
+    const count = await runRoundtripLeg((records) => onMessage({ kind: "roundtrip-records", records }));
+    onMessage({ kind: "roundtrip-done", count });
+  }
+}
+
 function main() {
   const status = el("status");
   const runButton = el("run");
@@ -463,61 +472,98 @@ function main() {
     }
   });
 
+  let running = false;
+
   async function start() {
     runButton.disabled = true;
     downloadButton.hidden = true;
     el("warnings").replaceChildren();
     el("summary").hidden = true;
     model = makeModel();
+    if (!jspi) model.roundtripState = "skipped";
     renderTable(model);
+    running = true;
 
-    try {
-      let done = 0;
-      await runBaseline((group, results) => {
-        done += 1;
-        status.textContent = `baseline: ${done}/${GROUPS.length} groups run`;
-        for (const { name, status: s, message } of results) {
-          model.baselineRecords.push(
-            message === undefined ? { group, name, status: s } : { group, name, status: s, message },
+    const started = Date.now();
+    let phase = "baseline";
+    let groupsDone = 0;
+    let received = 0;
+    const elapsed = () => `${Math.round((Date.now() - started) / 1000)}s`;
+    const ticker = setInterval(() => {
+      if (!running) return;
+      status.textContent =
+        phase === "baseline"
+          ? `baseline: ${groupsDone}/${GROUPS.length} groups — ${elapsed()}`
+          : `round trip: ${received.toLocaleString()} results — ${elapsed()}`;
+    }, 500);
+
+    const handle = (message) => {
+      switch (message.kind) {
+        case "baseline-group": {
+          groupsDone += 1;
+          for (const { name, status: s, message: m } of message.results) {
+            model.baselineRecords.push(
+              m === undefined
+                ? { group: message.group, name, status: s }
+                : { group: message.group, name, status: s, message: m },
+            );
+          }
+          const touched = addRecords(
+            model,
+            model.baselineRecords.slice(model.baselineRecords.length - message.results.length),
+            "baseline",
           );
+          for (const group of touched) refreshGroup(model, group);
+          refreshTotals(model);
+          break;
         }
-        addLeg(model, group, results, "baseline");
-        const target = model.byName.get(group);
-        if (target) {
-          classifyGroup(model, target);
-          refreshGroup(model, target);
+        case "roundtrip-start":
+          phase = "roundtrip";
+          model.roundtripState = "streaming";
+          break;
+        case "roundtrip-records": {
+          received += message.records.length;
+          model.roundtripRecords.push(...message.records);
+          const touched = addRecords(model, message.records, "roundtrip");
+          for (const group of touched) refreshGroup(model, group);
+          refreshTotals(model);
+          break;
         }
-        refreshTotals(model);
-      });
-    } catch (err) {
-      status.textContent = "the baseline failed";
-      warn(`the baseline leg failed:\n${String(err?.stack ?? err)}`);
-      runButton.disabled = false;
-      return;
-    }
+        case "roundtrip-done":
+          model.roundtripState = "done";
+          break;
+        default:
+          break;
+      }
+    };
 
-    if (jspi) {
-      status.textContent = "round trip: running (one call into the transpiled component)…";
+    let error = null;
+    const failure = await runInWorker(jspi, handle);
+    if (failure !== null) {
+      console.warn(`worker run failed (${failure}); retrying on the main thread`);
+      warn(`the worker run failed (retried on the main thread):\n${failure}`);
+      model = makeModel();
+      if (!jspi) model.roundtripState = "skipped";
+      renderTable(model);
+      phase = "baseline";
+      groupsDone = 0;
+      received = 0;
       try {
-        const records = await runRoundtrip();
-        model.roundtripRecords = records;
-        model.ranRoundtrip = true;
-        const byGroup = new Map();
-        for (const record of records) {
-          let list = byGroup.get(record.group);
-          if (!list) byGroup.set(record.group, (list = []));
-          list.push(record);
-        }
-        for (const [group, list] of byGroup) addLeg(model, group, list, "roundtrip");
+        await runInline(jspi, handle);
       } catch (err) {
-        warn(`the round-trip leg failed; showing the baseline only:\n${String(err?.stack ?? err)}`);
+        error = String(err?.stack ?? err);
       }
     }
 
-    for (const group of model.groups) {
-      classifyGroup(model, group);
-      refreshGroup(model, group);
+    running = false;
+    clearInterval(ticker);
+    if (model.roundtripState === "streaming") {
+      // The round trip started but never finished; without its full record
+      // set, losses are not computable.
+      model.roundtripState = "idle";
+      if (error === null) error = "the round trip ended without completing";
     }
+    for (const group of model.groups) refreshGroup(model, group);
     refreshTotals(model);
     if (model.unknownGroups.size > 0) {
       warn(
@@ -527,19 +573,25 @@ function main() {
     }
 
     const counts = totalCounts(model);
-    status.textContent = model.ranRoundtrip
-      ? `done: baseline ${counts.bPass}/${counts.total}, round trip ${counts.rPass}, ` +
-        `${counts.losses} losses (${counts.lossesIn} in-subset)`
-      : `done: baseline ${counts.bPass}/${counts.total} (round trip not run)`;
-    renderSummary(model);
-    downloadButton.hidden = false;
+    if (error !== null) {
+      status.textContent = "run failed — see the warning below";
+      warn(`this run failed:\n${error}`);
+    } else {
+      status.textContent =
+        model.roundtripState === "done"
+          ? `done in ${elapsed()}: baseline ${counts.bPass}/${counts.total}, round trip ${counts.rPass}, ` +
+            `${counts.losses} losses (${counts.lossesIn} in-subset)`
+          : `done in ${elapsed()}: baseline ${counts.bPass}/${counts.total} (round trip not run)`;
+      renderSummary(model);
+      downloadButton.hidden = false;
+    }
     runButton.disabled = false;
     runButton.textContent = "Run again";
   }
 
   function download() {
     const files = [["this-browser-baseline.json", model.baselineRecords]];
-    if (model.ranRoundtrip) files.push(["this-browser-roundtrip.json", model.roundtripRecords]);
+    if (model.roundtripState === "done") files.push(["this-browser-roundtrip.json", model.roundtripRecords]);
     for (const [name, records] of files) {
       const blob = new Blob([`${JSON.stringify(records)}\n`], { type: "application/json" });
       const a = document.createElement("a");

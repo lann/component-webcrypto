@@ -76,6 +76,7 @@ validate-wit:
     wasm-tools component wit rust/guest-provider/wit
     wasm-tools component wit examples/crypto-demo/wit
     wasm-tools component wit examples/componentize-demo/wit
+    wasm-tools component wit js/componentize/wpt/wit
     wasm-tools component wit conformance/guest/wit
 
 # Run the Rust tests, including the wasmtime-demo integration test (which
@@ -265,13 +266,23 @@ _wpt-parity-legs:
         > ../build/parity-roundtrip.json
 
 # Build everything the browser WPT parity page (js/componentize/wpt/web/)
-# loads: the suite modules under build/, the jco-transpiled parity runner
-# under parity/generated/, and the preview2-shim browser build the page's
-# import map resolves the runner's wasi imports to (vendored from the
-# parity package's node_modules into web/preview2-shim/, with its license).
+# loads: the suite modules under build/, the web transpile of the parity
+# runner under parity/generated-web/ (every import a relative path, so it
+# loads in the page's worker; the guard keeps that invariant honest), and
+# the preview2-shim browser build those imports resolve to (vendored from
+# the parity package's node_modules into web/preview2-shim/, with its
+# license).
 wpt-web-artifacts:
+    #!/usr/bin/env bash
+    set -euo pipefail
     js/componentize/wpt/component.sh build-parity
-    cd js/componentize/wpt/parity && npm run -s transpile
+    cd js/componentize/wpt/parity && npm run -s transpile:web npm run -s transpile:web && cd -npm run -s transpile:web && cd - cd - >/dev/null
+    if grep -q "from '@" js/componentize/wpt/parity/generated-web/parity-runner.js; then
+        echo "wpt-web-artifacts: generated-web carries a bare module import (a wasi map in" >&2
+        echo "parity/package.json's transpile:web no longer covers every wasi interface?):" >&2
+        grep "from '@" js/componentize/wpt/parity/generated-web/parity-runner.js >&2
+        exit 1
+    fi
     rm -rf js/componentize/wpt/web/preview2-shim
     mkdir -p js/componentize/wpt/web/preview2-shim
     cp js/componentize/wpt/parity/node_modules/@bytecodealliance/preview2-shim/dist/browser/*.js \
@@ -391,10 +402,11 @@ conformance-web-site: rust-docs
     cp -r js/componentize/wpt/web target/conformance-site/js/componentize/wpt/web
     rm target/conformance-site/js/componentize/wpt/web/.gitignore
     cp js/componentize/wpt/groups.js js/componentize/wpt/harness.js \
+        js/componentize/wpt/reporter.js \
         target/conformance-site/js/componentize/wpt/
     cp js/componentize/wpt/build/group-*.js \
         target/conformance-site/js/componentize/wpt/build/
-    cp -r js/componentize/wpt/parity/generated \
+    cp -r js/componentize/wpt/parity/generated-web \
         target/conformance-site/js/componentize/wpt/parity/
     cp -r target/doc target/conformance-site/doc
     cp .github/pages/index.html target/conformance-site/index.html
