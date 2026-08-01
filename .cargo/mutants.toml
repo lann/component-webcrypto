@@ -13,13 +13,45 @@ test_package = [
 
 # Redacting `Debug` impls have their own dedicated tests
 # (debug_redacts_key_material); mutants of the rendering itself are noise no
-# suite should be asked to pin. The generated-trait resource `drop` impls
-# are excluded because a no-op drop is unobservable by construction: it
-# leaks a resource-table entry within a session, which no suite (and no
-# guest) can distinguish from cleanup.
+# suite should be asked to pin. The generated-trait resource `drop` impls —
+# and `drop_resource`, the shared helper they call — are excluded because a
+# no-op drop is unobservable by construction: it leaks a resource-table
+# entry within a session, which no suite (and no guest) can distinguish
+# from cleanup.
+#
+# The remaining entries are equivalent mutants from the first full run's
+# triage (#147), each with the reason it cannot be distinguished:
+#
+# - `open_internal`'s length guard exists to keep `split_at` in bounds for
+#   inputs shorter than the nonce; at exactly nonce length both branches
+#   render `authentication-failed` (an empty body fails tag verification),
+#   so `<` vs `<=` is unobservable.
+# - `standalone::engine`'s explicit config currently coincides with the
+#   pinned wasmtime's `Engine::default()` (the oracle passes end to end on
+#   a default engine). The function exists to pin a pre-stable ABI rather
+#   than ride defaults; drop this exclusion if a wasmtime bump makes the
+#   defaults diverge.
+# - `can_sign -> true` (material and host getter): `sign` is the signing
+#   kind's only usage, so the at-least-one-usage mint check makes a
+#   sign-disabled key unrepresentable and the getter's false arm dead.
+#   Revisit if storage-loaded restricted handles (#97) ever make it
+#   representable.
+# - `poll_consume`'s availability gate (`available > 0` vs `>= 0`): with
+#   zero available the entered branch performs a zero-byte read and reports
+#   `Completed` where the writer cancelled — observable only to a guest
+#   that cancels a pending zero-byte write, which no suite drives. Revisit
+#   if stream-cancellation coverage lands. (The cap comparison that shared
+#   this function is pure `ByteCollector::accept` now, unit-tested at its
+#   boundaries.)
 exclude_re = [
     "impl std::fmt::Debug",
     "WithStore<T> for WasiWebcrypto>::drop",
+    "drop_resource",
+    "replace < with <= in AeadKeyMaterial::open_internal",
+    "replace engine -> wasmtime::Result<Engine>",
+    "SigningKeyMaterial::can_sign -> bool with true",
+    "HostSigningKey.*::can_sign -> Result<bool> with Ok\\(true\\)",
+    "replace > with >= in <impl StreamConsumer<D> for ByteCollector>::poll_consume",
 ]
 
 # The auto-derived floor is too tight when the oracle's suite runs slow

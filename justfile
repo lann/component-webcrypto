@@ -519,9 +519,24 @@ timing-lab-scheduled:
 # workflow). Needs cargo-mutants (`cargo install cargo-mutants --locked`).
 # Guests are prebuilt from unmutated sources: the subject is the host stack
 # the wasm calls into. Results land in mutants.out/.
+#
+# The verdict is the missed set, not cargo-mutants' exit code: exit 3
+# ("some mutants timed out") is a pass when mutants.out/missed.txt is
+# empty, because on this host a hang IS a distinction — the WIT drain
+# contract makes an operation that returns without draining its input
+# stream deadlock the guest's feeder. Every other nonzero status (missed
+# mutants, usage error, failing baseline) stays fatal.
 mutants shard="": build-conformance-guest build-signing-guest
+    #!/usr/bin/env bash
+    set -uo pipefail
     CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/conformance/guest/build/conformance-guest.component.wasm" \
     CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/conformance/signing-guest/build/conformance-signing-guest.component.wasm" \
         cargo mutants --in-place --profile mutants \
         -p webcrypto-impl-core -p wasmtime-webcrypto \
         {{ if shard != "" { "--shard " + shard } else { "" } }}
+    status=$?
+    if [ "$status" -eq 3 ] && [ -f mutants.out/missed.txt ] && ! [ -s mutants.out/missed.txt ]; then
+        echo "mutants: timeouts only (caught-by-hang under the drain contract); pass"
+        status=0
+    fi
+    exit $status
