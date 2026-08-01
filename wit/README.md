@@ -141,12 +141,17 @@ Every `*-jwk` function follows this contract. The minting interfaces'
   keys are unconditionally exportable — so a public JWK carrying
   `"ext": false` is rejected with `error.invalid-key`.
 - Export returns exactly the material-bearing members — `kty`, `k`, and
-  `alg` for the `oct` form; `kty`, `crv`, `x` (and `y`, and `d` on
-  private exports) for the OKP and EC forms, which carry no `alg` — and
+  `alg` for the `oct` form (`alg` omitted where none is registered — see
+  the next bullet); `kty`, `crv`, `x` (and `y`, and `d` on private
+  exports) for the OKP and EC forms, which carry no `alg` — and
   nothing else. Metadata this package does not model (`key_ops`, `ext`,
   `use`) is the consumer's to stamp. Member order is not contract.
-- `oct` algorithms without a registered JWK `alg` fail with
-  `error.unsupported`.
+- ChaCha20-Poly1305 uses the *alg-less* `oct` form of the [W3C Modern
+  Algorithms proposal](https://wicg.github.io/webcrypto-modern-algos/):
+  no JOSE `alg` is registered, so export omits the member and import
+  rejects a present one with `error.invalid-key`. `oct` algorithms with
+  no registered JWK form at all (the XChaCha constructions) have no JWK
+  minting, and export fails with `error.unsupported`.
 
 ## Error contract
 

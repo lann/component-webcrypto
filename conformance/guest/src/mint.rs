@@ -179,6 +179,10 @@ pub async fn import_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKe
     chacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
 }
 
+pub async fn import_chacha_key_jwk(jwk: String, extractable: bool) -> Result<AeadKey, Error> {
+    chacha20_poly1305::import_key_jwk(jwk, aead_options(extractable)).await
+}
+
 pub async fn import_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
     xchacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
 }

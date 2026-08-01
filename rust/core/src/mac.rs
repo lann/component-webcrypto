@@ -68,7 +68,7 @@ impl MacKeyMaterial {
     }
 
     fn import_jwk_hash(hash: HmacHash, jwk: &str, policy: MacPolicy) -> Result<Self, Error> {
-        let raw = crate::jwk::parse_oct(jwk, hmac_jwk_alg(hash), policy.extractable)?;
+        let raw = crate::jwk::parse_oct(jwk, Some(hmac_jwk_alg(hash)), policy.extractable)?;
         Self::import_hash(hash, raw, policy)
     }
 
@@ -77,7 +77,7 @@ impl MacKeyMaterial {
     pub fn export_jwk(&self) -> Result<String, Error> {
         Ok(crate::jwk::build_oct(
             &self.export()?,
-            hmac_jwk_alg(self.variant),
+            Some(hmac_jwk_alg(self.variant)),
         ))
     }
 

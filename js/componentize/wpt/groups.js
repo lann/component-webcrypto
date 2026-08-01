@@ -75,29 +75,26 @@ function chachaEncryptDecryptInSubset() {
 
 /**
  * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
- * rows are served whole, and so are the empty-usages rows for every
- * format (usages are validated before the format is considered). The
- * "Good parameters" jwk rows stay out: the package serves no ChaCha JWK
- * path (WIT-forced — see the shim header's deviations list).
+ * and "jwk" rows (the proposal's alg-less oct form, which the package's
+ * `chacha20-poly1305.import-key-jwk` serves) are in whole, as are the
+ * empty-usages rows for every format (usages are validated before the
+ * format is considered).
  * @param {string} name
  */
 function chachaImportKeyInSubset(name) {
   if (name.startsWith("Empty Usages:")) {
     return true;
   }
-  return name.includes("(raw-secret, ");
+  return name.includes("(raw-secret, ") || name.includes("(jwk, ");
 }
 
 /**
- * generateKey/successes (ChaCha20-Poly1305): the non-extractable rows are
- * served whole. The extractable rows also export the generated key as a
- * JWK, which the package declines for the ChaCha constructions
- * (WIT-forced — see the shim header's deviations list), so they stay
- * out-of-subset until a ChaCha JWK path exists.
- * @param {string} name
+ * generateKey/successes (ChaCha20-Poly1305): the whole group — the
+ * extractable rows export raw-secret and the alg-less oct JWK, both
+ * served.
  */
-function chachaGenerateKeyInSubset(name) {
-  return name.includes(", false, [");
+function chachaGenerateKeyInSubset() {
+  return true;
 }
 
 /**

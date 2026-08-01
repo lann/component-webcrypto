@@ -2288,6 +2288,7 @@ function unsupportedChacha(name) {
 /** The `lann:webcrypto/chacha20-poly1305` interface. */
 export const chacha20Poly1305 = {
   importKeyRaw: async () => unsupportedChacha("ChaCha20-Poly1305"),
+  importKeyJwk: async () => unsupportedChacha("ChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
 };
 
