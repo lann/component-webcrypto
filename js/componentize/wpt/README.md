@@ -100,19 +100,35 @@ the stack in the middle, and `parity/compare.mjs` holds the loss set to
 recorded loss no longer observed fails it too (progress must land as a
 reviewable diff, via `just update-wpt-parity`). Which *kind* each loss is —
 unserved or WIT-forced — is the shim header's deviations registry's to say.
-
 Two properties of the comparison follow from how WPT registers tests. Test
 names are outcome-dependent — a failed setup step registers a synthetic
 step name in place of the real test's — so round-trip-only *failures* are
 expected renames, while a round-trip-only *pass* fails the run: a pass the
-baseline never measured is outside the gate's premise and marks the legs'
-group tables drifting (the baseline duplicates the runner's group table,
-since it cannot import a module whose `lann:webcrypto` specifiers only
-resolve under componentize-js). And the baseline is recomputed per run,
-never pinned, so a platform upgrade moves both legs together; the loss set
-is sensitive to the platform only where the platform itself is.
+baseline never measured is outside the gate's premise. Both legs run the
+shared group table in [`groups.js`](groups.js), and the comparator fails
+hard if their observed group sets diverge anyway. And the baseline is
+recomputed per run, never pinned, so a platform upgrade moves both legs
+together; the loss set is sensitive to the platform only where the
+platform itself is.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
+
+## The browser parity page (web/)
+
+`web/` is the same two legs run live in a visiting browser, published on
+the GitHub Pages site: the baseline against that browser's own
+`crypto.subtle`, the round trip through the same jco-transpiled parity
+runner the Node leg uses, resolving its wasi imports through the page's
+import map (the preview2-shim browser build, vendored beside the page by
+`just wpt-web-artifacts`). The round trip needs JSPI; without it the page
+runs the baseline alone. Nothing on the page gates, and the pinned loss
+ratchet does not apply to it: `losses.js` records the *Node* baseline's
+losses, and a browser's baseline legitimately differs. Serve it locally
+with `just wpt-web`.
+
+Like the conformance viewer, the page's serving tree must mirror the
+repository layout: the transpiled runner imports `js/jco/webcrypto.js` by
+relative path.
 
 ## What is vendored
 
@@ -147,12 +163,13 @@ reaches this harness as a re-vendor with a census diff.
 | `digest/digest` | `digest.https.any.js` (wrapped callable — see `component.sh`) |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | `getRandomValues` | `getRandomValues.any.js` (wrapped callable) |
+| `randomUUID` | `randomUUID.https.any.js` (wrapped callable) |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the
 suites' entry points directly with this library's algorithms (`HMAC`,
 `AES-GCM`, `X25519`), exactly as those drivers do among others. Each
-group's subset follows what the library serves (`runner.js`'s classifiers
+group's subset follows what the library serves (`groups.js`'s classifiers
 are the authoritative definition): most groups assert their served slices
 whole, the KDF groups exclude their SHA-1 and unserved-target rows, and
 `sign_verify/ecdsa` stays empty-subset — every test in it needs ECDSA
@@ -176,7 +193,7 @@ the suites, and classifies every result by test name:
   AES key sizes, and so on). These are expected to fail with the library's
   documented fail-closed errors and are reported by count.
 
-The classifier functions in `runner.js` are the precise, machine-readable
+The classifier functions in `groups.js` are the precise, machine-readable
 definition of the subset; the suite gates that every in-subset test passes
 and surfaces any out-of-subset test that unexpectedly passes (the counts are
 printed either way).

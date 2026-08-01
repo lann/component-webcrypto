@@ -1,11 +1,13 @@
 name: pages
 
-# Publish the Pages site: the conformance results viewer (conformance/web/)
-# plus the public crates' API docs. Runs the full conformance suite on every
-# push to main (under Actions that includes the jco-browser target, so the
-# published matrix carries every column), builds the rustdoc, then deploys
-# the site assembled by `just conformance-web-site`. The viewer's URLs are
-# all relative, so it serves correctly from the project subpath.
+# Publish the Pages site: the conformance results viewer (conformance/web/),
+# the browser WPT parity page (js/componentize/wpt/web/), and the public
+# crates' API docs. Runs the full conformance suite on every push to main
+# (under Actions that includes the jco-browser target, so the published
+# matrix carries every column), builds the WPT page's artifacts and the
+# rustdoc, then deploys the site assembled by `just conformance-web-site`.
+# The pages' URLs are all relative, so they serve correctly from the
+# project subpath.
 
 on:
   push:
@@ -53,6 +55,9 @@ jobs:
 
       - name: Run the conformance suite
         run: just conformance
+
+      - name: Build the WPT parity page artifacts
+        run: just wpt-web-artifacts
 
       - name: Assemble the static site
         run: just conformance-web-site

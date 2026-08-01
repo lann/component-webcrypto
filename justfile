@@ -21,10 +21,12 @@ jco-checks:
     @just _step test-node
     @just _step wpt-parity
 
-# Everything the componentize CI job runs: the WPT WebCryptoAPI suites
-# against the webcrypto-componentize JS guest library.
+# Everything the componentize CI job runs: the webcrypto-componentize JS
+# guest library's behavioral checks (the composed demo) and the WPT
+# WebCryptoAPI suites against it.
 componentize-checks:
     @just _step typecheck-webcrypto-componentize
+    @just _step test-webcrypto-componentize
     @just _step test-webcrypto-componentize-wpt
 
 # Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
@@ -262,6 +264,28 @@ _wpt-parity-legs:
     cd js/componentize/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
         > ../build/parity-roundtrip.json
 
+# Build everything the browser WPT parity page (js/componentize/wpt/web/)
+# loads: the suite modules under build/, the jco-transpiled parity runner
+# under parity/generated/, and the preview2-shim browser build the page's
+# import map resolves the runner's wasi imports to (vendored from the
+# parity package's node_modules into web/preview2-shim/, with its license).
+wpt-web-artifacts:
+    js/componentize/wpt/component.sh build-parity
+    cd js/componentize/wpt/parity && npm run -s transpile
+    rm -rf js/componentize/wpt/web/preview2-shim
+    mkdir -p js/componentize/wpt/web/preview2-shim
+    cp js/componentize/wpt/parity/node_modules/@bytecodealliance/preview2-shim/dist/browser/*.js \
+        js/componentize/wpt/parity/node_modules/@bytecodealliance/preview2-shim/LICENSE \
+        js/componentize/wpt/web/preview2-shim/
+
+# Serve the browser WPT parity page: the same two legs as `just wpt-parity`
+# run live in your browser (the round trip needs JSPI — Chrome/Chromium
+# 137+). Serves the repository root, which the page's relative imports rely
+# on; PORT overrides the port (default 8787).
+wpt-web: wpt-web-artifacts
+    @echo "the WPT parity page: http://127.0.0.1:${PORT:-8787}/js/componentize/wpt/web/"
+    node conformance/web/serve.mjs
+
 # --- conformance -------------------------------------------------------------
 
 # The whole-run safety cap (seconds) for each conformance target invocation.
@@ -342,12 +366,14 @@ conformance-web: conformance
 rust-docs:
     cargo doc --no-deps -p lann-webcrypto-wasmtime -p lann-webcrypto-guest
 
-# Assemble the Pages site in target/conformance-site: the results viewer
-# (used by the pages workflow; assumes a conformance run already produced
-# results/matrix.json and the transpiled guests), the public crates' API
-# docs, and the landing page linking them. The viewer's subtree mirrors the
-# repository layout, which the page's relative URLs and the transpiled
-# guests' relative imports both rely on.
+# Assemble the Pages site in target/conformance-site: the conformance
+# results viewer, the browser WPT parity page, the public crates' API docs,
+# and the landing page linking them (used by the pages workflow; assumes a
+# conformance run already produced results/matrix.json and the transpiled
+# guests, and `wpt-web-artifacts` already produced the WPT page's
+# artifacts). Each page's subtree mirrors the repository layout, which the
+# pages' relative URLs and the transpiled components' relative imports both
+# rely on.
 conformance-web-site: rust-docs
     rm -rf target/conformance-site
     mkdir -p target/conformance-site/conformance/results \
@@ -360,6 +386,16 @@ conformance-web-site: rust-docs
         conformance/adapters/jco/generated-signing \
         target/conformance-site/conformance/adapters/jco/
     cp js/jco/webcrypto.js target/conformance-site/js/jco/
+    mkdir -p target/conformance-site/js/componentize/wpt/build \
+        target/conformance-site/js/componentize/wpt/parity
+    cp -r js/componentize/wpt/web target/conformance-site/js/componentize/wpt/web
+    rm target/conformance-site/js/componentize/wpt/web/.gitignore
+    cp js/componentize/wpt/groups.js js/componentize/wpt/harness.js \
+        target/conformance-site/js/componentize/wpt/
+    cp js/componentize/wpt/build/group-*.js \
+        target/conformance-site/js/componentize/wpt/build/
+    cp -r js/componentize/wpt/parity/generated \
+        target/conformance-site/js/componentize/wpt/parity/
     cp -r target/doc target/conformance-site/doc
     cp .github/pages/index.html target/conformance-site/index.html
 

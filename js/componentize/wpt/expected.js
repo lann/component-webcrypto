@@ -43,4 +43,5 @@ export const EXPECTED = {
   "import_export/ec_importKey": { inPassed: 36, inFailed: 0, outPassed: 12, outFailed: 216 },
   "import_export/ec_importKey_failures (ECDSA)": { inPassed: 276, inFailed: 0, outPassed: 0, outFailed: 344 },
   "getRandomValues": { inPassed: 39, inFailed: 0, outPassed: 0, outFailed: 0 },
+  "randomUUID": { inPassed: 3, inFailed: 0, outPassed: 0, outFailed: 0 },
 };

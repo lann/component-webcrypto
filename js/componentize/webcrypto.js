@@ -21,6 +21,7 @@
 //   - `digest`                  (SHA-256/384/512; SHA-1 through the
 //     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
+//   - `randomUUID`              (a version 4 UUID from the same entropy)
 //   - `generateKey`             (the secret-key algorithms, X25519, and
 //     Ed25519 pairs)
 //
@@ -32,6 +33,7 @@
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
 // `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
+// and `randomUUID`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
 // elaboration). Module specifiers here name those imports directly, so this
 // file needs no bundler: componentize-js resolves them against the world at
@@ -2057,5 +2059,20 @@ function getRandomValues(array) {
   return array;
 }
 
+/**
+ * Generate a version 4 UUID from the host's entropy
+ * (`wasi:random/random`), per the spec's "generate a random UUID"
+ * algorithm (RFC 9562, section 5.4): 16 random bytes with the version and
+ * variant bits set, rendered as lowercase hexadecimal.
+ * @returns {`${string}-${string}-${string}-${string}-${string}`}
+ */
+function randomUUID() {
+  const bytes = /** @type {Uint8Array} */ (wasiRandom.getRandomBytes(16n));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** A `crypto`-shaped namespace for code expecting `crypto.subtle`. */
-export const crypto = Object.freeze({ subtle, getRandomValues });
+export const crypto = Object.freeze({ subtle, getRandomValues, randomUUID });
