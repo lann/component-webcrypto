@@ -22,6 +22,24 @@ impl MacPolicy {
     }
 }
 
+/// `cipher.cipher-key-options`. `wrap`/`unwrap` are vocabulary ahead of
+/// operations, as on [`AeadPolicy`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CipherPolicy {
+    pub encrypt: bool,
+    pub decrypt: bool,
+    pub wrap: bool,
+    pub unwrap: bool,
+    pub extractable: bool,
+}
+
+impl CipherPolicy {
+    /// The at-least-one-usage mint check (the options contract).
+    pub fn check_useful(&self) -> Result<(), Error> {
+        useful(self.encrypt || self.decrypt || self.wrap || self.unwrap)
+    }
+}
+
 /// `aead.aead-key-options`. `wrap`/`unwrap` are vocabulary ahead of
 /// operations: recorded and reported, nothing here consumes them yet.
 #[derive(Clone, Copy, Debug, Default)]

@@ -367,6 +367,26 @@ pub fn derive_aes_gcm_key(
     crate::AeadKeyMaterial::import_aes_gcm(variant, okm.to_vec(), policy)
 }
 
+/// Mint an unauthenticated-cipher key from a parameterized derivation
+/// (the `derive-key` contract shared by `aes-cbc` and `aes-ctr`): the
+/// derivation run at the variant's key length, then subject to the import
+/// contract (which declines AES-192).
+pub fn derive_cipher_key(
+    input: &DeriveInputMaterial,
+    mode: crate::CipherMode,
+    variant: crate::AesVariant,
+    policy: crate::CipherPolicy,
+) -> Result<crate::CipherKeyMaterial, Error> {
+    policy.check_useful()?;
+    let bits = match variant {
+        crate::AesVariant::Aes128 => 128,
+        crate::AesVariant::Aes192 => 192,
+        crate::AesVariant::Aes256 => 256,
+    };
+    let okm = input.derive_for_key(bits, policy.extractable)?;
+    crate::CipherKeyMaterial::import(mode, variant, okm.to_vec(), policy)
+}
+
 /// RFC 8018 §5.2: fill `out` with PBKDF2 blocks
 /// `T_i = U_1 ^ … ^ U_c`, `U_1 = PRF(P, S ‖ INT(i))`, `U_j = PRF(P, U_{j-1})`,
 /// using the already-keyed PRF (cloning it per invocation reuses the key

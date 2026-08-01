@@ -2,18 +2,19 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::mint::{
-    import_chacha_key, import_hmac_key, import_ikm,
+    import_cbc_key, import_chacha_key, import_hmac_key, import_ikm,
     import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_password,
     import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
 };
 use crate::translate::{
-    AeadAlg, AeadCase, AeadExpectation, HkdfAlg, HkdfCase, HmacAlg, HmacCase, InternalNonceAlg,
-    InternalNonceCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase,
-    X25519Case,
+    AeadAlg, AeadCase, AeadExpectation, CbcCase, HkdfAlg, HkdfCase, HmacAlg, HmacCase,
+    InternalNonceAlg, InternalNonceCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase,
+    SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
-    compute, in_open, in_seal, open, seal, sig_verify, sign, verify, Schedule,
+    ci_decrypt, ci_encrypt, compute, in_open, in_seal, open, seal, sig_verify, sign, verify,
+    Schedule,
 };
 use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
@@ -179,6 +180,38 @@ pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// Run one AES-CBC vector under its schedule: a valid vector round-trips
+/// byte-exactly both ways; an invalid one (bad or absent padding) fails
+/// `decrypt` with the cipher kind's one uniform error — kind *and*
+/// message pinned, since any second rendering would be a distinguishable
+/// verdict.
+pub async fn run_cbc_case(case: &CbcCase) -> Result<(), String> {
+    let key = import_cbc_key(aes_variant(case.key_bits)?, case.key.clone(), false)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    if case.valid {
+        let (sealed, fed) = ci_encrypt(&key, &case.iv, None, &case.msg, case.schedule).await;
+        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+        let sealed = sealed.map_err(|e| describe("encrypt", &e))?;
+        expect_bytes(&sealed, &case.ct, "computed ciphertext")?;
+        let (opened, fed) = ci_decrypt(&key, &case.iv, None, &case.ct, case.schedule).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened = opened.map_err(|e| describe("decrypt", &e))?;
+        expect_bytes(&opened, &case.msg, "decrypted plaintext")
+    } else {
+        let (opened, fed) = ci_decrypt(&key, &case.iv, None, &case.ct, case.schedule).await;
+        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        match opened {
+            Err(Error::Other(detail)) if detail == "AES-CBC decryption failed" => Ok(()),
+            Err(other) => Err(describe(
+                "decrypt: expected the uniform failure, got",
+                &other,
+            )),
+            Ok(_) => Err("decrypted a ciphertext upstream marks invalid".into()),
+        }
+    }
 }
 
 /// Run one caller-nonce AEAD vector (any algorithm) under its schedule.

@@ -124,6 +124,8 @@ is sensitive to the platform only where the platform itself is.
 | --- | --- |
 | `sign_verify/hmac` | `hmac.https.any.js` (reference), `hmac.js`, `hmac_vectors.js` |
 | `encrypt_decrypt/aes_gcm` (96-bit iv) | `aes_gcm.https.any.js` (reference), `aes.js`, `aes_gcm_vectors.js`, `aes_gcm_96_iv_fixtures.js` |
+| `encrypt_decrypt/aes_cbc` | `aes_cbc.https.any.js` (reference), `aes_cbc_vectors.js` (the shared `aes.js` runner) |
+| `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
 | `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js` (references), `successes.js` |
 | `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |

@@ -83,10 +83,10 @@ pub mod bindings {
     // alias, and rustdoc renders an alias into a private module as an empty
     // enum.
     pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes, aes_gcm, aes_gcm_internal_nonce, bytes, chacha20_poly1305,
-        derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hkdf,
-        hmac_sha2, key_agreement, mac, pbkdf2, sha1_checked, sha2, signature, types, x25519,
-        xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+        aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, bytes,
+        chacha20_poly1305, cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign,
+        ed25519_verify, hkdf, hmac_sha2, key_agreement, mac, pbkdf2, sha1_checked, sha2, signature,
+        types, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
 }
 
@@ -581,6 +581,35 @@ impl AeadKeyOptions {
         let options = bindings::aead::AeadKeyOptions::new();
         options.can_seal(self.seal);
         options.can_open(self.open);
+        options.can_wrap(self.wrap);
+        options.can_unwrap(self.unwrap);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
+/// Mint-time policy for a [`CipherKey`] key. See [`MacKeyOptions`] for the
+/// options contract; `wrap`/`unwrap` are recorded ahead of operations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CipherKeyOptions {
+    /// Whether the minted key may `encrypt`.
+    pub encrypt: bool,
+    /// Whether the minted key may `decrypt`.
+    pub decrypt: bool,
+    /// Whether the minted key may wrap keys.
+    pub wrap: bool,
+    /// Whether the minted key may unwrap keys.
+    pub unwrap: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl CipherKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::cipher::CipherKeyOptions {
+        let options = bindings::cipher::CipherKeyOptions::new();
+        options.can_encrypt(self.encrypt);
+        options.can_decrypt(self.decrypt);
         options.can_wrap(self.wrap);
         options.can_unwrap(self.unwrap);
         options.extractable(self.extractable);
@@ -1155,6 +1184,104 @@ impl SigningKey {
 
 // --- key & digest creation -------------------------------------------------------
 
+/// An unauthenticated-cipher key (AES-CBC or AES-CTR), minted by
+/// [`aes_cbc`] / [`aes_ctr`]. **Nothing this key does authenticates**:
+/// ciphertext is malleable and a successful [`decrypt`](Self::decrypt) is
+/// not evidence the input is untampered. Default to [`Aead`]; use this
+/// kind only where an existing format fixes the mode. See the WIT
+/// `cipher` interface for the full contract.
+pub struct CipherKey(bindings::cipher::CipherKey);
+newtype_common!(CipherKey, bindings::cipher::CipherKey, "cipher-key");
+
+impl CipherKey {
+    /// Encrypt `plaintext` under `iv` (for AES-CTR, the initial counter
+    /// block plus the counter width in bits; AES-CBC callers pass `None`).
+    /// The caller owns the IV discipline — see the minting interface's
+    /// Security notes.
+    pub fn encrypt<'a>(
+        &'a self,
+        iv: impl Into<Cow<'a, [u8]>>,
+        counter_length: Option<u8>,
+        plaintext: impl Into<DataSource<'a>>,
+    ) -> Seal<'a> {
+        let iv = iv.into().into_owned();
+        Seal::new(
+            plaintext.into(),
+            Box::new(move |rx| Box::pin(self.0.encrypt(iv, counter_length, rx))),
+        )
+    }
+
+    /// Decrypt `ciphertext` under `iv`. The plaintext is unauthenticated:
+    /// treat it as attacker-influenced data even on success. Malformed
+    /// input fails [`Error::Other`], deliberately uniform across
+    /// conditions.
+    pub async fn decrypt(
+        &self,
+        iv: impl Into<Cow<'_, [u8]>>,
+        counter_length: Option<u8>,
+        ciphertext: impl Into<DataSource<'_>>,
+    ) -> Result<StreamReader<u8>, Error> {
+        let iv = iv.into().into_owned();
+        run_sourced(ciphertext.into(), |rx| {
+            self.0.decrypt(iv, counter_length, rx)
+        })
+        .await
+    }
+
+    /// The name of the key's algorithm family, e.g. `"AES-CBC"`.
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// The key length in bits.
+    pub fn algorithm_length(&self) -> u32 {
+        self.0.algorithm_length()
+    }
+
+    /// The algorithm's IV size in bytes (`16` for the AES modes).
+    pub fn iv_size(&self) -> u32 {
+        self.0.iv_size()
+    }
+
+    /// Whether [`export_key_raw`](Self::export_key_raw) may return the key
+    /// material (see [`Mac::extractable`]).
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
+    /// Whether the key permits [`encrypt`](Self::encrypt).
+    pub fn can_encrypt(&self) -> bool {
+        self.0.can_encrypt()
+    }
+
+    /// Whether the key permits [`decrypt`](Self::decrypt).
+    pub fn can_decrypt(&self) -> bool {
+        self.0.can_decrypt()
+    }
+
+    /// Whether the key may wrap keys — recorded ahead of operations.
+    pub fn can_wrap(&self) -> bool {
+        self.0.can_wrap()
+    }
+
+    /// Whether the key may unwrap keys. See [`can_wrap`](Self::can_wrap).
+    pub fn can_unwrap(&self) -> bool {
+        self.0.can_unwrap()
+    }
+
+    /// The raw key material, behind the extractability gate.
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.0.export_key_raw().await?)
+    }
+
+    /// The key as an `oct` JWK, behind the same gate.
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.0.export_key_jwk().await?)
+    }
+}
+
+pub mod aes_cbc;
+pub mod aes_ctr;
 pub mod aes_gcm;
 pub mod aes_gcm_internal_nonce;
 pub mod chacha20_poly1305;

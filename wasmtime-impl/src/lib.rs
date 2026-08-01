@@ -192,6 +192,12 @@ pub struct AeadKeyOptions {
     pub(crate) policy: webcrypto_impl_core::AeadPolicy,
 }
 
+/// A `cipher-key-options` resource. See [`MacKeyOptions`].
+#[derive(Debug, Default)]
+pub struct CipherKeyOptions {
+    pub(crate) policy: webcrypto_impl_core::CipherPolicy,
+}
+
 /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
 #[derive(Debug, Default)]
 pub struct InternalNonceKeyOptions {
@@ -274,6 +280,12 @@ pub struct MacKey {
 #[derive(Debug)]
 pub struct AeadKey {
     pub(crate) material: webcrypto_impl_core::AeadKeyMaterial,
+}
+
+/// Backing type for the `cipher.cipher-key` resource: the unauthenticated
+/// AES modes' key material.
+pub struct CipherKey {
+    pub(crate) material: webcrypto_impl_core::CipherKeyMaterial,
 }
 
 /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
@@ -383,6 +395,9 @@ where
     bindings::webcrypto::pbkdf2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::hmac_sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_gcm::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::cipher::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::aes_cbc::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::aes_ctr::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
         linker,
         T::webcrypto,

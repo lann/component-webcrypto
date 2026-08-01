@@ -24,6 +24,9 @@ use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
 use crate::bindings::webcrypto::aead_internal_nonce::{
     self, HostInternalNonceKey, HostInternalNonceKeyWithStore,
 };
+use crate::bindings::webcrypto::cipher::{
+    self as cipher_iface, HostCipherKey, HostCipherKeyWithStore,
+};
 use crate::bindings::webcrypto::derivation::{
     self as derivation_iface, HostDeriveInput, HostDeriveInputWithStore, HostDeriveOptions,
     HostDeriveOptionsWithStore,
@@ -40,7 +43,8 @@ use crate::bindings::webcrypto::pbkdf2::{
 };
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::{
-    aes_gcm as aes_gcm_iface, aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
+    aes_cbc as aes_cbc_iface, aes_ctr as aes_ctr_iface, aes_gcm as aes_gcm_iface,
+    aes_gcm_internal_nonce as aes_gcm_in_iface, bytes as bytes_iface,
     chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
     ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
     ed25519_verify as ed25519_verify_iface, hmac_sha2 as hmac_sha2_iface,
@@ -51,8 +55,9 @@ use crate::bindings::webcrypto::{
 use crate::limits::admit_input;
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
-    AeadKey, AgreementPublicKey, AgreementSecretKey, DeriveInput, Digest, Ikm, InternalNonceKey,
-    MacKey, Password, SigningKey, VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView,
+    AeadKey, AgreementPublicKey, AgreementSecretKey, CipherKey, DeriveInput, Digest, Ikm,
+    InternalNonceKey, MacKey, Password, SigningKey, VerifyingKey, WasiWebcrypto,
+    WasiWebcryptoCtxView,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -426,6 +431,244 @@ impl<T: Send> HostAeadKeyWithStore<T> for WasiWebcrypto {
         drop_resource(accessor, rep).await
     }
 }
+
+// --- cipher (the unauthenticated-mode kind) --------------------------------------
+
+impl cipher_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl HostCipherKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<CipherKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.material.name().to_string())
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<CipherKey>) -> Result<u32> {
+        Ok(self.table.get(&self_)?.material.length_bits())
+    }
+
+    fn iv_size(&mut self, self_: Resource<CipherKey>) -> Result<u32> {
+        let _ = self.table.get(&self_)?;
+        Ok(16)
+    }
+
+    fn extractable(&mut self, self_: Resource<CipherKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().extractable)
+    }
+
+    fn can_encrypt(&mut self, self_: Resource<CipherKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().encrypt)
+    }
+
+    fn can_decrypt(&mut self, self_: Resource<CipherKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().decrypt)
+    }
+
+    fn can_wrap(&mut self, self_: Resource<CipherKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().wrap)
+    }
+
+    fn can_unwrap(&mut self, self_: Resource<CipherKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.policy().unwrap)
+    }
+}
+
+impl cipher_iface::HostCipherKeyOptions for WasiWebcryptoCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<crate::CipherKeyOptions>> {
+        Ok(self.table.push(crate::CipherKeyOptions::default())?)
+    }
+
+    fn can_encrypt(
+        &mut self,
+        self_: Resource<crate::CipherKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.encrypt = allowed;
+        Ok(())
+    }
+
+    fn can_decrypt(
+        &mut self,
+        self_: Resource<crate::CipherKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.decrypt = allowed;
+        Ok(())
+    }
+
+    fn can_wrap(&mut self, self_: Resource<crate::CipherKeyOptions>, allowed: bool) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.wrap = allowed;
+        Ok(())
+    }
+
+    fn can_unwrap(
+        &mut self,
+        self_: Resource<crate::CipherKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.unwrap = allowed;
+        Ok(())
+    }
+
+    fn extractable(
+        &mut self,
+        self_: Resource<crate::CipherKeyOptions>,
+        allowed: bool,
+    ) -> Result<()> {
+        self.table.get_mut(&self_)?.policy.extractable = allowed;
+        Ok(())
+    }
+}
+
+impl<T: Send> cipher_iface::HostCipherKeyOptionsWithStore<T> for WasiWebcrypto {
+    async fn drop(
+        accessor: &Accessor<T, Self>,
+        rep: Resource<crate::CipherKeyOptions>,
+    ) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl<T: Send> HostCipherKeyWithStore<T> for WasiWebcrypto {
+    async fn encrypt(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<CipherKey>,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        plaintext: StreamReader<u8>,
+    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        drain_then_stream(accessor, self_, plaintext, |key, msg| {
+            Ok(key
+                .material
+                .encrypt(&iv, counter_length, msg)
+                .map_err(Error::from))
+        })
+        .await
+    }
+
+    async fn decrypt(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<CipherKey>,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        ciphertext: StreamReader<u8>,
+    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
+        drain_then_stream(accessor, self_, ciphertext, |key, msg| {
+            Ok(key
+                .material
+                .decrypt(&iv, counter_length, msg)
+                .map_err(Error::from))
+        })
+        .await
+    }
+
+    async fn export_key_raw(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<CipherKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<CipherKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<CipherKey>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+// --- aes-cbc / aes-ctr (key minting) ----------------------------------------------
+
+/// The shared minting body of the two unauthenticated-mode interfaces:
+/// they differ only in the `CipherMode` they bind.
+macro_rules! cipher_minting {
+    ($iface:path, $mode:expr) => {
+        const _: () = {
+            use $iface as iface;
+
+            impl iface::Host for WasiWebcryptoCtxView<'_> {}
+
+            impl<T: Send> iface::HostWithStore<T> for WasiWebcrypto {
+                async fn import_key_raw(
+                    accessor: &Accessor<T, Self>,
+                    variant: iface::AesVariant,
+                    raw: Vec<u8>,
+                    options: Resource<crate::CipherKeyOptions>,
+                ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
+                    let policy = take_options(accessor, options).await?.policy;
+                    let material = webcrypto_impl_core::CipherKeyMaterial::import(
+                        $mode,
+                        variant.into(),
+                        raw,
+                        policy,
+                    );
+                    mint(accessor, material.map(|material| CipherKey { material })).await
+                }
+
+                async fn import_key_jwk(
+                    accessor: &Accessor<T, Self>,
+                    variant: iface::AesVariant,
+                    jwk: String,
+                    options: Resource<crate::CipherKeyOptions>,
+                ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
+                    let policy = take_options(accessor, options).await?.policy;
+                    let material = webcrypto_impl_core::CipherKeyMaterial::import_jwk(
+                        $mode,
+                        variant.into(),
+                        &jwk,
+                        policy,
+                    );
+                    mint(accessor, material.map(|material| CipherKey { material })).await
+                }
+
+                async fn generate_key(
+                    accessor: &Accessor<T, Self>,
+                    variant: iface::AesVariant,
+                    options: Resource<crate::CipherKeyOptions>,
+                ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
+                    let policy = take_options(accessor, options).await?.policy;
+                    let material = webcrypto_impl_core::CipherKeyMaterial::generate(
+                        $mode,
+                        variant.into(),
+                        policy,
+                    )
+                    .map_err(rng_trap("random key generation"))?;
+                    mint(accessor, material.map(|material| CipherKey { material })).await
+                }
+
+                async fn derive_key(
+                    accessor: &Accessor<T, Self>,
+                    variant: iface::AesVariant,
+                    input: Resource<DeriveInput>,
+                    options: Resource<crate::CipherKeyOptions>,
+                ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
+                    let policy = take_options(accessor, options).await?.policy;
+                    let material = with_resource(accessor, input, |input| {
+                        webcrypto_impl_core::derive_cipher_key(
+                            &input.material,
+                            $mode,
+                            variant.into(),
+                            policy,
+                        )
+                    })
+                    .await?;
+                    mint(accessor, material.map(|material| CipherKey { material })).await
+                }
+            }
+        };
+    };
+}
+
+cipher_minting!(aes_cbc_iface, webcrypto_impl_core::CipherMode::Cbc);
+cipher_minting!(aes_ctr_iface, webcrypto_impl_core::CipherMode::Ctr);
 
 // --- derivation -------------------------------------------------------------
 

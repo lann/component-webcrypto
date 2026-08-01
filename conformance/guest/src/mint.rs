@@ -11,6 +11,7 @@ use lann_webcrypto_guest::bindings::aead_internal_nonce::{
     InternalNonceKey, InternalNonceKeyOptions,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
 use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
 use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
 use lann_webcrypto_guest::bindings::key_agreement::{
@@ -22,8 +23,8 @@ use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha2, x25519,
-    xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha2,
+    x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -53,6 +54,35 @@ pub fn internal_nonce_options(extractable: bool) -> InternalNonceKeyOptions {
     options.can_open(true);
     options.extractable(extractable);
     options
+}
+
+/// A `cipher-key-options` granting every usage.
+pub fn cipher_options(extractable: bool) -> CipherKeyOptions {
+    let options = CipherKeyOptions::new();
+    options.can_encrypt(true);
+    options.can_decrypt(true);
+    options.can_wrap(true);
+    options.can_unwrap(true);
+    options.extractable(extractable);
+    options
+}
+
+/// Import raw AES material as an AES-CBC `cipher-key` with every usage.
+pub async fn import_cbc_key(
+    variant: AesVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<CipherKey, Error> {
+    aes_cbc::import_key_raw(variant, raw, cipher_options(extractable)).await
+}
+
+/// Import raw AES material as an AES-CTR `cipher-key` with every usage.
+pub async fn import_ctr_key(
+    variant: AesVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<CipherKey, Error> {
+    aes_ctr::import_key_raw(variant, raw, cipher_options(extractable)).await
 }
 
 /// A `signing-key-options` granting `sign`.

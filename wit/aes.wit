@@ -142,3 +142,90 @@ interface aes-gcm-internal-nonce {
     /// not serve the variant.
     generate-key: async func(%variant: aes-variant, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }
+
+/// AES-CBC key minting (NIST SP 800-38A; PKCS#7 padding, the Web
+/// Cryptography API's `AES-CBC`): `cipher.cipher-key`s for the
+/// unauthenticated mode, served for compatibility with CBC-committed
+/// formats. Read the `cipher` interface's Security notes first.
+///
+/// Ciphertext is the padded encryption of the plaintext: always a
+/// non-zero multiple of 16 bytes (a full padding block is added when the
+/// plaintext is already block-aligned).
+///
+/// Security:
+/// - The 16-byte IV must be *unpredictable* to an attacker who can
+///   influence future plaintexts (CWE-329; the BEAST class), not merely
+///   unique: generate it fresh and randomly per message.
+/// - CBC with visible decryption failures is padding-oracle-prone by
+///   nature. The `cipher` kind's uniform-failure rule bounds what this
+///   API reveals to the verdict itself; protocols that surface the
+///   verdict per message to an active attacker remain at risk. Prefer
+///   `aes-gcm` anywhere the format is not already fixed.
+interface aes-cbc {
+    use types.{error};
+    use cipher.{cipher-key, cipher-key-options};
+    use aes.{aes-variant};
+    use derivation.{derive-input};
+
+    /// Import raw key material as the declared AES variant (see
+    /// `aes-gcm.import-key-raw` for the variant-redundancy contract).
+    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Import an RFC 7517 JSON Web Key as an AES-CBC key of the declared
+    /// variant. The key must be an `oct` key whose `alg`, if present,
+    /// names the declared variant (`"A128CBC"`/`"A192CBC"`/`"A256CBC"`);
+    /// otherwise as `aes-gcm.import-key-jwk`.
+    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Generate a fresh random key of the given AES variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: aes-variant, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from a parameterized derivation (the
+    /// `aes-gcm.derive-key` contract, minting a `cipher-key`).
+    derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: cipher-key-options) -> result<cipher-key, error>;
+}
+
+/// AES-CTR key minting (NIST SP 800-38A counter mode, the Web
+/// Cryptography API's `AES-CTR`): `cipher.cipher-key`s for the
+/// unauthenticated mode, served for compatibility with CTR-committed
+/// formats. Read the `cipher` interface's Security notes first.
+///
+/// Ciphertext is exactly the plaintext's length. The per-call `iv` is the
+/// 16-byte *initial counter block*, and `counter-length` (required; 1 to
+/// 128) is the width in bits of its rightmost, incrementing portion —
+/// WebCrypto's `AesCtrParams`. The counter wraps around within that width
+/// without carrying into the fixed portion; a message longer than
+/// 2^`counter-length` blocks fails rather than reuse counter values.
+///
+/// Security:
+/// - Every counter block a key ever consumes must be unique: a repeated
+///   block is a two-time pad and forfeits confidentiality outright.
+///   Uniqueness spans messages — the caller partitions the counter space
+///   across messages via the fixed portion, per SP 800-38A Appendix B.
+interface aes-ctr {
+    use types.{error};
+    use cipher.{cipher-key, cipher-key-options};
+    use aes.{aes-variant};
+    use derivation.{derive-input};
+
+    /// Import raw key material as the declared AES variant (see
+    /// `aes-gcm.import-key-raw` for the variant-redundancy contract).
+    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Import an RFC 7517 JSON Web Key as an AES-CTR key of the declared
+    /// variant. The key must be an `oct` key whose `alg`, if present,
+    /// names the declared variant (`"A128CTR"`/`"A192CTR"`/`"A256CTR"`);
+    /// otherwise as `aes-gcm.import-key-jwk`.
+    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Generate a fresh random key of the given AES variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: aes-variant, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from a parameterized derivation (the
+    /// `aes-gcm.derive-key` contract, minting a `cipher-key`).
+    derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: cipher-key-options) -> result<cipher-key, error>;
+}

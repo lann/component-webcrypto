@@ -25,6 +25,7 @@ package guest:webcrypto;
 world provider {
     export lann:webcrypto/mac@0.1.0;
     export lann:webcrypto/aead@0.1.0;
+    export lann:webcrypto/cipher@0.1.0;
     export lann:webcrypto/aead-internal-nonce@0.1.0;
     export lann:webcrypto/digest@0.1.0;
     export lann:webcrypto/bytes@0.1.0;
@@ -32,6 +33,8 @@ world provider {
     export lann:webcrypto/sha1-checked@0.1.0;
     export lann:webcrypto/hmac-sha2@0.1.0;
     export lann:webcrypto/aes-gcm@0.1.0;
+    export lann:webcrypto/aes-cbc@0.1.0;
+    export lann:webcrypto/aes-ctr@0.1.0;
     export lann:webcrypto/chacha20-poly1305@0.1.0;
     export lann:webcrypto/xchacha20-poly1305@0.1.0;
     export lann:webcrypto/aes-gcm-internal-nonce@0.1.0;

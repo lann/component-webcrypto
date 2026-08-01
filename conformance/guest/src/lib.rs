@@ -59,6 +59,7 @@ enum CaseKind {
     Pbkdf2(Pbkdf2Case),
     Hmac(HmacCase),
     Aead(AeadCase),
+    Cbc(translate::CbcCase),
     InternalNonce(InternalNonceCase),
     Sha2(Sha2Case),
     Sig(SigCase),
@@ -99,6 +100,7 @@ impl GuestTestCase for Case {
                 CaseKind::Pbkdf2(case) => vectors::run_pbkdf2_case(case).await,
                 CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
                 CaseKind::Aead(case) => vectors::run_aead_case(case).await,
+                CaseKind::Cbc(case) => vectors::run_cbc_case(case).await,
                 CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
                 CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
@@ -172,6 +174,14 @@ impl Guest for Component {
                 case.features(),
                 &missing,
                 CaseKind::Aead(case),
+            ));
+        }
+        for case in translate::cbc_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                &[],
+                &missing,
+                CaseKind::Cbc(case),
             ));
         }
         for case in translate::internal_nonce_cases() {

@@ -55,6 +55,7 @@
 
 mod aead;
 mod agreement;
+mod cipher;
 mod der8410;
 mod gcm;
 mod hash;
@@ -66,14 +67,16 @@ mod sig;
 
 pub use aead::AeadKeyMaterial;
 pub use agreement::{AgreementPublicMaterial, AgreementSecretMaterial};
+pub use cipher::{CipherKeyMaterial, CipherMode};
 pub use hash::{served_sha2, DigestKind, Sha1Posture, Sha2};
 pub use kdf::{
-    derive_aes_gcm_key, derive_mac_key, DeriveInputMaterial, IkmMaterial, PasswordMaterial,
+    derive_aes_gcm_key, derive_cipher_key, derive_mac_key, DeriveInputMaterial, IkmMaterial,
+    PasswordMaterial,
 };
 pub use mac::MacKeyMaterial;
 pub use policy::{
-    not_permitted, AeadPolicy, AgreementPolicy, DerivePolicy, InternalNoncePolicy, MacPolicy,
-    SigningPolicy,
+    not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, InternalNoncePolicy,
+    MacPolicy, SigningPolicy,
 };
 pub use sig::{SigPublic, SigningKeyMaterial};
 
