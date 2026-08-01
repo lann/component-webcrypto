@@ -7,14 +7,18 @@
 //
 //   - `importKey` / `exportKey` ("raw" and "jwk" formats)
 //   - `generateKey`
-//   - `sign` / `verify`     (HMAC-SHA-256)
-//   - `encrypt` / `decrypt` (AES-256-GCM)
+//   - `sign` / `verify`         (HMAC-SHA-256)
+//   - `encrypt` / `decrypt`     (AES-256-GCM)
+//   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-256/384/512;
+//     X25519 key agreement; derived-key targets HMAC-SHA-256 and
+//     AES-256-GCM)
 //
-// The component's world must import `lann:webcrypto/hmac-sha2@0.1.0` and
-// `lann:webcrypto/aes-gcm@0.1.0` (their `mac`/`aead`/`types` dependencies
-// are pulled in by WIT elaboration). Module specifiers here name those
-// imports directly, so this file needs no bundler: componentize-js resolves
-// them against the world at componentize time.
+// The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
+// `aes-gcm`, `derivation`, `hkdf`, `pbkdf2`, `key-agreement`, and `x25519`
+// (their `mac`/`aead`/`types` dependencies are pulled in by WIT
+// elaboration). Module specifiers here name those imports directly, so this
+// file needs no bundler: componentize-js resolves them against the world at
+// componentize time.
 //
 // Documented deviations from the Web Cryptography API (all fail closed with
 // clear errors, never silently differ). Each is classified — *unserved*
@@ -23,28 +27,44 @@
 // shape; a recorded design ruling) — per AGENTS.md, "WPT fidelity is a
 // first-class design constraint":
 //
-//   - Unserved: only HMAC-SHA-256 and AES-256-GCM are served; other
-//     algorithms, hashes, and AES key sizes throw `NotSupportedError`.
+//   - Unserved: beyond the algorithms above, everything throws
+//     `NotSupportedError` — including SHA-1 as a KDF hash, non-256 AES-GCM
+//     key sizes, and the derived-key targets the WIT's `derive-key` mints
+//     do not span (AES-CBC/CTR/KW, HMAC over other hashes).
 //   - Unserved: only the `"raw"` and `"jwk"` key formats are served;
-//     others throw `NotSupportedError`.
-//   - Unserved: the derive operations (`deriveBits`, `deriveKey`) and the
-//     algorithms reached only through them (X25519, HKDF, PBKDF2) are
-//     absent from the `subtle` subset entirely — calling them is a
-//     `TypeError` on a missing property, not a thrown `DOMException`. The
-//     WIT carries all of it (`derivation`, `key-agreement`, `hkdf`,
-//     `pbkdf2`, `x25519`); the vendored X25519, HKDF, and PBKDF2 WPT
-//     groups meter this gap (see wpt/README.md, "What is vendored").
+//     others throw `NotSupportedError`. X25519 public keys import as
+//     `"raw"` only (the WIT's public format); a public OKP JWK import
+//     throws `NotSupportedError`.
+//   - WIT-forced: an empty HKDF key imports on the platform but not here —
+//     `hkdf.import-ikm` rejects empty input keying material by ruling
+//     (`wit/README.md`, "Design notes": a zero-entropy IKM is never what a
+//     caller meant), so it fails with `DataError` instead.
+//   - WIT-forced: an extractable X25519 private key does not export — the
+//     package's private keys are deliberately generate-only surfaces
+//     (`wit/README.md`, "Design notes"; a fallible JWK/PKCS#8 export can
+//     return additively), so `exportKey("jwk", privateKey)` throws
+//     `NotSupportedError` where the platform returns the JWK.
+//     (`exportKey("raw", privateKey)` throws `InvalidAccessError` exactly
+//     as the platform does: raw export is public-only by spec.)
 //   - Runtime gap, not a deviation of this library: there is no
 //     `DOMException` in the componentize-js runtime, so this module exports
 //     a minimal stand-in with the standard `.name` values
 //     ("OperationError", "InvalidAccessError", "NotSupportedError",
 //     "DataError", "SyntaxError").
 //
-// The WIT-forced set is empty: AES-GCM's per-call IV lengths and
-// `tagLength`s are carried by `aead-key.seal`/`open`'s parameters.
+// AES-GCM's per-call IV lengths and `tagLength`s are carried by
+// `aead-key.seal`/`open`'s parameters, so they are not deviations. The WIT
+// grants do not ride this library's derive mints: a WIT `derive-input`'s
+// grants gate `derive-bits` and cap extractable `derive-key` mints, while
+// the platform's usage checks live on the *base key* and carry no cap — so
+// derive sources mint with both grants and the platform's usage model is
+// enforced here, the jco host's agreement-key pattern.
 
 import * as hmacSha2 from "lann:webcrypto/hmac-sha2@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
+import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
+import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
+import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
 import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
 // generated resource classes to exist: componentize-js builds each returned
@@ -53,6 +73,8 @@ import * as witWorld from "wit-world";
 // resources, constructed here per mint.
 import { MacKeyOptions } from "lann:webcrypto/mac@0.1.0";
 import { AeadKeyOptions } from "lann:webcrypto/aead@0.1.0";
+import { DeriveOptions } from "lann:webcrypto/derivation@0.1.0";
+import { AgreementKeyOptions } from "lann:webcrypto/key-agreement@0.1.0";
 
 // --- errors -------------------------------------------------------------------
 
@@ -299,10 +321,13 @@ const HANDLES = new WeakMap();
 const MINT_TOKEN = Symbol("CryptoKey mint token");
 
 /**
- * The WebCrypto `CryptoKey` projection of a `lann:webcrypto` key resource.
- * Always `type: "secret"` here (HMAC and AES-GCM keys).
+ * The WebCrypto `CryptoKey` projection of a `lann:webcrypto` key resource:
+ * `"secret"` for the HMAC, AES-GCM, and KDF keys, `"public"`/`"private"`
+ * for the X25519 pair.
  */
 export class CryptoKey {
+  /** @type {KeyType} */
+  #type;
   /** @type {KeyAlgorithm} */
   #algorithm;
   #extractable;
@@ -312,14 +337,16 @@ export class CryptoKey {
   /**
    * @param {symbol} token
    * @param {any} handle the `lann:webcrypto` key resource
+   * @param {KeyType} type
    * @param {KeyAlgorithm} algorithm
    * @param {boolean} extractable
    * @param {readonly KeyUsage[]} usages
    */
-  constructor(token, handle, algorithm, extractable, usages) {
+  constructor(token, handle, type, algorithm, extractable, usages) {
     if (token !== MINT_TOKEN) {
       throw new TypeError("CryptoKey cannot be constructed directly");
     }
+    this.#type = type;
     this.#algorithm = Object.freeze(algorithm);
     this.#extractable = extractable;
     this.#usages = Object.freeze([...usages]);
@@ -328,7 +355,7 @@ export class CryptoKey {
 
   /** @returns {KeyType} */
   get type() {
-    return "secret";
+    return this.#type;
   }
   get algorithm() {
     return this.#algorithm;
@@ -351,12 +378,13 @@ export class CryptoKey {
 
 /**
  * @param {any} handle
+ * @param {KeyType} type
  * @param {KeyAlgorithm} algorithm
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
  */
-function mintKey(handle, algorithm, extractable, usages) {
-  return new CryptoKey(MINT_TOKEN, handle, algorithm, extractable, usages);
+function mintKey(handle, type, algorithm, extractable, usages) {
+  return new CryptoKey(MINT_TOKEN, handle, type, algorithm, extractable, usages);
 }
 
 /**
@@ -384,8 +412,15 @@ function handleOf(key) {
  *   iv?: unknown,
  *   additionalData?: unknown,
  *   tagLength?: unknown,
+ *   salt?: unknown,
+ *   info?: unknown,
+ *   iterations?: unknown,
+ *   public?: unknown,
  * }} NormalizedAlgorithm
  */
+
+/** The algorithm names this library serves, in their registry spellings. */
+const SERVED_ALGORITHMS = ["HMAC", "AES-GCM", "HKDF", "PBKDF2", "X25519"];
 
 /**
  * @param {unknown} algorithm
@@ -405,8 +440,9 @@ function normalizeAlgorithm(algorithm) {
   if (typeof alg.name !== "string") {
     throw new TypeError("algorithm must be a string or an object with a string `name`");
   }
-  const name = alg.name.toUpperCase();
-  if (name !== "HMAC" && name !== "AES-GCM") {
+  const upper = alg.name.toUpperCase();
+  const name = SERVED_ALGORITHMS.find((served) => served.toUpperCase() === upper);
+  if (name === undefined) {
     throw dom("NotSupportedError", `unsupported algorithm ${alg.name}`);
   }
   alg.name = name;
@@ -431,6 +467,33 @@ function normalizeHash(hash) {
   return "SHA-256";
 }
 
+/**
+ * The WIT `sha2-variant` for a KDF's `hash` member. Wider than HMAC's
+ * `normalizeHash`: the KDFs are served over the whole SHA-2 family the WIT
+ * carries; SHA-1 (which WPT sweeps) is not in the package at all.
+ * @param {unknown} hash
+ * @returns {"sha256" | "sha384" | "sha512"}
+ */
+function sha2VariantOf(hash) {
+  if (typeof hash === "object" && hash !== null) {
+    const named = /** @type {{ name?: unknown }} */ (hash).name;
+    if (typeof named === "string") hash = named;
+  }
+  if (typeof hash !== "string") {
+    throw new TypeError("a KDF algorithm requires a `hash` member (a string or { name })");
+  }
+  switch (hash.toUpperCase()) {
+    case "SHA-256":
+      return "sha256";
+    case "SHA-384":
+      return "sha384";
+    case "SHA-512":
+      return "sha512";
+    default:
+      throw dom("NotSupportedError", `unsupported hash ${hash}; SHA-256/384/512 are served`);
+  }
+}
+
 /** @type {Readonly<Record<string, readonly KeyUsage[] | undefined>>} */
 const USAGES = {
   HMAC: ["sign", "verify"],
@@ -438,6 +501,12 @@ const USAGES = {
   // even though this library exposes no wrap operations yet: usages are
   // key metadata, validated at use.
   "AES-GCM": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
+  // The derive sources share WebCrypto's usage pair. X25519's entry is the
+  // *private* key's vocabulary; public keys carry no usages and are
+  // validated at their import site.
+  HKDF: ["deriveKey", "deriveBits"],
+  PBKDF2: ["deriveKey", "deriveBits"],
+  X25519: ["deriveKey", "deriveBits"],
 };
 
 /**
@@ -465,9 +534,24 @@ function normalizeUsages(keyUsages, name) {
     }
   }
   if (usages.length === 0) {
-    throw dom("SyntaxError", "usages cannot be empty for secret keys");
+    throw dom("SyntaxError", "usages cannot be empty for secret or private keys");
   }
   return usages;
+}
+
+/**
+ * Validate that `keyUsages` is a sequence and collect it, without the
+ * non-empty requirement — for the key types whose usage set must be empty
+ * (X25519 public keys).
+ * @param {unknown} keyUsages
+ * @returns {KeyUsage[]}
+ */
+function normalizeUsageSequence(keyUsages) {
+  const iterable = /** @type {Iterable<KeyUsage> | null | undefined} */ (keyUsages);
+  if (iterable == null || typeof iterable[Symbol.iterator] !== "function") {
+    throw new TypeError("keyUsages must be a sequence");
+  }
+  return [...iterable];
 }
 
 /**
@@ -510,6 +594,91 @@ function aesGcmMintOptions(usages, extractable) {
   options.canUnwrap(usages.includes("unwrapKey"));
   options.extractable(extractable);
   return options;
+}
+
+/**
+ * The `derive-options` resource for a KDF base-secret mint. Both grants,
+ * always: the platform's usage checks live on the *base key* and carry no
+ * cap rule, so the WebCrypto usages are enforced here (`requireUsage`) and
+ * the WIT grants do not ride them (see the header note).
+ */
+function deriveMintOptions() {
+  const options = new DeriveOptions();
+  options.canDeriveBits(true);
+  options.canDeriveKey(true);
+  return options;
+}
+
+/**
+ * The `agreement-key-options` resource for an X25519 secret-key mint. Both
+ * derive grants, like `deriveMintOptions`; `extractable` is recorded
+ * faithfully (the WIT keeps it as mint-time policy).
+ * @param {boolean} extractable
+ */
+function agreementMintOptions(extractable) {
+  const options = new AgreementKeyOptions();
+  options.canDeriveBits(true);
+  options.canDeriveKey(true);
+  options.extractable(extractable);
+  return options;
+}
+
+/**
+ * The WIT `derive-input` for one derive operation: the fully parameterized
+ * derivation the spec's (baseKey, normalized params) pair denotes.
+ *
+ * For X25519 this is where the agreement runs (`agree` computes the shared
+ * secret eagerly), so two spec-mandated errors surface here: an
+ * algorithm-mismatched or non-public `public` member is `InvalidAccessError`
+ * (checked before the call, like the spec's derive-bits steps), and the
+ * remaining `invalid-key` from `agree` is exactly the contributory all-zero
+ * check, which the spec reports as `OperationError` — remapped from
+ * `mapWitError`'s generic `DataError` because this call site knows which
+ * check it is.
+ * @param {NormalizedAlgorithm} alg
+ * @param {CryptoKey} baseKey narrowed by the caller's `requireKeyAlgorithm`
+ * @returns {Promise<any>} a `derivation.derive-input` resource
+ */
+async function prepareInput(alg, baseKey) {
+  if (alg.name === "X25519") {
+    const peer = alg.public;
+    if (!(peer instanceof CryptoKey)) {
+      throw new TypeError("X25519 derivation requires a CryptoKey as `public`");
+    }
+    if (peer.type !== "public") {
+      throw dom("InvalidAccessError", "the `public` member must be a public key");
+    }
+    if (peer.algorithm.name !== "X25519") {
+      throw dom(
+        "InvalidAccessError",
+        `public key algorithm is ${peer.algorithm.name}, not X25519`,
+      );
+    }
+    try {
+      return await callImport(handleOf(baseKey).agree(handleOf(peer)));
+    } catch (e) {
+      const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
+      if (cause?.tag === "invalid-key") {
+        throw dom("OperationError", cause.val ?? "the shared secret is the all-zero value", cause);
+      }
+      throw e;
+    }
+  }
+  if (alg.name === "HKDF") {
+    const variant = sha2VariantOf(alg.hash);
+    const salt = bytesOf(alg.salt, "salt");
+    const info = bytesOf(alg.info, "info");
+    return await callImport(hkdfIface.prepare(variant, handleOf(baseKey), salt, info));
+  }
+  // PBKDF2. A zero iteration count fails at `prepare` with the WIT's
+  // `other`, which maps onto the platform's own `OperationError`.
+  const variant = sha2VariantOf(alg.hash);
+  const salt = bytesOf(alg.salt, "salt");
+  const iterations = Number(alg.iterations);
+  if (!Number.isInteger(iterations) || iterations < 0 || iterations > 0xffffffff) {
+    throw new TypeError("PBKDF2 iterations must be a u32");
+  }
+  return await callImport(pbkdf2Iface.prepare(variant, handleOf(baseKey), salt, iterations));
 }
 
 /**
@@ -608,7 +777,7 @@ async function mintHmacKey(start, requestedLength, extractable, usages) {
     hash: Object.freeze({ name: "SHA-256" }),
     length,
   };
-  return mintKey(handle, projected, extractable, usages);
+  return mintKey(handle, "secret", projected, extractable, usages);
 }
 
 /**
@@ -620,7 +789,7 @@ async function mintAesGcmKey(start, extractable, usages) {
   const handle = await callImport(start());
   /** @type {AesKeyAlgorithm} */
   const projected = { name: "AES-GCM", length: 256 };
-  return mintKey(handle, projected, extractable, usages);
+  return mintKey(handle, "secret", projected, extractable, usages);
 }
 
 // --- subtle --------------------------------------------------------------------------
@@ -641,6 +810,58 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     );
   }
   const alg = normalizeAlgorithm(algorithm);
+
+  if (alg.name === "HKDF" || alg.name === "PBKDF2") {
+    // The spec's import steps for both KDFs: "raw" is the only format, and
+    // the key is forced non-extractable.
+    if (format !== "raw") {
+      throw dom("NotSupportedError", `${alg.name} keys support the "raw" format only`);
+    }
+    const usages = normalizeUsages(keyUsages, alg.name);
+    if (extractable) {
+      throw dom("SyntaxError", `${alg.name} keys cannot be extractable`);
+    }
+    const raw = bytesOf(keyData, "keyData");
+    const handle = await callImport(
+      alg.name === "HKDF"
+        ? hkdfIface.importIkm(raw, deriveMintOptions())
+        : pbkdf2Iface.importPassword(raw, deriveMintOptions()),
+    );
+    return mintKey(handle, "secret", { name: alg.name }, false, usages);
+  }
+
+  if (alg.name === "X25519") {
+    if (format === "raw") {
+      // The platform's raw X25519 import is public-only, and public keys
+      // carry no usages.
+      const requested = normalizeUsageSequence(keyUsages);
+      if (requested.length !== 0) {
+        throw dom("SyntaxError", "X25519 public keys take no usages");
+      }
+      const handle = await callImport(x25519Iface.importPublicKey(bytesOf(keyData, "keyData")));
+      return mintKey(handle, "public", { name: "X25519" }, !!extractable, []);
+    }
+    if (typeof keyData !== "object" || keyData === null) {
+      throw new TypeError("JWK key data must be an object");
+    }
+    const jwk = /** @type {JsonWebKey} */ (keyData);
+    if (jwk.d === undefined) {
+      // Unserved: the WIT's public import format is the raw u-coordinate.
+      throw dom(
+        "NotSupportedError",
+        "X25519 public keys import as \"raw\"; the public OKP JWK form is not served",
+      );
+    }
+    const usages = normalizeUsages(keyUsages, "X25519");
+    const handle = await callImport(
+      x25519Iface.importSecretKeyJwk(
+        jwkForImport(jwk, "enc", usages),
+        agreementMintOptions(!!extractable),
+      ),
+    );
+    return mintKey(handle, "private", { name: "X25519" }, !!extractable, usages);
+  }
+
   const usages = normalizeUsages(keyUsages, alg.name);
 
   if (alg.name === "HMAC") {
@@ -691,11 +912,27 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
  * @param {AlgorithmIdentifier | RsaHashedKeyGenParams | EcKeyGenParams | HmacKeyGenParams | AesKeyGenParams | Pbkdf2Params} algorithm
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} keyUsages
- * @returns {Promise<CryptoKey>}
+ * @returns {Promise<CryptoKey | CryptoKeyPair>}
  */
 async function generateKey(algorithm, extractable, keyUsages) {
   const alg = normalizeAlgorithm(algorithm);
+  if (alg.name === "HKDF" || alg.name === "PBKDF2") {
+    // The spec defines no generate operation for either KDF.
+    throw dom("NotSupportedError", `${alg.name} keys cannot be generated`);
+  }
   const usages = normalizeUsages(keyUsages, alg.name);
+
+  if (alg.name === "X25519") {
+    const pair = /** @type {[any, any]} */ (
+      await callImport(x25519Iface.generateKey(agreementMintOptions(!!extractable)))
+    );
+    return {
+      privateKey: mintKey(pair[0], "private", { name: "X25519" }, !!extractable, usages),
+      // Public keys are always extractable and carry no usages, as the
+      // platform's generate steps set them.
+      publicKey: mintKey(pair[1], "public", { name: "X25519" }, true, []),
+    };
+  }
 
   if (alg.name === "HMAC") {
     normalizeHash(alg.hash);
@@ -752,6 +989,18 @@ async function exportKey(format, key) {
   }
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
+  }
+  if (key.type === "private") {
+    if (format === "raw") {
+      // The spec's raw export is public-only for every asymmetric family.
+      throw dom("InvalidAccessError", "raw export serves public keys only");
+    }
+    // WIT-forced (see the header): private keys are generate-only surfaces,
+    // so there is no export path behind this call.
+    throw dom(
+      "NotSupportedError",
+      "private-key export is not served: the package's private keys are generate-only",
+    );
   }
   if (format === "jwk") {
     const jwkText = /** @type {string} */ (await callImport(handleOf(key).exportKeyJwk()));
@@ -877,6 +1126,98 @@ async function decrypt(algorithm, key, data) {
   return toArrayBuffer(plaintext);
 }
 
+/**
+ * @param {AlgorithmIdentifier | EcdhKeyDeriveParams | HkdfParams | Pbkdf2Params} algorithm
+ * @param {globalThis.CryptoKey} baseKey
+ * @param {number | null} [length]
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function deriveBits(algorithm, baseKey, length) {
+  const alg = normalizeAlgorithm(algorithm);
+  if (alg.name === "HMAC" || alg.name === "AES-GCM") {
+    throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
+  }
+  requireKeyAlgorithm(baseKey, alg.name);
+  requireUsage(baseKey, "deriveBits");
+  const input = await prepareInput(alg, baseKey);
+  const bits = length == null ? undefined : Number(length);
+  if (bits === undefined) {
+    // The null-length behavior is the source's: an agreement's natural
+    // output length (the whole shared secret), or the KDFs' refusal
+    // (`error.other`, the platform's own `OperationError`).
+    return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(input.deriveBits(undefined))));
+  }
+  if (bits === 0) {
+    // The platform's zero-length derive is an empty output. The WIT
+    // implementations decline zero-length requests, so the empty result is
+    // produced here — after `prepareInput` validated the parameters.
+    return new ArrayBuffer(0);
+  }
+  if (bits % 8 !== 0) {
+    // Sub-byte lengths: the KDFs reject them (the platform's own rule),
+    // and X25519 truncates with the trailing bits of the final byte
+    // zeroed. The WIT serves byte multiples and documents truncation as
+    // the consumer's (`derive-bits` doc), so the containing byte multiple
+    // is derived and masked here.
+    if (alg.name !== "X25519") {
+      throw dom("OperationError", `derive length must be a multiple of 8 bits, got ${bits}`);
+    }
+    const bytes = /** @type {Uint8Array} */ (
+      await callImport(input.deriveBits(Math.ceil(bits / 8) * 8))
+    );
+    bytes[bytes.length - 1] &= 0xff << (8 - (bits % 8));
+    return toArrayBuffer(bytes);
+  }
+  return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(input.deriveBits(bits))));
+}
+
+/**
+ * @param {AlgorithmIdentifier | EcdhKeyDeriveParams | HkdfParams | Pbkdf2Params} algorithm
+ * @param {globalThis.CryptoKey} baseKey
+ * @param {AlgorithmIdentifier | AesDerivedKeyParams | HmacImportParams} derivedKeyType
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} keyUsages
+ * @returns {Promise<CryptoKey>}
+ */
+async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsages) {
+  const alg = normalizeAlgorithm(algorithm);
+  if (alg.name === "HMAC" || alg.name === "AES-GCM") {
+    throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
+  }
+  const target = normalizeAlgorithm(derivedKeyType);
+  if (target.name !== "HMAC" && target.name !== "AES-GCM") {
+    // Deriving a KDF or agreement key is not among the WIT's `derive-key`
+    // mints (chaining is `hkdf.prepare-from`'s, below the subtle surface).
+    throw dom("NotSupportedError", `unsupported derived key type ${target.name}`);
+  }
+  const usages = normalizeUsages(keyUsages, target.name);
+  requireKeyAlgorithm(baseKey, alg.name);
+  requireUsage(baseKey, "deriveKey");
+  const input = await prepareInput(alg, baseKey);
+
+  if (target.name === "HMAC") {
+    normalizeHash(target.hash);
+    if (target.length === 0) {
+      throw dom("OperationError", "HMAC length cannot be 0");
+    }
+    const length = target.length === undefined ? undefined : Number(target.length);
+    return await mintHmacKey(
+      () => hmacSha2.deriveKey("sha256", input, length, hmacMintOptions(usages, !!extractable)),
+      undefined,
+      !!extractable,
+      usages,
+    );
+  }
+  if (target.length !== 256) {
+    throw dom("NotSupportedError", `unsupported AES-GCM length ${target.length}; only 256 is served`);
+  }
+  return await mintAesGcmKey(
+    () => aesGcm.deriveKey("aes256", input, aesGcmMintOptions(usages, !!extractable)),
+    !!extractable,
+    usages,
+  );
+}
+
 /** The `crypto.subtle` subset. */
 export const subtle = Object.freeze({
   importKey,
@@ -886,6 +1227,8 @@ export const subtle = Object.freeze({
   verify,
   encrypt,
   decrypt,
+  deriveBits,
+  deriveKey,
 });
 
 /** A `crypto`-shaped namespace for code expecting `crypto.subtle`. */

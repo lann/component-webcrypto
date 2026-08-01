@@ -9,14 +9,21 @@ package demo:componentize-webcrypto-demo@0.1.0;
 /// The world for a JS guest using the WebCrypto-subset library in
 /// `componentize-sdk/`: it imports exactly the `lann:webcrypto` surface the
 /// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
-/// `aes-gcm`/`aead`) and exports the same demo entry point as the Rust
-/// `crypto-demo` guest, so the existing `crypto-demo-driver` can drive it.
+/// `aes-gcm`/`aead`, and the derive model via `derivation`/`hkdf`/`pbkdf2`/
+/// `key-agreement`/`x25519`) and exports the same demo entry point as the
+/// Rust `crypto-demo` guest, so the existing `crypto-demo-driver` can drive
+/// it.
 world componentize-demo {
     import lann:webcrypto/types@0.1.0;
     import lann:webcrypto/mac@0.1.0;
     import lann:webcrypto/aead@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/derivation@0.1.0;
+    import lann:webcrypto/hkdf@0.1.0;
+    import lann:webcrypto/pbkdf2@0.1.0;
+    import lann:webcrypto/key-agreement@0.1.0;
+    import lann:webcrypto/x25519@0.1.0;
 
     export demo:webcrypto-demo/demo@0.1.0;
 }

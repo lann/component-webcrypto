@@ -24,7 +24,7 @@ import { CryptoKey, crypto, subtle } from "./webcrypto.js";
  * and one listed but unimplemented fails the assignment below.
  *
  * `generateKey` and `exportKey` are absent deliberately — see below.
- * @typedef {"importKey" | "sign" | "verify" | "encrypt" | "decrypt"} ServedMethods
+ * @typedef {"importKey" | "sign" | "verify" | "encrypt" | "decrypt" | "deriveBits" | "deriveKey"} ServedMethods
  */
 
 /** @type {Pick<SubtleCrypto, ServedMethods>} */
@@ -41,11 +41,12 @@ const cryptoServesWebCrypto = crypto;
  * deviation into the type rather than leaving it only in the README.
  *
  * `generateKey` returns a `CryptoKeyPair` for the asymmetric families and a
- * `CryptoKey` for the secret-key ones; this library serves HMAC and AES-GCM,
- * so it only ever returns a key.
- * @type {(algorithm: AesKeyGenParams | HmacKeyGenParams | Pbkdf2Params, extractable: boolean, keyUsages: ReadonlyArray<KeyUsage>) => Promise<globalThis.CryptoKey>}
+ * `CryptoKey` for the secret-key ones; this library serves both (X25519
+ * beside HMAC and AES-GCM), so it is asserted against the standard's
+ * catch-all overload.
+ * @type {(algorithm: AlgorithmIdentifier, extractable: boolean, keyUsages: ReadonlyArray<KeyUsage>) => Promise<globalThis.CryptoKeyPair | globalThis.CryptoKey>}
  */
-const generateKeyServesSecretKeyOverload = subtle.generateKey;
+const generateKeyServesCatchAllOverload = subtle.generateKey;
 
 /**
  * `exportKey`'s TS declaration is overloaded — `"jwk"` returns a
@@ -75,7 +76,7 @@ const keyServesCryptoKey = (key) => key;
 export const checked = {
   subtleServesWebCrypto,
   cryptoServesWebCrypto,
-  generateKeyServesSecretKeyOverload,
+  generateKeyServesCatchAllOverload,
   exportKeyServesRawOverload,
   keyServesCryptoKey,
 };

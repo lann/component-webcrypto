@@ -98,16 +98,85 @@ function generateKeyInSubset(name) {
 }
 
 /**
- * The derive-operation groups (derive_bits_keys/{hkdf,pbkdf2,cfrg_curves_*},
- * import_export/okp_*, generateKey/successes_X25519): the library serves
- * none of it — the WIT carries all of it (`derivation`, `hkdf`, `pbkdf2`,
- * `key-agreement`, `x25519`), but `deriveBits`/`deriveKey` and the
- * algorithms reached only through them are unserved shim surface (see the
- * header's deviations list) — so the subset is empty and every test is an
- * out-of-subset expected failure until the shim grows.
+ * The X25519 groups whose every test crosses unserved surface: the cfrg
+ * derive suites import all their keys as pkcs8/spki (formats the WIT
+ * defers by the format-admission ruling), and each generateKey success
+ * test exports the pair as spki + private JWK (the private export is
+ * WIT-forced; see the shim header). Their subset is therefore empty: the
+ * agreement's behavioral assertions live in the conformance suites, and
+ * these groups meter the remaining format gap.
  */
-function deriveInSubset() {
+function x25519FormatGatedInSubset() {
   return false;
+}
+
+/**
+ * derive_bits_keys/{hkdf,pbkdf2}: the served subset is SHA-256/384/512
+ * derivations over importable base secrets, with derived-key targets the
+ * WIT's `derive-key` mints span (AES-GCM 256, HMAC-SHA-256).
+ *
+ * Excluded, in match order: subtests needing an ECDH key (`generateKey`
+ * does not serve ECDH, so the fixture is null); the empty HKDF base key
+ * (WIT-forced — `import-ikm` rejects empty material by ruling); unserved
+ * derived-key targets; then SHA-1 rows — except the subtests whose
+ * checks precede the hash (bad hash names, missing usages), which are
+ * hash-independent and served for every row.
+ *
+ * The exclusions are whole-row, so the census pins a large `outPassed`
+ * for these groups: an unserved-target row's bad-hash and missing-usage
+ * subtests often expect the same `DOMException` name the unserved-target
+ * refusal carries, and pass for that wrong reason. Claiming a
+ * coincidence would let it silently break when the target is served, so
+ * they stay out-of-subset, visible in the pinned census.
+ * @param {string} name
+ */
+function kdfDeriveInSubset(name) {
+  if (name === "setup - define tests") {
+    return true;
+  }
+  if (name.includes("wrong (ECDH) key")) {
+    return false;
+  }
+  if (name.includes("empty derivedKey")) {
+    return false;
+  }
+  if (name.startsWith("Derived key of type")) {
+    const served =
+      name.startsWith("Derived key of type name: AES-GCM length: 256") ||
+      name.startsWith("Derived key of type name: HMAC hash: SHA-256");
+    if (!served) {
+      return false;
+    }
+  }
+  if (/bad hash name|missing deriveBits usage|missing deriveKey usage/.test(name)) {
+    return true;
+  }
+  return !name.includes(", SHA-1, ");
+}
+
+/**
+ * import_export/okp_importKey (X25519): raw public imports and
+ * non-extractable private JWK imports are served. Extractable private
+ * imports are excluded — each such test also exports the key, and private
+ * export is WIT-forced (the shim header's registry); public JWKs and the
+ * pkcs8/spki formats are unserved.
+ * @param {string} name
+ */
+function okpImportInSubset(name) {
+  if (name.includes("(raw, buffer(32)")) {
+    return true;
+  }
+  return name.includes("object(crv, d, x, kty)") && name.includes("false, [");
+}
+
+/**
+ * import_export/okp_importKey_failures (X25519): every raw-format and
+ * private-JWK rejection is served; the public JWK form and pkcs8/spki are
+ * unserved, so their expected errors are not this library's.
+ * @param {string} name
+ */
+function okpImportFailuresInSubset(name) {
+  return name.includes("(raw") || name.includes("jwk(private)");
 }
 
 // --- runner -----------------------------------------------------------------------
@@ -136,29 +205,29 @@ export const GROUPS = [
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",
     () => promise_test(defineCfrgBits, "setup - define tests"),
-    deriveInSubset,
+    x25519FormatGatedInSubset,
   ],
   [
     "derive_bits_keys/cfrg_curves_keys (X25519)",
     () => promise_test(defineCfrgKeys, "setup - define tests"),
-    deriveInSubset,
+    x25519FormatGatedInSubset,
   ],
-  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), deriveInSubset],
+  ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), okpImportInSubset],
   [
     "import_export/okp_importKey_failures (X25519)",
     () => runOkpImportKeyFailures(["X25519"]),
-    deriveInSubset,
+    okpImportFailuresInSubset,
   ],
-  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), deriveInSubset],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), x25519FormatGatedInSubset],
   [
     "derive_bits_keys/hkdf",
     () => promise_test(defineHkdf, "setup - define tests"),
-    deriveInSubset,
+    kdfDeriveInSubset,
   ],
   [
     "derive_bits_keys/pbkdf2",
     () => promise_test(definePbkdf2, "setup - define tests"),
-    deriveInSubset,
+    kdfDeriveInSubset,
   ],
 ];
 
