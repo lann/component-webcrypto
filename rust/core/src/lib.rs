@@ -47,6 +47,11 @@
 //! drop. The `export_key_raw` operations are the one place it leaves that
 //! protection, and they return a plain `Vec<u8>`.
 //!
+//! No secret-bearing material type implements `Clone`: a key's bytes and
+//! keyed cipher state exist in exactly one place, so duplication is
+//! unrepresentable. Callers that need to use material off-thread share it
+//! behind `Arc`.
+//!
 //! An extractable key's bytes are bound for guest memory, which the runtime
 //! allocates and frees and this crate cannot scrub: the material is
 //! unprotected from this call onward whatever the return type says. Every

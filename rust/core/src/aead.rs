@@ -19,7 +19,6 @@ const CHACHA_KEY_LEN: usize = 32;
 /// minting. Only the WIT variant cases the Rust implementations serve
 /// appear here: AES-192 is declined at minting (see the WIT `aes-variant`
 /// doc).
-#[derive(Clone)]
 // Each AES variant is an expanded key schedule; the size skew between the
 // AES-128 and AES-256 schedules is inherent and both live briefly per call.
 #[allow(clippy::large_enum_variant)]
@@ -68,7 +67,6 @@ impl AeadCipher {
 /// *decisions* over that count ([`check_budget`](Self::check_budget),
 /// [`seals_remaining`](Self::seals_remaining)) live here so the two
 /// implementations cannot diverge on them.
-#[derive(Clone)]
 pub struct AeadKeyMaterial {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
     cipher: AeadCipher,

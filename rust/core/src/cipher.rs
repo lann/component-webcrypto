@@ -57,7 +57,6 @@ impl CipherMode {
 }
 
 /// The AES block cipher backing a [`CipherKeyMaterial`], keyed at minting.
-#[derive(Clone)]
 // The size skew between the AES-128 and AES-256 key schedules is inherent.
 #[allow(clippy::large_enum_variant)]
 enum Block {
@@ -84,7 +83,6 @@ impl Block {
 /// The material behind a `cipher.cipher-key` resource: the keyed AES block
 /// cipher, its mode, the raw key bytes (zeroized on drop), and the
 /// mint-time policy.
-#[derive(Clone)]
 pub struct CipherKeyMaterial {
     mode: CipherMode,
     block: Block,

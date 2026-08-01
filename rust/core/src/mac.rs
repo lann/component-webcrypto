@@ -11,7 +11,6 @@ use crate::{
 /// The material behind a `mac.mac-key` resource: raw HMAC key bytes
 /// (zeroized on drop), the SHA-2 variant the key is bound to, and its
 /// extractability.
-#[derive(Clone)]
 pub struct MacKeyMaterial {
     /// The raw key material, retained for `sign`/`verify` and (when
     /// extractable) `export-key-raw`; zeroized on drop.
