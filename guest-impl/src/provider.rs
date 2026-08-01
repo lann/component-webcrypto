@@ -46,6 +46,7 @@ use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
 use crate::exports::lann::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
 use crate::exports::lann::webcrypto::hkdf_sha1::Guest as HkdfSha1Guest;
+use crate::exports::lann::webcrypto::hkdf_sha2::Guest as HkdfSha2Guest;
 use crate::exports::lann::webcrypto::hmac_sha1::Guest as HmacSha1Guest;
 use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
 use crate::exports::lann::webcrypto::key_agreement::{
@@ -59,6 +60,7 @@ use crate::exports::lann::webcrypto::pbkdf2::{
     self as pbkdf2_iface, Guest as Pbkdf2Guest, GuestPassword,
 };
 use crate::exports::lann::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
+use crate::exports::lann::webcrypto::pbkdf2_sha2::Guest as Pbkdf2Sha2Guest;
 use crate::exports::lann::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
@@ -625,7 +627,9 @@ impl HkdfGuest for Component {
         let material = webcrypto_impl_core::IkmMaterial::import(raw, policy)?;
         Ok(hkdf_iface::Ikm::new(Ikm { material }))
     }
+}
 
+impl HkdfSha2Guest for Component {
     async fn prepare(
         variant: Sha2Variant,
         input: hkdf_iface::IkmBorrow<'_>,
@@ -683,7 +687,9 @@ impl Pbkdf2Guest for Component {
         let material = webcrypto_impl_core::PasswordMaterial::import(raw, policy)?;
         Ok(pbkdf2_iface::Password::new(Password { material }))
     }
+}
 
+impl Pbkdf2Sha2Guest for Component {
     async fn prepare(
         variant: Sha2Variant,
         input: pbkdf2_iface::PasswordBorrow<'_>,

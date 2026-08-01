@@ -42,8 +42,10 @@ world provider {
     export lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
     export lann:webcrypto/derivation@0.1.0;
     export lann:webcrypto/hkdf@0.1.0;
+    export lann:webcrypto/hkdf-sha2@0.1.0;
     export lann:webcrypto/hkdf-sha1@0.1.0;
     export lann:webcrypto/pbkdf2@0.1.0;
+    export lann:webcrypto/pbkdf2-sha2@0.1.0;
     export lann:webcrypto/pbkdf2-sha1@0.1.0;
     export lann:webcrypto/key-agreement@0.1.0;
     export lann:webcrypto/x25519@0.1.0;

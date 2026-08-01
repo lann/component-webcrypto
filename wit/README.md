@@ -274,9 +274,10 @@ short:
   Kerberos string-to-key, WinZip AE-2), and SHA-1's collision breaks do
   not reach them — HMAC rests on the compression function's PRF property.
   They enter as per-algorithm interfaces (`hmac-sha1`, `hkdf-sha1`,
-  `pbkdf2-sha1`) rather than growing `sha2-variant`, which SHA-1 cannot
-  join by name; the KDF interfaces reuse `hkdf.ikm` and `pbkdf2.password`,
-  so one imported secret parameterizes either hash family. Bare SHA-1
+  `pbkdf2-sha1`, parallel to the `-sha2` interfaces) rather than growing
+  `sha2-variant`, which SHA-1 cannot join by name; the per-hash prepare
+  interfaces share `hkdf.ikm` and `pbkdf2.password`, so one imported
+  secret parameterizes either hash family. Bare SHA-1
   digests remain `sha1-checked`'s alone.
 - **Unauthenticated modes are in, for compatibility.** AES-CBC and
   AES-CTR are WebCrypto-committed formats real systems must read and

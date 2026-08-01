@@ -24,8 +24,8 @@ use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::hkdf;
-use lann_webcrypto_guest::bindings::pbkdf2;
+use lann_webcrypto_guest::bindings::hkdf_sha2;
+use lann_webcrypto_guest::bindings::pbkdf2_sha2;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -112,7 +112,7 @@ pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
             )
             .await
         }
-        _ => hkdf::prepare(variant, &ikm, case.salt.clone(), case.info.clone()).await,
+        _ => hkdf_sha2::prepare(variant, &ikm, case.salt.clone(), case.info.clone()).await,
     }
     .map_err(|e| describe("prepare", &e))?;
     let derived = input.derive_bits(Some(case.size * 8)).await;
@@ -183,7 +183,7 @@ pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
             )
             .await
         }
-        _ => pbkdf2::prepare(variant, &password, case.salt.clone(), case.iterations).await,
+        _ => pbkdf2_sha2::prepare(variant, &password, case.salt.clone(), case.iterations).await,
     }
     .map_err(|e| describe("prepare", &e))?;
     let derived = input.derive_bits(Some(case.dk_len * 8)).await;

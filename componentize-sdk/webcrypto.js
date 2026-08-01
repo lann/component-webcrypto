@@ -25,7 +25,8 @@
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
 // `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `derivation`, `hkdf`,
-// `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha1`, `key-agreement`, `x25519`,
+// `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
+// `key-agreement`, `x25519`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
 // `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
@@ -89,8 +90,10 @@ import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
 import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
 import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
+import * as hkdfSha2Iface from "lann:webcrypto/hkdf-sha2@0.1.0";
 import * as hkdfSha1Iface from "lann:webcrypto/hkdf-sha1@0.1.0";
 import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
+import * as pbkdf2Sha2Iface from "lann:webcrypto/pbkdf2-sha2@0.1.0";
 import * as pbkdf2Sha1Iface from "lann:webcrypto/pbkdf2-sha1@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
 import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
@@ -909,7 +912,7 @@ async function prepareInput(alg, baseKey) {
     return await callImport(
       "sha1" in route
         ? hkdfSha1Iface.prepare(handleOf(baseKey), salt, info)
-        : hkdfIface.prepare(route.variant, handleOf(baseKey), salt, info),
+        : hkdfSha2Iface.prepare(route.variant, handleOf(baseKey), salt, info),
     );
   }
   // PBKDF2. A zero iteration count fails at `prepare` with the WIT's
@@ -923,7 +926,7 @@ async function prepareInput(alg, baseKey) {
   return await callImport(
     "sha1" in route
       ? pbkdf2Sha1Iface.prepare(handleOf(baseKey), salt, iterations)
-      : pbkdf2Iface.prepare(route.variant, handleOf(baseKey), salt, iterations),
+      : pbkdf2Sha2Iface.prepare(route.variant, handleOf(baseKey), salt, iterations),
   );
 }
 
@@ -1745,7 +1748,7 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
   const target = normalizeAlgorithm(derivedKeyType);
   if (target.name !== "HMAC" && !target.name.startsWith("AES-")) {
     // Deriving a KDF or agreement key is not among the WIT's `derive-key`
-    // mints (chaining is `hkdf.prepare-from`'s, below the subtle surface).
+    // mints (chaining is `hkdf-sha2.prepare-from`'s, below the subtle surface).
     throw dom("NotSupportedError", `unsupported derived key type ${target.name}`);
   }
   // The sequence-and-emptiness usage check precedes the derivation, but

@@ -4,7 +4,7 @@ package lann:webcrypto@0.1.0;
 ///
 /// Keys returned here drive `key-agreement.secret-key.agree`, whose
 /// `derive-input` output feeds `derive-bits`, the key-minting interfaces'
-/// `derive-key`, and `hkdf.prepare-from` — the spec's own worked example
+/// `derive-key`, and `hkdf-sha2.prepare-from` — the spec's own worked example
 /// (X25519 → HKDF → AES-GCM) runs entirely through handles.
 ///
 /// Formats follow the format-admission rule (see `README.md`, "Design

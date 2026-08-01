@@ -48,7 +48,8 @@ use crate::bindings::webcrypto::{
     chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
     ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
     ed25519_verify as ed25519_verify_iface, hkdf_sha1 as hkdf_sha1_iface,
-    hmac_sha1 as hmac_sha1_iface, hmac_sha2 as hmac_sha2_iface, pbkdf2_sha1 as pbkdf2_sha1_iface,
+    hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface, hmac_sha2 as hmac_sha2_iface,
+    pbkdf2_sha1 as pbkdf2_sha1_iface, pbkdf2_sha2 as pbkdf2_sha2_iface,
     sha1_checked as sha1_checked_iface, sha2 as sha2_iface, signature as signature_iface,
     x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
@@ -766,10 +767,14 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
         let material = webcrypto_impl_core::IkmMaterial::import(raw, policy);
         mint(accessor, material.map(|material| Ikm { material })).await
     }
+}
 
+impl hkdf_sha2_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     async fn prepare(
         accessor: &Accessor<T, Self>,
-        variant: hkdf_iface::Sha2Variant,
+        variant: hkdf_sha2_iface::Sha2Variant,
         input: Resource<Ikm>,
         salt: Vec<u8>,
         info: Vec<u8>,
@@ -788,7 +793,7 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
 
     async fn prepare_from(
         accessor: &Accessor<T, Self>,
-        variant: hkdf_iface::Sha2Variant,
+        variant: hkdf_sha2_iface::Sha2Variant,
         input: Resource<DeriveInput>,
         salt: Vec<u8>,
         info: Vec<u8>,
@@ -942,10 +947,14 @@ impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
         let material = webcrypto_impl_core::PasswordMaterial::import(raw, policy);
         mint(accessor, material.map(|material| Password { material })).await
     }
+}
 
+impl pbkdf2_sha2_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> pbkdf2_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     async fn prepare(
         accessor: &Accessor<T, Self>,
-        variant: pbkdf2_iface::Sha2Variant,
+        variant: pbkdf2_sha2_iface::Sha2Variant,
         input: Resource<Password>,
         salt: Vec<u8>,
         iterations: u32,

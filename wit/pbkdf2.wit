@@ -1,12 +1,9 @@
 package lann:webcrypto@0.1.0;
 
-/// PBKDF2 (RFC 8018) over the SHA-2 hash family: password-based key
-/// derivation, as the Web Cryptography API serves it.
-///
-/// Like `hkdf`, this interface mints no keys. It mints `derive-input`s —
-/// parameterized derivations — which the key-minting interfaces'
-/// `derive-key` functions consume, and which yield raw output through
-/// `derivation.derive-input.derive-bits`.
+/// PBKDF2 (RFC 8018) passwords: the hash-independent half of the PBKDF2
+/// surface. The `password` resource minted here parameterizes derivations
+/// through the per-hash prepare interfaces (`pbkdf2-sha2`,
+/// `pbkdf2-sha1`), so one imported password serves either hash family.
 ///
 /// Security:
 /// - No operation returns a `password`'s bytes, under any grant:
@@ -16,14 +13,9 @@ package lann:webcrypto@0.1.0;
 ///   resource's construction-to-drop lifetime; that window is the
 ///   secret's exposure to memory side channels. Import late, drop early.
 ///   Dropping releases (and, in scrubbing implementations, zeroizes) it.
-///
-/// There is deliberately no `prepare-from` here: adopting another
-/// derivation's output as a *password* inverts the primitive's purpose.
-/// `hkdf.prepare-from` is the chaining path.
 interface pbkdf2 {
     use types.{error};
-    use sha2.{sha2-variant};
-    use derivation.{derive-input, derive-options};
+    use derivation.{derive-options};
 
     /// A password: consumable only by `prepare`, never readable. Usage
     /// grants are fixed at import and copied to every input prepared from
@@ -42,6 +34,26 @@ interface pbkdf2 {
     /// `error.not-permitted` if `options` grants nothing, per the
     /// package-wide options contract (see `README.md`).
     import-password: async func(raw: list<u8>, options: derive-options) -> result<password, error>;
+}
+
+/// PBKDF2 (RFC 8018) over the SHA-2 hash family: password-based key
+/// derivation, as the Web Cryptography API serves it.
+///
+/// Like `hkdf-sha2`, this interface mints no keys. It mints
+/// `derive-input`s — parameterized derivations — which the key-minting
+/// interfaces' `derive-key` functions consume, and which yield raw output
+/// through `derivation.derive-input.derive-bits`. The `password` resource
+/// and its import stay `pbkdf2`'s, so one imported password can
+/// parameterize derivations of either hash family.
+///
+/// There is deliberately no `prepare-from` here: adopting another
+/// derivation's output as a *password* inverts the primitive's purpose.
+/// `hkdf-sha2.prepare-from` is the chaining path.
+interface pbkdf2-sha2 {
+    use types.{error};
+    use sha2.{sha2-variant};
+    use pbkdf2.{password};
+    use derivation.{derive-input};
 
     /// Parameterize a derivation: `salt` and the iteration count are
     /// bound now, and the output length arrives per use (the platform's
@@ -61,11 +73,11 @@ interface pbkdf2 {
     /// implementation not serving the variant fails `error.unsupported`
     /// (the truncated SHA-2 variants are unserved package-wide).
     ///
-    /// Unlike `hkdf.prepare`, running the derivation early cannot discard
-    /// the base secret entirely: PBKDF2 has no extract step, so the input
-    /// retains password-derived keyed state (the PRF's key schedule) for
-    /// its lifetime — equivalent in sensitivity to HKDF's retained PRK,
-    /// and still not the raw password bytes.
+    /// Unlike `hkdf-sha2.prepare`, running the derivation early cannot
+    /// discard the base secret entirely: PBKDF2 has no extract step, so
+    /// the input retains password-derived keyed state (the PRF's key
+    /// schedule) for its lifetime — equivalent in sensitivity to HKDF's
+    /// retained PRK, and still not the raw password bytes.
     prepare: async func(%variant: sha2-variant, input: borrow<password>, salt: list<u8>, iterations: u32) -> result<derive-input, error>;
 }
 
@@ -84,7 +96,7 @@ interface pbkdf2-sha1 {
     use pbkdf2.{password};
     use derivation.{derive-input};
 
-    /// Parameterize a PBKDF2-HMAC-SHA-1 derivation. See `pbkdf2.prepare`
-    /// for the `salt` and `iterations` contracts.
+    /// Parameterize a PBKDF2-HMAC-SHA-1 derivation. See
+    /// `pbkdf2-sha2.prepare` for the `salt` and `iterations` contracts.
     prepare: async func(input: borrow<password>, salt: list<u8>, iterations: u32) -> result<derive-input, error>;
 }
