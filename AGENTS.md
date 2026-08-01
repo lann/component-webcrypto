@@ -162,11 +162,16 @@ is a semver-minor package bump: new methods are subtyping-compatible for
 existing compositions, but providers must update to serve them. Adding a
 **`types.error` case** is always semver-major: the variant sits in return
 position, so a new case flows toward consumers whose bindings cannot
-represent it — there is no compatible path for variant growth. Before
-proposing an error case, check whether the fail-closed design maps the
-condition onto an existing one (it usually does); `other(string)` carries
-operational conditions indefinitely, never semantic conditions callers must
-branch on.
+represent it — there is no compatible path for variant growth. The variant
+is therefore designed never to need growth: the closed cases carry the
+generic kinds' universal conditions, `other(string)` carries operational
+conditions (never semantic conditions callers must branch on), and
+`extension(extension-error)` carries named algorithm- and feature-specific
+conditions by (`origin`, `name`) pair — see `wit/README.md`, "Error
+contract". Before proposing a closed case, check whether the fail-closed
+design maps the condition onto an existing one (it usually does) and
+whether the condition is interface-specific (then it is an extension
+condition, not a case).
 
 The evolution rules describe the cost of a change, not a prohibition — and
 they bind only once the package has external consumers, which it does not

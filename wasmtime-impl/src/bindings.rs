@@ -77,6 +77,8 @@ mod generated {
             "lann:webcrypto/pbkdf2@0.1.0.[method]password.can-derive-key": trappable,
             "lann:webcrypto/digest@0.1.0.[method]digest.algorithm-name": trappable,
             "lann:webcrypto/sha2@0.1.0.make-digest": trappable,
+            "lann:webcrypto/sha1-checked@0.1.0.make-rejecting-digest": trappable,
+            "lann:webcrypto/sha1-checked@0.1.0.make-mitigating-digest": trappable,
             "lann:webcrypto/bytes@0.1.0.constant-time-equal": trappable,
             "lann:webcrypto/signature@0.1.0.[method]verifying-key.algorithm-name": trappable,
             "lann:webcrypto/signature@0.1.0.[method]verifying-key.algorithm-curve": trappable,

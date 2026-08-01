@@ -45,6 +45,7 @@ import {
   pbkdf2,
   hmacSha2,
   sha2,
+  sha1Checked,
   x25519,
   xchacha20Poly1305,
   xchacha20Poly1305InternalNonce,
@@ -152,6 +153,9 @@ const hmacSha2Interface = hmacSha2;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-sha2.js")} */
 const sha2Interface = sha2;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-sha1-checked.js")} */
+const sha1CheckedInterface = sha1Checked;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-bytes.js")} */
 const bytesInterface = bytes;

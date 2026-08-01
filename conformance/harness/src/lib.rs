@@ -50,11 +50,23 @@ pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 /// longer than 128 bytes).
 pub const FEATURE_GCM_ANY_IV: &str = "aes-gcm-any-iv";
 
+/// The `sha1-checked` feature: the checked-SHA-1 minting interface (both
+/// postures). Platform SHA-1 carries no sha1dc collision detection and
+/// the jco host is constrained to `crypto.subtle`, so the jco targets
+/// declare it missing — the first feature the in-guest provider serves
+/// that the platform hosts do not.
+pub const FEATURE_SHA1_CHECKED: &str = "sha1-checked";
+
 /// Every feature name a target may declare missing — shared here so every
 /// guest validates the same names. `all` traps on names outside this set,
 /// so a misspelled declaration is a harness bug rather than a silently
 /// inert one.
-pub const KNOWN_FEATURES: &[&str] = &[FEATURE_CHACHA, FEATURE_ECDSA_SIGN, FEATURE_GCM_ANY_IV];
+pub const KNOWN_FEATURES: &[&str] = &[
+    FEATURE_CHACHA,
+    FEATURE_ECDSA_SIGN,
+    FEATURE_GCM_ANY_IV,
+    FEATURE_SHA1_CHECKED,
+];
 
 /// A probe body. Boxed because each `async fn` has its own opaque type.
 pub type ProbeFn = fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>>;
@@ -243,6 +255,12 @@ pub fn describe(context: &str, error: &Error) -> String {
         Error::NotPermitted(detail) => format!("not-permitted: {detail}"),
         Error::KeyExhausted => "key-exhausted".to_string(),
         Error::Other(detail) => format!("other: {detail}"),
+        Error::Extension(ext) => format!(
+            "extension({origin}, {name}): {message}",
+            origin = ext.origin,
+            name = ext.name,
+            message = ext.message,
+        ),
     };
     format!("{context}: {rendered}")
 }
@@ -267,6 +285,9 @@ pub enum ErrKind {
     KeyExhausted,
     /// `other`.
     Other,
+    /// `extension` (any condition; probes pinning a specific
+    /// (`origin`, `name`) pair match on the payload directly).
+    Extension,
 }
 
 impl ErrKind {
@@ -281,6 +302,7 @@ impl ErrKind {
             ErrKind::NotPermitted => "not-permitted",
             ErrKind::KeyExhausted => "key-exhausted",
             ErrKind::Other => "other",
+            ErrKind::Extension => "extension",
         }
     }
 
@@ -296,6 +318,7 @@ impl ErrKind {
                 | (ErrKind::NotPermitted, Error::NotPermitted(_))
                 | (ErrKind::KeyExhausted, Error::KeyExhausted)
                 | (ErrKind::Other, Error::Other(_))
+                | (ErrKind::Extension, Error::Extension(_))
         )
     }
 }

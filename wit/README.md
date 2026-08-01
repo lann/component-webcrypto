@@ -169,6 +169,20 @@ and accidental corruption are indistinguishable in principle.
 complete the operation now, an implementation's buffering limit). It never
 carries semantic conditions a caller must branch on.
 
+**`extension(extension-error)` carries named conditions outside the closed
+set.** The closed cases are the conditions the *generic kinds'* contracts
+name — universal across operation families; `extension` carries algorithm-
+and feature-specific conditions, identified by the (`origin`, `name`) pair
+and defined by the interface that produces them (the first is
+`sha1-checked`'s `("lann:webcrypto", "collision-detected")`). The
+distinction from `other` is the contract: `extension` is a named condition
+a caller may branch on, `other` is operational noise a caller must not — so
+a condition can graduate from `other` to a named extension case without a
+type change, and the closed set never has to grow again. Third-party
+providers mint conditions under their own package `origin`. SDKs expose
+constants for known pairs, and the conformance suites pin exact pairs
+cross-implementation exactly as they pin message strings.
+
 **Verification returns `result<_, error>`, not `bool`.** An ignored boolean
 fails open; a dropped `result` does not.
 

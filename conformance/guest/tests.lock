@@ -7398,4 +7398,5 @@ cases = [
     { name = "probe/ecdsa-cross-hash-variants" },
     { name = "probe/x25519-format-roundtrips" },
     { name = "probe/internal-nonce-jwk" },
+    { name = "probe/sha1-checked-postures", features = ["sha1-checked"] },
 ]

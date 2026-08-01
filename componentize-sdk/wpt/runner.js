@@ -234,14 +234,14 @@ function getRandomValuesInSubset() {
 }
 
 /**
- * digest/digest: the served SHA-2 family (SHA-256/384/512, any name
- * casing), the bad-algorithm-name rejections, and the missing-name
- * `TypeError`s; SHA-1 rows are unserved (the WIT carries no SHA-1
- * anywhere).
- * @param {string} name
+ * digest/digest: the whole group — the SHA-2 family, the bad-algorithm-name
+ * rejections, the missing-name `TypeError`s, and the SHA-1 rows, which the
+ * shim serves through the package's `sha1-checked` interface (mitigating
+ * posture: byte-identical to the platform on every honest input, which is
+ * all WPT hashes).
  */
-function digestInSubset(name) {
-  return !/^sha-1 /i.test(name);
+function digestInSubset() {
+  return true;
 }
 
 /**
