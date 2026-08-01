@@ -28,6 +28,7 @@ import { GROUPS as GROUP_TABLE } from "./js/componentize/wpt/groups.js";
 import { drain, takeResults } from "./js/componentize/wpt/harness.js";
 import * as groupHmac from "./js/componentize/wpt/build/group-hmac.js";
 import * as groupAesGcm from "./js/componentize/wpt/build/group-aes-gcm.js";
+import * as groupAesGcm256Iv from "./js/componentize/wpt/build/group-aes-gcm-256-iv.js";
 import * as groupAesCbc from "./js/componentize/wpt/build/group-aes-cbc.js";
 import * as groupAesCtr from "./js/componentize/wpt/build/group-aes-ctr.js";
 import * as groupImportKey from "./js/componentize/wpt/build/group-import-key.js";
@@ -52,6 +53,7 @@ import * as groupPbkdf2Derive from "./js/componentize/wpt/build/group-pbkdf2-der
 const MODULES = {
   "group-hmac.js": groupHmac,
   "group-aes-gcm.js": groupAesGcm,
+  "group-aes-gcm-256-iv.js": groupAesGcm256Iv,
   "group-aes-cbc.js": groupAesCbc,
   "group-aes-ctr.js": groupAesCtr,
   "group-import-key.js": groupImportKey,

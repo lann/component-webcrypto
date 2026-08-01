@@ -39,8 +39,9 @@ function hmacInSubset(name) {
 }
 
 /**
- * encrypt_decrypt/aes_gcm (96-bit iv): 128- and 256-bit keys at every
- * legal tag length (per-call `tag-size` carries them all), plus the
+ * encrypt_decrypt/aes_gcm (both the 96-bit- and 256-bit-iv groups; the
+ * per-call `iv` parameter carries any length): 128- and 256-bit keys at
+ * every legal tag length (per-call `tag-size` carries them all), plus the
  * illegal-tag-length rejections and the mismatched-key tests (their
  * AES-CBC fixture is served); AES-192 is declined package-wide.
  */
@@ -283,6 +284,12 @@ export const GROUPS = [
   {
     name: "encrypt_decrypt/aes_gcm (96-bit iv)",
     module: "group-aes-gcm.js",
+    start: (ns) => ns.run_test(),
+    inSubset: gcmInSubset,
+  },
+  {
+    name: "encrypt_decrypt/aes_gcm (256-bit iv)",
+    module: "group-aes-gcm-256-iv.js",
     start: (ns) => ns.run_test(),
     inSubset: gcmInSubset,
   },
