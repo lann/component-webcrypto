@@ -7393,4 +7393,9 @@ cases = [
     { name = "probe/x25519-key-contract" },
     { name = "probe/x25519-agree-contract" },
     { name = "probe/x25519-grants-and-chaining" },
+    { name = "probe/sig-public-format-imports" },
+    { name = "probe/ed25519-private-format-imports" },
+    { name = "probe/ecdsa-cross-hash-variants" },
+    { name = "probe/x25519-format-roundtrips" },
+    { name = "probe/internal-nonce-jwk" },
 ]

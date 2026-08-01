@@ -131,6 +131,12 @@ interface aes-gcm-internal-nonce {
     /// `error.unsupported`.
     import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
+    /// Import key material from an `oct` JWK, subject to
+    /// `import-key-raw`'s contract (including the policy-based-rejection
+    /// allowance) and the package-wide JWK contract (see
+    /// `mac-key.export-key-jwk`).
+    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+
     /// Generate a fresh random internal-nonce AES-GCM key of the declared
     /// variant. Fails with `error.unsupported` if this implementation does
     /// not serve the variant.

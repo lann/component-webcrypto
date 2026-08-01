@@ -130,15 +130,23 @@ Every `*-jwk` function follows this contract. The minting interfaces'
   pinned so implementations cannot diverge on adversarial input). `k` is
   strict unpadded base64url (RFC 7515): padding, non-alphabet bytes, and
   non-zero trailing bits all fail with `error.invalid-key`.
-- Import validates the material-bearing fields: `kty`, `k`, `alg` against
-  the declared variant, and `ext` against the requested extractability;
-  failures are `error.invalid-key`. `use` and `key_ops` are ignored: this
-  package has no JWK usage model, so they are the consumer's policy to
-  check.
-- Export returns exactly the material-bearing members (`kty`, `k`, `alg`)
-  and nothing else. Metadata this package does not model (`key_ops`,
-  `ext`, `use`) is the consumer's to stamp. Member order is not contract.
-- Algorithms without a registered JWK `alg` fail with `error.unsupported`.
+- Import validates the material-bearing fields: `kty`, the key members
+  (`k`, or `crv`/`x`/`y`/`d` for the OKP and EC forms), `alg` where the
+  importing interface names accepted values (X25519 ignores `alg`
+  entirely, WebCrypto's rule for the ECDH family), and `ext` against the
+  requested extractability; failures are `error.invalid-key`. `use` and
+  `key_ops` are ignored: this package has no JWK usage model, so they are
+  the consumer's policy to check.
+- A *public-key* import has no extractability request — minted public
+  keys are unconditionally exportable — so a public JWK carrying
+  `"ext": false` is rejected with `error.invalid-key`.
+- Export returns exactly the material-bearing members — `kty`, `k`, and
+  `alg` for the `oct` form; `kty`, `crv`, `x` (and `y`, and `d` on
+  private exports) for the OKP and EC forms, which carry no `alg` — and
+  nothing else. Metadata this package does not model (`key_ops`, `ext`,
+  `use`) is the consumer's to stamp. Member order is not contract.
+- `oct` algorithms without a registered JWK `alg` fail with
+  `error.unsupported`.
 
 ## Error contract
 
@@ -212,9 +220,12 @@ short:
 - **ECDSA binds curve and hash at mint** (unlike WebCrypto's per-operation
   hash). A granted key cannot be used with a weaker digest than its minter
   chose.
-- **Signing keys are generate-only for now.** Private-key import/export
-  returns with the PKCS#8/JWK format work, whose inputs stay on specified
-  platform paths.
+- **Private keys import and export only through platform formats.**
+  Signing and agreement secret keys import as PKCS#8 or a private JWK and
+  export (extractability-gated, fallibly) the same way — never as bare
+  seeds or scalars, per the format-admission rule above. No import derives
+  the public half (see the no-derive rule above); importers supply it
+  separately through the public-key import.
 - **Empty PBKDF2 passwords are accepted; empty HKDF IKM is not.** RFC 8018
   admits an empty `P`, the platform serves it, and the upstream test
   vectors exercise it as valid, so rejecting it would break platform

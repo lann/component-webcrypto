@@ -11,18 +11,14 @@ knows — `crypto.subtle`.
 
 ## Surface
 
-`webcrypto.js` exports `subtle` (and a `crypto`-shaped `{ subtle }`
-namespace) serving:
+`webcrypto.js` exports `subtle` and a `crypto`-shaped
+`{ subtle, getRandomValues }` namespace. The served surface — the
+algorithms, operations, and key formats — is enumerated at the top of
+`webcrypto.js`, alongside the deviations registry it gates.
 
-| method | algorithms |
-| --- | --- |
-| `importKey` / `exportKey` | `"raw"` and `"jwk"` formats |
-| `generateKey` | HMAC-SHA-256, AES-256-GCM |
-| `sign` / `verify` | HMAC-SHA-256 |
-| `encrypt` / `decrypt` | AES-256-GCM |
-
-Keys are `CryptoKey` objects (`type: "secret"`, `algorithm`, `extractable`,
-`usages`) wrapping `lann:webcrypto` key resources; usages and extractability
+Keys are `CryptoKey` objects (`type` `"secret"`, `"public"`, or
+`"private"`, `algorithm`, `extractable`, `usages`) wrapping
+`lann:webcrypto` key resources; usages and extractability
 are enforced with WebCrypto's error vocabulary. The library maps the WIT
 `types.error` variant onto that vocabulary (`authentication-failed` →
 `OperationError`, `not-extractable` → `InvalidAccessError`, `invalid-key` →
@@ -34,9 +30,7 @@ shape.
 Deviations from the Web Cryptography API are documented at the top of
 `webcrypto.js` (the registry: every deviation appears there with its
 classification); all of them fail closed with clear errors rather than
-silently differing (the two algorithms only, `"raw"`/`"jwk"` formats only,
-and a minimal `DOMException` stand-in, which the componentize-js runtime
-lacks).
+silently differing.
 
 Within that subset the library tracks the spec closely enough to pass the
 relevant [web-platform-tests] suites: [`wpt/`](wpt) vendors the WebCryptoAPI

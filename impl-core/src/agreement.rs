@@ -55,6 +55,26 @@ impl AgreementPublicMaterial {
     pub fn export_jwk(&self) -> String {
         crate::jwk::build_okp_public("X25519", self.public.as_bytes())
     }
+
+    /// The SubjectPublicKeyInfo form (`public-key.export-key-spki`).
+    pub fn export_spki(&self) -> Vec<u8> {
+        crate::der8410::rfc8410_spki(crate::der8410::OID_X25519, self.public.as_bytes())
+    }
+
+    /// Import a public key from a SubjectPublicKeyInfo (the
+    /// `x25519.import-public-key-spki` contract): the embedded coordinate
+    /// is admitted exactly as the raw import admits it.
+    pub fn import_spki(spki: &[u8]) -> Result<Self, Error> {
+        let raw = crate::der8410::parse_rfc8410_spki(crate::der8410::OID_X25519, "X25519", spki)?;
+        Self::import(&raw)
+    }
+
+    /// Import a public key from an RFC 8037 OKP public JWK (the
+    /// `x25519.import-public-key-jwk` contract).
+    pub fn import_jwk(jwk: &str) -> Result<Self, Error> {
+        let raw = crate::jwk::parse_okp_public(jwk, "X25519", None)?;
+        Self::import(&raw)
+    }
 }
 
 /// The `key-agreement.secret-key` resource's material.
@@ -80,7 +100,7 @@ impl AgreementSecretMaterial {
     /// and a mismatched pair is never what a caller meant.
     pub fn import_jwk(jwk: &str, policy: AgreementPolicy) -> Result<Self, Error> {
         policy.check_useful()?;
-        let okp = crate::jwk::parse_okp_private(jwk, "X25519", policy.extractable)?;
+        let okp = crate::jwk::parse_okp_private(jwk, "X25519", policy.extractable, None)?;
         let d: [u8; 32] = okp.d.as_slice().try_into().map_err(|_| {
             Error::InvalidKey(format!(
                 "X25519 private keys are 32-byte scalars, got {} bytes",
@@ -94,6 +114,47 @@ impl AgreementSecretMaterial {
             ));
         }
         Ok(Self { secret, policy })
+    }
+
+    /// Import a static secret key from an RFC 8410 PKCS#8 PrivateKeyInfo
+    /// (the `x25519.import-secret-key-pkcs8` contract): the scalar is
+    /// clamped at use per RFC 7748, like the JWK import's `d`.
+    pub fn import_pkcs8(pkcs8_der: &[u8], policy: AgreementPolicy) -> Result<Self, Error> {
+        policy.check_useful()?;
+        let scalar =
+            crate::der8410::parse_rfc8410_pkcs8(crate::der8410::OID_X25519, "X25519", pkcs8_der)?;
+        Ok(Self {
+            secret: StaticSecret::from(*scalar),
+            policy,
+        })
+    }
+
+    /// The secret key as an RFC 8037 OKP private JWK
+    /// (`secret-key.export-key-jwk`), behind the extractability gate.
+    ///
+    /// The copy returned is *not* protected: see the note on
+    /// [`crate`](crate#exported-material).
+    pub fn export_jwk(&self) -> Result<String, Error> {
+        if !self.policy.extractable {
+            return Err(Error::NotExtractable);
+        }
+        Ok(crate::jwk::build_okp_private(
+            "X25519",
+            PublicKey::from(&self.secret).as_bytes(),
+            self.secret.as_bytes(),
+        ))
+    }
+
+    /// The secret key as a PKCS#8 PrivateKeyInfo
+    /// (`secret-key.export-key-pkcs8`), behind the same gate.
+    pub fn export_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        if !self.policy.extractable {
+            return Err(Error::NotExtractable);
+        }
+        Ok(
+            crate::der8410::rfc8410_pkcs8(crate::der8410::OID_X25519, self.secret.as_bytes())
+                .to_vec(),
+        )
     }
 
     /// Generate a fresh key pair, per the `x25519.generate-key` contract.
@@ -244,6 +305,45 @@ mod tests {
             AgreementPublicMaterial::import(&[1u8; 31]),
             Err(Error::InvalidKey(_))
         ));
+    }
+
+    /// The DER forms round-trip: spki for the public key, pkcs8 for the
+    /// secret (behind the extractability gate).
+    #[test]
+    fn der_format_round_trips() {
+        let xp = AgreementPolicy {
+            extractable: true,
+            ..policy_all()
+        };
+        let alice_d = unhex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+        let alice_x = unhex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+        let secret = AgreementSecretMaterial::import_jwk(
+            &build_okp_private("X25519", &alice_x, &alice_d),
+            xp,
+        )
+        .unwrap();
+        let p8 = secret.export_pkcs8().unwrap();
+        let back = AgreementSecretMaterial::import_pkcs8(&p8, xp).unwrap();
+        assert_eq!(back.export_jwk().unwrap(), secret.export_jwk().unwrap());
+
+        let public = AgreementPublicMaterial::import(&alice_x).unwrap();
+        let spki = public.export_spki();
+        assert_eq!(
+            AgreementPublicMaterial::import_spki(&spki)
+                .unwrap()
+                .export(),
+            alice_x
+        );
+        assert_eq!(
+            AgreementPublicMaterial::import_jwk(&public.export_jwk())
+                .unwrap()
+                .export(),
+            alice_x
+        );
+
+        let sealed = AgreementSecretMaterial::import_pkcs8(&p8, policy_all()).unwrap();
+        assert_eq!(sealed.export_jwk(), Err(Error::NotExtractable));
+        assert_eq!(sealed.export_pkcs8(), Err(Error::NotExtractable));
     }
 
     /// Agreed inputs carry the natural-length semantics: `none` is the

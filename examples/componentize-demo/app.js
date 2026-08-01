@@ -311,12 +311,18 @@ async function ed25519SignVerify() {
   await expectDomException("InvalidAccessError", "export the non-extractable private key", () =>
     subtle.exportKey("jwk", pair.privateKey),
   );
-  // Even extractable, a private key has no export path: signing keys are
-  // generate-only (the WIT-forced deviation the shim header records).
-  const extractable = await subtle.generateKey("Ed25519", true, ["sign"]);
-  await expectDomException("NotSupportedError", "export the extractable private key", () =>
-    subtle.exportKey("jwk", extractable.privateKey),
-  );
+  // An extractable private key round-trips through the gated JWK export:
+  // the re-import signs, and the original public half verifies it.
+  const extractable = await subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  const privateJwk = await subtle.exportKey("jwk", extractable.privateKey);
+  if (privateJwk.kty !== "OKP" || typeof privateJwk.d !== "string") {
+    throw new Error("exported private JWK is not an OKP key carrying d");
+  }
+  const reimportedPrivate = await subtle.importKey("jwk", privateJwk, "Ed25519", false, ["sign"]);
+  const sig2 = await subtle.sign("Ed25519", reimportedPrivate, message);
+  if (!(await subtle.verify("Ed25519", extractable.publicKey, sig2, message))) {
+    throw new Error("signature from the re-imported private key did not verify");
+  }
 }
 
 /**

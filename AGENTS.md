@@ -228,17 +228,16 @@ A WPT-observable behavior the shim does not exhibit is one of two things,
 and the difference is the signal:
 
 - **Unserved**: the WIT carries the semantics; the shim does not serve them
-  yet (algorithms beyond its documented set, key formats beyond
-  `raw`/`jwk`). Backlog, not a design problem.
+  yet (for example algorithms beyond its documented set). Backlog, not a
+  design problem.
 - **WIT-forced**: no shim could express the behavior through the interface
   shape. Keeping the set small is the goal, and every member must be a
   recorded ruling, never a silent consequence of whatever shape was
   convenient. The historical example — the fixed AES-GCM IV/tag
   contract — was resolved by carrying both as per-call
-  `aead-key.seal`/`open` parameters; the current members are two
-  deliberate rulings from `wit/README.md`'s design notes: empty HKDF IKM
-  is rejected, and private keys are generate-only (no export path until
-  the fallible JWK/PKCS#8 export returns additively).
+  `aead-key.seal`/`open` parameters; the current member is one
+  deliberate ruling from `wit/README.md`'s design notes: empty HKDF IKM
+  is rejected.
 
 The shim header's deviations list is the registry: every deviation appears
 there with its classification, so the WIT-forced set — the true cost of the

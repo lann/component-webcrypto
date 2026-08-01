@@ -29,6 +29,16 @@ interface x25519 {
     /// `error.invalid-key` at import.
     import-public-key-raw: async func(raw: list<u8>) -> result<public-key, error>;
 
+    /// Import a public key as an X.509 SubjectPublicKeyInfo (DER, RFC
+    /// 8410 algorithm id 1.3.101.110). The embedded u-coordinate is
+    /// admitted exactly as `import-public-key-raw` admits it.
+    import-public-key-spki: async func(spki: list<u8>) -> result<public-key, error>;
+
+    /// Import a public key as an RFC 8037 OKP public JWK (`kty: "OKP"`,
+    /// `crv: "X25519"`, `x`). `jwk` is the JWK as JSON text; see
+    /// `mac-key.export-key-jwk` for the package-wide JWK contract.
+    import-public-key-jwk: async func(jwk: string) -> result<public-key, error>;
+
     /// Import a static secret key as an RFC 8037 OKP private JWK
     /// (`kty: "OKP"`, `crv: "X25519"`, with `x` and `d` both required —
     /// RFC 8037 makes the public coordinate mandatory, so this is
@@ -47,6 +57,11 @@ interface x25519 {
     ///   check, and engines differ, so a platform-backed host cannot
     ///   promise it.)
     import-secret-key-jwk: async func(jwk: string, options: agreement-key-options) -> result<secret-key, error>;
+
+    /// Import a static secret key as a PKCS#8 PrivateKeyInfo (DER, RFC
+    /// 8410: the 32-byte scalar in a CurvePrivateKey). The scalar is
+    /// clamped at use per RFC 7748, like the JWK import's `d`.
+    import-secret-key-pkcs8: async func(pkcs8: list<u8>, options: agreement-key-options) -> result<secret-key, error>;
 
     /// Generate a fresh X25519 key pair.
     generate-key: async func(options: agreement-key-options) -> result<tuple<secret-key, public-key>, error>;

@@ -55,6 +55,7 @@
 
 mod aead;
 mod agreement;
+mod der8410;
 mod gcm;
 mod hash;
 mod jwk;
@@ -164,7 +165,11 @@ macro_rules! impl_conversions {
             fn from(variant: $ecdsa) -> Self {
                 match variant {
                     <$ecdsa>::P256Sha256 => Self::P256Sha256,
+                    <$ecdsa>::P256Sha384 => Self::P256Sha384,
+                    <$ecdsa>::P256Sha512 => Self::P256Sha512,
+                    <$ecdsa>::P384Sha256 => Self::P384Sha256,
                     <$ecdsa>::P384Sha384 => Self::P384Sha384,
+                    <$ecdsa>::P384Sha512 => Self::P384Sha512,
                     <$ecdsa>::P521Sha512 => Self::P521Sha512,
                 }
             }
@@ -198,7 +203,11 @@ pub enum AesVariant {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EcdsaVariant {
     P256Sha256,
+    P256Sha384,
+    P256Sha512,
+    P384Sha256,
     P384Sha384,
+    P384Sha512,
     /// Declared in the WIT, served by no implementation of this package
     /// (see the `ecdsa-variant` doc): every minting path declines it
     /// `unsupported`.

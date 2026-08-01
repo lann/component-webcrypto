@@ -109,38 +109,42 @@ function generateKeyInSubset(name) {
 }
 
 /**
- * The groups whose every test crosses unserved formats: the cfrg derive
- * and the eddsa/ecdsa sign_verify suites import all their keys as
- * pkcs8/spki (formats the WIT defers by the format-admission ruling), and
- * each generateKey success test exports its pair as spki + private JWK
- * (the private export is WIT-forced; see the shim header). Their subsets
- * are therefore empty: the algorithms' behavioral assertions live in the
- * conformance suites (and the demo guest covers the shim's own sign
- * path), and these groups meter the remaining format gap.
+ * sign_verify/ecdsa: every test needs ECDSA signing or a generated pair —
+ * `ecdsa-sign` is class D, withheld by the in-guest provider this shim
+ * composes with (see the shim header) — so the subset stays empty and the
+ * group meters that gap. The verify path's behavioral assertions live in
+ * the conformance suites.
  */
-function formatGatedInSubset() {
+function classDGatedInSubset() {
   return false;
 }
 
 /**
- * import_export/okp_importKey (Ed25519): raw public imports are served;
- * private OKP JWKs are not — Ed25519 signing keys are generate-only
- * (WIT-forced; see the shim header) — and public JWKs and pkcs8/spki are
- * unserved, as for X25519.
+ * derive_bits_keys/cfrg_curves_bits (X25519): served except the two tests
+ * whose fixtures need algorithms outside this library — "mismatched
+ * algorithms" needs an imported ECDH public key (its fixture is null
+ * here, so the failure is the wrong `TypeError`), and "public property
+ * value is a secret key" generates an AES-CBC key.
  * @param {string} name
  */
-function okpEd25519ImportInSubset(name) {
-  return name.includes("(raw, buffer(32)");
+function cfrgBitsInSubset(name) {
+  return !/mismatched algorithms|public property value is a secret key/.test(name);
 }
 
 /**
- * import_export/okp_importKey_failures (Ed25519): the raw-format
- * rejections are served; every JWK form is out (no private import at
- * all, unlike X25519).
- * @param {string} name
+ * import_export/okp_importKey (Ed25519): every served form — raw and spki
+ * public, private PKCS#8 and OKP JWKs (public and private).
  */
-function okpEd25519FailuresInSubset(name) {
-  return name.includes("(raw") || name.startsWith("Missing algorithm name");
+function okpEd25519ImportInSubset() {
+  return true;
+}
+
+/**
+ * import_export/okp_importKey_failures (Ed25519): every form's rejections
+ * are served.
+ */
+function okpEd25519FailuresInSubset() {
+  return true;
 }
 
 /**
@@ -188,28 +192,37 @@ function kdfDeriveInSubset(name) {
 }
 
 /**
- * import_export/ec_importKey: raw uncompressed ECDSA P-256/P-384 public
- * imports are served (65- and 97-byte points); ECDH is not an algorithm
- * here at all, P-521 is declared by the WIT and served by nothing, and
- * the spki/pkcs8/jwk EC forms are unserved.
+ * import_export/ec_importKey: the public ECDSA P-256/P-384 forms are
+ * served — raw and spki uncompressed points and public EC JWKs. Out: the
+ * compressed-point rows (an optional feature: `assert_implements_optional`
+ * is a failure in this two-status harness, and whether the WIT spki
+ * import accepts compression is implementation-defined — the composed
+ * provider happens to, which the census pins as `outPassed`), the private
+ * forms (pkcs8 and JWKs carrying `d` — class D, see the shim header),
+ * P-521 (declared by the WIT and served by nothing), and ECDH (not an
+ * algorithm here at all).
  * @param {string} name
  */
 function ecImportInSubset(name) {
-  return name.includes("name: ECDSA") && /\(raw, buffer\((65|97)\)/.test(name);
+  if (!name.includes("name: ECDSA") || name.includes("P-521") || name.includes("compressed")) {
+    return false;
+  }
+  return !name.includes("(pkcs8") && !name.includes(", d)");
 }
 
 /**
- * import_export/ec_importKey_failures (ECDSA): raw-format rejections are
- * served — for P-521 only the usage rejections, whose check precedes the
- * curve's — plus the missing-algorithm-name rows, whose `TypeError`
- * precedes every format and curve consideration.
+ * import_export/ec_importKey_failures (ECDSA): the public-form rejections
+ * are served — for P-521 only the usage rejections, whose check precedes
+ * the curve's — plus the missing-algorithm-name rows, whose `TypeError`
+ * precedes every format and curve consideration. The private forms stay
+ * out (class D).
  * @param {string} name
  */
 function ecImportFailuresInSubset(name) {
   if (name.startsWith("Missing algorithm name")) {
     return true;
   }
-  if (!name.includes("(raw")) {
+  if (name.includes("(pkcs8") || name.includes("jwk(private)")) {
     return false;
   }
   return name.startsWith("Bad usages") || !name.includes("P-521");
@@ -232,32 +245,20 @@ function digestInSubset(name) {
 }
 
 /**
- * import_export/okp_importKey (X25519): raw public imports and
- * non-extractable private JWK imports are served. Extractable private
- * imports are excluded — each such test also exports the key, and private
- * export is WIT-forced (the shim header's registry); public JWKs and the
- * pkcs8/spki formats are unserved.
- * @param {string} name
+ * import_export/okp_importKey (X25519): every served form — raw and spki
+ * public, private PKCS#8 and OKP JWKs (public and private), extractable
+ * or not (the gated private exports are served).
  */
-function okpImportInSubset(name) {
-  if (name.includes("(raw, buffer(32)")) {
-    return true;
-  }
-  return name.includes("object(crv, d, x, kty)") && name.includes("false, [");
+function okpImportInSubset() {
+  return true;
 }
 
 /**
- * import_export/okp_importKey_failures (X25519): every raw-format and
- * private-JWK rejection is served; the public JWK form and pkcs8/spki are
- * unserved, so their expected errors are not this library's.
- * @param {string} name
+ * import_export/okp_importKey_failures (X25519): every form's rejections
+ * are served.
  */
-function okpImportFailuresInSubset(name) {
-  return (
-    name.includes("(raw") ||
-    name.includes("jwk(private)") ||
-    name.startsWith("Missing algorithm name")
-  );
+function okpImportFailuresInSubset() {
+  return true;
 }
 
 // --- runner -----------------------------------------------------------------------
@@ -286,12 +287,12 @@ export const GROUPS = [
   [
     "derive_bits_keys/cfrg_curves_bits (X25519)",
     () => promise_test(defineCfrgBits, "setup - define tests"),
-    formatGatedInSubset,
+    cfrgBitsInSubset,
   ],
   [
     "derive_bits_keys/cfrg_curves_keys (X25519)",
     () => promise_test(defineCfrgKeys, "setup - define tests"),
-    formatGatedInSubset,
+    cfrgBitsInSubset,
   ],
   ["import_export/okp_importKey (X25519)", () => runOkpImportKey("X25519"), okpImportInSubset],
   [
@@ -299,7 +300,7 @@ export const GROUPS = [
     () => runOkpImportKeyFailures(["X25519"]),
     okpImportFailuresInSubset,
   ],
-  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), formatGatedInSubset],
+  ["generateKey/successes (X25519)", () => runGenerateKey(["X25519"]), () => true],
   [
     "derive_bits_keys/hkdf",
     () => promise_test(defineHkdf, "setup - define tests"),
@@ -311,16 +312,22 @@ export const GROUPS = [
     kdfDeriveInSubset,
   ],
   ["digest/digest", () => runDigest(), digestInSubset],
-  ["sign_verify/eddsa (Ed25519)", () => runEddsa("Ed25519"), formatGatedInSubset],
-  ["sign_verify/eddsa_small_order_points", () => runEddsaSmallOrder(), formatGatedInSubset],
-  ["sign_verify/ecdsa", () => runEcdsa(), formatGatedInSubset],
+  [
+    "sign_verify/eddsa (Ed25519)",
+    () => runEddsa("Ed25519"),
+    // The wrong-algorithm-name pair is out: its wrong-key fixture is an
+    // HMAC-SHA-1 key, and SHA-1 is not in the package.
+    (name) => !name.includes("wrong algorithm name"),
+  ],
+  ["sign_verify/eddsa_small_order_points", () => runEddsaSmallOrder(), () => true],
+  ["sign_verify/ecdsa", () => runEcdsa(), classDGatedInSubset],
   ["import_export/okp_importKey (Ed25519)", () => runOkpImportKey("Ed25519"), okpEd25519ImportInSubset],
   [
     "import_export/okp_importKey_failures (Ed25519)",
     () => runOkpImportKeyFailures(["Ed25519"]),
     okpEd25519FailuresInSubset,
   ],
-  ["generateKey/successes (Ed25519)", () => runGenerateKey(["Ed25519"]), formatGatedInSubset],
+  ["generateKey/successes (Ed25519)", () => runGenerateKey(["Ed25519"]), () => true],
   ["import_export/ec_importKey", () => runEcImportKey(), ecImportInSubset],
   [
     "import_export/ec_importKey_failures (ECDSA)",

@@ -14,13 +14,53 @@ fn p521_unsupported() -> Error {
     Error::Unsupported("ECDSA P-521 is not served by this implementation".into())
 }
 
+/// The mint-bound digest of an ECDSA variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EcdsaHash {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl EcdsaHash {
+    /// The registry digest name (`algorithm-hash`).
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sha256 => "SHA-256",
+            Self::Sha384 => "SHA-384",
+            Self::Sha512 => "SHA-512",
+        }
+    }
+}
+
+/// The served curve of an ECDSA variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EcdsaCurve {
+    P256,
+    P384,
+}
+
+/// Split a WIT `ecdsa-variant` into its served curve and hash, declining
+/// P-521 (`unsupported`, per the enum's doc).
+fn variant_parts(variant: EcdsaVariant) -> Result<(EcdsaCurve, EcdsaHash), Error> {
+    Ok(match variant {
+        EcdsaVariant::P256Sha256 => (EcdsaCurve::P256, EcdsaHash::Sha256),
+        EcdsaVariant::P256Sha384 => (EcdsaCurve::P256, EcdsaHash::Sha384),
+        EcdsaVariant::P256Sha512 => (EcdsaCurve::P256, EcdsaHash::Sha512),
+        EcdsaVariant::P384Sha256 => (EcdsaCurve::P384, EcdsaHash::Sha256),
+        EcdsaVariant::P384Sha384 => (EcdsaCurve::P384, EcdsaHash::Sha384),
+        EcdsaVariant::P384Sha512 => (EcdsaCurve::P384, EcdsaHash::Sha512),
+        EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
+    })
+}
+
 /// The algorithm behind a signature key, shared by the public and private
 /// halves so the `algorithm-name`/`-curve`/`-hash` getters have one table.
 #[derive(Clone, Copy)]
 enum SigAlg {
     Ed25519,
-    P256,
-    P384,
+    P256(EcdsaHash),
+    P384(EcdsaHash),
 }
 
 impl SigAlg {
@@ -28,7 +68,7 @@ impl SigAlg {
     fn name(self) -> &'static str {
         match self {
             Self::Ed25519 => ED25519_NAME,
-            Self::P256 | Self::P384 => ECDSA_NAME,
+            Self::P256(_) | Self::P384(_) => ECDSA_NAME,
         }
     }
 
@@ -36,8 +76,8 @@ impl SigAlg {
     fn curve(self) -> Option<&'static str> {
         match self {
             Self::Ed25519 => None,
-            Self::P256 => Some("P-256"),
-            Self::P384 => Some("P-384"),
+            Self::P256(_) => Some("P-256"),
+            Self::P384(_) => Some("P-384"),
         }
     }
 
@@ -45,8 +85,7 @@ impl SigAlg {
     fn hash(self) -> Option<&'static str> {
         match self {
             Self::Ed25519 => None,
-            Self::P256 => Some("SHA-256"),
-            Self::P384 => Some("SHA-384"),
+            Self::P256(hash) | Self::P384(hash) => Some(hash.name()),
         }
     }
 }
@@ -56,8 +95,8 @@ impl SigAlg {
 /// Verification is secret-free, so every arm exists on every target.
 pub enum SigPublic {
     Ed25519(ed25519_dalek::VerifyingKey),
-    EcdsaP256(p256::ecdsa::VerifyingKey),
-    EcdsaP384(p384::ecdsa::VerifyingKey),
+    EcdsaP256(p256::ecdsa::VerifyingKey, EcdsaHash),
+    EcdsaP384(p384::ecdsa::VerifyingKey, EcdsaHash),
 }
 
 impl SigPublic {
@@ -81,33 +120,78 @@ impl SigPublic {
     /// encodings and points not on the curve (the
     /// `ecdsa-verify.import-verifying-key-raw` contract).
     pub fn import_ecdsa(variant: EcdsaVariant, raw: &[u8]) -> Result<Self, Error> {
-        let expected = match variant {
-            EcdsaVariant::P256Sha256 => 65,
-            EcdsaVariant::P384Sha384 => 97,
-            EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
+        let (curve, hash) = variant_parts(variant)?;
+        let expected = match curve {
+            EcdsaCurve::P256 => 65,
+            EcdsaCurve::P384 => 97,
         };
         if raw.len() != expected || raw[0] != 0x04 {
             return Err(Error::InvalidKey(format!(
                 "{variant:?} public keys are uncompressed SEC1 points ({expected} bytes, leading 0x04)"
             )));
         }
-        match variant {
-            EcdsaVariant::P256Sha256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(raw)
-                .map(Self::EcdsaP256)
+        match curve {
+            EcdsaCurve::P256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(raw)
+                .map(|key| Self::EcdsaP256(key, hash))
                 .map_err(|err| Error::InvalidKey(format!("invalid P-256 public key: {err}"))),
-            EcdsaVariant::P384Sha384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(raw)
-                .map(Self::EcdsaP384)
+            EcdsaCurve::P384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(raw)
+                .map(|key| Self::EcdsaP384(key, hash))
                 .map_err(|err| Error::InvalidKey(format!("invalid P-384 public key: {err}"))),
-            EcdsaVariant::P521Sha512 => Err(p521_unsupported()),
         }
+    }
+
+    /// Import an Ed25519 public key from a SubjectPublicKeyInfo (the
+    /// `ed25519-verify.import-verifying-key-spki` contract): the embedded
+    /// point is subject to the raw import's strict criterion.
+    pub fn import_ed25519_spki(spki: &[u8]) -> Result<Self, Error> {
+        let raw = crate::der8410::parse_rfc8410_spki(crate::der8410::OID_ED25519, "Ed25519", spki)?;
+        Self::import_ed25519(&raw)
+    }
+
+    /// Import an Ed25519 public key from an OKP public JWK (the
+    /// `ed25519-verify.import-verifying-key-jwk` contract).
+    pub fn import_ed25519_jwk(jwk: &str) -> Result<Self, Error> {
+        let raw = crate::jwk::parse_okp_public(jwk, "Ed25519", Some(ED25519_JWK_ALGS))?;
+        Self::import_ed25519(&raw)
+    }
+
+    /// Import an ECDSA public key from a SubjectPublicKeyInfo (the
+    /// `ecdsa-verify.import-verifying-key-spki` contract): the encoded
+    /// curve must match the declared variant's.
+    pub fn import_ecdsa_spki(variant: EcdsaVariant, spki: &[u8]) -> Result<Self, Error> {
+        use spki::DecodePublicKey as _;
+        let (curve, hash) = variant_parts(variant)?;
+        match curve {
+            EcdsaCurve::P256 => p256::ecdsa::VerifyingKey::from_public_key_der(spki)
+                .map(|key| Self::EcdsaP256(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid P-256 spki: {err}"))),
+            EcdsaCurve::P384 => p384::ecdsa::VerifyingKey::from_public_key_der(spki)
+                .map(|key| Self::EcdsaP384(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid P-384 spki: {err}"))),
+        }
+    }
+
+    /// Import an ECDSA public key from an EC public JWK (the
+    /// `ecdsa-verify.import-verifying-key-jwk` contract): the JWK's `crv`
+    /// must match the declared variant's curve.
+    pub fn import_ecdsa_jwk(variant: EcdsaVariant, jwk: &str) -> Result<Self, Error> {
+        let (curve, _) = variant_parts(variant)?;
+        let parsed = crate::jwk::parse_ec(
+            jwk,
+            curve_name(curve),
+            false,
+            false,
+            Some(ec_jwk_algs(curve)),
+        )?;
+        Self::import_ecdsa(variant, &ec_point(curve, &parsed.x, &parsed.y)?)
     }
 
     /// The key's algorithm tag.
     fn alg(&self) -> SigAlg {
         match self {
             Self::Ed25519(_) => SigAlg::Ed25519,
-            Self::EcdsaP256(_) => SigAlg::P256,
-            Self::EcdsaP384(_) => SigAlg::P384,
+            Self::EcdsaP256(_, hash) => SigAlg::P256(*hash),
+            Self::EcdsaP384(_, hash) => SigAlg::P384(*hash),
         }
     }
 
@@ -131,8 +215,42 @@ impl SigPublic {
     pub fn export(&self) -> Vec<u8> {
         match self {
             Self::Ed25519(key) => key.to_bytes().to_vec(),
-            Self::EcdsaP256(key) => key.to_encoded_point(false).as_bytes().to_vec(),
-            Self::EcdsaP384(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+            Self::EcdsaP256(key, _) => key.to_encoded_point(false).as_bytes().to_vec(),
+            Self::EcdsaP384(key, _) => key.to_encoded_point(false).as_bytes().to_vec(),
+        }
+    }
+
+    /// The public key as a SubjectPublicKeyInfo
+    /// (`verifying-key.export-key-spki`).
+    pub fn export_spki(&self) -> Vec<u8> {
+        use spki::EncodePublicKey as _;
+        match self {
+            Self::Ed25519(key) => {
+                crate::der8410::rfc8410_spki(crate::der8410::OID_ED25519, key.as_bytes())
+            }
+            Self::EcdsaP256(key, _) => key
+                .to_public_key_der()
+                .expect("valid key encodes")
+                .into_vec(),
+            Self::EcdsaP384(key, _) => key
+                .to_public_key_der()
+                .expect("valid key encodes")
+                .into_vec(),
+        }
+    }
+
+    /// The public key as a JWK (`verifying-key.export-key-jwk`).
+    pub fn export_jwk(&self) -> String {
+        match self {
+            Self::Ed25519(key) => crate::jwk::build_okp_public("Ed25519", key.as_bytes()),
+            Self::EcdsaP256(key, _) => {
+                let point = key.to_encoded_point(false);
+                crate::jwk::build_ec_public("P-256", point.x().unwrap(), point.y().unwrap())
+            }
+            Self::EcdsaP384(key, _) => {
+                let point = key.to_encoded_point(false);
+                crate::jwk::build_ec_public("P-384", point.x().unwrap(), point.y().unwrap())
+            }
         }
     }
 
@@ -142,17 +260,31 @@ impl SigPublic {
     /// Ed25519 uses `verify_strict` semantics per the `ed25519-verify`
     /// criterion.
     pub fn verify(&self, data: &[u8], sig: &[u8]) -> Result<(), Error> {
-        use p256::ecdsa::signature::Verifier as _;
+        use p256::ecdsa::signature::hazmat::PrehashVerifier as _;
+        /// Verify under the mint-bound digest via the prehash path: its
+        /// bits2field conversion applies FIPS 186-5's leftmost-bits rule
+        /// for digests wider or narrower than the curve.
+        macro_rules! ecdsa_verify {
+            ($key:expr, $hash:expr, $sigty:ty, $sig:expr, $data:expr) => {
+                <$sigty>::from_slice($sig)
+                    .map_err(|_| ())
+                    .and_then(|sig| {
+                        $key.verify_prehash(&ecdsa_digest(*$hash, $data), &sig)
+                            .map_err(|_| ())
+                    })
+                    .is_ok()
+            };
+        }
         let ok = match self {
             Self::Ed25519(key) => ed25519_dalek::Signature::from_slice(sig)
                 .and_then(|sig| key.verify_strict(data, &sig))
                 .is_ok(),
-            Self::EcdsaP256(key) => p256::ecdsa::Signature::from_slice(sig)
-                .and_then(|sig| key.verify(data, &sig))
-                .is_ok(),
-            Self::EcdsaP384(key) => p384::ecdsa::Signature::from_slice(sig)
-                .and_then(|sig| key.verify(data, &sig))
-                .is_ok(),
+            Self::EcdsaP256(key, hash) => {
+                ecdsa_verify!(key, hash, p256::ecdsa::Signature, sig, data)
+            }
+            Self::EcdsaP384(key, hash) => {
+                ecdsa_verify!(key, hash, p384::ecdsa::Signature, sig, data)
+            }
         };
         if ok {
             Ok(())
@@ -160,6 +292,60 @@ impl SigPublic {
             Err(Error::AuthenticationFailed)
         }
     }
+}
+
+/// The mint-bound digest over `data`, as prehash bytes.
+fn ecdsa_digest(hash: EcdsaHash, data: &[u8]) -> Vec<u8> {
+    use sha2::Digest as _;
+    match hash {
+        EcdsaHash::Sha256 => sha2::Sha256::digest(data).to_vec(),
+        EcdsaHash::Sha384 => sha2::Sha384::digest(data).to_vec(),
+        EcdsaHash::Sha512 => sha2::Sha512::digest(data).to_vec(),
+    }
+}
+
+/// The registry curve name for a served curve.
+fn curve_name(curve: EcdsaCurve) -> &'static str {
+    match curve {
+        EcdsaCurve::P256 => "P-256",
+        EcdsaCurve::P384 => "P-384",
+    }
+}
+
+/// The JWK `alg` values an Ed25519 import accepts: WebCrypto's algorithm
+/// name and JOSE's EdDSA (w3c/webcrypto#401's import rule).
+const ED25519_JWK_ALGS: &[&str] = &["Ed25519", "EdDSA"];
+
+/// The JWK `alg` values an EC JWK import accepts for a served curve: the
+/// JOSE signature alg the curve pairs with (curve-determined, so it does
+/// not vary with the variant's mint-bound hash — WebCrypto's import rule).
+fn ec_jwk_algs(curve: EcdsaCurve) -> &'static [&'static str] {
+    match curve {
+        EcdsaCurve::P256 => &["ES256"],
+        EcdsaCurve::P384 => &["ES384"],
+    }
+}
+
+/// Assemble an uncompressed SEC1 point from JWK coordinates, validating
+/// their lengths for the curve.
+fn ec_point(curve: EcdsaCurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>, Error> {
+    let len = match curve {
+        EcdsaCurve::P256 => 32,
+        EcdsaCurve::P384 => 48,
+    };
+    if x.len() != len || y.len() != len {
+        return Err(Error::InvalidKey(format!(
+            "{} JWK coordinates are {len} bytes each, got {}/{}",
+            curve_name(curve),
+            x.len(),
+            y.len()
+        )));
+    }
+    let mut point = Vec::with_capacity(1 + 2 * len);
+    point.push(0x04);
+    point.extend_from_slice(x);
+    point.extend_from_slice(y);
+    Ok(point)
 }
 
 // Public material is not secret, but printing it wholesale is rarely
@@ -179,9 +365,9 @@ impl std::fmt::Debug for SigPublic {
 enum SigPrivate {
     Ed25519(ed25519_dalek::SigningKey),
     #[cfg(not(target_family = "wasm"))]
-    EcdsaP256(p256::ecdsa::SigningKey),
+    EcdsaP256(p256::ecdsa::SigningKey, EcdsaHash),
     #[cfg(not(target_family = "wasm"))]
-    EcdsaP384(p384::ecdsa::SigningKey),
+    EcdsaP384(p384::ecdsa::SigningKey, EcdsaHash),
 }
 
 impl SigPrivate {
@@ -190,9 +376,9 @@ impl SigPrivate {
         match self {
             Self::Ed25519(_) => SigAlg::Ed25519,
             #[cfg(not(target_family = "wasm"))]
-            Self::EcdsaP256(_) => SigAlg::P256,
+            Self::EcdsaP256(_, hash) => SigAlg::P256(*hash),
             #[cfg(not(target_family = "wasm"))]
-            Self::EcdsaP384(_) => SigAlg::P384,
+            Self::EcdsaP384(_, hash) => SigAlg::P384(*hash),
         }
     }
 }
@@ -243,16 +429,101 @@ impl SigningKeyMaterial {
         raw: &[u8],
         policy: SigningPolicy,
     ) -> Result<Self, Error> {
-        let private = match variant {
-            EcdsaVariant::P256Sha256 => p256::ecdsa::SigningKey::from_slice(raw)
-                .map(SigPrivate::EcdsaP256)
+        let (curve, hash) = variant_parts(variant)?;
+        let private = match curve {
+            EcdsaCurve::P256 => p256::ecdsa::SigningKey::from_slice(raw)
+                .map(|key| SigPrivate::EcdsaP256(key, hash))
                 .map_err(|err| Error::InvalidKey(format!("invalid P-256 private key: {err}")))?,
-            EcdsaVariant::P384Sha384 => p384::ecdsa::SigningKey::from_slice(raw)
-                .map(SigPrivate::EcdsaP384)
+            EcdsaCurve::P384 => p384::ecdsa::SigningKey::from_slice(raw)
+                .map(|key| SigPrivate::EcdsaP384(key, hash))
                 .map_err(|err| Error::InvalidKey(format!("invalid P-384 private key: {err}")))?,
-            EcdsaVariant::P521Sha512 => return Err(p521_unsupported()),
         };
         Ok(Self { private, policy })
+    }
+
+    /// Import a signing key from a PKCS#8 PrivateKeyInfo (the
+    /// `ecdsa-sign.import-signing-key-pkcs8` contract): the encoded curve
+    /// must match the declared variant's; an embedded public key is
+    /// validated by the decoder and never trusted on its own.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn import_ecdsa_pkcs8(
+        variant: EcdsaVariant,
+        pkcs8_der: &[u8],
+        policy: SigningPolicy,
+    ) -> Result<Self, Error> {
+        use pkcs8::DecodePrivateKey as _;
+        policy.check_useful()?;
+        let (curve, hash) = variant_parts(variant)?;
+        let private = match curve {
+            EcdsaCurve::P256 => p256::ecdsa::SigningKey::from_pkcs8_der(pkcs8_der)
+                .map(|key| SigPrivate::EcdsaP256(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid P-256 pkcs8: {err}")))?,
+            EcdsaCurve::P384 => p384::ecdsa::SigningKey::from_pkcs8_der(pkcs8_der)
+                .map(|key| SigPrivate::EcdsaP384(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid P-384 pkcs8: {err}")))?,
+        };
+        Ok(Self { private, policy })
+    }
+
+    /// Import a signing key from an EC private JWK (the
+    /// `ecdsa-sign.import-signing-key-jwk` contract). This implementation
+    /// takes the MAY: a JWK whose `x`/`y` are not the public point of `d`
+    /// is rejected `invalid-key`.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn import_ecdsa_jwk(
+        variant: EcdsaVariant,
+        jwk: &str,
+        policy: SigningPolicy,
+    ) -> Result<Self, Error> {
+        policy.check_useful()?;
+        let (curve, _) = variant_parts(variant)?;
+        let parsed = crate::jwk::parse_ec(
+            jwk,
+            curve_name(curve),
+            true,
+            policy.extractable,
+            Some(ec_jwk_algs(curve)),
+        )?;
+        let d = parsed.d.as_ref().expect("private parse carries d");
+        let key = Self::import_ecdsa_scalar(variant, d, policy)?;
+        let expected = ec_point(curve, &parsed.x, &parsed.y)?;
+        if key.public().export() != expected {
+            return Err(Error::InvalidKey(
+                "JWK `x`/`y` are not the public point of `d`".into(),
+            ));
+        }
+        Ok(key)
+    }
+
+    /// Import a signing key from an RFC 8410 PKCS#8 PrivateKeyInfo (the
+    /// `ed25519-sign.import-signing-key-pkcs8` contract). A v2 public
+    /// key, when present, is ignored: the key's identity is the seed's.
+    pub fn import_ed25519_pkcs8(pkcs8_der: &[u8], policy: SigningPolicy) -> Result<Self, Error> {
+        policy.check_useful()?;
+        let seed =
+            crate::der8410::parse_rfc8410_pkcs8(crate::der8410::OID_ED25519, "Ed25519", pkcs8_der)?;
+        Self::import_ed25519_seed(&*seed, policy)
+    }
+
+    /// Import a signing key from an RFC 8037 OKP private JWK (the
+    /// `ed25519-sign.import-signing-key-jwk` contract). This
+    /// implementation takes the MAY: a JWK whose `x` is not the public
+    /// key of `d` is rejected `invalid-key`.
+    pub fn import_ed25519_jwk(jwk: &str, policy: SigningPolicy) -> Result<Self, Error> {
+        policy.check_useful()?;
+        let okp = crate::jwk::parse_okp_private(
+            jwk,
+            "Ed25519",
+            policy.extractable,
+            Some(ED25519_JWK_ALGS),
+        )?;
+        let key = Self::import_ed25519_seed(&okp.d, policy)?;
+        if key.public().export() != okp.x {
+            return Err(Error::InvalidKey(
+                "JWK `x` is not the public key of `d`".into(),
+            ));
+        }
+        Ok(key)
     }
 
     /// Generate a fresh random ECDSA signing key of the declared variant by
@@ -266,10 +537,10 @@ impl SigningKeyMaterial {
         if let Err(err) = policy.check_useful() {
             return Ok(Err(err));
         }
-        let scalar_len = match variant {
-            EcdsaVariant::P256Sha256 => 32,
-            EcdsaVariant::P384Sha384 => 48,
-            EcdsaVariant::P521Sha512 => return Ok(Err(p521_unsupported())),
+        let scalar_len = match variant_parts(variant) {
+            Ok((EcdsaCurve::P256, _)) => 32,
+            Ok((EcdsaCurve::P384, _)) => 48,
+            Err(err) => return Ok(Err(err)),
         };
         // Bound the retries. Both rejections `import_ecdsa_scalar` can
         // report — an out-of-range scalar and a length mismatch — arrive as
@@ -301,22 +572,35 @@ impl SigningKeyMaterial {
         if !self.policy.sign {
             return Err(not_permitted("sign"));
         }
+        #[cfg(not(target_family = "wasm"))]
+        macro_rules! ecdsa_sign {
+            ($key:expr, $hash:expr, $sigty:ty, $data:expr) => {{
+                use p256::ecdsa::signature::hazmat::PrehashSigner as _;
+                // Deterministic (RFC 6979-style HMAC-DRBG over the curve's
+                // digest) and verify-compatible with any conforming
+                // verifier. The exact bytes are deliberately not part of
+                // any contract: the WIT records that RFC 6979 and
+                // randomized-k implementations both verify while differing
+                // in bytes, and cross-hash variants differ from the RFC's
+                // published vectors in their nonce-derivation hash.
+                let sig: $sigty = $key
+                    .sign_prehash(&ecdsa_digest(*$hash, $data))
+                    .expect("prehash length is a digest's; signing cannot fail");
+                sig.to_bytes().to_vec()
+            }};
+        }
         Ok(match &self.private {
             SigPrivate::Ed25519(key) => {
                 use ed25519_dalek::Signer as _;
                 key.sign(data).to_bytes().to_vec()
             }
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key) => {
-                use p256::ecdsa::signature::Signer as _;
-                let sig: p256::ecdsa::Signature = key.sign(data);
-                sig.to_bytes().to_vec()
+            SigPrivate::EcdsaP256(key, hash) => {
+                ecdsa_sign!(key, hash, p256::ecdsa::Signature, data)
             }
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key) => {
-                use p384::ecdsa::signature::Signer as _;
-                let sig: p384::ecdsa::Signature = key.sign(data);
-                sig.to_bytes().to_vec()
+            SigPrivate::EcdsaP384(key, hash) => {
+                ecdsa_sign!(key, hash, p384::ecdsa::Signature, data)
             }
         })
     }
@@ -329,9 +613,9 @@ impl SigningKeyMaterial {
         match &self.private {
             SigPrivate::Ed25519(key) => SigPublic::Ed25519(key.verifying_key()),
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key) => SigPublic::EcdsaP256(*key.verifying_key()),
+            SigPrivate::EcdsaP256(key, hash) => SigPublic::EcdsaP256(*key.verifying_key(), *hash),
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key) => SigPublic::EcdsaP384(*key.verifying_key()),
+            SigPrivate::EcdsaP384(key, hash) => SigPublic::EcdsaP384(*key.verifying_key(), *hash),
         }
     }
 
@@ -375,9 +659,77 @@ impl SigningKeyMaterial {
         Ok(match &self.private {
             SigPrivate::Ed25519(key) => key.to_bytes().to_vec(),
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key) => key.to_bytes().to_vec(),
+            SigPrivate::EcdsaP256(key, _) => key.to_bytes().to_vec(),
             #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key) => key.to_bytes().to_vec(),
+            SigPrivate::EcdsaP384(key, _) => key.to_bytes().to_vec(),
+        })
+    }
+
+    /// The private key as a JWK (the `signing-key.export-key-jwk`
+    /// contract), behind the extractability gate.
+    ///
+    /// The copy returned is *not* protected: see the note on
+    /// [`crate`](crate#exported-material).
+    pub fn export_jwk(&self) -> Result<String, Error> {
+        if !self.policy.extractable {
+            return Err(Error::NotExtractable);
+        }
+        Ok(match &self.private {
+            SigPrivate::Ed25519(key) => crate::jwk::build_okp_private(
+                "Ed25519",
+                key.verifying_key().as_bytes(),
+                &key.to_bytes(),
+            ),
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP256(key, _) => {
+                let point = key.verifying_key().to_encoded_point(false);
+                crate::jwk::build_ec_private(
+                    "P-256",
+                    point.x().unwrap(),
+                    point.y().unwrap(),
+                    &key.to_bytes(),
+                )
+            }
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP384(key, _) => {
+                let point = key.verifying_key().to_encoded_point(false);
+                crate::jwk::build_ec_private(
+                    "P-384",
+                    point.x().unwrap(),
+                    point.y().unwrap(),
+                    &key.to_bytes(),
+                )
+            }
+        })
+    }
+
+    /// The private key as a PKCS#8 PrivateKeyInfo (the
+    /// `signing-key.export-key-pkcs8` contract), behind the same gate:
+    /// the RFC 8410 v1 form for Ed25519, the SEC1 body for ECDSA.
+    pub fn export_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        if !self.policy.extractable {
+            return Err(Error::NotExtractable);
+        }
+        Ok(match &self.private {
+            SigPrivate::Ed25519(key) => {
+                crate::der8410::rfc8410_pkcs8(crate::der8410::OID_ED25519, &key.to_bytes()).to_vec()
+            }
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP256(key, _) => {
+                use pkcs8::EncodePrivateKey as _;
+                key.to_pkcs8_der()
+                    .expect("valid key encodes")
+                    .to_bytes()
+                    .to_vec()
+            }
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP384(key, _) => {
+                use pkcs8::EncodePrivateKey as _;
+                key.to_pkcs8_der()
+                    .expect("valid key encodes")
+                    .to_bytes()
+                    .to_vec()
+            }
         })
     }
 }
@@ -528,6 +880,113 @@ mod tests {
         match SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &[0; 32], xp()) {
             Err(Error::InvalidKey(_)) => {}
             _ => panic!("expected invalid-key for the zero scalar"),
+        }
+    }
+
+    /// The P-256 × SHA-384 cross variant: deterministic per key/message,
+    /// self-verifying, and genuinely bound — the same public point minted
+    /// under SHA-256 must reject the SHA-384 signature. (Byte-exactness
+    /// against RFC 6979's published cross-hash vectors is deliberately
+    /// unpinned: the WIT records that signature bytes differ across
+    /// conforming implementations.)
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn ecdsa_cross_variant_binds_the_hash() {
+        use hex_literal::hex;
+        let scalar = hex!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+        let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha384, &scalar, xp())
+            .unwrap();
+        let sig = key.sign(b"sample").unwrap();
+        assert_eq!(sig, key.sign(b"sample").unwrap(), "deterministic");
+        let public = key.public();
+        assert_eq!(public.hash(), Some("SHA-384"));
+        assert!(public.verify(b"sample", &sig).is_ok());
+        let sha256 = SigPublic::import_ecdsa(EcdsaVariant::P256Sha256, &public.export()).unwrap();
+        assert_eq!(
+            sha256.verify(b"sample", &sig),
+            Err(Error::AuthenticationFailed)
+        );
+    }
+
+    /// SPKI and JWK forms round-trip for both signature families, and the
+    /// wrong-curve/wrong-algorithm forms are rejected.
+    #[test]
+    fn public_format_round_trips() {
+        let ed = SigningKeyMaterial::import_ed25519_seed(&[0x42; 32], xp()).unwrap();
+        let public = ed.public();
+        let spki = public.export_spki();
+        assert_eq!(
+            SigPublic::import_ed25519_spki(&spki).unwrap().export(),
+            public.export()
+        );
+        let jwk = public.export_jwk();
+        assert_eq!(
+            SigPublic::import_ed25519_jwk(&jwk).unwrap().export(),
+            public.export()
+        );
+        assert!(matches!(
+            SigPublic::import_ed25519_spki(b"garbage"),
+            Err(Error::InvalidKey(_))
+        ));
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let ec = SigningKeyMaterial::generate_ecdsa(EcdsaVariant::P384Sha384, sp())
+                .unwrap()
+                .unwrap();
+            let public = ec.public();
+            let spki = public.export_spki();
+            let back = SigPublic::import_ecdsa_spki(EcdsaVariant::P384Sha384, &spki).unwrap();
+            assert_eq!(back.export(), public.export());
+            // The wrong declared curve is rejected.
+            assert!(matches!(
+                SigPublic::import_ecdsa_spki(EcdsaVariant::P256Sha256, &spki),
+                Err(Error::InvalidKey(_))
+            ));
+            let jwk = public.export_jwk();
+            let back = SigPublic::import_ecdsa_jwk(EcdsaVariant::P384Sha384, &jwk).unwrap();
+            assert_eq!(back.export(), public.export());
+        }
+    }
+
+    /// Private imports round-trip through the private exports, mismatched
+    /// JWK publics are rejected (the MAY this implementation takes), and
+    /// the extractability gate holds.
+    #[test]
+    fn private_format_round_trips_and_gates() {
+        let ed = SigningKeyMaterial::import_ed25519_seed(&[7; 32], xp()).unwrap();
+        let p8 = ed.export_pkcs8().unwrap();
+        let back = SigningKeyMaterial::import_ed25519_pkcs8(&p8, xp()).unwrap();
+        assert_eq!(back.export().unwrap(), ed.export().unwrap());
+        let jwk = ed.export_jwk().unwrap();
+        let back = SigningKeyMaterial::import_ed25519_jwk(&jwk, xp()).unwrap();
+        assert_eq!(back.export().unwrap(), ed.export().unwrap());
+        // A JWK whose x is not d's public key is rejected.
+        let other = SigningKeyMaterial::import_ed25519_seed(&[8; 32], xp()).unwrap();
+        let mismatched =
+            crate::jwk::build_okp_private("Ed25519", other.public().export().as_slice(), &[7; 32]);
+        assert!(matches!(
+            SigningKeyMaterial::import_ed25519_jwk(&mismatched, xp()),
+            Err(Error::InvalidKey(_))
+        ));
+        // The gate: non-extractable keys export nothing.
+        let sealed = SigningKeyMaterial::import_ed25519_seed(&[7; 32], sp()).unwrap();
+        assert_eq!(sealed.export_jwk(), Err(Error::NotExtractable));
+        assert_eq!(sealed.export_pkcs8(), Err(Error::NotExtractable));
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let ec = SigningKeyMaterial::generate_ecdsa(EcdsaVariant::P256Sha256, xp())
+                .unwrap()
+                .unwrap();
+            let p8 = ec.export_pkcs8().unwrap();
+            let back = SigningKeyMaterial::import_ecdsa_pkcs8(EcdsaVariant::P256Sha256, &p8, xp())
+                .unwrap();
+            assert_eq!(back.export().unwrap(), ec.export().unwrap());
+            let jwk = ec.export_jwk().unwrap();
+            let back =
+                SigningKeyMaterial::import_ecdsa_jwk(EcdsaVariant::P256Sha256, &jwk, xp()).unwrap();
+            assert_eq!(back.export().unwrap(), ec.export().unwrap());
         }
     }
 

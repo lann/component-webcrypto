@@ -89,6 +89,11 @@ probes! {
     x25519_key_contract,
     x25519_agree_contract,
     x25519_grants_and_chaining,
+    sig_public_format_imports,
+    ed25519_private_format_imports,
+    ecdsa_cross_hash_variants,
+    x25519_format_roundtrips,
+    internal_nonce_jwk,
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -2413,4 +2418,516 @@ async fn x25519_grants_and_chaining() -> Result<(), String> {
         .await
         .map_err(|e| describe("non-extractable derive-key", &e))?;
     expect(key.extractable(), false, "derived key extractability")
+}
+
+// RFC 8032 §7.1 TEST 3: the seed, its public key, and the deterministic
+// signature over the two-byte message `af82` — a cross-implementation
+// known answer, since RFC 8032 signing is deterministic.
+const ED25519_TEST3_SEED: &str = "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7";
+const ED25519_TEST3_PUBLIC: &str =
+    "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025";
+const ED25519_TEST3_MSG: &str = "af82";
+const ED25519_TEST3_SIG: &str = "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a";
+
+// The RFC 6979 A.2.5 P-256 public key: the uncompressed SEC1 point and its
+// SubjectPublicKeyInfo encoding.
+const P256_A25_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
+const P256_A25_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+const P256_A25_SPKI: &str = "3059301306072a8648ce3d020106082a8648ce3d0301070342000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+
+/// The RFC 8410 PKCS#8 encoding of a 32-byte private key (Ed25519 or
+/// X25519 by OID tail: 0x70 or 0x6e).
+fn rfc8410_pkcs8(oid_tail: u8, key: &[u8]) -> Vec<u8> {
+    let mut out = unhex("302e020100300506032b650004220420");
+    out[11] = oid_tail;
+    out.extend_from_slice(key);
+    out
+}
+
+/// The RFC 8410 SubjectPublicKeyInfo encoding of a 32-byte public key.
+fn rfc8410_spki(oid_tail: u8, key: &[u8]) -> Vec<u8> {
+    let mut out = unhex("302a300506032b6500032100");
+    out[8] = oid_tail;
+    out.extend_from_slice(key);
+    out
+}
+
+/// The SPKI and JWK verifying-key import/export formats agree with the raw
+/// form byte-for-byte, on both signature algorithms: raw → spki/jwk export
+/// → re-import → raw export is the identity, and a wrong-curve SPKI fails
+/// `invalid-key`.
+async fn sig_public_format_imports() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ecdsa_verify;
+    use lann_webcrypto_guest::bindings::ed25519_verify;
+
+    // Ed25519: the RFC 8032 TEST 3 public key through all three formats,
+    // each verifying the pinned deterministic signature.
+    let public_raw = unhex(ED25519_TEST3_PUBLIC);
+    let msg = unhex(ED25519_TEST3_MSG);
+    let sig = unhex(ED25519_TEST3_SIG);
+    let raw_key = import_ed25519_verifying_key(public_raw.clone())
+        .await
+        .map_err(|e| describe("import-verifying-key-raw", &e))?;
+    let spki = raw_key
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("export-key-spki", &e))?;
+    expect_bytes(
+        &spki,
+        &rfc8410_spki(0x70, &public_raw),
+        "Ed25519 SubjectPublicKeyInfo export",
+    )?;
+    let jwk = raw_key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    let x = crate::mint::b64url(&public_raw);
+    if !jwk.contains("\"OKP\"") || !jwk.contains("\"Ed25519\"") || !jwk.contains(&x) {
+        return Err(format!(
+            "exported Ed25519 JWK missing material members: {jwk}"
+        ));
+    }
+    for (what, key) in [
+        (
+            "spki import",
+            ed25519_verify::import_verifying_key_spki(spki)
+                .await
+                .map_err(|e| describe("import-verifying-key-spki", &e))?,
+        ),
+        (
+            "jwk import",
+            ed25519_verify::import_verifying_key_jwk(jwk)
+                .await
+                .map_err(|e| describe("import-verifying-key-jwk", &e))?,
+        ),
+    ] {
+        let exported = key
+            .export_key_raw()
+            .await
+            .map_err(|e| describe("export-key-raw", &e))?;
+        expect_bytes(&exported, &public_raw, &format!("raw export after {what}"))?;
+        let (verified, fed) = sig_verify(&key, &msg, &sig, Schedule::Whole).await;
+        fed?;
+        verified.map_err(|e| describe(&format!("TEST 3 signature under the {what}"), &e))?;
+    }
+
+    // ECDSA: the A.2.5 point through all three formats.
+    let mut point = vec![0x04];
+    point.extend(unhex(P256_A25_X));
+    point.extend(unhex(P256_A25_Y));
+    let raw_key = import_ecdsa_verifying_key(EcdsaVariant::P256Sha256, point.clone())
+        .await
+        .map_err(|e| describe("import-verifying-key-raw (ecdsa)", &e))?;
+    let spki = raw_key
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("export-key-spki (ecdsa)", &e))?;
+    expect_bytes(
+        &spki,
+        &unhex(P256_A25_SPKI),
+        "P-256 SubjectPublicKeyInfo export",
+    )?;
+    let jwk = raw_key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk (ecdsa)", &e))?;
+    let (x, y) = (
+        crate::mint::b64url(&unhex(P256_A25_X)),
+        crate::mint::b64url(&unhex(P256_A25_Y)),
+    );
+    if !jwk.contains("\"EC\"")
+        || !jwk.contains("\"P-256\"")
+        || !jwk.contains(&x)
+        || !jwk.contains(&y)
+    {
+        return Err(format!("exported EC JWK missing material members: {jwk}"));
+    }
+    for (what, key) in [
+        (
+            "spki import",
+            ecdsa_verify::import_verifying_key_spki(EcdsaVariant::P256Sha256, spki.clone())
+                .await
+                .map_err(|e| describe("import-verifying-key-spki (ecdsa)", &e))?,
+        ),
+        (
+            "jwk import",
+            ecdsa_verify::import_verifying_key_jwk(EcdsaVariant::P256Sha256, jwk)
+                .await
+                .map_err(|e| describe("import-verifying-key-jwk (ecdsa)", &e))?,
+        ),
+    ] {
+        let exported = key
+            .export_key_raw()
+            .await
+            .map_err(|e| describe("export-key-raw (ecdsa)", &e))?;
+        expect_bytes(&exported, &point, &format!("raw export after ECDSA {what}"))?;
+    }
+
+    // Cross-curve and cross-algorithm mismatches fail `invalid-key`.
+    expect_err(
+        "P-256 spki as p384-sha384",
+        ErrKind::InvalidKey,
+        ecdsa_verify::import_verifying_key_spki(EcdsaVariant::P384Sha384, spki).await,
+        "imported a P-256 SubjectPublicKeyInfo under a P-384 variant",
+    )?;
+    expect_err(
+        "X25519 spki as Ed25519",
+        ErrKind::InvalidKey,
+        ed25519_verify::import_verifying_key_spki(rfc8410_spki(0x6e, &public_raw)).await,
+        "imported an X25519 SubjectPublicKeyInfo as Ed25519",
+    )?;
+    expect_err(
+        "wrong-curve OKP JWK",
+        ErrKind::InvalidKey,
+        ed25519_verify::import_verifying_key_jwk(format!(
+            r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
+            crate::mint::b64url(&public_raw)
+        ))
+        .await,
+        "imported an X25519 JWK as Ed25519",
+    )?;
+
+    // The JWK `alg` policy: Ed25519 accepts its two registered spellings
+    // case-sensitively, and a public JWK restricting extractability
+    // (`ext: false`) cannot mint an unconditionally exportable public key.
+    let x = crate::mint::b64url(&public_raw);
+    for alg in ["Ed25519", "EdDSA"] {
+        ed25519_verify::import_verifying_key_jwk(format!(
+            r#"{{"kty":"OKP","crv":"Ed25519","x":"{x}","alg":"{alg}"}}"#
+        ))
+        .await
+        .map_err(|e| describe(&format!("import with alg {alg}"), &e))?;
+    }
+    expect_err(
+        "wrong-case alg",
+        ErrKind::InvalidKey,
+        ed25519_verify::import_verifying_key_jwk(format!(
+            r#"{{"kty":"OKP","crv":"Ed25519","x":"{x}","alg":"ed25519"}}"#
+        ))
+        .await,
+        "imported a JWK with a wrong-case alg",
+    )?;
+    expect_err(
+        "ext:false public JWK",
+        ErrKind::InvalidKey,
+        ed25519_verify::import_verifying_key_jwk(format!(
+            r#"{{"kty":"OKP","crv":"Ed25519","x":"{x}","ext":false}}"#
+        ))
+        .await,
+        "minted an always-exportable key from an ext:false JWK",
+    )
+}
+
+/// Ed25519 private-key imports: both formats reproduce the RFC 8032 TEST 3
+/// deterministic signature; generated keys round-trip through the gated
+/// JWK and PKCS#8 exports; the gate holds on non-extractable keys; a
+/// d-less OKP JWK is not a signing key.
+async fn ed25519_private_format_imports() -> Result<(), String> {
+    use crate::mint::signing_options;
+    use lann_webcrypto_guest::bindings::ed25519_sign;
+
+    let seed = unhex(ED25519_TEST3_SEED);
+    let msg = unhex(ED25519_TEST3_MSG);
+    let expected_sig = unhex(ED25519_TEST3_SIG);
+
+    let from_pkcs8 =
+        ed25519_sign::import_signing_key_pkcs8(rfc8410_pkcs8(0x70, &seed), signing_options(false))
+            .await
+            .map_err(|e| describe("import-signing-key-pkcs8", &e))?;
+    let (sig, fed) = sig_sign(&from_pkcs8, &msg, Schedule::Whole).await;
+    fed?;
+    expect_bytes(
+        &sig,
+        &expected_sig,
+        "TEST 3 signature from the PKCS#8 import",
+    )?;
+
+    let jwk = format!(
+        r#"{{"kty":"OKP","crv":"Ed25519","x":"{}","d":"{}"}}"#,
+        crate::mint::b64url(&unhex(ED25519_TEST3_PUBLIC)),
+        crate::mint::b64url(&seed),
+    );
+    let from_jwk = ed25519_sign::import_signing_key_jwk(jwk, signing_options(false))
+        .await
+        .map_err(|e| describe("import-signing-key-jwk", &e))?;
+    let (sig, fed) = sig_sign(&from_jwk, &msg, Schedule::Whole).await;
+    fed?;
+    expect_bytes(&sig, &expected_sig, "TEST 3 signature from the JWK import")?;
+
+    // Generated keys: the gated exports round-trip through both formats.
+    let (signing, public) = generate_ed25519_key(true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let payload = b"private-format roundtrip payload";
+    let pkcs8 = signing
+        .export_key_pkcs8()
+        .await
+        .map_err(|e| describe("export-key-pkcs8", &e))?;
+    let jwk = signing
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk (private)", &e))?;
+    if !jwk.contains("\"d\"") {
+        return Err(format!("exported private JWK carries no `d`: {jwk}"));
+    }
+    for (what, key) in [
+        (
+            "pkcs8",
+            ed25519_sign::import_signing_key_pkcs8(pkcs8, signing_options(false))
+                .await
+                .map_err(|e| describe("re-import of exported PKCS#8", &e))?,
+        ),
+        (
+            "jwk",
+            ed25519_sign::import_signing_key_jwk(jwk, signing_options(false))
+                .await
+                .map_err(|e| describe("re-import of exported JWK", &e))?,
+        ),
+    ] {
+        let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
+        fed?;
+        let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
+        fed?;
+        verified.map_err(|e| describe(&format!("{what} re-import did not verify"), &e))?;
+    }
+
+    // The extractability gate, in the failing direction.
+    let (non_extractable, _) = generate_ed25519_key(false)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect_err(
+        "export-key-pkcs8",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_pkcs8().await,
+        "exported a non-extractable signing key",
+    )?;
+    expect_err(
+        "export-key-jwk",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_jwk().await,
+        "exported a non-extractable signing key",
+    )?;
+
+    expect_err(
+        "public-only OKP JWK",
+        ErrKind::InvalidKey,
+        ed25519_sign::import_signing_key_jwk(
+            format!(
+                r#"{{"kty":"OKP","crv":"Ed25519","x":"{}"}}"#,
+                crate::mint::b64url(&unhex(ED25519_TEST3_PUBLIC))
+            ),
+            signing_options(false),
+        )
+        .await,
+        "imported a d-less JWK as a signing key",
+    )
+}
+
+/// The cross pairings of curve and hash are real variants: each mints a
+/// verifying key whose getters report its own binding (never the curve's
+/// default hash).
+async fn ecdsa_cross_hash_variants() -> Result<(), String> {
+    let mut p256 = vec![0x04];
+    p256.extend(unhex(P256_A25_X));
+    p256.extend(unhex(P256_A25_Y));
+    // The vendored Wycheproof P-384 file's group public key.
+    let p384 = unhex("042da57dda1089276a543f9ffdac0bff0d976cad71eb7280e7d9bfd9fee4bdb2f20f47ff888274389772d98cc5752138aa4b6d054d69dcf3e25ec49df870715e34883b1836197d76f8ad962e78f6571bbc7407b0d6091f9e4d88f014274406174f");
+    for (variant, point, curve, hash) in [
+        (EcdsaVariant::P256Sha384, &p256, "P-256", "SHA-384"),
+        (EcdsaVariant::P256Sha512, &p256, "P-256", "SHA-512"),
+        (EcdsaVariant::P384Sha256, &p384, "P-384", "SHA-256"),
+        (EcdsaVariant::P384Sha512, &p384, "P-384", "SHA-512"),
+    ] {
+        let key = import_ecdsa_verifying_key(variant, point.clone())
+            .await
+            .map_err(|e| describe(&format!("import-verifying-key-raw ({curve}/{hash})"), &e))?;
+        expect(
+            key.algorithm_curve(),
+            Some(curve.to_string()),
+            "cross-variant algorithm-curve",
+        )?;
+        expect(
+            key.algorithm_hash(),
+            Some(hash.to_string()),
+            "cross-variant algorithm-hash",
+        )?;
+    }
+    Ok(())
+}
+
+/// The X25519 format surface: the RFC 7748 §6.1 keys through the SPKI and
+/// PKCS#8 imports still derive the known shared secret, the gated secret
+/// exports round-trip, and the gate holds on non-extractable keys.
+async fn x25519_format_roundtrips() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::x25519;
+
+    let alice_x = unhex(RFC7748_ALICE_X);
+    let alice_d = unhex(RFC7748_ALICE_D);
+    let bob_x = unhex(RFC7748_BOB_X);
+    let shared = unhex(RFC7748_SHARED);
+
+    // Secret via PKCS#8, peer public via SPKI and JWK: every pairing
+    // derives the RFC 7748 shared secret.
+    let alice = x25519::import_secret_key_pkcs8(
+        rfc8410_pkcs8(0x6e, &alice_d),
+        agreement_options(true, true, true),
+    )
+    .await
+    .map_err(|e| describe("import-secret-key-pkcs8", &e))?;
+    let bob_spki = x25519::import_public_key_spki(rfc8410_spki(0x6e, &bob_x))
+        .await
+        .map_err(|e| describe("import-public-key-spki", &e))?;
+    let bob_jwk = x25519::import_public_key_jwk(format!(
+        r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
+        crate::mint::b64url(&bob_x)
+    ))
+    .await
+    .map_err(|e| describe("import-public-key-jwk", &e))?;
+    for (what, peer) in [("spki peer", &bob_spki), ("jwk peer", &bob_jwk)] {
+        let derived = alice
+            .agree(peer)
+            .await
+            .map_err(|e| describe(&format!("agree ({what})"), &e))?
+            .derive_bits(None)
+            .await
+            .map_err(|e| describe(&format!("derive-bits ({what})"), &e))?;
+        expect_bytes(
+            &derived,
+            &shared,
+            &format!("RFC 7748 shared secret ({what})"),
+        )?;
+    }
+
+    // The public SPKI export is the pinned RFC 8410 encoding of the raw
+    // form; the gated secret exports carry the imported material.
+    let alice_public = import_x25519_public_key(alice_x.clone())
+        .await
+        .map_err(|e| describe("import-public-key-raw", &e))?;
+    let spki = alice_public
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("public-key export-key-spki", &e))?;
+    expect_bytes(
+        &spki,
+        &rfc8410_spki(0x6e, &alice_x),
+        "X25519 SubjectPublicKeyInfo export",
+    )?;
+    let pkcs8 = alice
+        .export_key_pkcs8()
+        .await
+        .map_err(|e| describe("secret-key export-key-pkcs8", &e))?;
+    expect_bytes(
+        &pkcs8,
+        &rfc8410_pkcs8(0x6e, &alice_d),
+        "X25519 PKCS#8 export",
+    )?;
+    let jwk = alice
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("secret-key export-key-jwk", &e))?;
+    let d = crate::mint::b64url(&alice_d);
+    if !jwk.contains("\"OKP\"") || !jwk.contains("\"X25519\"") || !jwk.contains(&d) {
+        return Err(format!(
+            "exported secret JWK missing material members: {jwk}"
+        ));
+    }
+
+    // X25519 follows WebCrypto's ECDH-family JWK rule: `alg` is ignored
+    // on import, while an `ext: false` public JWK is rejected (a minted
+    // public key is unconditionally exportable).
+    x25519::import_public_key_jwk(format!(
+        r#"{{"kty":"OKP","crv":"X25519","x":"{}","alg":"anything"}}"#,
+        crate::mint::b64url(&bob_x)
+    ))
+    .await
+    .map_err(|e| describe("import-public-key-jwk (alg present)", &e))?;
+    expect_err(
+        "ext:false public JWK",
+        ErrKind::InvalidKey,
+        x25519::import_public_key_jwk(format!(
+            r#"{{"kty":"OKP","crv":"X25519","x":"{}","ext":false}}"#,
+            crate::mint::b64url(&bob_x)
+        ))
+        .await,
+        "minted an always-exportable key from an ext:false JWK",
+    )?;
+
+    // The gate, in the failing direction (the JWK import path mints
+    // non-extractable).
+    let non_extractable = import_x25519_secret_key(&alice_x, &alice_d, true, true)
+        .await
+        .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    expect_err(
+        "export-key-pkcs8",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_pkcs8().await,
+        "exported a non-extractable secret key",
+    )?;
+    expect_err(
+        "export-key-jwk",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_jwk().await,
+        "exported a non-extractable secret key",
+    )
+}
+
+/// The internal-nonce JWK surface: `import-key-jwk` mints a key
+/// interoperable with the raw import of the same material, and
+/// `export-key-jwk` round-trips behind the extractability gate.
+async fn internal_nonce_jwk() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce;
+
+    let raw: Vec<u8> = (1..=32).collect();
+    let from_jwk = aes_gcm_internal_nonce::import_key_jwk(
+        AesVariant::Aes256,
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A256GCM"}}"#),
+        crate::mint::internal_nonce_options(true),
+    )
+    .await
+    .map_err(|e| describe("import-key-jwk", &e))?;
+    let jwk = from_jwk
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    if !jwk.contains(JWK_K_32) || !jwk.contains("A256GCM") || !jwk.contains("\"oct\"") {
+        return Err(format!("exported JWK missing material members: {jwk}"));
+    }
+
+    // A message sealed under the JWK-minted key opens under the raw import
+    // of the same bytes.
+    let (sealed, fed) = in_seal(
+        &from_jwk,
+        b"aad",
+        b"internal-nonce jwk payload",
+        Schedule::Whole,
+    )
+    .await;
+    fed.map_err(|e| format!("seal data feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    let raw_key = import_internal_nonce_key(AesVariant::Aes256, raw, false)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let (opened, fed) = in_open(&raw_key, b"aad", &sealed, Schedule::Whole).await;
+    fed.map_err(|e| format!("open data feeder: {e}"))?;
+    let opened = opened.map_err(|e| describe("open", &e))?;
+    expect_bytes(&opened, b"internal-nonce jwk payload", "cross-mint open")?;
+
+    // The gate and the variant check, in the failing directions.
+    expect_err(
+        "export-key-jwk",
+        ErrKind::NotExtractable,
+        raw_key.export_key_jwk().await,
+        "exported a non-extractable key",
+    )?;
+    expect_err(
+        "32-byte JWK as aes128",
+        ErrKind::InvalidKey,
+        aes_gcm_internal_nonce::import_key_jwk(
+            AesVariant::Aes128,
+            format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A128GCM"}}"#),
+            crate::mint::internal_nonce_options(false),
+        )
+        .await,
+        "minted an aes128 key from 32 bytes",
+    )
 }

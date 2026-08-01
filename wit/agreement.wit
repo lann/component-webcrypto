@@ -40,8 +40,8 @@ interface key-agreement {
         /// Whether inputs agreed by the minted key may mint keys. Disabled
         /// by default.
         can-derive-key: func(allowed: bool);
-        /// Whether the minted key's material may be exported, once an
-        /// export path exists. Disabled by default.
+        /// Whether the minted key's material may be exported
+        /// (`secret-key.export-key-jwk`/`-pkcs8`). Disabled by default.
         extractable: func(allowed: bool);
     }
 
@@ -63,6 +63,10 @@ interface key-agreement {
         /// contract; the same handle-not-bytes fallibility as `export-key-raw`
         /// applies.
         export-key-jwk: async func() -> result<string, error>;
+
+        /// The public key as an X.509 SubjectPublicKeyInfo (DER). The
+        /// same handle-not-bytes fallibility as `export-key-raw` applies.
+        export-key-spki: async func() -> result<list<u8>, error>;
     }
 
     /// A secret key. `agree` is one-shot on the immutable key; the
@@ -99,9 +103,18 @@ interface key-agreement {
         /// `agreement-key-options.can-derive-key`.
         can-derive-key: func() -> bool;
 
-        /// Whether this key's material may be exported, once an export
-        /// path exists. Mint-time recorded policy (see
-        /// `agreement-key-options.extractable`).
+        /// Whether the export functions may return this key's material.
+        /// See `agreement-key-options.extractable`.
         extractable: func() -> bool;
+
+        /// The secret key as an RFC 8037 OKP private JWK. Fails
+        /// `error.not-extractable` unless the key was minted extractable;
+        /// fallible beyond the gate like every export (`README.md`,
+        /// "Extractability").
+        export-key-jwk: async func() -> result<string, error>;
+
+        /// The secret key as a PKCS#8 PrivateKeyInfo (DER), behind the
+        /// same extractability gate as `export-key-jwk`.
+        export-key-pkcs8: async func() -> result<list<u8>, error>;
     }
 }
