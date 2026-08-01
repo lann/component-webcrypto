@@ -1,4 +1,5 @@
-//! Admission control for host-side input buffering.
+//! Admission control for host-side memory: the input-buffering pool and the
+//! minted-resource retention pool.
 //!
 //! Every stream-taking operation buffers its whole input in host memory (the
 //! single-message contract), so a guest with many concurrent calls could
@@ -8,6 +9,14 @@
 //! request order) when the budget is spent, and releases when its buffers are
 //! gone — including the returned output stream, whose producer carries the
 //! [`Reservation`].
+//!
+//! The retention pool bounds what *mints* accumulate: every resource pushed
+//! into the table charges a fixed floor plus its variable-length material
+//! bytes ([`charge`]), holds the reservation for the resource's lifetime,
+//! and releases it when the resource drops. Retention admission is
+//! fail-fast, never waiting: its capacity frees only when the guest drops a
+//! resource, which may never happen, so a waiting mint could wait forever
+//! against a caller no rule obliges to make progress.
 //!
 //! Reservations are pessimistic (the full per-call bound, since a stream's
 //! length is unknowable up front): an admitted operation never waits for more
@@ -81,6 +90,21 @@ pub(crate) async fn admit_input<T: Send>(
 /// large limit into a small one would silently tighten it.
 fn permits(bytes: u64) -> usize {
     usize::try_from(bytes).unwrap_or(usize::MAX).max(1)
+}
+
+/// The fixed share of a retention charge: the per-resource overhead a mint
+/// retains beyond its material — the table slot and the resource's own
+/// struct. Charging it bounds resource *count* the way the variable part
+/// bounds bytes: without it, a guest minting millions of one-byte keys
+/// would retain unaccounted overhead far beyond the budget.
+pub(crate) const RETENTION_FLOOR: u64 = 128;
+
+/// Charge one minted resource's retention — [`RETENTION_FLOOR`] plus its
+/// variable-length material bytes — against the retention pool, fail-fast:
+/// `None` when the budget cannot fit the charge now.
+pub(crate) fn charge(pool: &Arc<BufferPool>, material_bytes: usize) -> Option<Reservation> {
+    let bytes = RETENTION_FLOOR.saturating_add(material_bytes as u64);
+    pool.clone().try_acquire_owned(permits(bytes))
 }
 
 #[cfg(test)]
@@ -173,5 +197,34 @@ mod tests {
         assert_eq!(permits(0), 1, "a zero budget would admit nothing");
         assert_eq!(permits(100), 100);
         assert_eq!(permits(u64::MAX), usize::MAX);
+    }
+
+    /// A retention charge takes the floor plus the material bytes, and a
+    /// charge the budget cannot fit fails immediately rather than waiting —
+    /// retention capacity frees only on resource drop, so a waiter could
+    /// wait forever.
+    #[test]
+    fn retention_charges_floor_plus_material_and_fails_fast() {
+        let pool = pool(RETENTION_FLOOR * 2 + 32);
+        let first = charge(&pool, 32).expect("fits: floor + 32");
+        assert_eq!(pool.available_permits() as u64, RETENTION_FLOOR);
+        let second = charge(&pool, 0).expect("fits: exactly the floor");
+        assert!(charge(&pool, 0).is_none(), "budget spent: must not wait");
+        drop(second);
+        drop(first);
+        assert_eq!(pool.available_permits() as u64, RETENTION_FLOOR * 2 + 32);
+    }
+
+    /// A single charge larger than the whole budget fails — the degenerate
+    /// per-mint size cap the accounting subsumes.
+    #[test]
+    fn retention_rejects_a_charge_beyond_the_budget() {
+        let pool = pool(RETENTION_FLOOR + 16);
+        assert!(charge(&pool, 17).is_none());
+        assert!(
+            charge(&pool, usize::MAX).is_none(),
+            "saturating, not wrapping"
+        );
+        assert!(charge(&pool, 16).is_some());
     }
 }
