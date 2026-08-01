@@ -73,9 +73,10 @@ jobs:
   mutants:
     if: github.repository == 'lann/component-webcrypto'
     runs-on: ubuntu-latest
-    # A full run measured ~20 s/mutant (~4 h for the current ~700 mutants);
-    # the `just mutants <k/n>` shard argument is the escape hatch if growth
-    # ever pushes this against the 6-hour job cap.
+    # The recipe runs two mutants at a time; the baseline full run fit in
+    # ~2.5 h single-job for ~700 mutants, so this cap has slack. The
+    # `just mutants <k/n>` shard argument is the escape hatch if growth
+    # ever pushes it against the 6-hour job cap.
     timeout-minutes: 350
     steps:
       - name: Checkout code
