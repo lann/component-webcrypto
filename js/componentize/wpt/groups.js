@@ -64,6 +64,57 @@ function cipherInSubset(name) {
 }
 
 /**
+ * encrypt_decrypt/chacha20_poly1305: the whole group — the fixed-vector
+ * encryptions and decryptions over "raw-secret" imports, the generated-key
+ * round trips, the tamper rejections, and the 12-byte-nonce rule (the
+ * WIT's `invalid-nonce` renders the expected `OperationError`).
+ */
+function chachaEncryptDecryptInSubset() {
+  return true;
+}
+
+/**
+ * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
+ * rows are served whole, and so are the empty-usages rows for every
+ * format (usages are validated before the format is considered). The
+ * "Good parameters" jwk rows stay out: the package serves no ChaCha JWK
+ * path (WIT-forced — see the shim header's deviations list).
+ * @param {string} name
+ */
+function chachaImportKeyInSubset(name) {
+  if (name.startsWith("Empty Usages:")) {
+    return true;
+  }
+  return name.includes("(raw-secret, ");
+}
+
+/**
+ * generateKey/successes (ChaCha20-Poly1305): the non-extractable rows are
+ * served whole. The extractable rows also export the generated key as a
+ * JWK, which the package declines for the ChaCha constructions
+ * (WIT-forced — see the shim header's deviations list), so they stay
+ * out-of-subset until a ChaCha JWK path exists.
+ * @param {string} name
+ */
+function chachaGenerateKeyInSubset(name) {
+  return name.includes(", false, [");
+}
+
+/**
+ * generateKey/failures, in both invocations: the served-algorithms sweep
+ * (HMAC, the AES family, Ed25519, X25519) and the ChaCha20-Poly1305 one.
+ * The whole group is in-subset — the suite asserts the spec's error
+ * ordering (algorithm normalization, nested hash included; then usage
+ * membership; then algorithm properties; then the empty-usage check),
+ * which this library implements for every served algorithm. The AES-192
+ * rows are in too: their expected errors are usage and length checks that
+ * precede the mint, so they never reach the package-wide AES-192 decline.
+ */
+function generateKeyFailuresInSubset() {
+  return true;
+}
+
+/**
  * import_export/symmetric_importKey: the "raw" and "jwk" formats;
  * HMAC-SHA-256 at any key size, the AES family at 128/256 bits.
  * Empty-usages tests are in for any parameters (usages are validated
@@ -100,19 +151,6 @@ function generateKeyInSubset(name) {
     return /length: (128|256)/.test(name);
   }
   return false;
-}
-
-/**
- * generateKey/failures, run for the served algorithms (HMAC, the AES
- * family, Ed25519, X25519): the whole group is in-subset — the suite
- * asserts the spec's error ordering (algorithm normalization, then usage
- * membership, then algorithm properties, then the empty-usage check),
- * which this library implements for every served algorithm. The AES-192
- * rows are in too: their expected errors are usage and length checks that
- * precede the mint, so they never reach the package-wide AES-192 decline.
- */
-function generateKeyFailuresInSubset() {
-  return true;
 }
 
 /**
@@ -335,6 +373,12 @@ export const GROUPS = [
     inSubset: cipherInSubset,
   },
   {
+    name: "encrypt_decrypt/chacha20_poly1305",
+    module: "group-chacha20-poly1305.js",
+    start: (ns) => ns.run_chacha20_poly1305_tests(),
+    inSubset: chachaEncryptDecryptInSubset,
+  },
+  {
     name: "import_export/symmetric_importKey (HMAC, AES-GCM)",
     module: "group-import-key.js",
     start: (ns) => {
@@ -342,6 +386,12 @@ export const GROUPS = [
       ns.runTests("AES-GCM");
     },
     inSubset: importKeyInSubset,
+  },
+  {
+    name: "import_export/symmetric_importKey (ChaCha20-Poly1305)",
+    module: "group-import-key.js",
+    start: (ns) => ns.runTests("ChaCha20-Poly1305"),
+    inSubset: chachaImportKeyInSubset,
   },
   {
     name: "generateKey/successes (HMAC, AES-GCM)",
@@ -353,6 +403,18 @@ export const GROUPS = [
     name: "generateKey/failures (HMAC, AES, Ed25519, X25519)",
     module: "group-generate-key-failures.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM", "AES-CBC", "AES-CTR", "Ed25519", "X25519"]),
+    inSubset: generateKeyFailuresInSubset,
+  },
+  {
+    name: "generateKey/successes (ChaCha20-Poly1305)",
+    module: "group-generate-key.js",
+    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
+    inSubset: chachaGenerateKeyInSubset,
+  },
+  {
+    name: "generateKey/failures (ChaCha20-Poly1305)",
+    module: "group-generate-key-failures.js",
+    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
     inSubset: generateKeyFailuresInSubset,
   },
   {

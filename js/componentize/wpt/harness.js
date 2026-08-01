@@ -2,7 +2,8 @@
 // tests inside a componentize-js guest (which has no browser globals).
 //
 // It implements only what those tests use — `promise_test`/`test`, the
-// `assert_*` functions they call, `setup`/`done` (no-ops here), the
+// `assert_*` functions they call, `promise_rejects_dom`, `setup`/`done`
+// (no-ops here), the
 // `subsetTest` passthrough from WPT's /common/subset-tests.js, and the
 // `btoa`/`self` globals — and it runs tests *sequentially*: each test's
 // function is awaited before the next starts, which testharness.js permits
@@ -117,14 +118,10 @@ globalThis.assert_throws_dom = function (name, fn, description) {
   fail(`${description ?? "assert_throws_dom"}: expected ${name}, nothing thrown`);
 };
 
-globalThis.assert_throws_quotaexceedederror = function (fn, quota, requested, description) {
-  globalThis.assert_throws_dom("QuotaExceededError", fn, description);
-};
-
 globalThis.promise_rejects_dom = function (test, name, promise, description) {
   return promise.then(
     () => {
-      fail(`${description ?? "promise_rejects_dom"}: expected ${name}, nothing thrown`);
+      fail(`${description ?? "promise_rejects_dom"}: expected ${name}, promise resolved`);
     },
     (e) => {
       if (/** @type {{ name?: unknown }} */ (e)?.name !== name) {
@@ -132,6 +129,10 @@ globalThis.promise_rejects_dom = function (test, name, promise, description) {
       }
     },
   );
+};
+
+globalThis.assert_throws_quotaexceedederror = function (fn, quota, requested, description) {
+  globalThis.assert_throws_dom("QuotaExceededError", fn, description);
 };
 
 globalThis.assert_implements_optional = function (condition, message) {

@@ -34,6 +34,7 @@ import * as groupAesCtr from "./js/componentize/wpt/build/group-aes-ctr.js";
 import * as groupImportKey from "./js/componentize/wpt/build/group-import-key.js";
 import * as groupGenerateKey from "./js/componentize/wpt/build/group-generate-key.js";
 import * as groupGenerateKeyFailures from "./js/componentize/wpt/build/group-generate-key-failures.js";
+import * as groupChacha from "./js/componentize/wpt/build/group-chacha20-poly1305.js";
 import * as groupCfrgBits from "./js/componentize/wpt/build/group-cfrg-bits.js";
 import * as groupCfrgKeys from "./js/componentize/wpt/build/group-cfrg-keys.js";
 import * as groupOkpImportKey from "./js/componentize/wpt/build/group-okp-import-key.js";
@@ -62,6 +63,7 @@ const MODULES = {
   "group-import-key.js": groupImportKey,
   "group-generate-key.js": groupGenerateKey,
   "group-generate-key-failures.js": groupGenerateKeyFailures,
+  "group-chacha20-poly1305.js": groupChacha,
   "group-cfrg-bits.js": groupCfrgBits,
   "group-cfrg-keys.js": groupCfrgKeys,
   "group-okp-import-key.js": groupOkpImportKey,

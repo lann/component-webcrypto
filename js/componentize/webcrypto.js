@@ -6,14 +6,15 @@
 // The surface mirrors `crypto.subtle` for the supported algorithms:
 //
 //   - `importKey` / `exportKey` ("raw", "jwk", "spki", and "pkcs8"
-//     formats)
+//     formats; "raw-secret" for ChaCha20-Poly1305, its only raw form)
 //   - `generateKey`
 //   - `sign` / `verify`         (HMAC over SHA-1 and SHA-256/384/512;
 //     Ed25519; ECDSA P-256/P-384 verification)
-//   - `encrypt` / `decrypt`     (AES-GCM, and the unauthenticated
+//   - `encrypt` / `decrypt`     (AES-GCM; ChaCha20-Poly1305 (RFC 8439,
+//     from the Modern Algorithms proposal); and the unauthenticated
 //     AES-CBC/AES-CTR through the package's `cipher` kind — see
 //     `wit/README.md`, "Unauthenticated modes are in, for compatibility";
-//     128- and 256-bit keys)
+//     128- and 256-bit AES keys)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-1 and
 //     SHA-256/384/512; X25519 key agreement; derived-key targets HMAC
 //     over the same hashes and AES-GCM/CBC/CTR)
@@ -25,7 +26,8 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `derivation`, `hkdf`,
+// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`,
+// `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
 // `key-agreement`, `x25519`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
@@ -48,6 +50,20 @@
 //     `NotSupportedError` — including AES-192 (which every implementation
 //     of the package declines) and AES-KW (parked with the package's wrap
 //     direction).
+//   - Unserved: the Modern Algorithms proposal's "raw-secret" /
+//     "raw-public" / "raw-seed" format aliases for the pre-proposal
+//     algorithms ("raw" remains). "raw-secret" is served where it is an
+//     algorithm's only raw form (ChaCha20-Poly1305).
+//   - Unserved: ChaCha20-Poly1305 as a deriveKey target. The
+//     `chacha20-poly1305` interface mints from raw material and
+//     generation only; a derive mint (or a deriveBits-and-import path
+//     here) would be additive.
+//   - WIT-forced: ChaCha20-Poly1305 JWKs. The package serves no JWK path
+//     for algorithms without a registered JOSE `alg` (a recorded ruling —
+//     see `aead-key.export-key-jwk`), and `chacha20-poly1305` mints from
+//     raw material only, so the "jwk" format fails with
+//     `NotSupportedError` where the proposal serves an alg-less "oct"
+//     JWK.
 //   - Unserved by composition: ECDSA signing, key generation, and
 //     private-key import. The interface exists (`ecdsa-sign`), but it is
 //     class D and the in-guest provider this library composes with
@@ -91,6 +107,7 @@ import * as hmacSha1Iface from "lann:webcrypto/hmac-sha1@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
 import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
 import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
+import * as chachaIface from "lann:webcrypto/chacha20-poly1305@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
 import * as hkdfSha2Iface from "lann:webcrypto/hkdf-sha2@0.1.0";
 import * as hkdfSha1Iface from "lann:webcrypto/hkdf-sha1@0.1.0";
@@ -515,6 +532,7 @@ const SERVED_ALGORITHMS = [
   "AES-GCM",
   "AES-CBC",
   "AES-CTR",
+  "ChaCha20-Poly1305",
   "HKDF",
   "PBKDF2",
   "X25519",
@@ -643,6 +661,8 @@ const USAGES = {
   // `cipher` kind records wrap/unwrap as vocabulary ahead of operations).
   "AES-CBC": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
   "AES-CTR": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
+  // The proposal gives ChaCha20-Poly1305 the AEAD vocabulary AES-GCM has.
+  "ChaCha20-Poly1305": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
   // The derive sources share WebCrypto's usage pair. X25519's entry is the
   // *private* key's vocabulary; public keys carry no usages and are
   // validated at their import site.
@@ -835,12 +855,13 @@ function hmacMintOptions(usages, extractable) {
 }
 
 /**
- * The `aead-key-options` resource carrying `usages` and `extractable`. See
+ * The `aead-key-options` resource carrying `usages` and `extractable`, for
+ * the aead kind's algorithms (AES-GCM and ChaCha20-Poly1305). See
  * `hmacMintOptions`; `wrapKey`/`unwrapKey` map onto the WIT wrap usages.
  * @param {readonly KeyUsage[]} usages
  * @param {boolean} extractable
  */
-function aesGcmMintOptions(usages, extractable) {
+function aeadMintOptions(usages, extractable) {
   const options = new AeadKeyOptions();
   options.canSeal(usages.includes("encrypt"));
   options.canOpen(usages.includes("decrypt"));
@@ -1116,6 +1137,18 @@ async function mintAesGcmKey(start, extractable, usages) {
 
 /**
  * @param {() => unknown} start
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
+async function mintChaChaKey(start, extractable, usages) {
+  const handle = await callImport(start());
+  // The proposal's ChaCha20-Poly1305 KeyAlgorithm carries no length
+  // member: the key size is fixed at 256 bits.
+  return mintKey(handle, "secret", { name: "ChaCha20-Poly1305" }, extractable, usages);
+}
+
+/**
+ * @param {() => unknown} start
  * @param {string} name the mode's registry name, for the projected algorithm
  * @param {boolean} extractable
  * @param {readonly KeyUsage[]} usages
@@ -1130,7 +1163,7 @@ async function mintCipherKey(start, name, extractable, usages) {
 // --- subtle --------------------------------------------------------------------------
 
 /**
- * @param {KeyFormat} format
+ * @param {KeyFormat | "raw-secret"} format
  * @param {BufferSource | JsonWebKey} keyData
  * @param {AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams | HmacImportParams | AesKeyAlgorithm} algorithm
  * @param {boolean} extractable
@@ -1141,8 +1174,36 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   // Algorithm normalization precedes the format gate, the spec's order: a
   // malformed algorithm is a TypeError even alongside an unserved format.
   const alg = normalizeAlgorithm(algorithm);
-  if (format !== "raw" && format !== "jwk" && format !== "spki" && format !== "pkcs8") {
+  if (
+    format !== "raw" &&
+    format !== "jwk" &&
+    format !== "spki" &&
+    format !== "pkcs8" &&
+    format !== "raw-secret"
+  ) {
     throw new TypeError(`${format} is not a KeyFormat`);
+  }
+
+  if (alg.name === "ChaCha20-Poly1305") {
+    const usages = normalizeUsages(keyUsages, alg.name);
+    requireNonEmptyUsages(usages);
+    if (format !== "raw-secret") {
+      // "raw-secret" is the algorithm's only served form: no DER formats
+      // by spec, no "raw" spelling (the proposal aliases "raw" for the
+      // pre-proposal algorithms only), and no JWK path in the package
+      // (see the header's deviations list).
+      throw dom("NotSupportedError", `ChaCha20-Poly1305 keys support the "raw-secret" format only`);
+    }
+    return await mintChaChaKey(
+      () => chachaIface.importKeyRaw(bytesOf(keyData, "keyData"), aeadMintOptions(usages, !!extractable)),
+      !!extractable,
+      usages,
+    );
+  }
+  if (format === "raw-secret") {
+    // The proposal's alias for the pre-proposal algorithms' "raw" —
+    // unserved (see the header's deviations list).
+    throw dom("NotSupportedError", `the raw-secret format is not served for ${alg.name}`);
   }
 
   if (alg.name === "HKDF" || alg.name === "PBKDF2") {
@@ -1377,8 +1438,8 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     return await mintAesGcmKey(
       () =>
         format === "jwk"
-          ? aesGcm.importKeyJwk(variant, material, aesGcmMintOptions(usages, !!extractable))
-          : aesGcm.importKeyRaw(variant, material, aesGcmMintOptions(usages, !!extractable)),
+          ? aesGcm.importKeyJwk(variant, material, aeadMintOptions(usages, !!extractable))
+          : aesGcm.importKeyRaw(variant, material, aeadMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1441,6 +1502,16 @@ async function generateKey(algorithm, extractable, keyUsages) {
     throw dom("NotSupportedError", "ECDSA key generation is not served: ecdsa-sign is class D");
   }
 
+  if (alg.name === "ChaCha20-Poly1305") {
+    requireNonEmptyUsages(usages);
+    // The proposal's generate params carry no length: the key is 256 bits.
+    return await mintChaChaKey(
+      () => chachaIface.generateKey(aeadMintOptions(usages, !!extractable)),
+      !!extractable,
+      usages,
+    );
+  }
+
   if (alg.name === "HMAC") {
     const route = hmacHashOf(alg.hash);
     // The spec's get-key-length: absent means the hash's block size (the
@@ -1472,7 +1543,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
       );
     }
     return await mintAesGcmKey(
-      () => aesGcm.generateKey(variant, aesGcmMintOptions(usages, !!extractable)),
+      () => aesGcm.generateKey(variant, aeadMintOptions(usages, !!extractable)),
       !!extractable,
       usages,
     );
@@ -1487,17 +1558,23 @@ async function generateKey(algorithm, extractable, keyUsages) {
  */
 /**
  * @overload
- * @param {Exclude<KeyFormat, "jwk">} format
+ * @param {Exclude<KeyFormat, "jwk"> | "raw-secret"} format
  * @param {globalThis.CryptoKey} key
  * @returns {Promise<ArrayBuffer>}
  */
 /**
- * @param {KeyFormat} format
+ * @param {KeyFormat | "raw-secret"} format
  * @param {globalThis.CryptoKey} key
  * @returns {Promise<ArrayBuffer | JsonWebKey>}
  */
 async function exportKey(format, key) {
-  if (format !== "raw" && format !== "jwk" && format !== "spki" && format !== "pkcs8") {
+  if (
+    format !== "raw" &&
+    format !== "jwk" &&
+    format !== "spki" &&
+    format !== "pkcs8" &&
+    format !== "raw-secret"
+  ) {
     throw new TypeError(`${format} is not a KeyFormat`);
   }
   if (!(key instanceof CryptoKey)) {
@@ -1505,6 +1582,19 @@ async function exportKey(format, key) {
   }
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
+  }
+  if (format === "raw-secret") {
+    if (key.algorithm.name !== "ChaCha20-Poly1305") {
+      // The proposal's alias for the pre-proposal algorithms' "raw" —
+      // unserved (see the header's deviations list).
+      throw dom("NotSupportedError", `the raw-secret format is not served for ${key.algorithm.name}`);
+    }
+    return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKeyRaw())));
+  }
+  if (key.algorithm.name === "ChaCha20-Poly1305" && format !== "jwk") {
+    // "raw-secret" is the only served non-JWK form; the JWK request flows
+    // through to the WIT's own decline (see the header's deviations list).
+    throw dom("NotSupportedError", `ChaCha20-Poly1305 keys support the "raw-secret" format only`);
   }
   if (format === "spki" || format === "pkcs8") {
     if (key.type === "secret") {
@@ -1679,6 +1769,27 @@ function gcmParams(alg) {
 }
 
 /**
+ * The per-operation ChaCha20-Poly1305 parameters (RFC 8439). The
+ * construction fixes both sizes: tags are 128 bits (any other `tagLength`
+ * is `OperationError`; the WIT's default `tag-size` carries the fixed 16
+ * bytes), and nonces are 12 bytes, whose violation the WIT's own
+ * `invalid-nonce` renders as the expected `OperationError`.
+ * @param {NormalizedAlgorithm} alg
+ * @returns {{ iv: Uint8Array, aad: Uint8Array }}
+ */
+function chachaParams(alg) {
+  if (alg.tagLength !== undefined && alg.tagLength !== 128) {
+    throw dom("OperationError", `ChaCha20-Poly1305 tags are 128 bits, got tagLength ${alg.tagLength}`);
+  }
+  const iv = bytesOf(alg.iv, "iv");
+  const aad =
+    alg.additionalData === undefined
+      ? new Uint8Array(0)
+      : bytesOf(alg.additionalData, "additionalData");
+  return { iv, aad };
+}
+
+/**
  * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} algorithm
  * @param {globalThis.CryptoKey} key
  * @param {BufferSource} data
@@ -1693,6 +1804,17 @@ async function encrypt(algorithm, key, data) {
     const handle = handleOf(key);
     const sealed = await callFedCollect(
       (rx) => handle.encrypt(iv, counterLength, rx),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(sealed);
+  }
+  if (alg.name === "ChaCha20-Poly1305") {
+    const { iv, aad } = chachaParams(alg);
+    requireKeyAlgorithm(key, "ChaCha20-Poly1305");
+    requireUsage(key, "encrypt");
+    const handle = handleOf(key);
+    const sealed = await callFedCollect(
+      (rx) => handle.seal(iv, aad, undefined, rx),
       bytesOf(data, "data"),
     );
     return toArrayBuffer(sealed);
@@ -1728,6 +1850,17 @@ async function decrypt(algorithm, key, data) {
     );
     return toArrayBuffer(plaintext);
   }
+  if (alg.name === "ChaCha20-Poly1305") {
+    const { iv, aad } = chachaParams(alg);
+    requireKeyAlgorithm(key, "ChaCha20-Poly1305");
+    requireUsage(key, "decrypt");
+    const handle = handleOf(key);
+    const plaintext = await callFedCollect(
+      (rx) => handle.open(iv, aad, undefined, rx),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(plaintext);
+  }
   const { iv, aad, tagSize } = gcmParams(alg);
   requireKeyAlgorithm(key, "AES-GCM");
   requireUsage(key, "decrypt");
@@ -1747,7 +1880,7 @@ async function decrypt(algorithm, key, data) {
  */
 async function deriveBits(algorithm, baseKey, length) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name.startsWith("AES-")) {
+  if (alg.name === "HMAC" || alg.name === "ChaCha20-Poly1305" || alg.name.startsWith("AES-")) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   requireKeyAlgorithm(baseKey, alg.name);
@@ -1794,7 +1927,7 @@ async function deriveBits(algorithm, baseKey, length) {
  */
 async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsages) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name.startsWith("AES-")) {
+  if (alg.name === "HMAC" || alg.name === "ChaCha20-Poly1305" || alg.name.startsWith("AES-")) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   const target = normalizeAlgorithm(derivedKeyType);
@@ -1843,7 +1976,7 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
     );
   }
   return await mintAesGcmKey(
-    () => aesGcm.deriveKey(variant, input, aesGcmMintOptions(usages, !!extractable)),
+    () => aesGcm.deriveKey(variant, input, aeadMintOptions(usages, !!extractable)),
     !!extractable,
     usages,
   );

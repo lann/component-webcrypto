@@ -134,7 +134,13 @@ relative path.
 
 `vendor/` holds unmodified files from WPT revision
 `8e573188890e6d0a5219711afc9bbb5dc5abbd7a` (`WebCryptoAPI/` and its
-`LICENSE.md`, the 3-clause BSD license the files are distributed under):
+`LICENSE.md`, the 3-clause BSD license the files are distributed under).
+The `.tentative` files (the ChaCha20-Poly1305 groups) test the [Modern
+Algorithms in the Web Cryptography API] proposal rather than the W3C
+recommendation; upstream drops the suffix if the proposal merges, which
+reaches this harness as a re-vendor with a census diff.
+
+[Modern Algorithms in the Web Cryptography API]: https://wicg.github.io/webcrypto-modern-algos/
 
 | suite | files |
 | --- | --- |
@@ -143,9 +149,11 @@ relative path.
 | `encrypt_decrypt/aes_gcm` (256-bit iv) | `aes_gcm_256_iv.https.any.js` (reference), `aes_gcm_256_iv_fixtures.js` (the shared `aes.js` runner and `aes_gcm_vectors.js`) |
 | `encrypt_decrypt/aes_cbc` | `aes_cbc.https.any.js` (reference), `aes_cbc_vectors.js` (the shared `aes.js` runner) |
 | `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
+| `encrypt_decrypt/chacha20_poly1305` | `chacha20_poly1305.tentative.https.any.js` (wrapped callable; self-contained) |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
-| `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js` (references), `successes.js` |
-| `generateKey` failures | `failures_HMAC.https.any.js`, `failures_AES-GCM.https.any.js`, `failures_AES-CBC.https.any.js`, `failures_AES-CTR.https.any.js`, `failures_Ed25519.https.any.js`, `failures_X25519.https.any.js` (references), `failures.js` |
+| `import_export/symmetric_importKey` (ChaCha20-Poly1305) | `ChaCha20-Poly1305_importKey.tentative.https.any.js` (reference; the shared `symmetric_importKey.js` runner) |
+| `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js`, `successes_chacha20_poly1305.tentative.https.any.js` (references), `successes.js` |
+| `generateKey` failures | `failures_HMAC.https.any.js`, `failures_AES-GCM.https.any.js`, `failures_AES-CBC.https.any.js`, `failures_AES-CTR.https.any.js`, `failures_Ed25519.https.any.js`, `failures_X25519.https.any.js`, `failures_chacha20_poly1305.tentative.https.any.js` (references), `failures.js` |
 | `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |
 | `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
