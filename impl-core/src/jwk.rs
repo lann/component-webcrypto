@@ -73,16 +73,7 @@ pub fn parse_okp_private(
     let jwk = parse_object(jwk)?;
     require_kty(&jwk, "OKP")?;
     check_alg(&jwk, allowed_algs)?;
-
-    match jwk.get("crv") {
-        Some(Value::String(crv)) if crv == expected_crv => {}
-        Some(Value::String(crv)) => {
-            return Err(Error::InvalidKey(format!(
-                "JWK crv is {crv:?}, not {expected_crv:?}"
-            )))
-        }
-        _ => return Err(Error::InvalidKey("JWK must carry a string `crv`".into())),
-    }
+    require_crv(&jwk, expected_crv)?;
 
     check_ext(&jwk, extractable)?;
 
