@@ -55,28 +55,53 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// either can deadlock against the bound, and no implementation can rescue
 /// it.
 ///
-/// What is bounded is what this host *accumulates*: the stream buffers, and
-/// the output stream until its bytes are read or dropped. What is not
-/// bounded is the `list<u8>` parameters — `aad`, `nonce`, and the minting
-/// interfaces' `raw` — which the canonical ABI lifts before the host
-/// function runs, so they are already in host memory when admission is
+/// # Minted-resource retention
+///
+/// Minted resources — keys, IKM, passwords, derivations, options, digests —
+/// live in the store's table until the guest drops them, so unbounded
+/// minting is unbounded host retention even with every operation bounded.
+/// A third limit bounds it:
+///
+/// - **Retention** ([`set_retention_limit`]): the retention pool. Every
+///   mint charges a fixed per-resource floor (which bounds resource
+///   *count*) plus its variable-length material bytes, holds the charge for
+///   the resource's lifetime, and releases it when the resource drops.
+///   Defaults to 16 MiB.
+///
+/// Retention admission is fail-fast, never waiting: its capacity frees only
+/// when the guest drops a resource, which may never happen. A mint past the
+/// budget fails with a recoverable `error.other` — drop resources and
+/// retry. The `*-options.new` constructors, whose WIT signatures carry no
+/// error channel, trap instead, the same class as a table-push failure.
+///
+/// What is bounded is what this host *accumulates*: the stream buffers, the
+/// output stream until its bytes are read or dropped, and minted resources.
+/// What is not bounded is the `list<u8>` parameters — `aad`, `nonce`, and
+/// the minting interfaces' `raw` — which the canonical ABI lifts before the
+/// host function runs, so they are already in host memory when admission is
 /// reached. Bounding those needs a hold *before* the call starts, which the
 /// component model provides to a component callee (`backpressure.{inc,dec}`)
 /// and does not expose to a host import. (The in-guest provider, which could
 /// use it, deliberately does not: it has essentially one caller, so its
 /// instance memory limit is its bound — see lann-webcrypto-guest-provider's `buffer` module.)
+/// Also outside the pools: each operation's transient working set — in
+/// `seal`/`open` the buffered input and the constructed output coexist
+/// until the input drops, so peak use briefly reaches about twice the
+/// reservation plus the tag, and `derive-bits` builds its full output
+/// before the ABI lifts it.
 ///
-/// The pool's budget is resolved **once**, at the first operation that
-/// buffers, and belongs to the pool from then on (see `limits.rs` for why
-/// the budget is the pool's, not each acquirer's). Configure the limits
-/// before the first crypto call; changing them afterwards retunes the
-/// per-call limit but not the pool.
+/// Each pool's budget is resolved **once**, at its first use, and belongs
+/// to the pool from then on (see `limits.rs` for why the budget is the
+/// pool's, not each acquirer's). Configure the limits before the first
+/// crypto call; changing them afterwards retunes the per-call limit but
+/// not the pools.
 ///
-/// Cloning the context gives the clone its own pool, since the pool is
-/// parameterized by the budget the context carries.
+/// Cloning the context gives the clone its own pools, since the pools are
+/// parameterized by the budgets the context carries.
 ///
 /// [`set_per_call_buffer_limit`]: WasiWebcryptoCtx::set_per_call_buffer_limit
 /// [`set_total_buffer_limit`]: WasiWebcryptoCtx::set_total_buffer_limit
+/// [`set_retention_limit`]: WasiWebcryptoCtx::set_retention_limit
 /// [`Store::set_hostcall_fuel`]: wasmtime::Store::set_hostcall_fuel
 #[derive(Debug, Default)]
 #[non_exhaustive]
@@ -87,14 +112,25 @@ pub struct WasiWebcryptoCtx {
     /// The admission pool, in bytes; `None` defaults to the store's
     /// hostcall fuel.
     total_buffer_limit: Option<u64>,
+    /// The minted-resource retention pool, in bytes; `None` defaults to
+    /// [`DEFAULT_RETENTION_LIMIT`].
+    retention_limit: Option<u64>,
     /// The admission pool, created on first use with the budget resolved
     /// from this context and the store's hostcall fuel.
     pool: std::sync::OnceLock<std::sync::Arc<crate::limits::BufferPool>>,
+    /// The retention pool, created on first mint with the budget resolved
+    /// from this context.
+    retention_pool: std::sync::OnceLock<std::sync::Arc<crate::limits::BufferPool>>,
 }
 
-/// Cloning a context gives the clone its **own** admission pool.
+/// The default minted-resource retention budget, in bytes. A constant
+/// rather than a share of the store's hostcall fuel: mints must resolve it
+/// in contexts that have no store access.
+const DEFAULT_RETENTION_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// Cloning a context gives the clone its **own** pools.
 ///
-/// The pool bounds aggregate retention against a ceiling that each context
+/// The pools bound aggregate retention against ceilings that each context
 /// carries separately, so sharing one pool between contexts configured
 /// differently would let the larger ceiling admit against the smaller
 /// context's accounting — exceeding the bound it was asked to enforce.
@@ -106,7 +142,9 @@ impl Clone for WasiWebcryptoCtx {
         Self {
             per_call_buffer_limit: self.per_call_buffer_limit,
             total_buffer_limit: self.total_buffer_limit,
+            retention_limit: self.retention_limit,
             pool: std::sync::OnceLock::new(),
+            retention_pool: std::sync::OnceLock::new(),
         }
     }
 }
@@ -129,6 +167,15 @@ impl WasiWebcryptoCtx {
         self.total_buffer_limit = limit;
     }
 
+    /// Set the minted-resource retention pool, in bytes: the most the
+    /// guest's live resources (keys, derivations, options, …) may retain
+    /// host-side, charged per mint and released per drop. `None` (the
+    /// default) is 16 MiB. A limit below the per-resource floor admits no
+    /// mint at all.
+    pub fn set_retention_limit(&mut self, limit: Option<u64>) {
+        self.retention_limit = limit;
+    }
+
     /// The effective `(per-call, total)` limits given the store's hostcall
     /// fuel, clamped so a reservation always fits an empty pool and no
     /// limit is zero.
@@ -146,6 +193,28 @@ impl WasiWebcryptoCtx {
     /// each acquisition's.
     pub(crate) fn pool(&self, total: u64) -> &std::sync::Arc<crate::limits::BufferPool> {
         self.pool.get_or_init(|| crate::limits::pool(total))
+    }
+
+    /// The effective retention limit, floored so the pool is never empty by
+    /// construction.
+    pub(crate) fn retention_limit_bytes(&self) -> u64 {
+        self.retention_limit
+            .unwrap_or(DEFAULT_RETENTION_LIMIT)
+            .max(1)
+    }
+
+    /// Charge one mint's retention (the per-resource floor plus
+    /// `material_bytes`) against the retention pool, fail-fast: `None` when
+    /// the budget cannot fit the charge now. The reservation releases when
+    /// dropped — it travels in the minted resource.
+    pub(crate) fn charge_retention(
+        &self,
+        material_bytes: usize,
+    ) -> Option<crate::limits::Reservation> {
+        let pool = self
+            .retention_pool
+            .get_or_init(|| crate::limits::pool(self.retention_limit_bytes()));
+        crate::limits::charge(pool, material_bytes)
     }
 }
 
@@ -181,45 +250,52 @@ impl HasData for WasiWebcrypto {
 /// A `mac-key-options` resource: mint-time policy under construction.
 /// Constructed with the WIT defaults (nothing granted), mutated by the
 /// setters, consumed by a mint.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MacKeyOptions {
     pub(crate) policy: lann_webcrypto_core::MacPolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `aead-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AeadKeyOptions {
     pub(crate) policy: lann_webcrypto_core::AeadPolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `cipher-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CipherKeyOptions {
     pub(crate) policy: lann_webcrypto_core::CipherPolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InternalNonceKeyOptions {
     pub(crate) policy: lann_webcrypto_core::InternalNoncePolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `signing-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SigningKeyOptions {
     pub(crate) policy: lann_webcrypto_core::SigningPolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// A `derive-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DeriveOptions {
     pub(crate) policy: lann_webcrypto_core::DerivePolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// An `agreement-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AgreementKeyOptions {
     pub(crate) policy: lann_webcrypto_core::AgreementPolicy,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `key-agreement.public-key` resource: public
@@ -227,6 +303,7 @@ pub struct AgreementKeyOptions {
 #[derive(Debug)]
 pub struct AgreementPublicKey {
     pub(crate) material: lann_webcrypto_core::AgreementPublicMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `key-agreement.secret-key` resource. `agree` is
@@ -235,6 +312,7 @@ pub struct AgreementPublicKey {
 #[derive(Debug)]
 pub struct AgreementSecretKey {
     pub(crate) material: lann_webcrypto_core::AgreementSecretMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `hkdf.ikm` resource: input keying material, never
@@ -242,6 +320,7 @@ pub struct AgreementSecretKey {
 #[derive(Debug)]
 pub struct Ikm {
     pub(crate) material: lann_webcrypto_core::IkmMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `pbkdf2.password` resource: a password, never
@@ -249,6 +328,7 @@ pub struct Ikm {
 #[derive(Debug)]
 pub struct Password {
     pub(crate) material: lann_webcrypto_core::PasswordMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `derivation.derive-input` resource: a
@@ -257,6 +337,7 @@ pub struct Password {
 #[derive(Debug)]
 pub struct DeriveInput {
     pub(crate) material: lann_webcrypto_core::DeriveInputMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `mac.mac-key` resource.
@@ -269,6 +350,7 @@ pub struct DeriveInput {
 #[derive(Debug)]
 pub struct MacKey {
     pub(crate) material: lann_webcrypto_core::MacKeyMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `aead.aead-key` resource.
@@ -280,12 +362,14 @@ pub struct MacKey {
 #[derive(Debug)]
 pub struct AeadKey {
     pub(crate) material: lann_webcrypto_core::AeadKeyMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
 /// AES modes' key material.
 pub struct CipherKey {
     pub(crate) material: lann_webcrypto_core::CipherKeyMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
@@ -300,6 +384,7 @@ pub struct InternalNonceKey {
     /// The number of `seal` invocations so far, counted against the
     /// algorithm's nonce budget.
     pub(crate) sealed: u64,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `digest.digest` resource.
@@ -312,6 +397,7 @@ pub struct InternalNonceKey {
 pub struct Digest {
     /// The digest algorithm this resource is bound to.
     pub(crate) variant: lann_webcrypto_core::DigestKind,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `signature.verifying-key` resource.
@@ -323,6 +409,7 @@ pub struct VerifyingKey {
     /// The public key, bound to its algorithm (and, for ECDSA, its
     /// curve/digest variant) at minting.
     pub(crate) public: lann_webcrypto_core::SigPublic,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 /// Backing type for the `signature.signing-key` resource.
@@ -332,6 +419,7 @@ pub struct VerifyingKey {
 #[derive(Debug)]
 pub struct SigningKey {
     pub(crate) material: lann_webcrypto_core::SigningKeyMaterial,
+    pub(crate) _retention: crate::limits::Reservation,
 }
 
 // `Debug` derives on the key-holding types print through the shared
@@ -455,16 +543,44 @@ mod tests {
         assert_eq!(ctx.buffer_limits(1024), (64, 64));
     }
 
-    /// A clone carries the configured limits but gets its own pool (the
+    /// A clone carries the configured limits but gets its own pools (the
     /// `Clone` impl's contract: budgets are per-context).
     #[test]
     fn clone_preserves_limits_with_a_fresh_pool() {
         let mut ctx = WasiWebcryptoCtx::new();
         ctx.set_per_call_buffer_limit(Some(3));
         ctx.set_total_buffer_limit(Some(9));
+        ctx.set_retention_limit(Some(crate::limits::RETENTION_FLOOR * 3 / 2));
         let pool = ctx.pool(9).clone();
+        let charge = ctx.charge_retention(0).expect("within the fresh budget");
         let clone = ctx.clone();
         assert_eq!(clone.buffer_limits(1024), (3, 9));
+        assert_eq!(
+            clone.retention_limit_bytes(),
+            crate::limits::RETENTION_FLOOR * 3 / 2
+        );
         assert!(!std::sync::Arc::ptr_eq(&pool, clone.pool(9)));
+        // The clone's retention pool is fresh: the original's outstanding
+        // charge does not count against it.
+        assert!(clone.charge_retention(0).is_some());
+        assert!(ctx.charge_retention(0).is_none(), "the original is spent");
+        drop(charge);
+    }
+
+    /// Minting charges the retention pool and dropping the reservation
+    /// releases it, with the budget resolved once at first charge.
+    #[test]
+    fn retention_charges_release_on_drop() {
+        let mut ctx = WasiWebcryptoCtx::new();
+        ctx.set_retention_limit(Some(crate::limits::RETENTION_FLOOR * 2));
+        let first = ctx.charge_retention(0).expect("floor fits");
+        let second = ctx.charge_retention(0).expect("two floors fit");
+        assert!(ctx.charge_retention(0).is_none(), "budget is spent");
+        drop(first);
+        let third = ctx.charge_retention(0).expect("released capacity readmits");
+        drop((second, third));
+        // Raising the limit after the pool resolved does not retune it.
+        ctx.set_retention_limit(Some(1_000_000));
+        assert!(ctx.charge_retention(1_000).is_none());
     }
 }

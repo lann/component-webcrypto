@@ -54,7 +54,7 @@ use crate::bindings::webcrypto::{
     x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
-use crate::limits::admit_input;
+use crate::limits::{admit_input, Reservation};
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
     AeadKey, AgreementPublicKey, AgreementSecretKey, CipherKey, DeriveInput, Digest, Ikm,
@@ -81,6 +81,28 @@ fn rng_trap(what: &str) -> impl Fn(lann_webcrypto_core::RngError) -> wasmtime::E
 
 // --- shared operation shapes ---------------------------------------------------
 
+/// The message for a mint the retention budget cannot admit.
+fn retention_message(limit: u64) -> String {
+    format!(
+        "minted resources exceed the retention limit ({limit} bytes); see \
+         WasiWebcryptoCtx::set_retention_limit"
+    )
+}
+
+/// Render an exhausted retention budget as the WIT's recoverable
+/// operational error.
+fn retention_exhausted(limit: u64) -> Error {
+    Error::Other(retention_message(limit))
+}
+
+/// Charge one resource's retention floor, trap-shaped: for the
+/// `*-options.new` constructors, whose WIT signatures carry no error
+/// channel.
+fn charge_floor_or_trap(ctx: &crate::WasiWebcryptoCtx) -> Result<Reservation> {
+    ctx.charge_retention(0)
+        .ok_or_else(|| wasmtime::Error::msg(retention_message(ctx.retention_limit_bytes())))
+}
+
 /// Consume a `*-key-options` resource (the mint took ownership), yielding
 /// its accumulated state.
 async fn take_options<T: Send, O: Send + 'static>(
@@ -90,15 +112,39 @@ async fn take_options<T: Send, O: Send + 'static>(
     accessor.with(|mut access| Ok(access.get().table.delete(options)?))
 }
 
-/// Push a mint's outcome into the store's table: a successful mint becomes
-/// a resource handle, a WIT error flows to the caller.
-async fn mint<T: Send, R: Send + 'static>(
+/// Charge a mint's retention (the per-resource floor plus the resource's
+/// variable-length material bytes, fail-fast — see `lib.rs`,
+/// "Minted-resource retention"), then push its outcome into the store's
+/// table: a successful mint becomes a resource handle carrying its
+/// [`Reservation`]; a WIT error — the core's verdict, or the exhausted
+/// budget — flows to the caller.
+async fn mint<T: Send, M, R: Send + 'static>(
     accessor: &Accessor<T, WasiWebcrypto>,
-    minted: std::result::Result<R, lann_webcrypto_core::Error>,
+    minted: std::result::Result<M, lann_webcrypto_core::Error>,
+    material_bytes: impl FnOnce(&M) -> usize,
+    build: impl FnOnce(M, Reservation) -> R,
 ) -> Result<std::result::Result<Resource<R>, Error>> {
-    match minted {
-        Ok(resource) => accessor.with(|mut access| Ok(Ok(access.get().table.push(resource)?))),
-        Err(err) => Ok(Err(err.into())),
+    let material = match minted {
+        Ok(material) => material,
+        Err(err) => return Ok(Err(err.into())),
+    };
+    accessor.with(|mut access| {
+        let view = access.get();
+        match view.ctx.charge_retention(material_bytes(&material)) {
+            Some(retention) => Ok(Ok(view.table.push(build(material, retention))?)),
+            None => Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes()))),
+        }
+    })
+}
+
+/// The `derive-input` builder every `prepare` and `agree` shares.
+fn build_derive_input(
+    material: lann_webcrypto_core::DeriveInputMaterial,
+    _retention: Reservation,
+) -> DeriveInput {
+    DeriveInput {
+        material,
+        _retention,
     }
 }
 
@@ -216,7 +262,11 @@ impl HostMacKey for WasiWebcryptoCtxView<'_> {
 
 impl mac::HostMacKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::MacKeyOptions>> {
-        Ok(self.table.push(crate::MacKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::MacKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_sign(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
@@ -336,7 +386,11 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
 
 impl aead::HostAeadKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::AeadKeyOptions>> {
-        Ok(self.table.push(crate::AeadKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::AeadKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_seal(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
@@ -475,7 +529,11 @@ impl HostCipherKey for WasiWebcryptoCtxView<'_> {
 
 impl cipher_iface::HostCipherKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::CipherKeyOptions>> {
-        Ok(self.table.push(crate::CipherKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::CipherKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_encrypt(
@@ -612,7 +670,16 @@ macro_rules! cipher_minting {
                         raw,
                         policy,
                     );
-                    mint(accessor, material.map(|material| CipherKey { material })).await
+                    mint(
+                        accessor,
+                        material,
+                        |m| m.length_bits() as usize / 8,
+                        |material, _retention| CipherKey {
+                            material,
+                            _retention,
+                        },
+                    )
+                    .await
                 }
 
                 async fn import_key_jwk(
@@ -628,7 +695,16 @@ macro_rules! cipher_minting {
                         &jwk,
                         policy,
                     );
-                    mint(accessor, material.map(|material| CipherKey { material })).await
+                    mint(
+                        accessor,
+                        material,
+                        |m| m.length_bits() as usize / 8,
+                        |material, _retention| CipherKey {
+                            material,
+                            _retention,
+                        },
+                    )
+                    .await
                 }
 
                 async fn generate_key(
@@ -643,7 +719,16 @@ macro_rules! cipher_minting {
                         policy,
                     )
                     .map_err(rng_trap("random key generation"))?;
-                    mint(accessor, material.map(|material| CipherKey { material })).await
+                    mint(
+                        accessor,
+                        material,
+                        |m| m.length_bits() as usize / 8,
+                        |material, _retention| CipherKey {
+                            material,
+                            _retention,
+                        },
+                    )
+                    .await
                 }
 
                 async fn derive_key(
@@ -662,7 +747,16 @@ macro_rules! cipher_minting {
                         )
                     })
                     .await?;
-                    mint(accessor, material.map(|material| CipherKey { material })).await
+                    mint(
+                        accessor,
+                        material,
+                        |m| m.length_bits() as usize / 8,
+                        |material, _retention| CipherKey {
+                            material,
+                            _retention,
+                        },
+                    )
+                    .await
                 }
             }
         };
@@ -678,7 +772,11 @@ impl derivation_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl HostDeriveOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::DeriveOptions>> {
-        Ok(self.table.push(crate::DeriveOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::DeriveOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_derive_bits(
@@ -764,8 +862,18 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::DeriveOptions>,
     ) -> Result<std::result::Result<Resource<Ikm>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
+        let raw_len = raw.len();
         let material = lann_webcrypto_core::IkmMaterial::import(raw, policy);
-        mint(accessor, material.map(|material| Ikm { material })).await
+        mint(
+            accessor,
+            material,
+            move |_| raw_len,
+            |material, _retention| Ikm {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -779,6 +887,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let info_len = info.len();
         let material = with_resource(accessor, input, |ikm| {
             lann_webcrypto_core::DeriveInputMaterial::prepare(
                 variant.into(),
@@ -788,7 +897,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             )
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| info_len, build_derive_input).await
     }
 
     async fn prepare_from(
@@ -798,6 +907,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let info_len = info.len();
         let material = with_resource(accessor, input, |upstream| {
             lann_webcrypto_core::DeriveInputMaterial::prepare_from(
                 variant.into(),
@@ -807,7 +917,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             )
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| info_len, build_derive_input).await
     }
 }
 
@@ -823,7 +933,16 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::import_sha1(raw, policy);
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn import_key_jwk(
@@ -833,7 +952,16 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::import_jwk_sha1(&jwk, policy);
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn generate_key(
@@ -844,7 +972,16 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::generate_sha1(length, policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn derive_key(
@@ -858,7 +995,16 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
             lann_webcrypto_core::derive_mac_key_sha1(&input.material, length, policy)
         })
         .await?;
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -871,11 +1017,12 @@ impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let info_len = info.len();
         let material = with_resource(accessor, input, |ikm| {
             lann_webcrypto_core::DeriveInputMaterial::prepare_sha1(&ikm.material, &salt, info)
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| info_len, build_derive_input).await
     }
 
     async fn prepare_from(
@@ -884,6 +1031,7 @@ impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let info_len = info.len();
         let material = with_resource(accessor, input, |upstream| {
             lann_webcrypto_core::DeriveInputMaterial::prepare_from_sha1(
                 &upstream.material,
@@ -892,7 +1040,7 @@ impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
             )
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| info_len, build_derive_input).await
     }
 }
 
@@ -905,6 +1053,7 @@ impl<T: Send> pbkdf2_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         iterations: u32,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let salt_len = salt.len();
         let material = with_resource(accessor, input, |password| {
             lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
                 &password.material,
@@ -913,7 +1062,7 @@ impl<T: Send> pbkdf2_sha1_iface::HostWithStore<T> for WasiWebcrypto {
             )
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| salt_len, build_derive_input).await
     }
 }
 
@@ -944,8 +1093,18 @@ impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::DeriveOptions>,
     ) -> Result<std::result::Result<Resource<Password>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
+        let raw_len = raw.len();
         let material = lann_webcrypto_core::PasswordMaterial::import(raw, policy);
-        mint(accessor, material.map(|material| Password { material })).await
+        mint(
+            accessor,
+            material,
+            move |_| raw_len,
+            |material, _retention| Password {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -959,6 +1118,7 @@ impl<T: Send> pbkdf2_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         salt: Vec<u8>,
         iterations: u32,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
+        let salt_len = salt.len();
         let material = with_resource(accessor, input, |password| {
             lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2(
                 variant.into(),
@@ -968,7 +1128,7 @@ impl<T: Send> pbkdf2_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             )
         })
         .await?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, move |_| salt_len, build_derive_input).await
     }
 }
 
@@ -978,7 +1138,11 @@ impl key_agreement_iface::Host for WasiWebcryptoCtxView<'_> {}
 
 impl HostAgreementKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::AgreementKeyOptions>> {
-        Ok(self.table.push(crate::AgreementKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::AgreementKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_derive_bits(
@@ -1081,7 +1245,7 @@ impl<T: Send> HostSecretKeyWithStore<T> for WasiWebcrypto {
             let peer = view.table.get(&peer)?;
             Ok(secret.material.agree(&peer.material))
         })?;
-        mint(accessor, material.map(|material| DeriveInput { material })).await
+        mint(accessor, material, |_| 0, build_derive_input).await
     }
 
     async fn export_key_jwk(
@@ -1121,7 +1285,12 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementPublicMaterial::import(&raw);
         mint(
             accessor,
-            material.map(|material| AgreementPublicKey { material }),
+            material,
+            |_| 0,
+            |material, _retention| AgreementPublicKey {
+                material,
+                _retention,
+            },
         )
         .await
     }
@@ -1133,7 +1302,12 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementPublicMaterial::import_spki(&spki);
         mint(
             accessor,
-            material.map(|material| AgreementPublicKey { material }),
+            material,
+            |_| 0,
+            |material, _retention| AgreementPublicKey {
+                material,
+                _retention,
+            },
         )
         .await
     }
@@ -1145,7 +1319,12 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementPublicMaterial::import_jwk(&jwk);
         mint(
             accessor,
-            material.map(|material| AgreementPublicKey { material }),
+            material,
+            |_| 0,
+            |material, _retention| AgreementPublicKey {
+                material,
+                _retention,
+            },
         )
         .await
     }
@@ -1159,7 +1338,12 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementSecretMaterial::import_pkcs8(&pkcs8, policy);
         mint(
             accessor,
-            material.map(|material| AgreementSecretKey { material }),
+            material,
+            |_| 0,
+            |material, _retention| AgreementSecretKey {
+                material,
+                _retention,
+            },
         )
         .await
     }
@@ -1173,7 +1357,12 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementSecretMaterial::import_jwk(&jwk, policy);
         mint(
             accessor,
-            material.map(|material| AgreementSecretKey { material }),
+            material,
+            |_| 0,
+            |material, _retention| AgreementSecretKey {
+                material,
+                _retention,
+            },
         )
         .await
     }
@@ -1190,8 +1379,19 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         match material {
             Ok((secret, public)) => accessor.with(|mut access| {
                 let view = access.get();
-                let secret = view.table.push(AgreementSecretKey { material: secret })?;
-                let public = view.table.push(AgreementPublicKey { material: public })?;
+                let (Some(r1), Some(r2)) =
+                    (view.ctx.charge_retention(0), view.ctx.charge_retention(0))
+                else {
+                    return Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes())));
+                };
+                let secret = view.table.push(AgreementSecretKey {
+                    material: secret,
+                    _retention: r1,
+                })?;
+                let public = view.table.push(AgreementPublicKey {
+                    material: public,
+                    _retention: r2,
+                })?;
                 Ok(Ok((secret, public)))
             }),
             Err(err) => Ok(Err(err.into())),
@@ -1241,8 +1441,12 @@ impl sha2_iface::Host for WasiWebcryptoCtxView<'_> {
             Ok(variant) => variant,
             Err(err) => return Ok(Err(err.into())),
         };
+        let Some(_retention) = self.ctx.charge_retention(0) else {
+            return Ok(Err(retention_exhausted(self.ctx.retention_limit_bytes())));
+        };
         Ok(Ok(self.table.push(Digest {
             variant: DigestKind::Sha2(variant),
+            _retention,
         })?))
     }
 }
@@ -1251,14 +1455,22 @@ impl sha2_iface::Host for WasiWebcryptoCtxView<'_> {
 
 impl sha1_checked_iface::Host for WasiWebcryptoCtxView<'_> {
     fn make_rejecting_digest(&mut self) -> Result<std::result::Result<Resource<Digest>, Error>> {
+        let Some(_retention) = self.ctx.charge_retention(0) else {
+            return Ok(Err(retention_exhausted(self.ctx.retention_limit_bytes())));
+        };
         Ok(Ok(self.table.push(Digest {
             variant: DigestKind::Sha1Checked(Sha1Posture::Reject),
+            _retention,
         })?))
     }
 
     fn make_mitigating_digest(&mut self) -> Result<std::result::Result<Resource<Digest>, Error>> {
+        let Some(_retention) = self.ctx.charge_retention(0) else {
+            return Ok(Err(retention_exhausted(self.ctx.retention_limit_bytes())));
+        };
         Ok(Ok(self.table.push(Digest {
             variant: DigestKind::Sha1Checked(Sha1Posture::Mitigate),
+            _retention,
         })?))
     }
 }
@@ -1276,7 +1488,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::import(variant.into(), raw, policy);
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn import_key_jwk(
@@ -1287,7 +1508,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::import_jwk(variant.into(), &jwk, policy);
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn generate_key(
@@ -1299,7 +1529,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = MacKeyMaterial::generate(variant.into(), length, policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn derive_key(
@@ -1314,7 +1553,16 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
             lann_webcrypto_core::derive_mac_key(&input.material, variant.into(), length, policy)
         })
         .await?;
-        mint(accessor, material.map(|material| MacKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| MacKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -1331,7 +1579,16 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy);
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn import_key_jwk(
@@ -1342,7 +1599,16 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy);
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn generate_key(
@@ -1353,7 +1619,16 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn derive_key(
@@ -1367,7 +1642,16 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
             lann_webcrypto_core::derive_aes_gcm_key(&input.material, variant.into(), policy)
         })
         .await?;
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -1384,7 +1668,16 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::import_chacha20_poly1305(raw, policy);
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn generate_key(
@@ -1394,7 +1687,16 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::generate_chacha20_poly1305(policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -1406,7 +1708,16 @@ impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy);
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn generate_key(
@@ -1416,7 +1727,16 @@ impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let material = AeadKeyMaterial::generate_xchacha20_poly1305(policy)
             .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material.map(|material| AeadKey { material })).await
+        mint(
+            accessor,
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| AeadKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -1453,7 +1773,11 @@ impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
 
 impl aead_internal_nonce::HostInternalNonceKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::InternalNonceKeyOptions>> {
-        Ok(self.table.push(crate::InternalNonceKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::InternalNonceKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_seal(
@@ -1568,10 +1892,13 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
         let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into());
         mint(
             accessor,
-            material.map(|material| InternalNonceKey {
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| InternalNonceKey {
                 material,
                 sealed: 0,
-            }),
+                _retention,
+            },
         )
         .await
     }
@@ -1586,10 +1913,13 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
         let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy.into());
         mint(
             accessor,
-            material.map(|material| InternalNonceKey {
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| InternalNonceKey {
                 material,
                 sealed: 0,
-            }),
+                _retention,
+            },
         )
         .await
     }
@@ -1604,10 +1934,13 @@ impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
             .map_err(rng_trap("random key generation"))?;
         mint(
             accessor,
-            material.map(|material| InternalNonceKey {
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| InternalNonceKey {
                 material,
                 sealed: 0,
-            }),
+                _retention,
+            },
         )
         .await
     }
@@ -1627,10 +1960,13 @@ impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
         let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy.into());
         mint(
             accessor,
-            material.map(|material| InternalNonceKey {
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| InternalNonceKey {
                 material,
                 sealed: 0,
-            }),
+                _retention,
+            },
         )
         .await
     }
@@ -1644,10 +1980,13 @@ impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
             .map_err(rng_trap("random key generation"))?;
         mint(
             accessor,
-            material.map(|material| InternalNonceKey {
+            material,
+            |m| m.length_bits() as usize / 8,
+            |material, _retention| InternalNonceKey {
                 material,
                 sealed: 0,
-            }),
+                _retention,
+            },
         )
         .await
     }
@@ -1737,7 +2076,11 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
 
 impl signature_iface::HostSigningKeyOptions for WasiWebcryptoCtxView<'_> {
     fn new(&mut self) -> Result<Resource<crate::SigningKeyOptions>> {
-        Ok(self.table.push(crate::SigningKeyOptions::default())?)
+        let _retention = charge_floor_or_trap(self.ctx)?;
+        Ok(self.table.push(crate::SigningKeyOptions {
+            policy: Default::default(),
+            _retention,
+        })?)
     }
 
     fn can_sign(&mut self, self_: Resource<crate::SigningKeyOptions>, allowed: bool) -> Result<()> {
@@ -1812,7 +2155,13 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ed25519(&raw);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 
     async fn import_verifying_key_spki(
@@ -1820,7 +2169,13 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ed25519_spki(&spki);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 
     async fn import_verifying_key_jwk(
@@ -1828,7 +2183,13 @@ impl<T: Send> ed25519_verify_iface::HostWithStore<T> for WasiWebcrypto {
         jwk: String,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ed25519_jwk(&jwk);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 }
 
@@ -1854,7 +2215,16 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = SigningKeyMaterial::import_ed25519_pkcs8(&pkcs8, policy);
-        mint(accessor, material.map(|material| SigningKey { material })).await
+        mint(
+            accessor,
+            material,
+            |_| 0,
+            |material, _retention| SigningKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn import_signing_key_jwk(
@@ -1864,7 +2234,16 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = SigningKeyMaterial::import_ed25519_jwk(&jwk, policy);
-        mint(accessor, material.map(|material| SigningKey { material })).await
+        mint(
+            accessor,
+            material,
+            |_| 0,
+            |material, _retention| SigningKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
@@ -1875,9 +2254,19 @@ async fn mint_key_pair<T: Send>(
 ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
     let public = material.public();
     accessor.with(|mut access| {
-        let table = access.get().table;
-        let signing = table.push(SigningKey { material })?;
-        let verifying = table.push(VerifyingKey { public })?;
+        let view = access.get();
+        let (Some(r1), Some(r2)) = (view.ctx.charge_retention(0), view.ctx.charge_retention(0))
+        else {
+            return Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes())));
+        };
+        let signing = view.table.push(SigningKey {
+            material,
+            _retention: r1,
+        })?;
+        let verifying = view.table.push(VerifyingKey {
+            public,
+            _retention: r2,
+        })?;
         Ok(Ok((signing, verifying)))
     })
 }
@@ -1894,7 +2283,13 @@ impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ecdsa(variant.into(), &raw);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 
     async fn import_verifying_key_spki(
@@ -1903,7 +2298,13 @@ impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ecdsa_spki(variant.into(), &spki);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 
     async fn import_verifying_key_jwk(
@@ -1912,7 +2313,13 @@ impl<T: Send> ecdsa_verify_iface::HostWithStore<T> for WasiWebcrypto {
         jwk: String,
     ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
         let public = SigPublic::import_ecdsa_jwk(variant.into(), &jwk);
-        mint(accessor, public.map(|public| VerifyingKey { public })).await
+        mint(
+            accessor,
+            public,
+            |_| 0,
+            |public, _retention| VerifyingKey { public, _retention },
+        )
+        .await
     }
 }
 
@@ -1940,7 +2347,16 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = SigningKeyMaterial::import_ecdsa_pkcs8(variant.into(), &pkcs8, policy);
-        mint(accessor, material.map(|material| SigningKey { material })).await
+        mint(
+            accessor,
+            material,
+            |_| 0,
+            |material, _retention| SigningKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 
     async fn import_signing_key_jwk(
@@ -1951,14 +2367,60 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = SigningKeyMaterial::import_ecdsa_jwk(variant.into(), &jwk, policy);
-        mint(accessor, material.map(|material| SigningKey { material })).await
+        mint(
+            accessor,
+            material,
+            |_| 0,
+            |material, _retention| SigningKey {
+                material,
+                _retention,
+            },
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::bindings::webcrypto::mac::HostMacKeyOptions as _;
+    use crate::bindings::webcrypto::sha1_checked::Host as _;
+    use crate::bindings::webcrypto::sha2::{self as sha2_iface, Host as _};
+    use crate::bindings::webcrypto::types::Error;
     use crate::MacKey;
     use lann_webcrypto_core::{MacKeyMaterial, MacPolicy, Sha2Variant};
+
+    /// Minting charges the retention budget: a spent budget fails a
+    /// fallible mint with the WIT's operational error and traps an options
+    /// constructor (whose signature has no error channel), and dropping a
+    /// held resource readmits the next mint.
+    #[test]
+    fn minting_charges_the_retention_budget() {
+        let mut ctx = crate::WasiWebcryptoCtx::new();
+        ctx.set_retention_limit(Some(crate::limits::RETENTION_FLOOR));
+        let mut table = wasmtime::component::ResourceTable::new();
+        let mut view = crate::WasiWebcryptoCtxView {
+            ctx: &mut ctx,
+            table: &mut table,
+        };
+
+        let digest = view
+            .make_digest(sha2_iface::Sha2Variant::Sha256)
+            .unwrap()
+            .expect("one floor-sized mint fits the budget");
+
+        match view.make_rejecting_digest().unwrap() {
+            Err(Error::Other(msg)) => assert!(msg.contains("set_retention_limit"), "{msg}"),
+            other => panic!("expected the retention error, got {other:?}"),
+        }
+        let trap = crate::bindings::webcrypto::mac::HostMacKeyOptions::new(&mut view)
+            .expect_err("an options mint past the budget traps");
+        assert!(trap.to_string().contains("set_retention_limit"), "{trap}");
+
+        view.table.delete(digest).unwrap();
+        view.make_rejecting_digest()
+            .unwrap()
+            .expect("the dropped resource's charge readmits the mint");
+    }
 
     /// `Debug` on key-holding types never prints key material: the bytes
     /// are redacted (in the shared core's material types, which these
@@ -1971,8 +2433,10 @@ mod tests {
             verify: true,
             extractable: true,
         };
+        let pool = crate::limits::pool(1024);
         let key = MacKey {
             material: MacKeyMaterial::import(Sha2Variant::Sha256, vec![0xAB; 32], policy).unwrap(),
+            _retention: crate::limits::charge(&pool, 32).unwrap(),
         };
         let rendered = format!("{key:?}");
         assert!(rendered.contains("<redacted>"), "{rendered}");
