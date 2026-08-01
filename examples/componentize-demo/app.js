@@ -8,7 +8,7 @@
 // which the justfile recipe sets to the repository root — hence the
 // root-relative library path below.
 
-import { subtle, CryptoKey, DOMException } from "./componentize-sdk/webcrypto.js";
+import { crypto, subtle, CryptoKey, DOMException } from "./componentize-sdk/webcrypto.js";
 
 const encoder = new TextEncoder();
 
@@ -319,6 +319,31 @@ async function ed25519SignVerify() {
   );
 }
 
+/**
+ * getRandomValues through the shim: fills from the host entropy, returns
+ * the array, honors the type and quota errors.
+ */
+async function getRandomValuesCheck() {
+  const a = crypto.getRandomValues(new Uint8Array(64));
+  const b = crypto.getRandomValues(new Uint8Array(64));
+  if (a.every((byte, i) => byte === b[i])) {
+    throw new Error("two 64-byte fills were identical");
+  }
+  if (new Set(a).size < 8) {
+    throw new Error("64 random bytes with fewer than 8 distinct values");
+  }
+  const words = crypto.getRandomValues(new BigUint64Array(4));
+  if (words.length !== 4 || (words[0] === 0n && words[1] === 0n && words[2] === 0n && words[3] === 0n)) {
+    throw new Error("BigUint64Array fill looks wrong");
+  }
+  await expectDomException("TypeMismatchError", "float fill", () =>
+    Promise.resolve().then(() => crypto.getRandomValues(new Float64Array(4))),
+  );
+  await expectDomException("QuotaExceededError", "oversized fill", () =>
+    Promise.resolve().then(() => crypto.getRandomValues(new Uint8Array(65537))),
+  );
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -332,6 +357,7 @@ const CHECKS = [
   ["jwk-roundtrip", jwkRoundtrip],
   ["jwk-rejects-malformed", jwkRejectsMalformed],
   ["ed25519-sign-verify", ed25519SignVerify],
+  ["get-random-values", getRandomValuesCheck],
 ];
 
 // The `demo:webcrypto-demo/demo@0.1.0` export. `run` returns the ok summary

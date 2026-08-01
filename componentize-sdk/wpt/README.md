@@ -135,6 +135,7 @@ is sensitive to the platform only where the platform itself is.
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
 | `digest/digest` | `digest.https.any.js` (wrapped callable — see `component.sh`) |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
+| `getRandomValues` | `getRandomValues.any.js` (wrapped callable) |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the

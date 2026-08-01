@@ -38,6 +38,7 @@ import { run_test as runEddsaSmallOrder } from "./componentize-sdk/wpt/build/gro
 import { run_test as runEcdsa } from "./componentize-sdk/wpt/build/group-ecdsa.js";
 import { run_ec_import_tests as runEcImportKey } from "./componentize-sdk/wpt/build/group-ec-import-key.js";
 import { run_test as runEcImportKeyFailures } from "./componentize-sdk/wpt/build/group-ec-import-key-failures.js";
+import { run_get_random_values_tests as runGetRandomValues } from "./componentize-sdk/wpt/build/group-get-random-values.js";
 import { define_tests as defineHkdf } from "./componentize-sdk/wpt/build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "./componentize-sdk/wpt/build/group-pbkdf2-derive.js";
 
@@ -213,6 +214,11 @@ function ecImportFailuresInSubset(name) {
   return name.startsWith("Bad usages") || !name.includes("P-521");
 }
 
+/** getRandomValues: the whole group is served. */
+function getRandomValuesInSubset() {
+  return true;
+}
+
 /**
  * digest/digest: the served SHA-2 family (SHA-256/384/512, any name
  * casing), the bad-algorithm-name rejections, and the missing-name
@@ -320,6 +326,7 @@ export const GROUPS = [
     () => runEcImportKeyFailures(["ECDSA"]),
     ecImportFailuresInSubset,
   ],
+  ["getRandomValues", () => runGetRandomValues(), getRandomValuesInSubset],
 ];
 
 export const demoWebcryptoDemoDemo010 = {

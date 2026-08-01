@@ -28,6 +28,7 @@ import { run_test as runEddsaSmallOrder } from "../build/group-eddsa-small-order
 import { run_test as runEcdsa } from "../build/group-ecdsa.js";
 import { run_ec_import_tests as runEcImportKey } from "../build/group-ec-import-key.js";
 import { run_test as runEcImportKeyFailures } from "../build/group-ec-import-key-failures.js";
+import { run_get_random_values_tests as runGetRandomValues } from "../build/group-get-random-values.js";
 import { define_tests as defineHkdf } from "../build/group-hkdf-derive.js";
 import { define_tests as definePbkdf2 } from "../build/group-pbkdf2-derive.js";
 
@@ -64,6 +65,7 @@ const GROUPS = [
   ["generateKey/successes (Ed25519)", () => runGenerateKey(["Ed25519"])],
   ["import_export/ec_importKey", () => runEcImportKey()],
   ["import_export/ec_importKey_failures (ECDSA)", () => runEcImportKeyFailures(["ECDSA"])],
+  ["getRandomValues", () => runGetRandomValues()],
 ];
 
 const records = [];

@@ -90,6 +90,22 @@ globalThis.assert_in_array = function (actual, expected, message) {
   }
 };
 
+globalThis.assert_throws_dom = function (name, fn, description) {
+  try {
+    fn();
+  } catch (e) {
+    if (/** @type {{ name?: unknown }} */ (e)?.name === name) {
+      return;
+    }
+    fail(`${description ?? "assert_throws_dom"}: expected ${name}, got ${e}`);
+  }
+  fail(`${description ?? "assert_throws_dom"}: expected ${name}, nothing thrown`);
+};
+
+globalThis.assert_throws_quotaexceedederror = function (fn, quota, requested, description) {
+  globalThis.assert_throws_dom("QuotaExceededError", fn, description);
+};
+
 globalThis.assert_implements_optional = function (condition, message) {
   // WPT's optional-feature marker (PRECONDITION_FAILED there); this harness
   // has two statuses, so a missing optional feature reports as a failure

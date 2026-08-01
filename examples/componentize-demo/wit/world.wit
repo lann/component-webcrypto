@@ -30,6 +30,7 @@ world componentize-demo {
     import lann:webcrypto/ed25519-verify@0.1.0;
     import lann:webcrypto/ed25519-sign@0.1.0;
     import lann:webcrypto/ecdsa-verify@0.1.0;
+    import wasi:random/random@0.2.0;
 
     export demo:webcrypto-demo/demo@0.1.0;
 }

@@ -24,4 +24,5 @@ declare module "lann:webcrypto/signature@0.1.0";
 declare module "lann:webcrypto/ed25519-verify@0.1.0";
 declare module "lann:webcrypto/ed25519-sign@0.1.0";
 declare module "lann:webcrypto/ecdsa-verify@0.1.0";
+declare module "wasi:random/random@0.2.0";
 declare module "wit-world";
