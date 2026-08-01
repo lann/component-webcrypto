@@ -146,13 +146,14 @@ reaches this harness as a re-vendor with a census diff.
 | --- | --- |
 | `sign_verify/hmac` | `hmac.https.any.js` (reference), `hmac.js`, `hmac_vectors.js` |
 | `encrypt_decrypt/aes_gcm` (96-bit iv) | `aes_gcm.https.any.js` (reference), `aes.js`, `aes_gcm_vectors.js`, `aes_gcm_96_iv_fixtures.js` |
+| `encrypt_decrypt/aes_gcm` (256-bit iv) | `aes_gcm_256_iv.https.any.js` (reference), `aes_gcm_256_iv_fixtures.js` (the shared `aes.js` runner and `aes_gcm_vectors.js`) |
 | `encrypt_decrypt/aes_cbc` | `aes_cbc.https.any.js` (reference), `aes_cbc_vectors.js` (the shared `aes.js` runner) |
 | `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
 | `encrypt_decrypt/chacha20_poly1305` | `chacha20_poly1305.tentative.https.any.js` (wrapped callable; self-contained) |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
 | `import_export/symmetric_importKey` (ChaCha20-Poly1305) | `ChaCha20-Poly1305_importKey.tentative.https.any.js` (reference; the shared `symmetric_importKey.js` runner) |
 | `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js`, `successes_chacha20_poly1305.tentative.https.any.js` (references), `successes.js` |
-| `generateKey` failures (ChaCha20-Poly1305) | `failures_chacha20_poly1305.tentative.https.any.js` (reference), `failures.js` |
+| `generateKey` failures | `failures_HMAC.https.any.js`, `failures_AES-GCM.https.any.js`, `failures_AES-CBC.https.any.js`, `failures_AES-CTR.https.any.js`, `failures_Ed25519.https.any.js`, `failures_X25519.https.any.js`, `failures_chacha20_poly1305.tentative.https.any.js` (references), `failures.js` |
 | `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |
 | `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
@@ -160,10 +161,13 @@ reaches this harness as a re-vendor with a census diff.
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
 | `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
+| `derive_bits_keys/derived_bits_length` | `derived_bits_length.https.any.js` (reference), `derived_bits_length.js`, `derived_bits_length_vectors.js`, `derived_bits_length_testcases.js` |
 | `digest/digest` | `digest.https.any.js` (wrapped callable — see `component.sh`) |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | `getRandomValues` | `getRandomValues.any.js` (wrapped callable) |
 | `randomUUID` | `randomUUID.https.any.js` (wrapped callable) |
+| `normalize-algorithm-name` | `normalize-algorithm-name.https.any.js` (wrapped callable) |
+| `crypto_key_cached_slots` | `crypto_key_cached_slots.https.any.js` (wrapped callable) |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the

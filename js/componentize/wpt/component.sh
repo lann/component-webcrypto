@@ -149,6 +149,8 @@ gen_suites() {
     cat "$V"/helpers.js "$V"/hmac_vectors.js "$V"/hmac.js > "$B"/group-hmac.js
     echo 'export { run_test };' >> "$B"/group-hmac.js
     cat "$V"/helpers.js "$V"/aes_gcm_96_iv_fixtures.js "$V"/aes_gcm_vectors.js "$V"/aes.js > "$B"/group-aes-gcm.js
+    cat "$V"/helpers.js "$V"/aes_gcm_256_iv_fixtures.js "$V"/aes_gcm_vectors.js "$V"/aes.js > "$B"/group-aes-gcm-256-iv.js
+    echo 'export { run_test };' >> "$B"/group-aes-gcm-256-iv.js
     cat "$V"/helpers.js "$V"/aes_cbc_vectors.js "$V"/aes.js > "$B"/group-aes-cbc.js
     echo 'export { run_test };' >> "$B"/group-aes-cbc.js
     cat "$V"/helpers.js "$V"/aes_ctr_vectors.js "$V"/aes.js > "$B"/group-aes-ctr.js
@@ -212,10 +214,22 @@ JS
     echo 'function run_random_uuid_tests() {' >> "$B"/group-random-uuid.js
     cat "$V"/randomUUID.https.any.js >> "$B"/group-random-uuid.js
     printf '}\nexport { run_random_uuid_tests };\n' >> "$B"/group-random-uuid.js
+    cat "$V"/helpers.js > "$B"/group-normalize-algorithm-name.js
+    echo 'function run_normalize_algorithm_name_tests() {' >> "$B"/group-normalize-algorithm-name.js
+    cat "$V"/normalize-algorithm-name.https.any.js >> "$B"/group-normalize-algorithm-name.js
+    printf '}\nexport { run_normalize_algorithm_name_tests };\n' >> "$B"/group-normalize-algorithm-name.js
+    cat "$V"/helpers.js > "$B"/group-crypto-key-cached-slots.js
+    echo 'function run_crypto_key_cached_slots_tests() {' >> "$B"/group-crypto-key-cached-slots.js
+    cat "$V"/crypto_key_cached_slots.https.any.js >> "$B"/group-crypto-key-cached-slots.js
+    printf '}\nexport { run_crypto_key_cached_slots_tests };\n' >> "$B"/group-crypto-key-cached-slots.js
     cat "$V"/helpers.js "$V"/hkdf_vectors.js "$V"/hkdf.js > "$B"/group-hkdf-derive.js
     echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
     cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js
     echo 'export { define_tests };' >> "$B"/group-pbkdf2-derive.js
+    # The length vectors must precede the test cases: the case table reads
+    # `algorithms` while it evaluates.
+    cat "$V"/helpers.js "$V"/derived_bits_length.js "$V"/derived_bits_length_vectors.js "$V"/derived_bits_length_testcases.js > "$B"/group-derived-bits-length.js
+    echo 'export { define_tests };' >> "$B"/group-derived-bits-length.js
 }
 
 case "${1:-}" in
