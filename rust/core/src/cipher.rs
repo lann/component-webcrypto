@@ -199,6 +199,11 @@ impl CipherKeyMaterial {
         (self.raw.len() * 8) as u32
     }
 
+    /// The material's length in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.raw.len()
+    }
+
     /// The mint-time policy.
     pub fn policy(&self) -> CipherPolicy {
         self.policy

@@ -265,16 +265,17 @@ pub(crate) trait Minted: Sized {
     fn minted(payload: Self::Payload, retention: crate::limits::Reservation) -> Self;
 }
 
-/// Declare the minted resource types: the `#[payload]` field, an optional
-/// `retains` byte measure (the retention charge's variable part; the
-/// default is floor-only), any defaulted extra fields, and the hidden
-/// retention reservation, with the [`Minted`] impl assembling them.
+/// Declare the minted resource types: the `#[payload]` field, any
+/// defaulted extra fields, and the hidden retention reservation, with the
+/// [`Minted`] impl assembling them. `#[payload(retains = method)]` names
+/// the payload method measuring the retention charge's variable part (the
+/// default is floor-only); anything more complex than a method call
+/// belongs on the payload type, not in a declaration.
 macro_rules! minted_resources {
     ($(
         $(#[$attr:meta])*
         pub struct $name:ident {
-            $(retains $bytes:expr,)?
-            #[payload]
+            #[payload $((retains = $measure:ident))?]
             $(#[$pattr:meta])*
             $payload:ident: $pty:ty
             $(, $(#[$fattr:meta])* $field:ident: $fty:ty = $default:expr)* $(,)?
@@ -293,10 +294,7 @@ macro_rules! minted_resources {
 
             fn payload_bytes(payload: &Self::Payload) -> usize {
                 let _ = payload;
-                0 $(+ {
-                    let measure: fn(&$pty) -> usize = $bytes;
-                    measure(payload)
-                })?
+                0 $(+ payload.$measure())?
             }
 
             fn minted(payload: Self::Payload, retention: crate::limits::Reservation) -> Self {
@@ -383,8 +381,7 @@ minted_resources! {
     /// readable through the API under any grant.
     #[derive(Debug)]
     pub struct Ikm {
-        retains |m| m.byte_len(),
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::IkmMaterial,
     }
 
@@ -392,8 +389,7 @@ minted_resources! {
     /// readable through the API under any grant.
     #[derive(Debug)]
     pub struct Password {
-        retains |m| m.byte_len(),
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::PasswordMaterial,
     }
 
@@ -402,8 +398,7 @@ minted_resources! {
     /// `prepare`, so this retains the PRK rather than the base secret).
     #[derive(Debug)]
     pub struct DeriveInput {
-        retains |m| m.byte_len(),
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::DeriveInputMaterial,
     }
 
@@ -416,8 +411,7 @@ minted_resources! {
     /// lives host-side either way.
     #[derive(Debug)]
     pub struct MacKey {
-        retains |m| m.length_bits() as usize / 8,
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::MacKeyMaterial,
     }
 
@@ -429,16 +423,14 @@ minted_resources! {
     /// carries no per-operation state.
     #[derive(Debug)]
     pub struct AeadKey {
-        retains |m| m.length_bits() as usize / 8,
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::AeadKeyMaterial,
     }
 
     /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
     /// AES modes' key material.
     pub struct CipherKey {
-        retains |m| m.length_bits() as usize / 8,
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::CipherKeyMaterial,
     }
 
@@ -450,8 +442,7 @@ minted_resources! {
     /// (`error.key-exhausted`) for 12-byte-nonce algorithms.
     #[derive(Debug)]
     pub struct InternalNonceKey {
-        retains |m| m.length_bits() as usize / 8,
-        #[payload]
+        #[payload(retains = byte_len)]
         material: lann_webcrypto_core::AeadKeyMaterial,
         /// The number of `seal` invocations so far, counted against the
         /// algorithm's nonce budget.
