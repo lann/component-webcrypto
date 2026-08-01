@@ -46,6 +46,8 @@ import * as groupEcImportKey from "./js/componentize/wpt/build/group-ec-import-k
 import * as groupEcImportKeyFailures from "./js/componentize/wpt/build/group-ec-import-key-failures.js";
 import * as groupGetRandomValues from "./js/componentize/wpt/build/group-get-random-values.js";
 import * as groupRandomUuid from "./js/componentize/wpt/build/group-random-uuid.js";
+import * as groupNormalizeAlgorithmName from "./js/componentize/wpt/build/group-normalize-algorithm-name.js";
+import * as groupCryptoKeyCachedSlots from "./js/componentize/wpt/build/group-crypto-key-cached-slots.js";
 import * as groupHkdfDerive from "./js/componentize/wpt/build/group-hkdf-derive.js";
 import * as groupPbkdf2Derive from "./js/componentize/wpt/build/group-pbkdf2-derive.js";
 import * as groupDerivedBitsLength from "./js/componentize/wpt/build/group-derived-bits-length.js";
@@ -72,6 +74,8 @@ const MODULES = {
   "group-ec-import-key-failures.js": groupEcImportKeyFailures,
   "group-get-random-values.js": groupGetRandomValues,
   "group-random-uuid.js": groupRandomUuid,
+  "group-normalize-algorithm-name.js": groupNormalizeAlgorithmName,
+  "group-crypto-key-cached-slots.js": groupCryptoKeyCachedSlots,
   "group-hkdf-derive.js": groupHkdfDerive,
   "group-pbkdf2-derive.js": groupPbkdf2Derive,
   "group-derived-bits-length.js": groupDerivedBitsLength,

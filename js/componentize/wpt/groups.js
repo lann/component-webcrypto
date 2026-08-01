@@ -258,6 +258,22 @@ function randomUuidInSubset() {
 }
 
 /**
+ * normalize-algorithm-name: ASCII-case-insensitive name matching, probed
+ * with Kelvin-sign lookalikes. The HKDF row is out: its setup imports
+ * empty input keying material, which `hkdf.import-ikm` rejects by ruling
+ * (WIT-forced — see the shim header), so the name is never reached.
+ * @param {string} name
+ */
+function normalizeAlgorithmNameInSubset(name) {
+  return !name.includes('does not match "HKDF"');
+}
+
+/** crypto_key_cached_slots: the whole group is served. */
+function cachedSlotsInSubset() {
+  return true;
+}
+
+/**
  * digest/digest: the whole group — the SHA-2 family, the bad-algorithm-name
  * rejections, the missing-name `TypeError`s, and the SHA-1 rows, which the
  * shim serves through the package's `sha1-checked` interface (mitigating
@@ -452,5 +468,17 @@ export const GROUPS = [
     module: "group-random-uuid.js",
     start: (ns) => ns.run_random_uuid_tests(),
     inSubset: randomUuidInSubset,
+  },
+  {
+    name: "normalize-algorithm-name",
+    module: "group-normalize-algorithm-name.js",
+    start: (ns) => ns.run_normalize_algorithm_name_tests(),
+    inSubset: normalizeAlgorithmNameInSubset,
+  },
+  {
+    name: "crypto_key_cached_slots",
+    module: "group-crypto-key-cached-slots.js",
+    start: (ns) => ns.run_crypto_key_cached_slots_tests(),
+    inSubset: cachedSlotsInSubset,
   },
 ];

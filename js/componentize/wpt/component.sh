@@ -207,6 +207,14 @@ JS
     echo 'function run_random_uuid_tests() {' >> "$B"/group-random-uuid.js
     cat "$V"/randomUUID.https.any.js >> "$B"/group-random-uuid.js
     printf '}\nexport { run_random_uuid_tests };\n' >> "$B"/group-random-uuid.js
+    cat "$V"/helpers.js > "$B"/group-normalize-algorithm-name.js
+    echo 'function run_normalize_algorithm_name_tests() {' >> "$B"/group-normalize-algorithm-name.js
+    cat "$V"/normalize-algorithm-name.https.any.js >> "$B"/group-normalize-algorithm-name.js
+    printf '}\nexport { run_normalize_algorithm_name_tests };\n' >> "$B"/group-normalize-algorithm-name.js
+    cat "$V"/helpers.js > "$B"/group-crypto-key-cached-slots.js
+    echo 'function run_crypto_key_cached_slots_tests() {' >> "$B"/group-crypto-key-cached-slots.js
+    cat "$V"/crypto_key_cached_slots.https.any.js >> "$B"/group-crypto-key-cached-slots.js
+    printf '}\nexport { run_crypto_key_cached_slots_tests };\n' >> "$B"/group-crypto-key-cached-slots.js
     cat "$V"/helpers.js "$V"/hkdf_vectors.js "$V"/hkdf.js > "$B"/group-hkdf-derive.js
     echo 'export { define_tests };' >> "$B"/group-hkdf-derive.js
     cat "$V"/helpers.js "$V"/pbkdf2_vectors.js "$V"/pbkdf2.js > "$B"/group-pbkdf2-derive.js

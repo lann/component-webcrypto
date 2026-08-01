@@ -121,6 +121,19 @@ globalThis.assert_throws_quotaexceedederror = function (fn, quota, requested, de
   globalThis.assert_throws_dom("QuotaExceededError", fn, description);
 };
 
+globalThis.promise_rejects_dom = function (test, name, promise, description) {
+  return promise.then(
+    () => {
+      fail(`${description ?? "promise_rejects_dom"}: expected ${name}, nothing thrown`);
+    },
+    (e) => {
+      if (/** @type {{ name?: unknown }} */ (e)?.name !== name) {
+        fail(`${description ?? "promise_rejects_dom"}: expected ${name}, got ${e}`);
+      }
+    },
+  );
+};
+
 globalThis.assert_implements_optional = function (condition, message) {
   // WPT's optional-feature marker (PRECONDITION_FAILED there); this harness
   // has two statuses, so a missing optional feature reports as a failure

@@ -158,6 +158,8 @@ relative path.
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | `getRandomValues` | `getRandomValues.any.js` (wrapped callable) |
 | `randomUUID` | `randomUUID.https.any.js` (wrapped callable) |
+| `normalize-algorithm-name` | `normalize-algorithm-name.https.any.js` (wrapped callable) |
+| `crypto_key_cached_slots` | `crypto_key_cached_slots.https.any.js` (wrapped callable) |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the
