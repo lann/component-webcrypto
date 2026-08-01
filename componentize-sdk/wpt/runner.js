@@ -56,16 +56,17 @@ function hmacInSubset(name) {
 }
 
 /**
- * encrypt_decrypt/aes_gcm (96-bit iv): 256-bit keys at every legal tag
- * length (per-call `tag-size` carries them all), plus the illegal-tag-length
- * rejections; other key sizes are out, as is the mismatched-key test (it
- * needs AES-CBC normalization to succeed before the key check).
+ * encrypt_decrypt/aes_gcm (96-bit iv): 128- and 256-bit keys at every
+ * legal tag length (per-call `tag-size` carries them all), plus the
+ * illegal-tag-length rejections; AES-192 is declined package-wide, and
+ * the mismatched-key test is out (it needs AES-CBC normalization to
+ * succeed before the key check).
  */
 function gcmInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  return name.includes("256-bit key") && !name.includes("mismatched key and algorithm");
+  return /(128|256)-bit key/.test(name) && !name.includes("mismatched key and algorithm");
 }
 
 /**
@@ -85,7 +86,7 @@ function importKeyInSubset(name) {
     return true;
   }
   if (name.includes("{name: AES-GCM}")) {
-    return name.includes(" 256 bits ");
+    return / (128|256) bits /.test(name);
   }
   return false;
 }
@@ -102,7 +103,7 @@ function generateKeyInSubset(name) {
     return /hash: SHA-(256|384|512)/.test(name);
   }
   if (/name: aes-gcm/i.test(name)) {
-    return name.includes("length: 256");
+    return /length: (128|256)/.test(name);
   }
   return false;
 }
@@ -174,7 +175,7 @@ function kdfDeriveInSubset(name) {
   }
   if (name.startsWith("Derived key of type")) {
     const served =
-      name.startsWith("Derived key of type name: AES-GCM length: 256") ||
+      /^Derived key of type name: AES-GCM length: (128|256)/.test(name) ||
       /^Derived key of type name: HMAC hash: SHA-(256|384|512)/.test(name);
     if (!served) {
       return false;
