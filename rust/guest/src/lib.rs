@@ -66,6 +66,7 @@ mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
         path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305"],
         world: "imports",
         generate_all,
         pub_export_macro: false,

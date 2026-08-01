@@ -35,6 +35,9 @@ const { values } = parseArgs({
     map: { type: "string", multiple: true },
     "world-name": { type: "string" },
     "out-dir": { type: "string", short: "o" },
+    // `types` only: WIT `@unstable` gates to enable, like `jco types
+    // --feature` (repeatable).
+    feature: { type: "string", multiple: true },
   },
 });
 
@@ -63,6 +66,7 @@ switch (command) {
       worldName: values["world-name"],
       asyncMode: values["async-mode"],
       outDir: values["out-dir"],
+      features: values.feature,
     });
     await writeFiles(files);
     break;

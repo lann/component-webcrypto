@@ -217,6 +217,34 @@ then fails at composition (`wac plug`) time rather than at run time. This
 repository's in-guest provider documents its classification and policy in
 `rust/guest-provider/README.md`.
 
+## Stability gates
+
+Most of the package is ungated. The ChaCha interfaces are marked
+`@unstable`, so tooling hides them unless a consumer enables the feature
+(for example `wasm-tools ... --features`, wit-bindgen's `features` option,
+componentize-js's `--features`):
+
+- `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305`. The
+  algorithm is IETF-standard (RFC 8439), but its browser WebCrypto
+  surface is a proposal (W3C ["Modern Algorithms in the Web Cryptography
+  API"]), and this package's JWK posture for it may follow how that
+  proposal settles (the proposal serves an alg-less `oct` JWK; this
+  package currently declines the JWK path — see the error contract's
+  `unsupported` and the design notes).
+- `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
+  `xchacha20-poly1305-internal-nonce`. The construction is deployed
+  (libsodium lineage) but not IETF-standardized, and no platform
+  WebCrypto serves it.
+
+A gate marks the *interface shape* as provisional — semver-minor changes
+may still reshape gated interfaces. It says nothing about runtime
+availability: an implementation may decline any minting path with
+`error.unsupported` either way, and a gated interface a consumer enables
+still needs the same handling. Stabilization replaces the gate with
+`@since` once the referenced externals settle.
+
+["Modern Algorithms in the Web Cryptography API"]: https://wicg.github.io/webcrypto-modern-algos/
+
 ## Design notes
 
 Decisions that shape the surface, recorded so the doc comments can stay

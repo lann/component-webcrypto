@@ -70,11 +70,21 @@ clippy:
 
 # Validate WIT packages.
 validate-wit:
+    # Each package is validated in both views: the default (the @unstable
+    # ChaCha gates hidden — what a consumer sees without opting in) and
+    # with every feature enabled.
     wasm-tools component wit wit
+    wasm-tools component wit wit --all-features
     wasm-tools component wit rust/wasmtime/wit
+    wasm-tools component wit rust/wasmtime/wit --all-features
     wasm-tools component wit js/jco/wit
+    wasm-tools component wit js/jco/wit --all-features
     wasm-tools component wit rust/guest-provider/wit
+    wasm-tools component wit rust/guest-provider/wit --all-features
     wasm-tools component wit examples/crypto-demo/wit
+    wasm-tools component wit examples/crypto-demo/wit --all-features
+    wasm-tools component wit js/componentize/wpt/wit
+    wasm-tools component wit js/componentize/wpt/wit --all-features
     wasm-tools component wit examples/componentize-demo/wit
     wasm-tools component wit js/componentize/wpt/wit
     wasm-tools component wit conformance/guest/wit
@@ -176,6 +186,7 @@ build-componentize-demo:
     mkdir -p examples/componentize-demo/build
     "$(js/componentize/wpt/component.sh toolchain)" \
         -q -d examples/componentize-demo/wit -w componentize-demo \
+        --features chacha20-poly1305 \
         componentize examples/componentize-demo/app.js -p . \
         -o examples/componentize-demo/build/componentize-demo.component.wasm
 

@@ -554,12 +554,19 @@ where
     bindings::webcrypto::cipher::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_cbc::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_ctr::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    // The ChaCha interfaces are gated `@unstable` in the WIT (see
+    // `wit/README.md`, "Stability gates"), so their generated
+    // `add_to_linker`s take `LinkOptions`. This host serves them
+    // unconditionally: the gate marks the interface shape provisional, not
+    // this implementation's capability.
     bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
         linker,
+        bindings::webcrypto::chacha20_poly1305::LinkOptions::default().chacha20_poly1305(true),
         T::webcrypto,
     )?;
     bindings::webcrypto::xchacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
         linker,
+        bindings::webcrypto::xchacha20_poly1305::LinkOptions::default().xchacha20_poly1305(true),
         T::webcrypto,
     )?;
     bindings::webcrypto::aes_gcm_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
@@ -568,6 +575,8 @@ where
     )?;
     bindings::webcrypto::xchacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
+        bindings::webcrypto::xchacha20_poly1305_internal_nonce::LinkOptions::default()
+            .xchacha20_poly1305(true),
         T::webcrypto,
     )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;

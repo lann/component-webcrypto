@@ -26,7 +26,9 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`,
+// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`
+// (gated `@unstable(feature = chacha20-poly1305)`: the world line carries
+// the gate and componentize-js needs `--features chacha20-poly1305`),
 // `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
 // `key-agreement`, `x25519`,
