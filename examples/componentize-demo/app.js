@@ -396,9 +396,9 @@ async function getRandomValuesCheck() {
  * digests to standard SHA-1 in both postures; input carrying a collision
  * attack yields the deterministic sha1dc safe hash under the default
  * mitigating posture, and under `setSha1CollisionPolicy("reject")` throws
- * `OperationError` — the shim's mapping of the package's
- * `("lann:webcrypto", "collision-detected")` extension condition, whose
- * pair rides in the `DOMException`'s `cause`.
+ * `OperationError` (the shim's mapping of the package's
+ * `("lann:webcrypto", "collision-detected")` extension condition; the
+ * `bindings-transport` check asserts the condition's delivery).
  */
 async function sha1CollisionPolicy() {
   const attacked = unhex(SHATTERED_PREFIX);
@@ -409,18 +409,9 @@ async function sha1CollisionPolicy() {
 
     setSha1CollisionPolicy("reject");
     expectEq(hex(await subtle.digest("SHA-1", encoder.encode("abc"))), ABC_SHA1, "reject: abc");
-    let thrown;
-    try {
-      await subtle.digest("SHA-1", attacked);
-    } catch (e) {
-      thrown = e;
-    }
-    if (!(thrown instanceof DOMException) || thrown.name !== "OperationError") {
-      throw new Error(`reject: attacked input: expected OperationError, got ${thrown ?? "success"}`);
-    }
-    const ext = thrown.cause?.val;
-    expectEq(ext?.origin, "lann:webcrypto", "reject: cause origin");
-    expectEq(ext?.name, "collision-detected", "reject: cause condition name");
+    await expectDomException("OperationError", "reject: attacked input", () =>
+      subtle.digest("SHA-1", attacked),
+    );
   } finally {
     setSha1CollisionPolicy("mitigate");
   }
@@ -433,6 +424,58 @@ async function sha1CollisionPolicy() {
   if (!(badPolicy instanceof TypeError)) {
     throw new Error(`invalid policy: expected TypeError, got ${badPolicy ?? "success"}`);
   }
+}
+
+/**
+ * Bindings-transport probe: asserts field-exact delivery of the composite
+ * WIT shapes whose transport no known-answer check observes. A toolchain
+ * that permutes or truncates a shape's fields (#184's record reversal)
+ * fails here directly, not as a downstream crypto mismatch.
+ *
+ * Today that is the `extension-error` record — the package's only
+ * multi-field record — delivered by the rejecting SHA-1 digest's error
+ * and preserved verbatim as the `DOMException`'s `cause`. All three
+ * string fields are asserted exactly, `message` included: this is a
+ * transport assertion (bytes in = bytes out, the message pinned as the
+ * Rust conformance probe pins it), not a consumer contract on the
+ * message. The other shapes crossing the boundary are covered
+ * incidentally but adequately elsewhere: enum discriminants and
+ * list/string payloads by every known-answer check, `generate-key`'s
+ * tuple order by ed25519-sign-verify (a swapped tuple delivers
+ * wrong-typed resource handles), option/bool/numeric getters by the key
+ * metadata assertions. New shapes (key-storage metadata records,
+ * stream-aead parameters) get their assertions here as they land.
+ */
+async function bindingsTransport() {
+  let thrown;
+  try {
+    setSha1CollisionPolicy("reject");
+    await subtle.digest("SHA-1", unhex(SHATTERED_PREFIX));
+  } catch (e) {
+    thrown = e;
+  } finally {
+    setSha1CollisionPolicy("mitigate");
+  }
+  if (thrown === undefined) {
+    throw new Error("a rejecting digest hashed an attacked input");
+  }
+  const payload = thrown.cause;
+  expectEq(payload?.tag, "extension", "error variant tag");
+  const ext = payload?.val;
+  expectEq(
+    Object.keys(ext ?? {})
+      .sort()
+      .join(),
+    "message,name,origin",
+    "extension-error field census",
+  );
+  expectEq(ext?.origin, "lann:webcrypto", "extension-error origin");
+  expectEq(ext?.name, "collision-detected", "extension-error name");
+  expectEq(
+    ext?.message,
+    "input carries a SHA-1 collision attack pattern",
+    "extension-error message",
+  );
 }
 
 const CHECKS = [
@@ -450,6 +493,7 @@ const CHECKS = [
   ["ed25519-sign-verify", ed25519SignVerify],
   ["get-random-values", getRandomValuesCheck],
   ["sha1-collision-policy", sha1CollisionPolicy],
+  ["bindings-transport", bindingsTransport],
 ];
 
 // The `demo:webcrypto-demo/demo@0.1.0` export. `run` returns the ok summary
