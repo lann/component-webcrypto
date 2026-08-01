@@ -5,25 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <title>lann:webcrypto WPT parity</title>
-<!-- The jco-transpiled parity runner imports its wasi shims by bare
-     specifier; this map resolves them to the browser build vendored by
-     `just wpt-web-artifacts` (sockets to a local stub: the browser build's
-     sockets module predates the resource-class shape jco expects, and the
-     runner never opens one). Import maps apply to the document only, not
-     to module workers, which is why the page runs both legs on the main
-     thread (see app.mjs). -->
-<script type="importmap">
-{
-  "imports": {
-    "@bytecodealliance/preview2-shim/cli": "./preview2-shim/cli.js",
-    "@bytecodealliance/preview2-shim/clocks": "./preview2-shim/clocks.js",
-    "@bytecodealliance/preview2-shim/filesystem": "./preview2-shim/filesystem.js",
-    "@bytecodealliance/preview2-shim/io": "./preview2-shim/io.js",
-    "@bytecodealliance/preview2-shim/random": "./preview2-shim/random.js",
-    "@bytecodealliance/preview2-shim/sockets": "./sockets-stub.js"
-  }
-}
-</script>
 <style>
   :root {
     --pass: #1a7f37;

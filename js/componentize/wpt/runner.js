@@ -28,6 +28,7 @@ import { GROUPS as GROUP_TABLE } from "./js/componentize/wpt/groups.js";
 import { drain, takeResults } from "./js/componentize/wpt/harness.js";
 import * as groupHmac from "./js/componentize/wpt/build/group-hmac.js";
 import * as groupAesGcm from "./js/componentize/wpt/build/group-aes-gcm.js";
+import * as groupAesGcm256Iv from "./js/componentize/wpt/build/group-aes-gcm-256-iv.js";
 import * as groupAesCbc from "./js/componentize/wpt/build/group-aes-cbc.js";
 import * as groupAesCtr from "./js/componentize/wpt/build/group-aes-ctr.js";
 import * as groupImportKey from "./js/componentize/wpt/build/group-import-key.js";
@@ -46,13 +47,17 @@ import * as groupEcImportKey from "./js/componentize/wpt/build/group-ec-import-k
 import * as groupEcImportKeyFailures from "./js/componentize/wpt/build/group-ec-import-key-failures.js";
 import * as groupGetRandomValues from "./js/componentize/wpt/build/group-get-random-values.js";
 import * as groupRandomUuid from "./js/componentize/wpt/build/group-random-uuid.js";
+import * as groupNormalizeAlgorithmName from "./js/componentize/wpt/build/group-normalize-algorithm-name.js";
+import * as groupCryptoKeyCachedSlots from "./js/componentize/wpt/build/group-crypto-key-cached-slots.js";
 import * as groupHkdfDerive from "./js/componentize/wpt/build/group-hkdf-derive.js";
 import * as groupPbkdf2Derive from "./js/componentize/wpt/build/group-pbkdf2-derive.js";
+import * as groupDerivedBitsLength from "./js/componentize/wpt/build/group-derived-bits-length.js";
 
 /** The statically imported suite modules, keyed as groups.js names them. */
 const MODULES = {
   "group-hmac.js": groupHmac,
   "group-aes-gcm.js": groupAesGcm,
+  "group-aes-gcm-256-iv.js": groupAesGcm256Iv,
   "group-aes-cbc.js": groupAesCbc,
   "group-aes-ctr.js": groupAesCtr,
   "group-import-key.js": groupImportKey,
@@ -71,8 +76,11 @@ const MODULES = {
   "group-ec-import-key-failures.js": groupEcImportKeyFailures,
   "group-get-random-values.js": groupGetRandomValues,
   "group-random-uuid.js": groupRandomUuid,
+  "group-normalize-algorithm-name.js": groupNormalizeAlgorithmName,
+  "group-crypto-key-cached-slots.js": groupCryptoKeyCachedSlots,
   "group-hkdf-derive.js": groupHkdfDerive,
   "group-pbkdf2-derive.js": groupPbkdf2Derive,
+  "group-derived-bits-length.js": groupDerivedBitsLength,
 };
 
 // --- runner -----------------------------------------------------------------------

@@ -87,10 +87,14 @@ round trip:  WPT tests ► shim ► WIT ► component ABI ► jco ► platform c
 ```
 
 `parity/baseline.mjs` runs the suite bundles directly on this Node's
-`crypto.subtle`; `parity-runner.js` (componentized from the tree like the
-gating runner, but ungated — it reports every result and asserts nothing
-in-guest) is transpiled by jco against `js/jco/webcrypto.js` and run by
-`parity/roundtrip.mjs`. Because both legs end at the identical platform
+`crypto.subtle`; `parity-runner.js` (componentized from the tree against
+the `wpt-parity-runner` world in [`wit/`](wit/), ungated — it reports
+every result and asserts nothing in-guest) is transpiled by jco against
+`js/jco/webcrypto.js` and run by `parity/roundtrip.mjs`. The runner
+streams each record through its `wpt:parity/reporter` import as the test
+settles — the Node leg just collects them; the browser page shows them
+live — and `run` resolves to a record count the embedder cross-checks.
+Because both legs end at the identical platform
 engine, the platform's own coverage cancels out: whatever it does not
 implement fails both legs, with no exclusion list to maintain. Every test
 the baseline passes and the round trip does not is a *loss* introduced by
@@ -117,14 +121,19 @@ platform itself is.
 
 `web/` is the same two legs run live in a visiting browser, published on
 the GitHub Pages site: the baseline against that browser's own
-`crypto.subtle`, the round trip through the same jco-transpiled parity
-runner the Node leg uses, resolving its wasi imports through the page's
-import map (the preview2-shim browser build, vendored beside the page by
-`just wpt-web-artifacts`). The round trip needs JSPI; without it the page
-runs the baseline alone. Nothing on the page gates, and the pinned loss
-ratchet does not apply to it: `losses.js` records the *Node* baseline's
-losses, and a browser's baseline legitimately differs. Serve it locally
-with `just wpt-web`.
+`crypto.subtle`, the round trip through a web transpile of the same parity
+runner (`transpile:web` in parity/package.json — every import mapped to a
+relative path, wasi included, so the module loads in the page's Web
+Worker with no import map; `just wpt-web-artifacts` vendors the
+preview2-shim browser build those paths resolve to). Both legs run in the
+worker and stream: the round trip's records arrive through the runner's
+reporter import as each test settles, so the page shows live progress
+mid-run; a main-thread fallback runs the same legs if the worker path
+fails. The round trip needs JSPI; without it the page runs the baseline
+alone. Nothing on the page gates, and the pinned loss ratchet does not
+apply to it: `losses.js` records the *Node* baseline's losses, and a
+browser's baseline legitimately differs. Serve it locally with
+`just wpt-web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
 repository layout: the transpiled runner imports `js/jco/webcrypto.js` by
@@ -146,13 +155,14 @@ reaches this harness as a re-vendor with a census diff.
 | --- | --- |
 | `sign_verify/hmac` | `hmac.https.any.js` (reference), `hmac.js`, `hmac_vectors.js` |
 | `encrypt_decrypt/aes_gcm` (96-bit iv) | `aes_gcm.https.any.js` (reference), `aes.js`, `aes_gcm_vectors.js`, `aes_gcm_96_iv_fixtures.js` |
+| `encrypt_decrypt/aes_gcm` (256-bit iv) | `aes_gcm_256_iv.https.any.js` (reference), `aes_gcm_256_iv_fixtures.js` (the shared `aes.js` runner and `aes_gcm_vectors.js`) |
 | `encrypt_decrypt/aes_cbc` | `aes_cbc.https.any.js` (reference), `aes_cbc_vectors.js` (the shared `aes.js` runner) |
 | `encrypt_decrypt/aes_ctr` | `aes_ctr.https.any.js` (reference), `aes_ctr_vectors.js` |
 | `encrypt_decrypt/chacha20_poly1305` | `chacha20_poly1305.tentative.https.any.js` (wrapped callable; self-contained) |
 | `import_export/symmetric_importKey` | `symmetric_importKey.https.any.js` (reference), `symmetric_importKey.js` |
 | `import_export/symmetric_importKey` (ChaCha20-Poly1305) | `ChaCha20-Poly1305_importKey.tentative.https.any.js` (reference; the shared `symmetric_importKey.js` runner) |
 | `generateKey` successes | `successes_HMAC.https.any.js`, `successes_X25519.https.any.js`, `successes_Ed25519.https.any.js`, `successes_chacha20_poly1305.tentative.https.any.js` (references), `successes.js` |
-| `generateKey` failures (ChaCha20-Poly1305) | `failures_chacha20_poly1305.tentative.https.any.js` (reference), `failures.js` |
+| `generateKey` failures | `failures_HMAC.https.any.js`, `failures_AES-GCM.https.any.js`, `failures_AES-CBC.https.any.js`, `failures_AES-CTR.https.any.js`, `failures_Ed25519.https.any.js`, `failures_X25519.https.any.js`, `failures_chacha20_poly1305.tentative.https.any.js` (references), `failures.js` |
 | `sign_verify/eddsa` (Ed25519) | `eddsa_curve25519.https.any.js`, `eddsa_small_order_points.https.any.js` (references), `eddsa.js`, `eddsa_small_order_points.js`, `eddsa_vectors.js` |
 | `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
@@ -160,10 +170,13 @@ reaches this harness as a re-vendor with a census diff.
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
 | `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
+| `derive_bits_keys/derived_bits_length` | `derived_bits_length.https.any.js` (reference), `derived_bits_length.js`, `derived_bits_length_vectors.js`, `derived_bits_length_testcases.js` |
 | `digest/digest` | `digest.https.any.js` (wrapped callable — see `component.sh`) |
 | `import_export/okp_importKey` (X25519) | `okp_importKey_X25519.https.any.js`, `okp_importKey_failures_X25519.https.any.js` (references), `okp_importKey.js`, `okp_importKey_fixtures.js`, `importKey_failures.js`, `okp_importKey_failures_fixtures.js` |
 | `getRandomValues` | `getRandomValues.any.js` (wrapped callable) |
 | `randomUUID` | `randomUUID.https.any.js` (wrapped callable) |
+| `normalize-algorithm-name` | `normalize-algorithm-name.https.any.js` (wrapped callable) |
+| `crypto_key_cached_slots` | `crypto_key_cached_slots.https.any.js` (wrapped callable) |
 | shared | `util/helpers.js` |
 
 The `.https.any.js` drivers are kept for reference; the runner invokes the

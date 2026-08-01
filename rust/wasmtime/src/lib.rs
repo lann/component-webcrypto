@@ -247,179 +247,242 @@ impl HasData for WasiWebcrypto {
     type Data<'a> = WasiWebcryptoCtxView<'a>;
 }
 
-/// A `mac-key-options` resource: mint-time policy under construction.
-/// Constructed with the WIT defaults (nothing granted), mutated by the
-/// setters, consumed by a mint.
-#[derive(Debug)]
-pub struct MacKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::MacPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
+/// A resource this host mints: a payload plus the retention reservation
+/// charged for it (see [`WasiWebcryptoCtx`], "Minted-resource retention").
+/// [`minted_resources!`] implements it, placing the reservation in a
+/// private field so it releases exactly when the resource leaves the
+/// store's table.
+pub(crate) trait Minted: Sized {
+    /// What a mint computes; any other fields take their declared
+    /// defaults.
+    type Payload;
+
+    /// The variable-length bytes the resource retains beyond the
+    /// per-resource floor, measured for the retention charge.
+    fn payload_bytes(payload: &Self::Payload) -> usize;
+
+    /// Assemble the resource around its charged reservation.
+    fn minted(payload: Self::Payload, retention: crate::limits::Reservation) -> Self;
 }
 
-/// An `aead-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct AeadKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::AeadPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
+/// Declare the minted resource types: the `#[payload]` field, any
+/// defaulted extra fields, and the hidden retention reservation, with the
+/// [`Minted`] impl assembling them. `#[payload(retains = method)]` names
+/// the payload method measuring the retention charge's variable part (the
+/// default is floor-only); anything more complex than a method call
+/// belongs on the payload type, not in a declaration.
+macro_rules! minted_resources {
+    ($(
+        $(#[$attr:meta])*
+        pub struct $name:ident {
+            #[payload $((retains = $measure:ident))?]
+            $(#[$pattr:meta])*
+            $payload:ident: $pty:ty
+            $(, $(#[$fattr:meta])* $field:ident: $fty:ty = $default:expr)* $(,)?
+        }
+    )*) => {$(
+        $(#[$attr])*
+        pub struct $name {
+            $(#[$pattr])*
+            pub(crate) $payload: $pty,
+            $($(#[$fattr])* pub(crate) $field: $fty,)*
+            _retention: crate::limits::Reservation,
+        }
+
+        impl Minted for $name {
+            type Payload = $pty;
+
+            fn payload_bytes(payload: &Self::Payload) -> usize {
+                let _ = payload;
+                0 $(+ payload.$measure())?
+            }
+
+            fn minted(payload: Self::Payload, retention: crate::limits::Reservation) -> Self {
+                Self {
+                    $payload: payload,
+                    $($field: $default,)*
+                    _retention: retention,
+                }
+            }
+        }
+    )*};
 }
 
-/// A `cipher-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct CipherKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::CipherPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+minted_resources! {
+    /// A `mac-key-options` resource: mint-time policy under construction.
+    /// Constructed with the WIT defaults (nothing granted), mutated by the
+    /// setters, consumed by a mint.
+    #[derive(Debug)]
+    pub struct MacKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::MacPolicy,
+    }
 
-/// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct InternalNonceKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::InternalNoncePolicy,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// An `aead-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct AeadKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::AeadPolicy,
+    }
 
-/// A `signing-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct SigningKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::SigningPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// A `cipher-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct CipherKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::CipherPolicy,
+    }
 
-/// A `derive-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct DeriveOptions {
-    pub(crate) policy: lann_webcrypto_core::DerivePolicy,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct InternalNonceKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::InternalNoncePolicy,
+    }
 
-/// An `agreement-key-options` resource. See [`MacKeyOptions`].
-#[derive(Debug)]
-pub struct AgreementKeyOptions {
-    pub(crate) policy: lann_webcrypto_core::AgreementPolicy,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// A `signing-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct SigningKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::SigningPolicy,
+    }
 
-/// Backing type for the `key-agreement.public-key` resource: public
-/// material only, exchangeable and secret-free.
-#[derive(Debug)]
-pub struct AgreementPublicKey {
-    pub(crate) material: lann_webcrypto_core::AgreementPublicMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// A `derive-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct DeriveOptions {
+        #[payload]
+        policy: lann_webcrypto_core::DerivePolicy,
+    }
 
-/// Backing type for the `key-agreement.secret-key` resource. `agree` is
-/// one-shot and stateless per call; the derivation state lives in the
-/// `derive-input` it mints.
-#[derive(Debug)]
-pub struct AgreementSecretKey {
-    pub(crate) material: lann_webcrypto_core::AgreementSecretMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// An `agreement-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct AgreementKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::AgreementPolicy,
+    }
 
-/// Backing type for the `hkdf.ikm` resource: input keying material, never
-/// readable through the API under any grant.
-#[derive(Debug)]
-pub struct Ikm {
-    pub(crate) material: lann_webcrypto_core::IkmMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `key-agreement.public-key` resource: public
+    /// material only, exchangeable and secret-free.
+    #[derive(Debug)]
+    pub struct AgreementPublicKey {
+        #[payload]
+        material: lann_webcrypto_core::AgreementPublicMaterial,
+    }
 
-/// Backing type for the `pbkdf2.password` resource: a password, never
-/// readable through the API under any grant.
-#[derive(Debug)]
-pub struct Password {
-    pub(crate) material: lann_webcrypto_core::PasswordMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `key-agreement.secret-key` resource. `agree` is
+    /// one-shot and stateless per call; the derivation state lives in the
+    /// `derive-input` it mints.
+    #[derive(Debug)]
+    pub struct AgreementSecretKey {
+        #[payload]
+        material: lann_webcrypto_core::AgreementSecretMaterial,
+    }
 
-/// Backing type for the `derivation.derive-input` resource: a
-/// parameterized derivation, run eagerly (the extract step runs at
-/// `prepare`, so this retains the PRK rather than the base secret).
-#[derive(Debug)]
-pub struct DeriveInput {
-    pub(crate) material: lann_webcrypto_core::DeriveInputMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `hkdf.ikm` resource: input keying material, never
+    /// readable through the API under any grant.
+    #[derive(Debug)]
+    pub struct Ikm {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::IkmMaterial,
+    }
 
-/// Backing type for the `mac.mac-key` resource.
-///
-/// Holds the shared core's HMAC key material (raw bytes zeroized on drop,
-/// the bound SHA-2 variant, and extractability); `sign`/`verify` are
-/// one-shot and stateless per call, so the key carries no per-operation
-/// state. `extractable` gates `export-key-raw` only — the material necessarily
-/// lives host-side either way.
-#[derive(Debug)]
-pub struct MacKey {
-    pub(crate) material: lann_webcrypto_core::MacKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `pbkdf2.password` resource: a password, never
+    /// readable through the API under any grant.
+    #[derive(Debug)]
+    pub struct Password {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::PasswordMaterial,
+    }
 
-/// Backing type for the `aead.aead-key` resource.
-///
-/// Holds the shared core's AEAD key material (the ready-to-use cipher bound
-/// to its algorithm at minting, raw bytes zeroized on drop, and
-/// extractability). `seal`/`open` are stateless per call, so the key
-/// carries no per-operation state.
-#[derive(Debug)]
-pub struct AeadKey {
-    pub(crate) material: lann_webcrypto_core::AeadKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `derivation.derive-input` resource: a
+    /// parameterized derivation, run eagerly (the extract step runs at
+    /// `prepare`, so this retains the PRK rather than the base secret).
+    #[derive(Debug)]
+    pub struct DeriveInput {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::DeriveInputMaterial,
+    }
 
-/// Backing type for the `cipher.cipher-key` resource: the unauthenticated
-/// AES modes' key material.
-pub struct CipherKey {
-    pub(crate) material: lann_webcrypto_core::CipherKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `mac.mac-key` resource.
+    ///
+    /// Holds the shared core's HMAC key material (raw bytes zeroized on drop,
+    /// the bound SHA-2 variant, and extractability); `sign`/`verify` are
+    /// one-shot and stateless per call, so the key carries no per-operation
+    /// state. `extractable` gates `export-key-raw` only — the material necessarily
+    /// lives host-side either way.
+    #[derive(Debug)]
+    pub struct MacKey {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::MacKeyMaterial,
+    }
 
-/// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
-///
-/// Like [`AeadKey`], but the nonce is generated here per `seal` (the SP
-/// 800-38D §8.2.2 RBG-based construction) and carried in the sealed output.
-/// The key tracks its seal count to enforce the WIT nonce budget
-/// (`error.key-exhausted`) for 12-byte-nonce algorithms.
-#[derive(Debug)]
-pub struct InternalNonceKey {
-    pub(crate) material: lann_webcrypto_core::AeadKeyMaterial,
-    /// The number of `seal` invocations so far, counted against the
-    /// algorithm's nonce budget.
-    pub(crate) sealed: u64,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `aead.aead-key` resource.
+    ///
+    /// Holds the shared core's AEAD key material (the ready-to-use cipher bound
+    /// to its algorithm at minting, raw bytes zeroized on drop, and
+    /// extractability). `seal`/`open` are stateless per call, so the key
+    /// carries no per-operation state.
+    #[derive(Debug)]
+    pub struct AeadKey {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::AeadKeyMaterial,
+    }
 
-/// Backing type for the `digest.digest` resource.
-///
-/// A digest holds no key material — just the algorithm it is bound to
-/// (a SHA-2 variant, or checked SHA-1 in a collision posture); `compute`
-/// is one-shot and stateless per call, so the resource is reusable and
-/// carries no per-operation state.
-#[derive(Debug)]
-pub struct Digest {
-    /// The digest algorithm this resource is bound to.
-    pub(crate) variant: lann_webcrypto_core::DigestKind,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
+    /// AES modes' key material.
+    pub struct CipherKey {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::CipherKeyMaterial,
+    }
 
-/// Backing type for the `signature.verifying-key` resource.
-///
-/// Public material only — verification is secret-free, and there is no
-/// extractability gate (`%export` always succeeds).
-#[derive(Debug)]
-pub struct VerifyingKey {
-    /// The public key, bound to its algorithm (and, for ECDSA, its
-    /// curve/digest variant) at minting.
-    pub(crate) public: lann_webcrypto_core::SigPublic,
-    pub(crate) _retention: crate::limits::Reservation,
-}
+    /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
+    ///
+    /// Like [`AeadKey`], but the nonce is generated here per `seal` (the SP
+    /// 800-38D §8.2.2 RBG-based construction) and carried in the sealed output.
+    /// The key tracks its seal count to enforce the WIT nonce budget
+    /// (`error.key-exhausted`) for 12-byte-nonce algorithms.
+    #[derive(Debug)]
+    pub struct InternalNonceKey {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::AeadKeyMaterial,
+        /// The number of `seal` invocations so far, counted against the
+        /// algorithm's nonce budget.
+        sealed: u64 = 0,
+    }
 
-/// Backing type for the `signature.signing-key` resource.
-///
-/// `sign` is one-shot and stateless per call, so the key carries no
-/// per-operation state. `extractable` gates `%export` only.
-#[derive(Debug)]
-pub struct SigningKey {
-    pub(crate) material: lann_webcrypto_core::SigningKeyMaterial,
-    pub(crate) _retention: crate::limits::Reservation,
+    /// Backing type for the `digest.digest` resource.
+    ///
+    /// A digest holds no key material — just the algorithm it is bound to
+    /// (a SHA-2 variant, or checked SHA-1 in a collision posture); `compute`
+    /// is one-shot and stateless per call, so the resource is reusable and
+    /// carries no per-operation state.
+    #[derive(Debug)]
+    pub struct Digest {
+        #[payload]
+        /// The digest algorithm this resource is bound to.
+        variant: lann_webcrypto_core::DigestKind,
+    }
+
+    /// Backing type for the `signature.verifying-key` resource.
+    ///
+    /// Public material only — verification is secret-free, and there is no
+    /// extractability gate (`%export` always succeeds).
+    #[derive(Debug)]
+    pub struct VerifyingKey {
+        #[payload]
+        /// The public key, bound to its algorithm (and, for ECDSA, its
+        /// curve/digest variant) at minting.
+        public: lann_webcrypto_core::SigPublic,
+    }
+
+    /// Backing type for the `signature.signing-key` resource.
+    ///
+    /// `sign` is one-shot and stateless per call, so the key carries no
+    /// per-operation state. `extractable` gates `%export` only.
+    #[derive(Debug)]
+    pub struct SigningKey {
+        #[payload]
+        material: lann_webcrypto_core::SigningKeyMaterial,
+    }
 }
 
 // `Debug` derives on the key-holding types print through the shared

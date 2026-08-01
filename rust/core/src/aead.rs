@@ -274,6 +274,11 @@ impl AeadKeyMaterial {
         }
     }
 
+    /// The material's length in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.raw.len()
+    }
+
     /// The nonce length in bytes this key's algorithm specifies
     /// (`aead-key.nonce-size`, and the internal-nonce wire prefix).
     pub fn nonce_len(&self) -> usize {

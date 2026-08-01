@@ -51,6 +51,11 @@ impl IkmMaterial {
     pub fn policy(&self) -> DerivePolicy {
         self.policy
     }
+
+    /// The material's length in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.raw.len()
+    }
 }
 
 /// The `pbkdf2.password` resource's material: bytes that no operation
@@ -76,6 +81,11 @@ impl PasswordMaterial {
 
     pub fn policy(&self) -> DerivePolicy {
         self.policy
+    }
+
+    /// The password's length in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.raw.len()
     }
 }
 
@@ -298,6 +308,17 @@ impl DeriveInputMaterial {
 
     pub fn policy(&self) -> DerivePolicy {
         self.policy
+    }
+
+    /// The length in bytes of the variable-length state this input
+    /// retains: the bound `info` (HKDF), the bound salt (PBKDF2), or the
+    /// agreed shared secret.
+    pub fn byte_len(&self) -> usize {
+        match &self.realized {
+            Realized::Hkdf { info, .. } => info.len(),
+            Realized::Pbkdf2 { salt, .. } => salt.len(),
+            Realized::Agreed { secret } => secret.len(),
+        }
     }
 
     /// The derived bits at `length_bits` (the `derive-input.derive-bits`

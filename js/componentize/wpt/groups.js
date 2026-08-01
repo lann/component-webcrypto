@@ -39,8 +39,9 @@ function hmacInSubset(name) {
 }
 
 /**
- * encrypt_decrypt/aes_gcm (96-bit iv): 128- and 256-bit keys at every
- * legal tag length (per-call `tag-size` carries them all), plus the
+ * encrypt_decrypt/aes_gcm (both the 96-bit- and 256-bit-iv groups; the
+ * per-call `iv` parameter carries any length): 128- and 256-bit keys at
+ * every legal tag length (per-call `tag-size` carries them all), plus the
  * illegal-tag-length rejections and the mismatched-key tests (their
  * AES-CBC fixture is served); AES-192 is declined package-wide.
  */
@@ -100,23 +101,16 @@ function chachaGenerateKeyInSubset(name) {
 }
 
 /**
- * generateKey/failures (ChaCha20-Poly1305): the ChaCha vector rows are
- * served (bad and empty usages render this library's own `SyntaxError`s),
- * and so are the suite's fixed rows — the empty-algorithm `TypeError`s
- * and the bad-algorithm rows for names this library does not serve at all
- * (`NotSupportedError` from algorithm normalization). Out: the HMAC
- * bad-hash rows. The spec rejects an unsupported hash during algorithm
- * normalization, before usage validation; this library resolves the hash
- * in the HMAC branch after `normalizeUsages`, so the rows pairing MD5
- * with a usage outside HMAC's vocabulary render `SyntaxError` instead.
- * The sign-only rows in that slice pass for the right reason but travel
- * with it, pinned as `outPassed`.
- * @param {string} name
+ * generateKey/failures, in both invocations: the served-algorithms sweep
+ * (HMAC, the AES family, Ed25519, X25519) and the ChaCha20-Poly1305 one.
+ * The whole group is in-subset — the suite asserts the spec's error
+ * ordering (algorithm normalization, nested hash included; then usage
+ * membership; then algorithm properties; then the empty-usage check),
+ * which this library implements for every served algorithm. The AES-192
+ * rows are in too: their expected errors are usage and length checks that
+ * precede the mint, so they never reach the package-wide AES-192 decline.
  */
-function generateKeyFailuresInSubset(name) {
-  if (name.startsWith("Bad algorithm:")) {
-    return !name.includes("HMAC");
-  }
+function generateKeyFailuresInSubset() {
   return true;
 }
 
@@ -203,9 +197,11 @@ function okpEd25519FailuresInSubset() {
  *
  * Excluded, in match order: subtests needing an ECDH key (`generateKey`
  * does not serve ECDH, so the fixture is null); the empty HKDF base key
- * (WIT-forced — `import-ikm` rejects empty material by ruling); and
- * unserved derived-key targets. The SHA-1 rows are served (the
- * `hkdf-sha1`/`pbkdf2-sha1` interfaces).
+ * (WIT-forced — `import-ikm` rejects empty material by ruling), except
+ * its bad-hash rows, which are served: algorithm normalization rejects
+ * the hash before the base key is looked at, the spec's own order, so
+ * the refused import never matters; and unserved derived-key targets.
+ * The SHA-1 rows are served (the `hkdf-sha1`/`pbkdf2-sha1` interfaces).
  *
  * The exclusions are whole-row, so the census pins a large `outPassed`
  * for these groups: an unserved-target row's bad-hash and missing-usage
@@ -222,7 +218,7 @@ function kdfDeriveInSubset(name) {
   if (name.includes("wrong (ECDH) key")) {
     return false;
   }
-  if (name.includes("empty derivedKey")) {
+  if (name.includes("empty derivedKey") && !name.includes("with bad hash name")) {
     return false;
   }
   if (name.startsWith("Derived key of type")) {
@@ -237,6 +233,19 @@ function kdfDeriveInSubset(name) {
     return true;
   }
   return true;
+}
+
+/**
+ * derive_bits_keys/derived_bits_length: the `length` parameter's edge
+ * semantics — explicit sizes, zero (an empty output), sub-byte lengths
+ * (the KDFs reject, X25519 truncates and masks), and null/undefined/
+ * omitted (the KDFs reject, an agreement yields its natural output) —
+ * for the served HKDF, PBKDF2, and X25519 rows. The ECDH rows need a
+ * P-curve agreement no implementation serves.
+ * @param {string} name
+ */
+function derivedBitsLengthInSubset(name) {
+  return !name.startsWith("ECDH");
 }
 
 /**
@@ -287,6 +296,22 @@ function randomUuidInSubset() {
 }
 
 /**
+ * normalize-algorithm-name: ASCII-case-insensitive name matching, probed
+ * with Kelvin-sign lookalikes. The HKDF row is out: its setup imports
+ * empty input keying material, which `hkdf.import-ikm` rejects by ruling
+ * (WIT-forced — see the shim header), so the name is never reached.
+ * @param {string} name
+ */
+function normalizeAlgorithmNameInSubset(name) {
+  return !name.includes('does not match "HKDF"');
+}
+
+/** crypto_key_cached_slots: the whole group is served. */
+function cachedSlotsInSubset() {
+  return true;
+}
+
+/**
  * digest/digest: the whole group — the SHA-2 family, the bad-algorithm-name
  * rejections, the missing-name `TypeError`s, and the SHA-1 rows, which the
  * shim serves through the package's `sha1-checked` interface (mitigating
@@ -330,6 +355,12 @@ export const GROUPS = [
     inSubset: gcmInSubset,
   },
   {
+    name: "encrypt_decrypt/aes_gcm (256-bit iv)",
+    module: "group-aes-gcm-256-iv.js",
+    start: (ns) => ns.run_test(),
+    inSubset: gcmInSubset,
+  },
+  {
     name: "encrypt_decrypt/aes_cbc",
     module: "group-aes-cbc.js",
     start: (ns) => ns.run_test(),
@@ -367,6 +398,12 @@ export const GROUPS = [
     module: "group-generate-key.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM"]),
     inSubset: generateKeyInSubset,
+  },
+  {
+    name: "generateKey/failures (HMAC, AES, Ed25519, X25519)",
+    module: "group-generate-key-failures.js",
+    start: (ns) => ns.run_test(["HMAC", "AES-GCM", "AES-CBC", "AES-CTR", "Ed25519", "X25519"]),
+    inSubset: generateKeyFailuresInSubset,
   },
   {
     name: "generateKey/successes (ChaCha20-Poly1305)",
@@ -421,6 +458,12 @@ export const GROUPS = [
     module: "group-pbkdf2-derive.js",
     start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
     inSubset: kdfDeriveInSubset,
+  },
+  {
+    name: "derive_bits_keys/derived_bits_length",
+    module: "group-derived-bits-length.js",
+    start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
+    inSubset: derivedBitsLengthInSubset,
   },
   {
     name: "digest/digest",
@@ -487,5 +530,17 @@ export const GROUPS = [
     module: "group-random-uuid.js",
     start: (ns) => ns.run_random_uuid_tests(),
     inSubset: randomUuidInSubset,
+  },
+  {
+    name: "normalize-algorithm-name",
+    module: "group-normalize-algorithm-name.js",
+    start: (ns) => ns.run_normalize_algorithm_name_tests(),
+    inSubset: normalizeAlgorithmNameInSubset,
+  },
+  {
+    name: "crypto_key_cached_slots",
+    module: "group-crypto-key-cached-slots.js",
+    start: (ns) => ns.run_crypto_key_cached_slots_tests(),
+    inSubset: cachedSlotsInSubset,
   },
 ];
