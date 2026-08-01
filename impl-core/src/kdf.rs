@@ -139,8 +139,8 @@ enum Realized {
     Agreed { secret: Zeroizing<Vec<u8>> },
 }
 
-/// A `derivation.derive-input` minted by `hkdf.prepare`/`prepare-from`,
-/// `pbkdf2.prepare`, or `key-agreement.secret-key.agree`, with the grants
+/// A `derivation.derive-input` minted by `hkdf-sha2.prepare`/`prepare-from`,
+/// `pbkdf2-sha2.prepare`, or `key-agreement.secret-key.agree`, with the grants
 /// copied from the base secret.
 #[derive(Debug)]
 pub struct DeriveInputMaterial {
@@ -149,7 +149,7 @@ pub struct DeriveInputMaterial {
 }
 
 impl DeriveInputMaterial {
-    /// Parameterize a derivation over imported IKM (`hkdf.prepare`):
+    /// Parameterize a derivation over imported IKM (`hkdf-sha2.prepare`):
     /// HKDF-Extract with `salt`, `info` bound for expand, grants copied.
     pub fn prepare(
         variant: Sha2Variant,
@@ -180,7 +180,7 @@ impl DeriveInputMaterial {
         })
     }
 
-    /// Parameterize a PBKDF2 derivation (`pbkdf2.prepare`): the PRF's key
+    /// Parameterize a PBKDF2 derivation (`pbkdf2-sha2.prepare`): the PRF's key
     /// schedule runs now (the input retains keyed state, not the
     /// password), salt and iteration count are bound, and a zero
     /// iteration count fails `error.other` — the platform's
@@ -254,7 +254,7 @@ impl DeriveInputMaterial {
     }
 
     /// Parameterize a derivation over another derivation's output
-    /// (`hkdf.prepare-from`): the upstream derivation runs at its natural
+    /// (`hkdf-sha2.prepare-from`): the upstream derivation runs at its natural
     /// length — an agreement's full shared secret; KDF sources have none,
     /// so they fail `error.other` exactly as the platform's
     /// `deriveKey(… → "HKDF")` does.

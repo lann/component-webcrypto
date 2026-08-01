@@ -1124,7 +1124,7 @@ async function importIkm(raw, options) {
 }
 
 /**
- * Parameterize a derivation (the `hkdf.prepare` contract): the input's
+ * Parameterize a derivation (the `hkdf-sha2.prepare` contract): the input's
  * grants are copied; the salt and info are copied too, since the lifted
  * arrays are this call's, not the resource's.
  * @param {{ hash: string }} resolved
@@ -1145,7 +1145,7 @@ async function prepare(resolved, input, salt, info) {
 }
 
 /**
- * Chain from another derivation's output (the `hkdf.prepare-from`
+ * Chain from another derivation's output (the `hkdf-sha2.prepare-from`
  * contract): the upstream runs at its natural output length, which only
  * agreement inputs have — the platform's `deriveKey(X25519 → "HKDF")`
  * turns the shared secret into an HKDF base key without the bytes
@@ -1182,10 +1182,11 @@ async function prepareFrom(resolved, input, salt, info) {
 /** The `lann:webcrypto/derivation` interface: its resource classes. */
 export const derivation = { DeriveOptions, DeriveInput };
 
-/** The `lann:webcrypto/hkdf` interface. */
-export const hkdf = {
-  Ikm,
-  importIkm,
+/** The `lann:webcrypto/hkdf` interface: the hash-independent half. */
+export const hkdf = { Ikm, importIkm };
+
+/** The `lann:webcrypto/hkdf-sha2` interface. */
+export const hkdfSha2 = {
   /**
    * @param {string} variant
    * @param {Ikm} input
@@ -1284,7 +1285,7 @@ async function importPassword(raw, options) {
 }
 
 /**
- * Parameterize a PBKDF2 derivation (the `pbkdf2.prepare` contract): salt
+ * Parameterize a PBKDF2 derivation (the `pbkdf2-sha2.prepare` contract): salt
  * and iteration count bound now, output length per use. A zero iteration
  * count fails here — the platform's `OperationError`, checked early so a
  * misparameterized input cannot mint.
@@ -1304,9 +1305,10 @@ async function preparePbkdf2(resolved, input, salt, iterations) {
 }
 
 /** The `lann:webcrypto/pbkdf2` interface. */
-export const pbkdf2 = {
-  Password,
-  importPassword,
+export const pbkdf2 = { Password, importPassword };
+
+/** The `lann:webcrypto/pbkdf2-sha2` interface. */
+export const pbkdf2Sha2 = {
   /**
    * @param {string} variant
    * @param {Password} input

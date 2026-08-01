@@ -79,7 +79,7 @@ interface key-agreement {
         /// The returned input has a *natural* output length — the
         /// agreement's full shared secret (32 bytes for X25519) — so
         /// `derive-bits(none)` returns the whole secret and
-        /// `hkdf.prepare-from` accepts it as IKM.
+        /// `hkdf-sha2.prepare-from` accepts it as IKM.
         ///
         /// Security:
         /// - Fails `error.invalid-key` if the shared secret is the

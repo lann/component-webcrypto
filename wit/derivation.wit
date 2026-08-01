@@ -12,8 +12,8 @@ package lann:webcrypto@0.1.0;
 /// parameterized derivation, lacking only the output length, which the
 /// platform too supplies per use.
 ///
-/// Sources construct it on their own interfaces (`hkdf.prepare`, a future
-/// `pbkdf2.prepare`, a future agreement's `agree`); targets consume it
+/// Sources construct it on their own interfaces (`hkdf-sha2.prepare`,
+/// `pbkdf2-sha2.prepare`, an agreement's `agree`); targets consume it
 /// beside `import-key-raw` on their minting interfaces (`aes-gcm.derive-key`,
 /// `hmac-sha2.derive-key`).
 ///

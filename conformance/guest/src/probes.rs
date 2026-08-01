@@ -1805,14 +1805,14 @@ async fn signing_usage_policy() -> Result<(), String> {
 async fn hkdf_derive_key_equivalence() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf;
+    use lann_webcrypto_guest::bindings::hkdf_sha2;
     use lann_webcrypto_guest::bindings::hmac_sha2;
     use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
 
     let ikm = import_ikm(b"equivalence input keying material".to_vec(), true, true)
         .await
         .map_err(|e| describe("import-ikm", &e))?;
-    let input = hkdf::prepare(
+    let input = hkdf_sha2::prepare(
         Sha2Variant::Sha256,
         &ikm,
         b"equivalence salt".to_vec(),
@@ -1874,7 +1874,7 @@ async fn hkdf_derive_key_equivalence() -> Result<(), String> {
 async fn hkdf_grants_and_chaining() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf;
+    use lann_webcrypto_guest::bindings::hkdf_sha2;
 
     expect_err(
         "zero-grant import-ikm",
@@ -1897,10 +1897,10 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
     expect_err(
         "prepare on a truncated variant",
         ErrKind::Unsupported,
-        hkdf::prepare(Sha2Variant::Sha224, &bits_only, Vec::new(), Vec::new()).await,
+        hkdf_sha2::prepare(Sha2Variant::Sha224, &bits_only, Vec::new(), Vec::new()).await,
         "prepared over an unserved variant",
     )?;
-    let input = hkdf::prepare(Sha2Variant::Sha256, &bits_only, Vec::new(), Vec::new())
+    let input = hkdf_sha2::prepare(Sha2Variant::Sha256, &bits_only, Vec::new(), Vec::new())
         .await
         .map_err(|e| describe("prepare", &e))?;
     expect(
@@ -1943,7 +1943,7 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
         true,
         "key-only ikm can-derive-key",
     )?;
-    let input = hkdf::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), Vec::new())
+    let input = hkdf_sha2::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), Vec::new())
         .await
         .map_err(|e| describe("prepare (key-only)", &e))?;
     expect(
@@ -1981,7 +1981,7 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
     expect_err(
         "KDF-from-KDF chaining",
         ErrKind::Other,
-        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        hkdf_sha2::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
         "chained from an input with no natural output length",
     )?;
 
@@ -1997,13 +1997,13 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
 /// `prepare` with the platform's error, grants copy from the password, the
 /// §14.3.7 equivalence holds for a PBKDF2 input, and chaining from a
 /// PBKDF2 input fails exactly as from an HKDF one — there is deliberately
-/// no `pbkdf2.prepare-from` at all, and `hkdf.prepare-from` refuses KDF
+/// no `pbkdf2-sha2.prepare-from` at all, and `hkdf-sha2.prepare-from` refuses KDF
 /// upstreams of either flavor.
 async fn pbkdf2_contract() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf;
-    use lann_webcrypto_guest::bindings::pbkdf2;
+    use lann_webcrypto_guest::bindings::hkdf_sha2;
+    use lann_webcrypto_guest::bindings::pbkdf2_sha2;
 
     expect_err(
         "zero-grant import-password",
@@ -2016,7 +2016,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
     let password = import_password(b"passwd".to_vec(), true, true)
         .await
         .map_err(|e| describe("import-password", &e))?;
-    let input = pbkdf2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 1)
+    let input = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 1)
         .await
         .map_err(|e| describe("prepare", &e))?;
     let dk = input
@@ -2052,13 +2052,13 @@ async fn pbkdf2_contract() -> Result<(), String> {
     expect_err(
         "zero iteration count",
         ErrKind::Other,
-        pbkdf2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 0).await,
+        pbkdf2_sha2::prepare(Sha2Variant::Sha256, &password, b"salt".to_vec(), 0).await,
         "prepared with zero iterations",
     )?;
     expect_err(
         "prepare on a truncated variant",
         ErrKind::Unsupported,
-        pbkdf2::prepare(Sha2Variant::Sha512224, &password, b"salt".to_vec(), 1).await,
+        pbkdf2_sha2::prepare(Sha2Variant::Sha512224, &password, b"salt".to_vec(), 1).await,
         "prepared over an unserved variant",
     )?;
 
@@ -2066,7 +2066,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
     let empty = import_password(Vec::new(), true, true)
         .await
         .map_err(|e| describe("empty import-password", &e))?;
-    let input = pbkdf2::prepare(Sha2Variant::Sha256, &empty, vec![1, 2, 3, 4], 2)
+    let input = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &empty, vec![1, 2, 3, 4], 2)
         .await
         .map_err(|e| describe("prepare (empty password)", &e))?;
     input
@@ -2098,7 +2098,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
         "password can-derive-bits",
     )?;
     expect(key_only.can_derive_key(), true, "password can-derive-key")?;
-    let input = pbkdf2::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), 1)
+    let input = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &key_only, Vec::new(), 1)
         .await
         .map_err(|e| describe("prepare (key-only)", &e))?;
     expect(
@@ -2115,7 +2115,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
     expect_err(
         "chaining from a PBKDF2 input",
         ErrKind::Other,
-        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        hkdf_sha2::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
         "chained from a KDF input",
     )
 }
@@ -2375,13 +2375,13 @@ async fn x25519_agree_contract() -> Result<(), String> {
 
 /// The derive grants an agreed input inherits gate exactly their
 /// operations (including the cap rule), and — the property no KDF source
-/// has — `hkdf.prepare-from` chains from an agreement: the spec's own
+/// has — `hkdf-sha2.prepare-from` chains from an agreement: the spec's own
 /// X25519 → HKDF → AES-GCM example, checked against HKDF over the same
 /// shared secret imported as IKM.
 async fn x25519_grants_and_chaining() -> Result<(), String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf;
+    use lann_webcrypto_guest::bindings::hkdf_sha2;
 
     let shared = unhex(RFC7748_SHARED);
     let alice =
@@ -2393,12 +2393,12 @@ async fn x25519_grants_and_chaining() -> Result<(), String> {
         .map_err(|e| describe("import Bob's public key", &e))?;
 
     // Chaining equivalence: prepare-from over the agreed input equals
-    // hkdf.prepare over the same shared secret imported as IKM.
+    // hkdf-sha2.prepare over the same shared secret imported as IKM.
     let input = alice
         .agree(&bob_public)
         .await
         .map_err(|e| describe("agree", &e))?;
-    let chained = hkdf::prepare_from(
+    let chained = hkdf_sha2::prepare_from(
         Sha2Variant::Sha256,
         &input,
         b"chain salt".to_vec(),
@@ -2413,7 +2413,7 @@ async fn x25519_grants_and_chaining() -> Result<(), String> {
     let ikm = import_ikm(shared.clone(), true, true)
         .await
         .map_err(|e| describe("import-ikm (shared secret)", &e))?;
-    let direct = hkdf::prepare(
+    let direct = hkdf_sha2::prepare(
         Sha2Variant::Sha256,
         &ikm,
         b"chain salt".to_vec(),
@@ -2454,7 +2454,7 @@ async fn x25519_grants_and_chaining() -> Result<(), String> {
     expect_err(
         "chaining without the derive-key grant",
         ErrKind::NotPermitted,
-        hkdf::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        hkdf_sha2::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
         "chained from a key-less input",
     )?;
 
@@ -3438,19 +3438,19 @@ async fn cipher_jwk_and_exports() -> Result<(), String> {
 /// `derive-bits` + `import-key-raw` over the same HKDF derivation (the
 /// `hkdf_derive_key_equivalence` pattern).
 async fn cipher_derive_key() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr, hkdf};
+    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr, hkdf_sha2};
 
     let ikm = import_ikm(vec![0x0b; 22], true, true)
         .await
         .map_err(|e| describe("import-ikm", &e))?;
-    let input = hkdf::prepare(
+    let input = hkdf_sha2::prepare(
         lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &ikm,
         b"salt".to_vec(),
         b"info".to_vec(),
     )
     .await
-    .map_err(|e| describe("hkdf.prepare", &e))?;
+    .map_err(|e| describe("hkdf-sha2.prepare", &e))?;
     let bits = input
         .derive_bits(Some(256))
         .await
@@ -3502,7 +3502,9 @@ async fn cipher_derive_key() -> Result<(), String> {
 /// prepare steps over the shared `ikm`/`password` resources.
 async fn hmac_sha1_family() -> Result<(), String> {
     use crate::mint::mac_options;
-    use lann_webcrypto_guest::bindings::{hkdf, hkdf_sha1, hmac_sha1, pbkdf2, pbkdf2_sha1};
+    use lann_webcrypto_guest::bindings::{
+        hkdf_sha1, hkdf_sha2, hmac_sha1, pbkdf2_sha1, pbkdf2_sha2,
+    };
 
     // HS1 JWK round trip on the shared oct contract.
     let key = hmac_sha1::import_key_jwk(
@@ -3575,7 +3577,7 @@ async fn hmac_sha1_family() -> Result<(), String> {
     verified.map_err(|e| describe("derive-key disagreed with derive-bits + import", &e))?;
 
     // Chaining: `hkdf-sha1.prepare-from` rejects a KDF source exactly as
-    // `hkdf.prepare-from` does (only agreements have a natural length).
+    // `hkdf-sha2.prepare-from` does (only agreements have a natural length).
     expect_err(
         "hkdf-sha1.prepare-from a KDF source",
         ErrKind::Other,
@@ -3584,14 +3586,14 @@ async fn hmac_sha1_family() -> Result<(), String> {
     )?;
     // And the SHA-2 chain from the same resources still works: one ikm
     // parameterizes either hash family.
-    hkdf::prepare(
+    hkdf_sha2::prepare(
         lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &ikm,
         b"salt".to_vec(),
         b"info".to_vec(),
     )
     .await
-    .map_err(|e| describe("hkdf.prepare over the same ikm", &e))?;
+    .map_err(|e| describe("hkdf-sha2.prepare over the same ikm", &e))?;
 
     // PBKDF2-SHA-1: the zero-iteration refusal, on the shared password.
     let password = import_password(b"password".to_vec(), true, true)
@@ -3603,13 +3605,13 @@ async fn hmac_sha1_family() -> Result<(), String> {
         pbkdf2_sha1::prepare(&password, b"salt".to_vec(), 0).await,
         "prepared a zero-iteration derivation",
     )?;
-    pbkdf2::prepare(
+    pbkdf2_sha2::prepare(
         lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &password,
         b"salt".to_vec(),
         1,
     )
     .await
-    .map_err(|e| describe("pbkdf2.prepare over the same password", &e))?;
+    .map_err(|e| describe("pbkdf2-sha2.prepare over the same password", &e))?;
     Ok(())
 }
