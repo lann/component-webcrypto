@@ -1104,7 +1104,7 @@ function isAgreementParams(params) {
 
 /**
  * Import input keying material (the `hkdf.import-ikm` contract): empty
- * material is `invalid-key`, a grantless policy `not-permitted`. The
+ * material is accepted, a grantless policy `not-permitted`. The
  * platform key is minted non-extractable — its own requirement, and the
  * WIT's.
  * @param {Uint8Array} raw
@@ -1113,7 +1113,6 @@ function isAgreementParams(params) {
 async function importIkm(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  if (raw.length === 0) throw errInvalidKey("HKDF input keying material must be non-empty");
   let key;
   try {
     key = await subtle.importKey("raw", asBufferSource(raw), "HKDF", false, usages);

@@ -540,8 +540,7 @@ impl Pbkdf2Alg {
 /// One Wycheproof PBKDF2 vector: derive `dk_len` bytes from
 /// (`password`, `salt`, `iterations`) and compare with `dk`. Every
 /// upstream vector is `valid` (the file has no invalid cases), including
-/// the empty-password ones — which is why `import-password` accepts empty
-/// material.
+/// the empty-password ones (empty KDF secrets are accepted package-wide).
 pub struct Pbkdf2Case {
     pub alg: Pbkdf2Alg,
     pub tc_id: u64,

@@ -26,10 +26,11 @@ interface hkdf {
         can-derive-key: func() -> bool;
     }
 
-    /// Import input keying material. Empty material is rejected with
-    /// `error.invalid-key` (RFC 5869 permits it; WebCrypto's HKDF import
-    /// does not mint zero-length keys either, and a zero-entropy IKM is
-    /// never what a caller meant). Fails `error.not-permitted` if
+    /// Import input keying material. Empty material is accepted (RFC
+    /// 5869 permits it, and the Web Cryptography API serves it), but an
+    /// implementation enforcing a security policy MAY reject degenerate
+    /// material with `error.invalid-key`, as on
+    /// `hmac-sha2.import-key-raw`. Fails `error.not-permitted` if
     /// `options` grants nothing, per the package-wide options contract.
     import-ikm: async func(raw: list<u8>, options: derive-options) -> result<ikm, error>;
 }
