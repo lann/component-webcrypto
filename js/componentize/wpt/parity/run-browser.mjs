@@ -21,8 +21,8 @@ const OUT_DIR = join(REPO_ROOT, "js", "componentize", "wpt", "build");
 
 const engineArgIndex = process.argv.indexOf("--engine");
 const ENGINE = engineArgIndex === -1 ? "firefox" : process.argv[engineArgIndex + 1];
-if (ENGINE !== "firefox" && ENGINE !== "chromium") {
-  console.error("usage: node run-browser.mjs [--engine firefox|chromium]");
+if (ENGINE !== "firefox" && ENGINE !== "chromium" && ENGINE !== "webkit") {
+  console.error("usage: node run-browser.mjs [--engine firefox|chromium|webkit]");
   process.exit(2);
 }
 
@@ -122,7 +122,7 @@ async function main() {
             "javascript.options.wasm_js_promise_integration": true,
           },
         })
-      : await playwright.chromium.launch({
+      : await playwright[ENGINE].launch({
           headless: true,
           timeout: LAUNCH_TIMEOUT_MS,
         });
