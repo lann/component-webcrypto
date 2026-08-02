@@ -300,6 +300,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just wpt-parity` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `js/componentize/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
 | `just wpt-parity-firefox` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_FIREFOX=1. The same two legs run in headless Firefox (Playwright's pinned build, Gecko's JSPI pref) against the engine's own ratchet, `js/componentize/wpt/parity/losses-firefox.js` — loss sets are per-engine facts, so intentional changes need `just update-wpt-parity-firefox`. Needs Playwright Firefox (`cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`). |
+| `just wpt-parity-chromium` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_CHROMIUM=1. Like the Firefox row, in Playwright's pinned Chromium against `js/componentize/wpt/parity/losses-chromium.js`; intentional changes need `just update-wpt-parity-chromium`. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
@@ -469,9 +470,9 @@ closed numbers remain stable references.
   by enriching the `aead` kind with per-call parameters). Class D is not implicated: the crypto runs host-side on the
   platform. A browser leg exists as the live parity page on the Pages
   site (js/componentize/wpt/web/ — see that README's "The browser parity
-  page"), and a *gating* Firefox leg runs in CI with its own pinned loss
-  set (`just wpt-parity-firefox`; losses-firefox.js); a gating Chromium
-  leg, with a Chromium ratchet recorded the same way, remains unbuilt.
+  page"), and gating Firefox and Chromium legs run in CI, each against
+  its own pinned loss set (`just wpt-parity-firefox` /
+  `wpt-parity-chromium`; losses-firefox.js, losses-chromium.js).
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium

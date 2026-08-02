@@ -4,11 +4,13 @@
 // writes the two record files the comparator consumes to ../build/
 // (parity-baseline-<engine>.json, parity-roundtrip-<engine>.json).
 //
-// The engine is Playwright's own Firefox build (pinned by playwright-core's
-// version, so every run of one checkout measures one engine), launched with
-// Gecko's JSPI pref: the round trip needs JSPI, which Firefox has not yet
-// shipped by default. Install it once with
-// `npx playwright-core install --with-deps firefox` (from this directory).
+// `--engine firefox` (default) or `--engine chromium` selects the browser:
+// always Playwright's own build (pinned by playwright-core's version, so
+// every run of one checkout measures one engine per name). Firefox is
+// launched with Gecko's JSPI pref, which the round trip needs and Firefox
+// has not yet shipped by default; Chromium ships JSPI. Install an engine
+// once with `npx playwright-core install --with-deps <engine>` (from this
+// directory).
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
@@ -16,6 +18,13 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const OUT_DIR = join(REPO_ROOT, "js", "componentize", "wpt", "build");
+
+const engineArgIndex = process.argv.indexOf("--engine");
+const ENGINE = engineArgIndex === -1 ? "firefox" : process.argv[engineArgIndex + 1];
+if (ENGINE !== "firefox" && ENGINE !== "chromium") {
+  console.error("usage: node run-browser.mjs [--engine firefox|chromium]");
+  process.exit(2);
+}
 
 const MIME = {
   ".html": "text/html",
@@ -42,7 +51,7 @@ const beat = (note) => {
 (async () => {
   try {
     if (typeof WebAssembly.Suspending !== "function") {
-      throw new Error("no JSPI in this browser (is the Gecko pref applied?)");
+      throw new Error("no JSPI in this browser (for Firefox, is the Gecko pref applied?)");
     }
     const baseline = [];
     let groups = 0;
@@ -104,13 +113,19 @@ async function main() {
   const [playwright, server] = await Promise.all([import("playwright-core"), serve()]);
   const { port } = server.address();
 
-  const browser = await playwright.firefox.launch({
-    headless: true,
-    timeout: LAUNCH_TIMEOUT_MS,
-    firefoxUserPrefs: {
-      "javascript.options.wasm_js_promise_integration": true,
-    },
-  });
+  const browser =
+    ENGINE === "firefox"
+      ? await playwright.firefox.launch({
+          headless: true,
+          timeout: LAUNCH_TIMEOUT_MS,
+          firefoxUserPrefs: {
+            "javascript.options.wasm_js_promise_integration": true,
+          },
+        })
+      : await playwright.chromium.launch({
+          headless: true,
+          timeout: LAUNCH_TIMEOUT_MS,
+        });
   try {
     const page = await browser.newPage();
     page.on("console", (msg) => {
@@ -155,10 +170,10 @@ async function main() {
     });
     if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
     await mkdir(OUT_DIR, { recursive: true });
-    await writeFile(join(OUT_DIR, "parity-baseline-firefox.json"), JSON.stringify(outcome.baseline));
-    await writeFile(join(OUT_DIR, "parity-roundtrip-firefox.json"), JSON.stringify(outcome.roundtrip));
+    await writeFile(join(OUT_DIR, `parity-baseline-${ENGINE}.json`), JSON.stringify(outcome.baseline));
+    await writeFile(join(OUT_DIR, `parity-roundtrip-${ENGINE}.json`), JSON.stringify(outcome.roundtrip));
     console.log(
-      `wpt parity (firefox): ${outcome.baseline.length} baseline records, ` +
+      `wpt parity (${ENGINE}): ${outcome.baseline.length} baseline records, ` +
         `${outcome.roundtrip.length} round-trip records`,
     );
   } finally {
@@ -170,7 +185,7 @@ async function main() {
 main().then(
   () => process.exit(0),
   (err) => {
-    console.error("wpt parity firefox adapter failed:", err);
+    console.error(`wpt parity ${ENGINE} adapter failed:`, err);
     process.exit(1);
   },
 );

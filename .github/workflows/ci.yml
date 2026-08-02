@@ -109,11 +109,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Install Playwright Firefox
-        # The Firefox WPT parity gate's engine: Playwright's pinned build
-        # (launched with Gecko's JSPI pref), so the loss set in
-        # losses-firefox.js measures one engine everywhere.
-        run: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox
+      - name: Install Playwright browsers
+        # The browser WPT parity gates' engines: Playwright's pinned builds
+        # (Firefox launched with Gecko's JSPI pref; Chromium ships JSPI), so
+        # the loss sets in losses-firefox.js and losses-chromium.js measure
+        # one engine each, everywhere.
+        run: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox chromium
 
       - name: Run the jco host checks
         run: just jco-checks
