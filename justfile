@@ -188,7 +188,7 @@ build-componentize-demo:
     mkdir -p examples/componentize-demo/build
     "$(js/componentize/wpt/component.sh toolchain)" \
         -q -d examples/componentize-demo/wit -w componentize-demo \
-        --features chacha20-poly1305 \
+        --features chacha20-poly1305,sha1-checked \
         componentize examples/componentize-demo/app.js -p . \
         -o examples/componentize-demo/build/componentize-demo.component.wasm
 

@@ -66,7 +66,8 @@ pub fn load(
         &mut linker,
         crate::LinkOptions::default()
             .chacha20_poly1305(true)
-            .xchacha20_poly1305(true),
+            .xchacha20_poly1305(true)
+            .sha1_checked(true),
     )?;
     let store = Store::new(
         &engine,

@@ -17,6 +17,11 @@ futures-io = ["dep:futures-io"]
 # three imports to the generated world, so every composition of a consumer
 # component must then provide them.
 chacha = []
+# The `@unstable`-gated `sha1-checked` interface (see wit/README.md,
+# "Stability gates"). Off by default, like `chacha`: enabling it adds the
+# import to the generated world, and platform-backed providers cannot
+# serve it.
+sha1-checked = []
 
 [dependencies]
 # `async` pulls in the component-model `stream`/`future` runtime support and

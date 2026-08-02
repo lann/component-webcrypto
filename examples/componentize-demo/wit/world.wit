@@ -36,6 +36,7 @@ world componentize-demo {
     import lann:webcrypto/x25519@0.1.0;
     import lann:webcrypto/digest@0.1.0;
     import lann:webcrypto/sha2@0.1.0;
+    @unstable(feature = sha1-checked)
     import lann:webcrypto/sha1-checked@0.1.0;
     import lann:webcrypto/signature@0.1.0;
     import lann:webcrypto/ed25519-verify@0.1.0;
