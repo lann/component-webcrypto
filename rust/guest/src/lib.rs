@@ -370,18 +370,44 @@ impl<'a> DataSource<'a> {
 /// scratch buffer, bounding a feed's extra memory to one chunk.
 const FEED_CHUNK: usize = 8192;
 
+/// A feeder's outcome, distinct from its *failure* ([`Error::Read`]): a
+/// rejected write is not itself an error — the closure rule permits a
+/// failing operation to stop reading — so its meaning depends on the
+/// operation's result.
+#[must_use]
+enum Feed {
+    /// Every byte was written.
+    Complete,
+    /// The operation stopped accepting input partway.
+    Rejected,
+}
+
+impl Feed {
+    /// The success-path requirement: a completed operation promises it
+    /// consumed the whole input, so rejection under success is the defect
+    /// [`Error::ShortWrite`] names.
+    fn require_complete(self) -> Result<(), Error> {
+        match self {
+            Feed::Complete => Ok(()),
+            Feed::Rejected => Err(Error::ShortWrite),
+        }
+    }
+}
+
 impl Inner<'_> {
     /// Feed this source into `tx`, then drop the writer to end the stream.
-    async fn feed(self, mut tx: StreamWriter<u8>) -> Result<(), Error> {
+    /// The error is always [`Error::Read`] — the only way a feed *fails*;
+    /// the operation rejecting input is an outcome, not an error.
+    async fn feed(self, mut tx: StreamWriter<u8>) -> Result<Feed, Error> {
         match self {
             // Pass-through sources never reach the feeder.
             Inner::Stream(_) => unreachable!("stream sources are passed through"),
             Inner::Bytes(Cow::Owned(data)) => {
                 let leftover = tx.write_all(data).await;
                 if leftover.is_empty() {
-                    Ok(())
+                    Ok(Feed::Complete)
                 } else {
-                    Err(Error::ShortWrite)
+                    Ok(Feed::Rejected)
                 }
             }
             // A borrowed buffer is never duplicated whole: it is fed in
@@ -395,10 +421,10 @@ impl Inner<'_> {
                     scratch.extend_from_slice(chunk);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(Error::ShortWrite);
+                        return Ok(Feed::Rejected);
                     }
                 }
-                Ok(())
+                Ok(Feed::Complete)
             }
             #[cfg(feature = "bytes")]
             Inner::Buf(mut buf) => {
@@ -413,10 +439,10 @@ impl Inner<'_> {
                     buf.advance(n);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(Error::ShortWrite);
+                        return Ok(Feed::Rejected);
                     }
                 }
-                Ok(())
+                Ok(Feed::Complete)
             }
             #[cfg(feature = "futures-io")]
             Inner::Reader(mut reader) => {
@@ -430,12 +456,12 @@ impl Inner<'_> {
                         .await
                         .map_err(Error::Read)?;
                     if n == 0 {
-                        return Ok(());
+                        return Ok(Feed::Complete);
                     }
                     scratch.extend_from_slice(&chunk[..n]);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(Error::ShortWrite);
+                        return Ok(Feed::Rejected);
                     }
                 }
             }
@@ -445,12 +471,11 @@ impl Inner<'_> {
 
 /// Run the operation built by `op` over `source`: pass a stream source
 /// through directly, or mint a stream pair and feed the source concurrently
-/// with the operation (per the closure rule, the feed settles no later than
-/// the operation). Precedence over the joined outcomes: a [`Error::Read`]
-/// from the feeder wins over everything — the operation only saw a
-/// truncated input; then the operation's own error — a failing operation
-/// may close its input early, so a rejected write is not the verdict; a
-/// rejected write under a *successful* result is [`Error::ShortWrite`].
+/// with the operation (per the closure rule, the feed settles no later
+/// than the operation). The joined outcome resolves one precedence rule
+/// per statement: a source failure outranks everything (the operation only
+/// saw a truncated input); then the operation's result is authoritative;
+/// and a completed operation must have consumed the whole input.
 async fn run_sourced<T, F>(
     source: DataSource<'_>,
     op: impl FnOnce(StreamReader<u8>) -> F,
@@ -463,12 +488,10 @@ where
         inner => {
             let (tx, rx) = wit_stream::new();
             let (result, fed) = futures::join!(op(rx), inner.feed(tx));
-            match (result, fed) {
-                (_, Err(read @ Error::Read(_))) => Err(read),
-                (Err(error), _) => Err(error.into()),
-                (Ok(_), Err(error)) => Err(error),
-                (Ok(value), Ok(())) => Ok(value),
-            }
+            let fed = fed?;
+            let value = result?;
+            fed.require_complete()?;
+            Ok(value)
         }
     }
 }
@@ -565,12 +588,10 @@ fn seal_and_collect<'a>(
                     Ok::<_, Error>(stream.collect().await)
                 };
                 let (result, fed) = futures::join!(sealed, inner.feed(tx));
-                match (result, fed) {
-                    (_, Err(read @ Error::Read(_))) => Err(read),
-                    (Err(error), _) => Err(error),
-                    (Ok(_), Err(error)) => Err(error),
-                    (Ok(value), Ok(())) => Ok(value),
-                }
+                let fed = fed?;
+                let value = result?;
+                fed.require_complete()?;
+                Ok(value)
             }
         }
     })
@@ -1616,4 +1637,96 @@ pub mod xchacha20_poly1305_internal_nonce;
 /// through the engine's own compilation.
 pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
     bindings::bytes::constant_time_equal(a, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, Feed};
+
+    fn read_error() -> Error {
+        Error::Read(std::io::Error::other("reader failed"))
+    }
+
+    /// Rejection maps to [`Error::ShortWrite`] only through the
+    /// success-path requirement; completion satisfies it. (The rest of
+    /// the precedence is statement order at the join sites: the feed's
+    /// `?` — always a read failure — before the operation's, before this
+    /// requirement.)
+    #[test]
+    fn rejection_is_short_write_only_by_requirement() {
+        assert!(matches!(
+            Feed::Rejected.require_complete(),
+            Err(Error::ShortWrite)
+        ));
+        assert!(Feed::Complete.require_complete().is_ok());
+    }
+
+    /// Every WIT error case maps onto its own variant — and the match in
+    /// `From` is exhaustive, so a case added to the WIT is a compile error
+    /// here rather than a silent fallthrough.
+    #[test]
+    fn wit_errors_map_onto_their_variants() {
+        use super::bindings::types::{Error as Raw, ExtensionError};
+        assert!(matches!(
+            Error::from(Raw::InvalidKey("k".into())),
+            Error::InvalidKey(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::InvalidNonce("n".into())),
+            Error::InvalidNonce(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::AuthenticationFailed),
+            Error::AuthenticationFailed
+        ));
+        assert!(matches!(
+            Error::from(Raw::NotExtractable),
+            Error::NotExtractable
+        ));
+        assert!(matches!(
+            Error::from(Raw::Unsupported("u".into())),
+            Error::Unsupported(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::NotPermitted("p".into())),
+            Error::NotPermitted(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::KeyExhausted),
+            Error::KeyExhausted
+        ));
+        assert!(matches!(
+            Error::from(Raw::Other("o".into())),
+            Error::Other(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::Extension(ExtensionError {
+                origin: "lann:webcrypto".into(),
+                name: "collision-detected".into(),
+                message: "m".into(),
+            })),
+            Error::Extension(_)
+        ));
+    }
+
+    /// Every `Display` rendering identifies its condition: the WIT-mirrored
+    /// variants by case name, the SDK-local ones by prose.
+    #[test]
+    fn display_identifies_every_condition() {
+        let renders = [
+            (Error::InvalidKey("k".into()), "invalid-key: k"),
+            (Error::InvalidNonce("n".into()), "invalid-nonce: n"),
+            (Error::AuthenticationFailed, "authentication-failed"),
+            (Error::NotExtractable, "not-extractable"),
+            (Error::Unsupported("u".into()), "unsupported: u"),
+            (Error::NotPermitted("p".into()), "not-permitted: p"),
+            (Error::KeyExhausted, "key-exhausted"),
+            (Error::Other("o".into()), "other: o"),
+        ];
+        for (error, expected) in renders {
+            assert_eq!(error.to_string(), expected);
+        }
+        assert!(read_error().to_string().contains("reader failed"));
+        assert!(Error::ShortWrite.to_string().starts_with("short write"));
+    }
 }
