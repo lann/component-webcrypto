@@ -10,12 +10,15 @@ item; everything shared lives here.
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
 - **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`, `key-agreement`) own the
+  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`) own the
   algorithm-agnostic resources.
   Operations hang off key resources. Adding an algorithm does not change
-  these interfaces.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
-  `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`) only mint keys, bound
+  these interfaces. The `wrapping` interface holds the provider-held
+  intermediates key wrapping trades in (`wrap-input`, `unwrap-input`), as
+  `derivation` holds `derive-input`.
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
+  `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`)
+  only mint keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -136,16 +139,33 @@ Every `*-jwk` function follows this contract. The minting interfaces'
 
 - A JWK travels as JSON text. The implementation owns the parse. Duplicate
   members resolve last-wins (ECMA-404 engines' `JSON.parse` semantics,
-  pinned so implementations cannot diverge on adversarial input). `k` is
-  strict unpadded base64url (RFC 7515): padding, non-alphabet bytes, and
-  non-zero trailing bits all fail with `error.invalid-key`.
+  pinned so implementations cannot diverge on adversarial input).
+  Trailing ASCII space characters (0x20) after the JSON text are accepted
+  and ignored — the AES-KW wrapped form pads JWKs with them (see
+  `aes-kw`), and the round trip must survive every conforming parse. `k`
+  is strict unpadded base64url (RFC 7515): padding, non-alphabet bytes,
+  and non-zero trailing bits all fail with `error.invalid-key`.
 - Import validates the material-bearing fields: `kty`, the key members
   (`k`, or `crv`/`x`/`y`/`d` for the OKP and EC forms), `alg` where the
   importing interface names accepted values (X25519 ignores `alg`
   entirely, WebCrypto's rule for the ECDH family), and `ext` against the
   requested extractability; failures are `error.invalid-key`. `use` and
-  `key_ops` are ignored: this package has no JWK usage model, so they are
-  the consumer's policy to check.
+  `key_ops` are ignored on the import path: this package has no JWK
+  usage model, so they are the consumer's policy to check — the caller
+  holds the JWK.
+- On the *unwrap* path the caller never sees the JWK, so the JWK-reading
+  unwrap mints (`unwrap-key-jwk`, `unwrap-signing-key-jwk`,
+  `unwrap-secret-key-jwk`) validate the two usage members in the
+  caller's stead (the W3C Web Cryptography API's own `unwrapKey`
+  checks): a
+  `key_ops` member, when present, must include every usage the mint's
+  options grant, under the granted operations' platform names (`seal` →
+  `"encrypt"`, `open` → `"decrypt"`, `sign`/`verify` → themselves,
+  `wrap`/`unwrap` → `"wrapKey"`/`"unwrapKey"`); a `use` member, when
+  present, must match the key's family (`"enc"` for encryption,
+  wrapping, and agreement keys; `"sig"` for MAC and signature keys).
+  Mismatches fail `error.invalid-key`, the platform's `DataError` for
+  these checks.
 - A *public-key* import has no extractability request — minted public
   keys are unconditionally exportable — so a public JWK carrying
   `"ext": false` is rejected with `error.invalid-key`.
@@ -220,6 +240,11 @@ suites pin exact pairs cross-implementation.
 
 **Verification returns `result<_, error>`, not `bool`.** An ignored boolean
 fails open; a dropped `result` does not.
+
+**Error strings never carry material the caller does not already hold.**
+The sharp case is an unwrap mint's `invalid-key`: its parse input is
+decrypted key material the design keeps unobservable, so the message MUST
+NOT include any of it.
 
 ## Timing-channel policy
 
@@ -368,8 +393,39 @@ short:
   from one kind to the other. The uniform-failure rule is load-bearing —
   a CBC decryption error names no cause, because a distinguishable
   padding verdict is a padding-oracle amplifier. AES-KW is not part of
-  this ruling: it belongs to the wrap direction (`wrap-key`/`unwrap-key`
-  operations), not to a cipher kind.
+  this ruling: it is integrity-checked, and lives in the `key-wrap` kind.
+- **Key wrapping trades in provider-held intermediates.** Wrapping is
+  serialize-then-encrypt and unwrapping is decrypt-then-mint, split at
+  two opaque resources (`wrapping.wrap-input`, `wrapping.unwrap-input`)
+  so the key material transits neither half's caller: unwrap can mint a
+  *non-extractable* key from wrapped transport, which no composition of
+  `open` and `import-key-raw` can express. Consequences, all deliberate:
+  - Producing a `wrap-input` sits behind the source key's extractability
+    gate — the W3C Web Cryptography API's `wrapKey` rule. A profile that
+    serves *wrapped export only* (FIPS 140-3 key transport) mints keys
+    extractable, serves `to-wrap-input-*`, and declines the plaintext
+    exports under the package's policy-rejection allowance; the WIT does
+    not need a separate "wrappable" grant for it.
+  - The intermediates cannot cross providers (resource types are
+    per-instance), so both halves of a wrap or an unwrap run inside one
+    provider and only wrapped bytes travel between parties.
+  - The `key-wrap` kind's `wrap` accepts only a `wrap-input`, never
+    caller bytes: a deterministic wrapping algorithm (AES-KW) has no
+    direct bytes path. The restriction is friction, not a guarantee —
+    arbitrary bytes can still arrive through an extractable import, as
+    on the platform.
+  - Verification timing on `unwrap` is implementation latitude: an
+    implementation verifies (and decrypts) at `unwrap` or defers both
+    to the consuming mint — a platform host's atomic `unwrapKey`, and a
+    future keystore-resident wrapping key, can only defer. The
+    invariant is the mint's, not the operation's: no mint succeeds on
+    input whose verification fails.
+  - Unwrapping under the `cipher` kind is served for WebCrypto parity
+    and is unauthenticated like everything in that kind: the typed
+    mint's parse is not authentication. The two-step sequence reveals
+    exactly what the pre-existing `decrypt`-then-import sequence
+    reveals — decryption success and a separate parse verdict — and no
+    more.
 - **FIPS 140-3 stays possible, not implemented.** The internal-nonce kind
   carries the approved-mode seal; interfaces deliberately permit
   policy-based rejection (short HMAC keys, imported internal-nonce
@@ -424,3 +480,15 @@ Brief definitions; follow the links for depth.
 - **usage** — a per-key grant recorded at mint that permits an operation
   (WebCrypto's
   [`KeyUsage`](https://www.w3.org/TR/WebCryptoAPI/#dfn-KeyUsage)).
+- **key material** — the secret (or, for public keys, encoded) bytes a
+  key resource stands for; what import consumes and export returns.
+  [Key (cryptography)](https://en.wikipedia.org/wiki/Key_(cryptography)).
+- **key wrapping** — encrypting one key's material under another key, for
+  transport or storage
+  ([NIST SP 800-38F](https://csrc.nist.gov/pubs/sp/800/38/f/final);
+  WebCrypto's
+  [`wrapKey`](https://www.w3.org/TR/WebCryptoAPI/#SubtleCrypto-method-wrapKey)/`unwrapKey`).
+  The wrapping key is often called a key-encryption key (KEK).
+- **ICV** — integrity check value: the fixed verification block a
+  key-wrap algorithm embeds in the wrapped output; AES-KW's is 64 bits
+  ([RFC 3394 §2.2.3](https://www.rfc-editor.org/rfc/rfc3394#section-2.2.3)).

@@ -7,13 +7,14 @@
 //! [`contract`]: crate::contract
 
 use crate::mint::{
-    agreement_options, generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key,
-    generate_key, generate_x25519_key, generate_xchacha_internal_nonce_key, import_aes_key_jwk,
-    import_cbc_key, import_chacha_key, import_ctr_key, import_hmac_key, import_hmac_key_jwk,
-    import_hmac_sha1_key, import_ikm, import_internal_nonce_key, import_key_raw, import_password,
+    agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
+    generate_internal_nonce_key, generate_key, generate_kw_key, generate_x25519_key,
+    generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
+    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
+    import_internal_nonce_key, import_key_raw, import_kw_key, import_password,
     import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
-    import_xchacha_key, x25519_secret_jwk, RFC7748_ALICE_D, RFC7748_ALICE_X, RFC7748_BOB_D,
-    RFC7748_BOB_X, RFC7748_SHARED,
+    import_xchacha_key, kw_options, mac_options, x25519_secret_jwk, RFC7748_ALICE_D,
+    RFC7748_ALICE_X, RFC7748_BOB_D, RFC7748_BOB_X, RFC7748_SHARED,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt, ci_encrypt_ok, ci_encrypt_op, compute, compute_ok,
@@ -85,6 +86,13 @@ probes! {
     jwk_semantics,
     xchacha_jwk_unsupported(xchacha),
     aead_wrap_grants,
+    aead_wrap_operations,
+    wrap_input_gates,
+    kw_key_contract,
+    kw_jwk_padding,
+    cipher_wrap_uniform_failure,
+    unwrap_jwk_usage_members,
+    kdf_secret_unwrap,
     signing_usage_policy,
     hkdf_derive_key_equivalence,
     hkdf_params_and_chaining,
@@ -1334,9 +1342,9 @@ async fn xchacha_jwk_unsupported() -> Result<(), String> {
     }
 }
 
-/// The wrap grants on `aead-key`: recorded ahead of the wrap operations
-/// existing, each mints a key on its own, reports through its getter in
-/// both directions, and permits neither seal nor open. (The seal/open
+/// The wrap grants on `aead-key`: each mints a key on its own, reports
+/// through its getter in both directions, and permits neither seal nor
+/// open (the operations themselves are `aead_wrap_operations`'s subject). (The seal/open
 /// grants' enforcement and getters are the contract battery's `usage`
 /// area, per family.)
 async fn aead_wrap_grants() -> Result<(), String> {
@@ -2866,4 +2874,444 @@ async fn sha1_derive_surface() -> Result<(), String> {
     .await
     .map_err(|e| describe("pbkdf2-sha2.prepare over the same password", &e))?;
     Ok(())
+}
+
+/// The wrap operations on `aead-key`: `wrap` is byte-identical to sealing
+/// the exported bytes, `unwrap` verifies (a tampered wrap fails
+/// `authentication-failed`), and the raw unwrap mint recovers the material.
+async fn aead_wrap_operations() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let payload = import_hmac_key(Sha2Variant::Sha256, vec![0x42u8; 20], true)
+        .await
+        .map_err(|e| describe("payload import", &e))?;
+    let nonce = [7u8; 12];
+
+    let input = payload
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    let wrapped = kek
+        .wrap(nonce.to_vec(), b"aad".to_vec(), None, input)
+        .await
+        .map_err(|e| describe("aead-key.wrap", &e))?;
+    let exported = payload
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("payload export", &e))?;
+    let (sealed, fed) = seal(&kek, &nonce, b"aad", None, &exported, Schedule::Whole).await;
+    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("seal comparison", &e))?;
+    expect_bytes(&wrapped, &sealed, "wrap vs seal over the export")?;
+
+    let mut tampered = wrapped.clone();
+    tampered[0] ^= 1;
+    expect_err(
+        "unwrap of a tampered wrap",
+        ErrKind::AuthenticationFailed,
+        kek.unwrap(nonce.to_vec(), b"aad".to_vec(), None, tampered)
+            .await,
+        "tampered wrap unwrapped",
+    )?;
+
+    let unwrapped = kek
+        .unwrap(nonce.to_vec(), b"aad".to_vec(), None, wrapped)
+        .await
+        .map_err(|e| describe("aead-key.unwrap", &e))?;
+    let minted = hmac_sha2::unwrap_key_raw(Sha2Variant::Sha256, unwrapped, mac_options(true))
+        .await
+        .map_err(|e| describe("hmac-sha2.unwrap-key-raw", &e))?;
+    let recovered = minted
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("minted export", &e))?;
+    expect_bytes(&recovered, &[0x42u8; 20], "recovered material")
+}
+
+/// The wrap-input gates: `to-wrap-input-*` sits behind the source key's
+/// extractability gate, exactly like the exports.
+async fn wrap_input_gates() -> Result<(), String> {
+    let sealed_key = import_hmac_key(Sha2Variant::Sha256, vec![9u8; 32], false)
+        .await
+        .map_err(|e| describe("import", &e))?;
+    expect_err(
+        "to-wrap-input-raw on a non-extractable key",
+        ErrKind::NotExtractable,
+        sealed_key.to_wrap_input_raw().await,
+        "non-extractable material entered the wrap path",
+    )?;
+    expect_err(
+        "to-wrap-input-jwk on a non-extractable key",
+        ErrKind::NotExtractable,
+        sealed_key.to_wrap_input_jwk().await,
+        "non-extractable material entered the wrap path",
+    )
+}
+
+/// The `kw-key` capability surface: getters, grants (a wrap-only key
+/// refuses `unwrap`), the AES-192 decline on every minting path, exports,
+/// and the unwrap domain (out-of-domain input is `authentication-failed`,
+/// indistinguishable from a bad ICV).
+async fn kw_key_contract() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aes_kw;
+    use lann_webcrypto_guest::bindings::key_wrap::KwKeyOptions;
+
+    let key = import_kw_key(AesVariant::Aes256, vec![1u8; 32], true)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    expect(key.algorithm_name(), "AES-KW".to_string(), "algorithm-name")?;
+    expect(key.algorithm_length(), 256, "algorithm-length")?;
+    expect(key.extractable(), true, "extractable getter")?;
+    let jwk = key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("export-key-jwk", &e))?;
+    if !jwk.contains("\"A256KW\"") {
+        return Err(format!("exported JWK lacks the A256KW alg: {jwk}"));
+    }
+    let back = aes_kw::import_key_jwk(AesVariant::Aes256, jwk.clone(), kw_options(true))
+        .await
+        .map_err(|e| describe("import-key-jwk", &e))?;
+    expect_bytes(
+        &back
+            .export_key_raw()
+            .await
+            .map_err(|e| describe("export", &e))?,
+        &[1u8; 32],
+        "JWK round trip",
+    )?;
+
+    // Grants.
+    let options = KwKeyOptions::new();
+    options.can_wrap(true);
+    let wrap_only = aes_kw::generate_key(AesVariant::Aes128, options)
+        .await
+        .map_err(|e| describe("wrap-only generate", &e))?;
+    expect(wrap_only.can_wrap(), true, "wrap-only can-wrap")?;
+    expect(wrap_only.can_unwrap(), false, "wrap-only can-unwrap")?;
+    expect_err(
+        "unwrap on a wrap-only key",
+        ErrKind::NotPermitted,
+        wrap_only.unwrap(vec![0u8; 24]).await,
+        "wrap-only key unwrapped",
+    )?;
+    expect_err(
+        "zero-usage kw mint",
+        ErrKind::NotPermitted,
+        aes_kw::generate_key(AesVariant::Aes128, KwKeyOptions::new()).await,
+        "zero-usage options minted",
+    )?;
+
+    // AES-192 declines on every minting path.
+    expect_err(
+        "aes-kw import-key-raw AES-192",
+        ErrKind::Unsupported,
+        import_kw_key(AesVariant::Aes192, vec![0u8; 24], false).await,
+        "AES-192 kw key minted",
+    )?;
+    expect_err(
+        "aes-kw generate-key AES-192",
+        ErrKind::Unsupported,
+        generate_kw_key(AesVariant::Aes192, false).await,
+        "AES-192 kw key generated",
+    )?;
+
+    // Unwrap domain: under 24 bytes, or off the 8-byte grid.
+    let key = import_kw_key(AesVariant::Aes256, vec![1u8; 32], false)
+        .await
+        .map_err(|e| describe("import", &e))?;
+    for bad in [vec![0u8; 16], vec![0u8; 20], Vec::new()] {
+        expect_err(
+            "unwrap outside the wrapped-form domain",
+            ErrKind::AuthenticationFailed,
+            key.unwrap(bad).await,
+            "out-of-domain wrapped form unwrapped",
+        )?;
+    }
+    // Wrap domain: off-grid or under 16 bytes fails invalid-key.
+    let short = import_hmac_key(Sha2Variant::Sha256, vec![2u8; 9], true)
+        .await
+        .map_err(|e| describe("short payload import", &e))?;
+    expect_err(
+        "wrap outside the input domain",
+        ErrKind::InvalidKey,
+        key.wrap(
+            short
+                .to_wrap_input_raw()
+                .await
+                .map_err(|e| describe("to-wrap-input", &e))?,
+        )
+        .await,
+        "out-of-domain material wrapped",
+    )
+}
+
+/// The AES-KW JWK padding rule: a JWK-format wrap-input is space-padded to
+/// a multiple of 8 (observable in the wrapped length), and the JWK unwrap
+/// mint's parse tolerates the trailing padding.
+async fn kw_jwk_padding() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+
+    let kek = generate_kw_key(AesVariant::Aes128, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let payload = import_hmac_key(Sha2Variant::Sha256, vec![5u8; 20], true)
+        .await
+        .map_err(|e| describe("payload import", &e))?;
+    let jwk_len = payload
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("payload export-key-jwk", &e))?
+        .len();
+    let input = payload
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let wrapped = kek.wrap(input).await.map_err(|e| describe("wrap", &e))?;
+    expect(
+        wrapped.len(),
+        jwk_len.div_ceil(8) * 8 + 8,
+        "wrapped length carries the space padding",
+    )?;
+    let minted = hmac_sha2::unwrap_key_jwk(
+        Sha2Variant::Sha256,
+        kek.unwrap(wrapped.clone())
+            .await
+            .map_err(|e| describe("unwrap", &e))?,
+        mac_options(true),
+    )
+    .await
+    .map_err(|e| describe("hmac-sha2.unwrap-key-jwk", &e))?;
+    expect_bytes(
+        &minted
+            .export_key_raw()
+            .await
+            .map_err(|e| describe("export", &e))?,
+        &[5u8; 20],
+        "JWK-wrapped material",
+    )
+}
+
+/// The cipher kind's wrap surface keeps the uniform-failure rule: a
+/// malformed CBC unwrap fails with the mode's one fixed `other` message,
+/// never `authentication-failed`.
+async fn cipher_wrap_uniform_failure() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aes_cbc;
+
+    // Full grants: the comparison below runs both `wrap` and `encrypt` on
+    // one key (grant enforcement is `cipher_usage_policy`'s subject).
+    let kek = aes_cbc::generate_key(AesVariant::Aes256, crate::mint::cipher_options(false))
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    match kek.unwrap(vec![0u8; 16], None, vec![1u8; 15]).await {
+        Err(Error::Other(detail)) if detail == "AES-CBC decryption failed" => {}
+        Err(other) => {
+            return Err(describe(
+                "cipher unwrap: expected the uniform failure, got",
+                &other,
+            ))
+        }
+        Ok(_) => return Err("unwrapped a malformed CBC wrap".into()),
+    }
+    // The wrap path is encrypt over the serialized material.
+    let payload = import_hmac_key(Sha2Variant::Sha256, vec![3u8; 16], true)
+        .await
+        .map_err(|e| describe("payload import", &e))?;
+    let wrapped = kek
+        .wrap(
+            vec![9u8; 16],
+            None,
+            payload
+                .to_wrap_input_raw()
+                .await
+                .map_err(|e| describe("to-wrap-input", &e))?,
+        )
+        .await
+        .map_err(|e| describe("cipher-key.wrap", &e))?;
+    let (sealed, fed) = ci_encrypt(&kek, &[9u8; 16], None, &[3u8; 16], Schedule::Whole).await;
+    fed.map_err(|e| format!("encrypt feeder: {e}"))?;
+    let sealed = sealed.map_err(|e| describe("encrypt comparison", &e))?;
+    expect_bytes(&wrapped, &sealed, "cipher wrap vs encrypt over the export")
+}
+
+/// The unwrap-path JWK `use`/`key_ops` checks: the mints validate the two
+/// members in the caller's stead, with fixed `invalid-key` messages.
+async fn unwrap_jwk_usage_members() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
+
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let nonce = [8u8; 12];
+
+    // The export path strips use/key_ops, so a member-carrying JWK enters
+    // the wrap path as an HMAC key's raw bytes: what unwraps is exactly
+    // the hand-built text.
+    let carrying = format!(
+        "{{\"kty\":\"oct\",\"k\":\"{}\",\"use\":\"sig\",\"key_ops\":[\"sign\"]}}",
+        conformance_harness::b64url(&[6u8; 32]),
+    );
+    let as_material = import_hmac_key(Sha2Variant::Sha256, carrying.into_bytes(), true)
+        .await
+        .map_err(|e| describe("carrier import", &e))?;
+    let wrapped = kek
+        .wrap(
+            nonce.to_vec(),
+            b"".to_vec(),
+            None,
+            as_material
+                .to_wrap_input_raw()
+                .await
+                .map_err(|e| describe("to-wrap-input", &e))?,
+        )
+        .await
+        .map_err(|e| describe("wrap", &e))?;
+
+    // A mint whose grants exceed the JWK's key_ops fails invalid-key…
+    let options = MacKeyOptions::new();
+    options.can_sign(true);
+    options.can_verify(true);
+    match hmac_sha2::unwrap_key_jwk(
+        Sha2Variant::Sha256,
+        kek.unwrap(nonce.to_vec(), b"".to_vec(), None, wrapped.clone())
+            .await
+            .map_err(|e| describe("unwrap", &e))?,
+        options,
+    )
+    .await
+    {
+        Err(Error::InvalidKey(msg)) => {
+            if msg.contains("sig") || msg.contains("sign") || msg.contains("{") {
+                return Err(format!("unwrap-mint message echoes the JWK: {msg}"));
+            }
+        }
+        Err(other) => {
+            return Err(describe(
+                "key_ops mismatch: expected invalid-key, got",
+                &other,
+            ))
+        }
+        Ok(_) => return Err("minted past a key_ops member missing a granted usage".into()),
+    }
+
+    // …and a sign-only mint (within key_ops, matching use) succeeds.
+    let options = MacKeyOptions::new();
+    options.can_sign(true);
+    hmac_sha2::unwrap_key_jwk(
+        Sha2Variant::Sha256,
+        kek.unwrap(nonce.to_vec(), b"".to_vec(), None, wrapped)
+            .await
+            .map_err(|e| describe("second unwrap", &e))?,
+        options,
+    )
+    .await
+    .map_err(|e| describe("conforming unwrap-key-jwk", &e))?;
+    Ok(())
+}
+
+/// The KDF unwrap doors: a secret can arrive wrapped and parameterize
+/// derivations without its bytes ever surfacing, agreeing with the same
+/// secret imported directly.
+async fn kdf_secret_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::{hkdf, hkdf_sha2, pbkdf2, pbkdf2_sha2};
+
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let secret = vec![0x11u8; 22];
+    let carrier = import_hmac_key(Sha2Variant::Sha256, secret.clone(), true)
+        .await
+        .map_err(|e| describe("carrier import", &e))?;
+    let nonce = [4u8; 12];
+    let wrapped = kek
+        .wrap(
+            nonce.to_vec(),
+            b"".to_vec(),
+            None,
+            carrier
+                .to_wrap_input_raw()
+                .await
+                .map_err(|e| describe("to-wrap-input", &e))?,
+        )
+        .await
+        .map_err(|e| describe("wrap", &e))?;
+
+    // HKDF: unwrapped IKM derives the same bits as directly imported IKM.
+    let unwrapped_ikm = hkdf::unwrap_ikm(
+        kek.unwrap(nonce.to_vec(), b"".to_vec(), None, wrapped)
+            .await
+            .map_err(|e| describe("unwrap", &e))?,
+        derive_options(true, true),
+    )
+    .await
+    .map_err(|e| describe("hkdf.unwrap-ikm", &e))?;
+    let direct_ikm = import_ikm(secret.clone(), true, true)
+        .await
+        .map_err(|e| describe("direct import-ikm", &e))?;
+    let via_unwrap = hkdf_sha2::prepare(
+        Sha2Variant::Sha256,
+        &unwrapped_ikm,
+        b"salt".to_vec(),
+        b"info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare", &e))?
+    .derive_bits(Some(256))
+    .await
+    .map_err(|e| describe("derive-bits", &e))?;
+    let via_import = hkdf_sha2::prepare(
+        Sha2Variant::Sha256,
+        &direct_ikm,
+        b"salt".to_vec(),
+        b"info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare (direct)", &e))?
+    .derive_bits(Some(256))
+    .await
+    .map_err(|e| describe("derive-bits (direct)", &e))?;
+    expect_bytes(&via_unwrap, &via_import, "HKDF bits via unwrap-ikm")?;
+
+    // PBKDF2: the same, through unwrap-password.
+    let wrapped = kek
+        .wrap(
+            nonce.to_vec(),
+            b"pw".to_vec(),
+            None,
+            carrier
+                .to_wrap_input_raw()
+                .await
+                .map_err(|e| describe("to-wrap-input", &e))?,
+        )
+        .await
+        .map_err(|e| describe("wrap (password)", &e))?;
+    let unwrapped_pw = pbkdf2::unwrap_password(
+        kek.unwrap(nonce.to_vec(), b"pw".to_vec(), None, wrapped)
+            .await
+            .map_err(|e| describe("unwrap (password)", &e))?,
+        derive_options(true, true),
+    )
+    .await
+    .map_err(|e| describe("pbkdf2.unwrap-password", &e))?;
+    let direct_pw = import_password(secret, true, true)
+        .await
+        .map_err(|e| describe("direct import-password", &e))?;
+    let via_unwrap =
+        pbkdf2_sha2::prepare(Sha2Variant::Sha256, &unwrapped_pw, b"salt".to_vec(), 1000)
+            .await
+            .map_err(|e| describe("pbkdf2 prepare", &e))?
+            .derive_bits(Some(256))
+            .await
+            .map_err(|e| describe("pbkdf2 derive-bits", &e))?;
+    let via_import = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &direct_pw, b"salt".to_vec(), 1000)
+        .await
+        .map_err(|e| describe("pbkdf2 prepare (direct)", &e))?
+        .derive_bits(Some(256))
+        .await
+        .map_err(|e| describe("pbkdf2 derive-bits (direct)", &e))?;
+    expect_bytes(&via_unwrap, &via_import, "PBKDF2 bits via unwrap-password")
 }

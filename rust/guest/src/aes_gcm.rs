@@ -54,3 +54,29 @@ pub async fn derive_key(
         bindings::aes_gcm::derive_key(variant, input.as_raw(), options.lower()).await?,
     ))
 }
+
+/// Mint an AES-GCM key of the declared variant from unwrapped key
+/// material read as raw bytes, subject to [`import_key_raw`]'s contract.
+/// Consumes the [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_key_raw(
+    variant: AesVariant,
+    input: crate::UnwrapInput,
+    options: AeadKeyOptions,
+) -> Result<Aead, Error> {
+    Ok(Aead::from_raw(
+        bindings::aes_gcm::unwrap_key_raw(variant, input.into_raw(), options.lower()).await?,
+    ))
+}
+
+/// Mint an AES-GCM key from unwrapped key material read as an `oct` JWK,
+/// subject to [`import_key_jwk`]'s contract plus the unwrap-path
+/// `use`/`key_ops` checks. Consumes the [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_key_jwk(
+    variant: AesVariant,
+    input: crate::UnwrapInput,
+    options: AeadKeyOptions,
+) -> Result<Aead, Error> {
+    Ok(Aead::from_raw(
+        bindings::aes_gcm::unwrap_key_jwk(variant, input.into_raw(), options.lower()).await?,
+    ))
+}

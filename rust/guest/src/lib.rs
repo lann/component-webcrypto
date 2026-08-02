@@ -120,10 +120,10 @@ pub mod bindings {
     #[cfg(feature = "sha1-checked")]
     pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, bytes,
-        cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hkdf,
-        hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, mac, pbkdf2, pbkdf2_sha1,
-        pbkdf2_sha2, sha2, signature, types, x25519,
+        aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw,
+        bytes, cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify,
+        hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap, mac, pbkdf2,
+        pbkdf2_sha1, pbkdf2_sha2, sha2, signature, types, wrapping, x25519,
     };
     #[cfg(feature = "chacha")]
     pub use super::generated::lann::webcrypto::{
@@ -628,17 +628,16 @@ impl MacKeyOptions {
 }
 
 /// Mint-time policy for an [`Aead`] key. See [`MacKeyOptions`] for the
-/// options contract; `wrap`/`unwrap` are recorded ahead of operations (the
-/// package has no wrap operation yet).
+/// options contract.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AeadKeyOptions {
     /// Whether the minted key may `seal`.
     pub seal: bool,
     /// Whether the minted key may `open`.
     pub open: bool,
-    /// Whether the minted key may wrap keys.
+    /// Whether the minted key may `wrap` key material.
     pub wrap: bool,
-    /// Whether the minted key may unwrap keys.
+    /// Whether the minted key may `unwrap` key material.
     pub unwrap: bool,
     /// Whether the minted key's material may be exported.
     pub extractable: bool,
@@ -658,16 +657,16 @@ impl AeadKeyOptions {
 }
 
 /// Mint-time policy for a [`CipherKey`] key. See [`MacKeyOptions`] for the
-/// options contract; `wrap`/`unwrap` are recorded ahead of operations.
+/// options contract.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CipherKeyOptions {
     /// Whether the minted key may `encrypt`.
     pub encrypt: bool,
     /// Whether the minted key may `decrypt`.
     pub decrypt: bool,
-    /// Whether the minted key may wrap keys.
+    /// Whether the minted key may `wrap` key material.
     pub wrap: bool,
-    /// Whether the minted key may unwrap keys.
+    /// Whether the minted key may `unwrap` key material.
     pub unwrap: bool,
     /// Whether the minted key's material may be exported.
     pub extractable: bool,
@@ -679,6 +678,29 @@ impl CipherKeyOptions {
         let options = bindings::cipher::CipherKeyOptions::new();
         options.can_encrypt(self.encrypt);
         options.can_decrypt(self.decrypt);
+        options.can_wrap(self.wrap);
+        options.can_unwrap(self.unwrap);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
+/// Mint-time policy for a [`KwKey`]. See [`MacKeyOptions`] for the options
+/// contract.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KwKeyOptions {
+    /// Whether the minted key may `wrap` key material.
+    pub wrap: bool,
+    /// Whether the minted key may `unwrap` key material.
+    pub unwrap: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl KwKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::key_wrap::KwKeyOptions {
+        let options = bindings::key_wrap::KwKeyOptions::new();
         options.can_wrap(self.wrap);
         options.can_unwrap(self.unwrap);
         options.extractable(self.extractable);
@@ -908,6 +930,25 @@ impl Mac {
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
         self.0.export_key_jwk().await.map_err(Error::from)
     }
+
+    /// This key's raw material as a [`WrapInput`], behind the same
+    /// extractability gate as [`export_key_raw`](Self::export_key_raw).
+    pub async fn to_wrap_input_raw(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_raw()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The JWK serialization as a [`WrapInput`], behind the same gate.
+    pub async fn to_wrap_input_jwk(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_jwk()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
 }
 
 /// An `aead.aead-key`: caller-nonce authenticated encryption with
@@ -1043,15 +1084,66 @@ impl Aead {
         self.0.can_open()
     }
 
-    /// Whether the key may wrap keys — recorded and enforced ahead of
-    /// operations (the package has no wrap operation yet).
+    /// Whether the key permits [`wrap`](Self::wrap).
     pub fn can_wrap(&self) -> bool {
         self.0.can_wrap()
     }
 
-    /// Whether the key may unwrap keys. See [`can_wrap`](Self::can_wrap).
+    /// Whether the key permits [`unwrap`](Self::unwrap). See
+    /// [`can_wrap`](Self::can_wrap).
     pub fn can_unwrap(&self) -> bool {
         self.0.can_unwrap()
+    }
+
+    /// Encrypt and authenticate serialized key material under `nonce`
+    /// with `aad`, exactly as `seal` encrypts a message (the WIT
+    /// `aead-key.wrap` contract). Consumes the [`WrapInput`].
+    pub async fn wrap(
+        &self,
+        nonce: impl Into<Vec<u8>>,
+        aad: impl Into<Vec<u8>>,
+        tag_size: Option<u8>,
+        input: WrapInput,
+    ) -> Result<Vec<u8>, Error> {
+        self.0
+            .wrap(nonce.into(), aad.into(), tag_size, input.into_raw())
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Decrypt and verify wrapped key material into an [`UnwrapInput`]
+    /// for a typed unwrap mint (the WIT `aead-key.unwrap` contract).
+    pub async fn unwrap(
+        &self,
+        nonce: impl Into<Vec<u8>>,
+        aad: impl Into<Vec<u8>>,
+        tag_size: Option<u8>,
+        wrapped: impl Into<Vec<u8>>,
+    ) -> Result<UnwrapInput, Error> {
+        self.0
+            .unwrap(nonce.into(), aad.into(), tag_size, wrapped.into())
+            .await
+            .map(UnwrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// This key's raw material as a [`WrapInput`], behind the same
+    /// extractability gate as [`export_key_raw`](Self::export_key_raw).
+    pub async fn to_wrap_input_raw(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_raw()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The JWK serialization as a [`WrapInput`], behind the same gate.
+    pub async fn to_wrap_input_jwk(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_jwk()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
     }
 
     /// The raw key material; fails with [`Error::NotExtractable`] unless the
@@ -1381,14 +1473,65 @@ impl CipherKey {
         self.0.can_decrypt()
     }
 
-    /// Whether the key may wrap keys — recorded ahead of operations.
+    /// Whether the key permits [`wrap`](Self::wrap).
     pub fn can_wrap(&self) -> bool {
         self.0.can_wrap()
     }
 
-    /// Whether the key may unwrap keys. See [`can_wrap`](Self::can_wrap).
+    /// Whether the key permits [`unwrap`](Self::unwrap). See
+    /// [`can_wrap`](Self::can_wrap).
     pub fn can_unwrap(&self) -> bool {
         self.0.can_unwrap()
+    }
+
+    /// Encrypt serialized key material under `iv`, exactly as `encrypt`
+    /// encrypts a message (the WIT `cipher-key.wrap` contract; nothing
+    /// here authenticates). Consumes the [`WrapInput`].
+    pub async fn wrap(
+        &self,
+        iv: impl Into<Vec<u8>>,
+        counter_length: Option<u8>,
+        input: WrapInput,
+    ) -> Result<Vec<u8>, Error> {
+        self.0
+            .wrap(iv.into(), counter_length, input.into_raw())
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Decrypt wrapped key material into an [`UnwrapInput`] for a typed
+    /// unwrap mint (the WIT `cipher-key.unwrap` contract; the result is
+    /// unauthenticated).
+    pub async fn unwrap(
+        &self,
+        iv: impl Into<Vec<u8>>,
+        counter_length: Option<u8>,
+        wrapped: impl Into<Vec<u8>>,
+    ) -> Result<UnwrapInput, Error> {
+        self.0
+            .unwrap(iv.into(), counter_length, wrapped.into())
+            .await
+            .map(UnwrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// This key's raw material as a [`WrapInput`], behind the same
+    /// extractability gate as [`export_key_raw`](Self::export_key_raw).
+    pub async fn to_wrap_input_raw(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_raw()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The JWK serialization as a [`WrapInput`], behind the same gate.
+    pub async fn to_wrap_input_jwk(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_jwk()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
     }
 
     /// The raw key material, behind the extractability gate.
@@ -1600,10 +1743,103 @@ impl AgreementSecretKey {
     }
 }
 
+/// A `wrapping.wrap-input`: one key's serialized material awaiting
+/// encryption under a wrapping key. Single-use — the consuming wrap
+/// operation takes it by value, on failure as on success.
+pub struct WrapInput(bindings::wrapping::WrapInput);
+newtype_common!(WrapInput, bindings::wrapping::WrapInput, "wrap-input");
+
+/// A `wrapping.unwrap-input`: decrypted key material awaiting a typed
+/// unwrap mint. Single-use, like [`WrapInput`].
+pub struct UnwrapInput(bindings::wrapping::UnwrapInput);
+newtype_common!(UnwrapInput, bindings::wrapping::UnwrapInput, "unwrap-input");
+
+/// A `key-wrap.kw-key`: a dedicated key-wrapping key (AES-KW), bound to
+/// its algorithm at creation.
+pub struct KwKey(bindings::key_wrap::KwKey);
+newtype_common!(KwKey, bindings::key_wrap::KwKey, "kw-key");
+
+impl KwKey {
+    /// Encrypt serialized key material (the WIT `kw-key.wrap` contract:
+    /// deterministic; JWK-formatted input is space-padded to a multiple
+    /// of 8; the input domain is a multiple of 8 bytes, at least 16).
+    /// Consumes the [`WrapInput`].
+    pub async fn wrap(&self, input: WrapInput) -> Result<Vec<u8>, Error> {
+        self.0.wrap(input.into_raw()).await.map_err(Error::from)
+    }
+
+    /// Decrypt and integrity-check wrapped key material into an
+    /// [`UnwrapInput`] for a typed unwrap mint. Every integrity failure —
+    /// including input outside the wrapped-form domain — fails
+    /// [`Error::AuthenticationFailed`].
+    pub async fn unwrap(&self, wrapped: impl Into<Vec<u8>>) -> Result<UnwrapInput, Error> {
+        self.0
+            .unwrap(wrapped.into())
+            .await
+            .map(UnwrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The registry algorithm name, `"AES-KW"`.
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// The key length in bits.
+    pub fn algorithm_length(&self) -> u32 {
+        self.0.algorithm_length()
+    }
+
+    /// Whether the key material may be exported.
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
+    /// Whether the key permits [`wrap`](Self::wrap).
+    pub fn can_wrap(&self) -> bool {
+        self.0.can_wrap()
+    }
+
+    /// Whether the key permits [`unwrap`](Self::unwrap).
+    pub fn can_unwrap(&self) -> bool {
+        self.0.can_unwrap()
+    }
+
+    /// This key's raw material as a [`WrapInput`], behind the same
+    /// extractability gate as [`export_key_raw`](Self::export_key_raw).
+    pub async fn to_wrap_input_raw(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_raw()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The JWK serialization as a [`WrapInput`], behind the same gate.
+    pub async fn to_wrap_input_jwk(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_jwk()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The raw key material, behind the extractability gate.
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
+    }
+
+    /// The key as an `oct` JWK, behind the same gate.
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
+}
+
 pub mod aes_cbc;
 pub mod aes_ctr;
 pub mod aes_gcm;
 pub mod aes_gcm_internal_nonce;
+pub mod aes_kw;
 #[cfg(feature = "chacha")]
 pub mod chacha20_poly1305;
 pub mod ecdsa;

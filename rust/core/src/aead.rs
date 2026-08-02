@@ -412,6 +412,18 @@ impl AeadKeyMaterial {
         if !self.policy.seal {
             return Err(not_permitted("seal"));
         }
+        self.seal_checked(nonce, aad, tag_size, msg)
+    }
+
+    /// The seal computation behind both `seal` and `wrap`, after their
+    /// respective grant checks.
+    fn seal_checked(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        msg: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         self.check_nonce(nonce)?;
         let tag_len = self.check_tag_size(tag_size)?;
         if self.is_standard_point(nonce, tag_len) {
@@ -439,6 +451,18 @@ impl AeadKeyMaterial {
         if !self.policy.open {
             return Err(not_permitted("open"));
         }
+        self.open_checked(nonce, aad, tag_size, msg)
+    }
+
+    /// The open computation behind both `open` and `unwrap`, after their
+    /// respective grant checks.
+    fn open_checked(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        msg: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         self.check_nonce(nonce)?;
         let tag_len = self.check_tag_size(tag_size)?;
         if self.is_standard_point(nonce, tag_len) {
@@ -448,6 +472,40 @@ impl AeadKeyMaterial {
         } else {
             self.general_gcm().open(nonce, aad, tag_len, msg)
         }
+    }
+
+    /// Encrypt and authenticate serialized key material (the
+    /// `aead-key.wrap` contract): `seal`'s computation exactly — for
+    /// raw-format input, byte-identical to sealing the exported bytes —
+    /// behind the `wrap` grant.
+    pub fn wrap(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        input: crate::WrapInputMaterial,
+    ) -> Result<Vec<u8>, Error> {
+        if !self.policy.wrap {
+            return Err(not_permitted("wrap"));
+        }
+        self.seal_checked(nonce, aad, tag_size, &input.into_bytes())
+    }
+
+    /// Decrypt and verify wrapped key material into an unwrap intermediate
+    /// (the `aead-key.unwrap` contract, verified eagerly): any decryption
+    /// failure reports `authentication-failed` with no detail.
+    pub fn unwrap_wrapped(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        tag_size: Option<u8>,
+        wrapped: &[u8],
+    ) -> Result<crate::UnwrapInputMaterial, Error> {
+        if !self.policy.unwrap {
+            return Err(not_permitted("unwrap"));
+        }
+        self.open_checked(nonce, aad, tag_size, wrapped)
+            .map(crate::UnwrapInputMaterial::new)
     }
 
     /// Encrypt and authenticate `msg` under a fresh random nonce with `aad`,
@@ -514,8 +572,7 @@ impl AeadKeyMaterial {
         self.policy.open
     }
 
-    /// Whether the key permits wrapping (`aead-key.can-wrap`; recorded
-    /// vocabulary, no operation yet).
+    /// Whether the key permits `wrap` (`aead-key.can-wrap`).
     pub fn can_wrap(&self) -> bool {
         self.policy.wrap
     }

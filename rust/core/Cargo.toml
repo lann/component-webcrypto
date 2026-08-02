@@ -28,6 +28,9 @@ aes-gcm = "0.10"
 # expanded schedule; `chacha20poly1305` and the signature crates already
 # zeroize their key material by default).
 aes = { version = "0.8", features = ["zeroize"] }
+# AES-KW (RFC 3394) over the same fixsliced `aes` block cipher, for the
+# `key-wrap` kind.
+aes-kw = "0.2"
 # The general GCM path (nonces other than 96 bits, truncated tags), which
 # `aes-gcm`'s type-level parameterization cannot express at runtime: GCM is
 # assembled from the same primitives the crate composes — `ghash` is the

@@ -180,18 +180,19 @@ function grantedUsages(pairs) {
 }
 
 /**
- * Lift a `subtle.decrypt` rejection. A failed tag check surfaces as
- * `OperationError`, which is `authentication-failed` and deliberately
- * carries no detail. Anything else — `DataError`, `InvalidAccessError`,
- * `QuotaExceededError` — is an operational condition: reporting those as
- * `authentication-failed` would render a local fault as an attack signal
- * and hide real bugs behind an expected-looking error.
+ * Lift a `subtle.decrypt` (or `subtle.unwrapKey`) rejection. A failed tag
+ * check surfaces as `OperationError`, which is `authentication-failed` and
+ * deliberately carries no detail. Anything else — `DataError`,
+ * `InvalidAccessError`, `QuotaExceededError` — is an operational condition:
+ * reporting those as `authentication-failed` would render a local fault as
+ * an attack signal and hide real bugs behind an expected-looking error.
  * @param {unknown} err
+ * @param {string} [operation]
  */
-function decryptFailure(err) {
+function decryptFailure(err, operation = "open") {
   const failure = asPlatformError(err);
   if (failure.name === "OperationError") return errAuthenticationFailed();
-  return errOther(`open: ${failure.detail}`);
+  return errOther(`${operation}: ${failure.detail}`);
 }
 
 /**
@@ -526,13 +527,28 @@ export class MacKey extends symmetricKeyTail({ canSign: "sign", canVerify: "veri
   algorithmLength() {
     return this.#lengthBits;
   }
+
+  /**
+   * This key's raw material as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyRaw`.
+   */
+  async toWrapInputRaw() {
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
+  }
+
+  /**
+   * The JWK serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputJwk() {
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
+  }
 }
 
 /**
  * The `aead-key-options` resource. See `MacKeyOptions` for the state and
- * same-provider mechanics; the wrap/unwrap usages map onto WebCrypto's
- * `wrapKey`/`unwrapKey` (recorded on the platform key; no operation in
- * this package consumes them yet).
+ * same-provider mechanics; the wrap/unwrap grants gate `aead-key.wrap` and
+ * `unwrap` (see `aeadKeyGrants` for how the grants reach the platform key).
  */
 /** @type {WeakMap<AeadKeyOptions, { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const aeadPolicies = new WeakMap();
@@ -577,18 +593,27 @@ export class AeadKeyOptions {
 }
 
 /**
- * The `aead-key` resource: an AES-GCM or ChaCha20-Poly1305 key. Holds a
- * `CryptoKey` imported with exactly the usages its mint options granted and
- * the options' `extractable` flag, so the platform enforces the policy the
- * resource reports; instances are minted only by the `aes-gcm` and
- * `chacha20-poly1305` interface functions below.
+ * The usage grants recorded at mint for each `aead-key`. The platform
+ * usages cannot carry the WIT grants one-to-one: `wrap` runs
+ * `subtle.encrypt` and `unwrap` runs `subtle.decrypt` (WebCrypto's
+ * `wrapKey`-with-an-encryption-algorithm model), so the platform key is
+ * minted with `encrypt` if (seal or wrap) and `decrypt` if (open or
+ * unwrap), and the WIT grants are enforced host-side against this record
+ * (the `AGREEMENT_PLATFORM_USAGES` precedent).
+ * @type {WeakMap<AeadKey, { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }>}
  */
-export class AeadKey extends symmetricKeyTail({
-  canSeal: "encrypt",
-  canOpen: "decrypt",
-  canWrap: "wrapKey",
-  canUnwrap: "unwrapKey",
-}) {
+const aeadKeyGrants = new WeakMap();
+
+const aeadGrantsOf = stateReader(aeadKeyGrants, "aead-key");
+
+/**
+ * The `aead-key` resource: an AES-GCM or ChaCha20-Poly1305 key. Holds a
+ * `CryptoKey` whose platform usages cover the operations its mint options
+ * granted (see `aeadKeyGrants`) and the options' `extractable` flag;
+ * instances are minted only by the `aes-gcm` and `chacha20-poly1305`
+ * interface functions below.
+ */
+export class AeadKey extends symmetricKeyTail({}) {
   /**
    * The key length in bits, fixed at mint. `aead-key.algorithm-length` is
    * declared *total* in the WIT, so it must not depend on
@@ -600,10 +625,12 @@ export class AeadKey extends symmetricKeyTail({
   /**
    * @param {CryptoKey} key
    * @param {number} lengthBits
+   * @param {{ seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }} grants
    */
-  constructor(key, lengthBits) {
+  constructor(key, lengthBits, grants) {
     super(key);
     this.#lengthBits = lengthBits;
+    aeadKeyGrants.set(this, grants);
   }
 
   /**
@@ -649,6 +676,63 @@ export class AeadKey extends symmetricKeyTail({
   }
 
   /**
+   * Encrypt and authenticate serialized key material under `nonce` and
+   * `aad`, exactly as `seal` encrypts a message: the result is
+   * ciphertext followed by tag, and the `nonce`/`tagSize` contracts (and
+   * their error cases) are `seal`'s. `input` is consumed first, on
+   * failure as on success. Throws `{ tag: 'not-permitted' }` on a key
+   * minted without the `wrap` grant.
+   * @param {Uint8Array} nonce
+   * @param {Uint8Array} aad
+   * @param {number | undefined} tagSize
+   * @param {WrapInput} input
+   * @returns {Promise<Uint8Array>}
+   */
+  async wrap(nonce, aad, tagSize, input) {
+    const { bytes } = consumeWrapInput(input);
+    if (!this.canWrap()) throw notPermitted("wrap");
+    return aeadSealOpen(
+      "seal",
+      platformKeyOf(this),
+      nonce,
+      aad,
+      tagSize,
+      asBufferSource(bytes),
+      "wrap",
+    );
+  }
+
+  /**
+   * Decrypt and verify wrapped key material under `nonce` and `aad`,
+   * eagerly (this host does not use the WIT's deferral latitude): a
+   * verification failure throws `{ tag: 'authentication-failed' }` here,
+   * and the minted `unwrap-input` holds verified plaintext. The
+   * `nonce`/`tagSize` contracts (and their error cases) are `open`'s.
+   * Throws `{ tag: 'not-permitted' }` on a key minted without the
+   * `unwrap` grant.
+   * @param {Uint8Array} nonce
+   * @param {Uint8Array} aad
+   * @param {number | undefined} tagSize
+   * @param {Uint8Array} wrapped
+   * @returns {Promise<UnwrapInput>}
+   */
+  async unwrap(nonce, aad, tagSize, wrapped) {
+    if (!this.canUnwrap()) throw notPermitted("unwrap");
+    return new UnwrapInput(
+      MINT,
+      await aeadSealOpen(
+        "open",
+        platformKeyOf(this),
+        nonce,
+        aad,
+        tagSize,
+        asBufferSource(wrapped),
+        "unwrap",
+      ),
+    );
+  }
+
+  /**
    * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
    * from the mint (see `#lengthBits`), and the size getters report the
    * standard/default parameters — both AEADs this host serves (AES-GCM and
@@ -670,6 +754,39 @@ export class AeadKey extends symmetricKeyTail({
   tagSize() {
     return 16;
   }
+
+  /** The usage grants: the mint policy recorded in `aeadKeyGrants`. */
+  canSeal() {
+    return aeadGrantsOf(this).seal;
+  }
+
+  canOpen() {
+    return aeadGrantsOf(this).open;
+  }
+
+  canWrap() {
+    return aeadGrantsOf(this).wrap;
+  }
+
+  canUnwrap() {
+    return aeadGrantsOf(this).unwrap;
+  }
+
+  /**
+   * This key's raw material as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyRaw`.
+   */
+  async toWrapInputRaw() {
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
+  }
+
+  /**
+   * The JWK serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputJwk() {
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
+  }
 }
 
 /**
@@ -681,15 +798,18 @@ export class AeadKey extends symmetricKeyTail({
  * taxonomy, an `open` failure through `decryptFailure` (a failed tag check
  * is `open`'s expected outcome). An AES-GCM failure under a nonce outside
  * the platform's window is reinterpreted as `{ tag: 'unsupported', val }`
- * in either direction (see `gcmNonceUnservable`).
+ * in either direction (see `gcmNonceUnservable`). `wrap`/`unwrap` share
+ * the body too, naming themselves through `operation` so their failure
+ * details carry the operation the caller invoked.
  * @param {"seal" | "open"} direction
  * @param {CryptoKey} key
  * @param {Uint8Array} nonce
  * @param {Uint8Array} aad
  * @param {number | undefined} tagSize
  * @param {Uint8Array<ArrayBuffer>} message
+ * @param {string} [operation]
  */
-async function aeadSealOpen(direction, key, nonce, aad, tagSize, message) {
+async function aeadSealOpen(direction, key, nonce, aad, tagSize, message, operation = direction) {
   const chacha = key.algorithm.name === "ChaCha20-Poly1305";
   /** @type {AesGcmParams} */
   let params;
@@ -714,13 +834,15 @@ async function aeadSealOpen(direction, key, nonce, aad, tagSize, message) {
   try {
     result =
       direction === "seal"
-        ? await platformCall(`${params.name} seal`, () => subtle.encrypt(params, key, message))
+        ? await platformCall(`${params.name} ${operation}`, () =>
+            subtle.encrypt(params, key, message),
+          )
         : await subtle.decrypt(params, key, message);
   } catch (err) {
     if (!chacha && gcmNonceUnservable(nonce)) {
       throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
     }
-    throw direction === "seal" ? err : decryptFailure(err);
+    throw direction === "seal" ? err : decryptFailure(err, operation);
   }
   return new Uint8Array(result);
 }
@@ -851,6 +973,41 @@ async function deriveHmacKey(resolved, input, length, options) {
 const SHA1_HMAC = { hash: "SHA-1", blockBytes: 64 };
 
 /**
+ * The shared unwrap-key-raw body of both HMAC interfaces (see the
+ * `wrapping` interface): the `import-key-raw` path over the consumed
+ * input's bytes, with `invalid-key` details redacted (see
+ * `redactingInvalidKey`). `resolve` is a thunk so the input is consumed
+ * before anything — a declined variant included — can fail (the WIT
+ * consumes on failure as on success).
+ * @param {() => { hash: string, blockBytes: number }} resolve
+ * @param {UnwrapInput} input
+ * @param {MacKeyOptions} options
+ */
+function unwrapHmacKeyRaw(resolve, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped HMAC key material", () =>
+    importHmacKey(resolve(), bytes, options),
+  );
+}
+
+/**
+ * The shared unwrap-key-jwk body of both HMAC interfaces: the unwrap-path
+ * `use`/`key_ops` checks (see `unwrappedJwk`; the MAC grants map onto the
+ * platform's `sign`/`verify` names one-to-one), then the `import-key-jwk`
+ * path. `resolve` as on `unwrapHmacKeyRaw`.
+ * @param {() => { hash: string, blockBytes: number }} resolve
+ * @param {UnwrapInput} input
+ * @param {MacKeyOptions} options
+ */
+function unwrapHmacKeyJwk(resolve, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  const jwk = unwrappedJwk(bytes, "sig", macUsages(macPolicy(options)));
+  return redactingInvalidKey("unwrapped HMAC JWK", () =>
+    importHmacKeyJwk(resolve(), jwk, options),
+  );
+}
+
+/**
  * The `lann:webcrypto/hmac-sha1` interface: the same platform paths as
  * `hmac-sha2` at `SHA-1` (the platform serves the hash; HMAC's security
  * rests on the PRF property, which SHA-1's collision breaks do not
@@ -878,6 +1035,16 @@ export const hmacSha1 = {
    * @param {MacKeyOptions} options
    */
   deriveKey: (input, length, options) => deriveHmacKey(SHA1_HMAC, input, length, options),
+  /**
+   * @param {UnwrapInput} input
+   * @param {MacKeyOptions} options
+   */
+  unwrapKeyRaw: (input, options) => unwrapHmacKeyRaw(() => SHA1_HMAC, input, options),
+  /**
+   * @param {UnwrapInput} input
+   * @param {MacKeyOptions} options
+   */
+  unwrapKeyJwk: (input, options) => unwrapHmacKeyJwk(() => SHA1_HMAC, input, options),
 };
 
 /** The `lann:webcrypto/hmac-sha2` interface. */
@@ -911,6 +1078,20 @@ export const hmacSha2 = {
    */
   deriveKey: (variant, input, length, options) =>
     deriveHmacKey(sha2Variant(variant), input, length, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {MacKeyOptions} options
+   */
+  unwrapKeyRaw: (variant, input, options) =>
+    unwrapHmacKeyRaw(() => sha2Variant(variant), input, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {MacKeyOptions} options
+   */
+  unwrapKeyJwk: (variant, input, options) =>
+    unwrapHmacKeyJwk(() => sha2Variant(variant), input, options),
 };
 
 /** @type {WeakMap<DeriveOptions, { deriveBits: boolean, deriveKey: boolean }>} */
@@ -967,6 +1148,156 @@ const ikmOf = stateReader(ikmState, "ikm");
 
 /** A mint token so the resource classes have no public constructor path. */
 const MINT = Symbol("webcrypto mint");
+
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * Per-instance state of the wrapping intermediates. Both resources appear
+ * as *parameters* of other interfaces' functions (`wrap` takes a
+ * `wrap-input`, the unwrap mints take an `unwrap-input`), so state lives in
+ * WeakMaps, the `ikm` idiom. Consumption is deletion: the consuming
+ * operation removes the entry before anything else runs, on failure as on
+ * success (the WIT contract), so a second use misses the map exactly like a
+ * foreign resource does.
+ * @type {WeakMap<WrapInput, { format: "raw" | "jwk" | "pkcs8", bytes: Uint8Array }>}
+ */
+const wrapInputState = new WeakMap();
+
+/** @type {WeakMap<UnwrapInput, { bytes: Uint8Array }>} */
+const unwrapInputState = new WeakMap();
+
+/**
+ * The `wrapping.wrap-input` resource: serialized key material awaiting
+ * encryption under a wrapping key. The serialization format travels with
+ * the resource — `kw-key.wrap`'s JWK padding keys on it — and the bytes
+ * never reach the guest.
+ */
+export class WrapInput {
+  /**
+   * @param {symbol} token
+   * @param {"raw" | "jwk" | "pkcs8"} format
+   * @param {Uint8Array} bytes
+   */
+  constructor(token, format, bytes) {
+    if (token !== MINT) throw new TypeError("wrap-input is minted by to-wrap-input-*");
+    wrapInputState.set(this, { format, bytes });
+  }
+}
+
+/**
+ * The `wrapping.unwrap-input` resource: decrypted key material awaiting a
+ * typed mint. This host's `unwrap` operations decrypt — and, on the
+ * authenticated kinds, verify — eagerly, so the bytes here are already
+ * verified; they never reach the guest.
+ */
+export class UnwrapInput {
+  /**
+   * @param {symbol} token
+   * @param {Uint8Array} bytes
+   */
+  constructor(token, bytes) {
+    if (token !== MINT) throw new TypeError("unwrap-input is minted by unwrap");
+    unwrapInputState.set(this, { bytes });
+  }
+}
+
+/** The `lann:webcrypto/wrapping` interface: its resource classes. */
+export const wrapping = { WrapInput, UnwrapInput };
+
+/**
+ * Consume a `wrap-input`: the entry is removed before the operation does
+ * anything else, on failure as on success (the WIT contract). A miss means
+ * the resource was already consumed or belongs to another provider.
+ * @param {WrapInput} input
+ */
+function consumeWrapInput(input) {
+  const state = wrapInputState.get(input);
+  wrapInputState.delete(input);
+  if (state === undefined) {
+    throw errOther("wrap-input already consumed or minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * Consume an `unwrap-input`. See `consumeWrapInput`.
+ * @param {UnwrapInput} input
+ */
+function consumeUnwrapInput(input) {
+  const state = unwrapInputState.get(input);
+  unwrapInputState.delete(input);
+  if (state === undefined) {
+    throw errOther("unwrap-input already consumed or minted by another provider");
+  }
+  return state;
+}
+
+/**
+ * Run an unwrap mint's import body, redacting the detail of any
+ * `invalid-key` failure to the fixed message `invalid ${what}`: the parse
+ * input is decrypted key material the caller does not hold, so the message
+ * must not carry any of it (see `README.md`, "Error contract") — including
+ * the platform failure details the import paths' messages interpolate.
+ * @template T
+ * @param {string} what
+ * @param {() => Promise<T>} run
+ * @returns {Promise<T>}
+ */
+async function redactingInvalidKey(what, run) {
+  try {
+    return await run();
+  } catch (err) {
+    if (isWitError(err) && err.tag === "invalid-key") {
+      throw errInvalidKey(`invalid ${what}`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Parse an unwrap-input's bytes as JWK text and validate the two usage
+ * members in the caller's stead (the unwrap-path JWK contract; on the
+ * import path the caller holds the JWK, so they are its policy to check):
+ * `key_ops`, when present, must include every usage granted in the mint's
+ * options, under the granted operations' platform names; `use`, when
+ * present, must match the key's family. Both members are then stripped, as
+ * on the import path. Trailing whitespace after the JSON text — the
+ * `kw-key.wrap` JWK padding — is accepted (`JSON.parse` ignores it). Every
+ * failure carries a fixed message: the text is decrypted key material the
+ * caller does not hold.
+ * @param {Uint8Array} bytes
+ * @param {"enc" | "sig"} family
+ * @param {string[]} grantedOps
+ * @returns {string} the validated JWK, re-serialized without `use`/`key_ops`
+ */
+function unwrappedJwk(bytes, family, grantedOps) {
+  let text;
+  try {
+    text = utf8Decoder.decode(bytes);
+  } catch {
+    throw errInvalidKey("unwrapped JWK is not valid UTF-8");
+  }
+  let jwk;
+  try {
+    jwk = JSON.parse(text);
+  } catch {
+    throw errInvalidKey("unwrapped JWK is not valid JSON");
+  }
+  if (typeof jwk !== "object" || jwk === null || Array.isArray(jwk)) {
+    throw errInvalidKey("unwrapped JWK must be a JSON object");
+  }
+  const { use, key_ops, ...material } = /** @type {Record<string, unknown>} */ (jwk);
+  if (use !== undefined && use !== family) {
+    throw errInvalidKey("unwrapped JWK `use` does not match the key's family");
+  }
+  if (key_ops !== undefined) {
+    if (!Array.isArray(key_ops) || !grantedOps.every((op) => key_ops.includes(op))) {
+      throw errInvalidKey("unwrapped JWK `key_ops` does not cover the granted usages");
+    }
+  }
+  return JSON.stringify(material);
+}
 
 /**
  * The `hkdf.ikm` resource: input keying material as a platform `CryptoKey`
@@ -1183,11 +1514,26 @@ async function prepareFrom(resolved, input, salt, info) {
   return new DeriveInput(MINT, baseKey, params, { ...state.policy });
 }
 
+/**
+ * Mint input keying material from unwrapped bytes (the `hkdf.unwrap-ikm`
+ * contract; see the `wrapping` interface): `import-ikm`'s path over the
+ * consumed input's bytes, with `invalid-key` details redacted (see
+ * `redactingInvalidKey`).
+ * @param {UnwrapInput} input
+ * @param {DeriveOptions} options
+ */
+async function unwrapIkm(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped HKDF input keying material", () =>
+    importIkm(bytes, options),
+  );
+}
+
 /** The `lann:webcrypto/derivation` interface: its resource classes. */
 export const derivation = { DeriveOptions, DeriveInput };
 
 /** The `lann:webcrypto/hkdf` interface: the hash-independent half. */
-export const hkdf = { Ikm, importIkm };
+export const hkdf = { Ikm, importIkm, unwrapIkm };
 
 /** The `lann:webcrypto/hkdf-sha2` interface. */
 export const hkdfSha2 = {
@@ -1296,8 +1642,22 @@ async function preparePbkdf2(resolved, input, salt, iterations) {
   return new DeriveInput(MINT, key, params, { ...policy });
 }
 
+/**
+ * Mint a password from unwrapped bytes (the `pbkdf2.unwrap-password`
+ * contract): `import-password`'s path over the consumed input's bytes,
+ * with `invalid-key` details redacted (see `redactingInvalidKey`).
+ * @param {UnwrapInput} input
+ * @param {DeriveOptions} options
+ */
+async function unwrapPassword(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped PBKDF2 password", () =>
+    importPassword(bytes, options),
+  );
+}
+
 /** The `lann:webcrypto/pbkdf2` interface. */
-export const pbkdf2 = { Password, importPassword };
+export const pbkdf2 = { Password, importPassword, unwrapPassword };
 
 /** The `lann:webcrypto/pbkdf2-sha2` interface. */
 export const pbkdf2Sha2 = {
@@ -1513,6 +1873,21 @@ export class AgreementSecretKey {
       await platformCall("pkcs8 secret-key export", () => subtle.exportKey("pkcs8", state.key)),
     );
   }
+
+  /**
+   * The private JWK serialization as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyJwk`.
+   */
+  async toWrapInputJwk() {
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await this.exportKeyJwk()));
+  }
+
+  /**
+   * The PKCS#8 serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputPkcs8() {
+    return new WrapInput(MINT, "pkcs8", await this.exportKeyPkcs8());
+  }
 }
 
 /**
@@ -1635,6 +2010,51 @@ async function importX25519SecretKeyPkcs8(pkcs8, options) {
   return new AgreementSecretKey(MINT, key, { ...policy });
 }
 
+/**
+ * The granted operations' platform names for an agreement mint policy (the
+ * unwrap-path `key_ops` rule; the derive grants map onto the platform's
+ * names one-to-one).
+ * @param {{ deriveBits: boolean, deriveKey: boolean }} policy
+ */
+function agreementGrantedOps(policy) {
+  const ops = [];
+  if (policy.deriveBits) ops.push("deriveBits");
+  if (policy.deriveKey) ops.push("deriveKey");
+  return ops;
+}
+
+/**
+ * Mint a static secret key from unwrapped key material read as an OKP
+ * private JWK (the `x25519.unwrap-secret-key-jwk` contract): the
+ * unwrap-path `use`/`key_ops` checks, then `import-secret-key-jwk`'s path
+ * with `invalid-key` details redacted (see `redactingInvalidKey`).
+ * @param {UnwrapInput} input
+ * @param {AgreementKeyOptions} options
+ */
+async function unwrapX25519SecretKeyJwk(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const jwk = unwrappedJwk(bytes, "enc", agreementGrantedOps(policy));
+  return redactingInvalidKey("unwrapped X25519 private JWK", () =>
+    importX25519SecretKeyJwk(jwk, options),
+  );
+}
+
+/**
+ * Mint a static secret key from unwrapped key material read as a PKCS#8
+ * PrivateKeyInfo: `import-secret-key-pkcs8`'s path, redacted like the JWK
+ * mint.
+ * @param {UnwrapInput} input
+ * @param {AgreementKeyOptions} options
+ */
+async function unwrapX25519SecretKeyPkcs8(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped X25519 pkcs8", () =>
+    importX25519SecretKeyPkcs8(bytes, options),
+  );
+}
+
 /** The `lann:webcrypto/x25519` interface. */
 export const x25519 = {
   importPublicKeyRaw: importX25519PublicKey,
@@ -1643,6 +2063,8 @@ export const x25519 = {
   importSecretKeyJwk: importX25519SecretKeyJwk,
   importSecretKeyPkcs8: importX25519SecretKeyPkcs8,
   generateKey: generateX25519Key,
+  unwrapSecretKeyJwk: unwrapX25519SecretKeyJwk,
+  unwrapSecretKeyPkcs8: unwrapX25519SecretKeyPkcs8,
 };
 
 /**
@@ -1752,19 +2174,57 @@ function aesVariantByteLength(variant) {
 }
 
 /**
- * The WebCrypto usages granted by an AEAD mint policy (seal/open map onto
- * encrypt/decrypt; wrap/unwrap onto wrapKey/unwrapKey), throwing
- * `{ tag: 'not-permitted' }` for a zero-usage grant. The internal-nonce
- * vocabulary has no wrap usages, so its policies arrive without them.
+ * The WebCrypto usages for an AEAD mint policy, throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant. The WIT grants do not
+ * map onto the platform's usages one-to-one: `wrap` runs `subtle.encrypt`
+ * and `unwrap` runs `subtle.decrypt` (see `aeadKeyGrants`), so the
+ * platform key carries `encrypt` if (seal or wrap) and `decrypt` if (open
+ * or unwrap), and every WIT grant is enforced host-side against the
+ * recorded policy. The internal-nonce vocabulary has no wrap usages, so
+ * its policies arrive without them.
  * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ * @returns {KeyUsage[]}
  */
 function aeadUsages(policy) {
-  return grantedUsages([
-    ["encrypt", policy.seal],
-    ["decrypt", policy.open],
-    ["wrapKey", policy.wrap ?? false],
-    ["unwrapKey", policy.unwrap ?? false],
-  ]);
+  /** @type {KeyUsage[]} */
+  const usages = [];
+  if (policy.seal || (policy.wrap ?? false)) usages.push("encrypt");
+  if (policy.open || (policy.unwrap ?? false)) usages.push("decrypt");
+  if (usages.length === 0) {
+    throw errNotPermitted("a key with no enabled usage cannot be minted");
+  }
+  return usages;
+}
+
+/**
+ * The WIT-level grants of an AEAD mint policy, as recorded on the minted
+ * key (see `aeadKeyGrants`).
+ * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ */
+function aeadGrants(policy) {
+  return {
+    seal: policy.seal,
+    open: policy.open,
+    wrap: policy.wrap ?? false,
+    unwrap: policy.unwrap ?? false,
+  };
+}
+
+/**
+ * The granted operations' platform names for an AEAD mint policy (the
+ * unwrap-path `key_ops` rule): the one-to-one names — `seal` →
+ * `"encrypt"`, `open` → `"decrypt"`, `wrap`/`unwrap` →
+ * `"wrapKey"`/`"unwrapKey"` — unlike `aeadUsages`, whose collapsed pairs
+ * serve the platform key.
+ * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ */
+function aeadGrantedOps(policy) {
+  const ops = [];
+  if (policy.seal) ops.push("encrypt");
+  if (policy.open) ops.push("decrypt");
+  if (policy.wrap ?? false) ops.push("wrapKey");
+  if (policy.unwrap ?? false) ops.push("unwrapKey");
+  return ops;
 }
 
 /**
@@ -1772,13 +2232,15 @@ function aeadUsages(policy) {
  * two interfaces share the whole import/generate contract and differ only
  * in the resource they mint and the options resource they consume
  * (`readPolicy` is the matching options kind's policy reader).
+ * `InternalNonceKey` takes no grants record, so its constructor ignores
+ * the third argument.
  * @template T
  * @template O
- * @param {new (key: CryptoKey, lengthBits: number) => T} Ctor
+ * @param {new (key: CryptoKey, lengthBits: number, grants: { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }) => T} Ctor
  * @param {(options: O) => { seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean, extractable: boolean }} readPolicy
  */
 function aesMinting(Ctor, readPolicy) {
-  return {
+  const minting = {
     /**
      * Import raw key material as the declared AES variant. A variant this
      * implementation declines throws `{ tag: 'unsupported', val }`;
@@ -1803,7 +2265,7 @@ function aesMinting(Ctor, readPolicy) {
         policy.extractable,
         usages,
       );
-      return new Ctor(key, expected * 8);
+      return new Ctor(key, expected * 8, aeadGrants(policy));
     },
 
     /**
@@ -1840,7 +2302,7 @@ function aesMinting(Ctor, readPolicy) {
           `JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`,
         );
       }
-      return new Ctor(key, lengthBits);
+      return new Ctor(key, lengthBits, aeadGrants(policy));
     },
 
     /**
@@ -1856,9 +2318,44 @@ function aesMinting(Ctor, readPolicy) {
       const key = await platformCall(`${variant} key generation`, () =>
         subtle.generateKey({ name: "AES-GCM", length }, policy.extractable, usages),
       );
-      return new Ctor(key, length);
+      return new Ctor(key, length, aeadGrants(policy));
+    },
+
+    /**
+     * Mint a key from unwrapped material read as raw bytes (see the
+     * `wrapping` interface): the `import-key-raw` path over the consumed
+     * input's bytes, with `invalid-key` details redacted (see
+     * `redactingInvalidKey`).
+     * @param {string} variant
+     * @param {UnwrapInput} input
+     * @param {O} options
+     */
+    async unwrapKeyRaw(variant, input, options) {
+      const { bytes } = consumeUnwrapInput(input);
+      return redactingInvalidKey(`unwrapped ${variant} key material`, () =>
+        minting.importKeyRaw(variant, bytes, options),
+      );
+    },
+
+    /**
+     * Mint a key from unwrapped material read as an `oct` JWK: the
+     * unwrap-path `use`/`key_ops` checks (see `unwrappedJwk`), then the
+     * `import-key-jwk` path, redacted like `unwrapKeyRaw`.
+     * @param {string} variant
+     * @param {UnwrapInput} input
+     * @param {O} options
+     */
+    async unwrapKeyJwk(variant, input, options) {
+      const { bytes } = consumeUnwrapInput(input);
+      const policy = readPolicy(options);
+      aeadUsages(policy);
+      const jwk = unwrappedJwk(bytes, "enc", aeadGrantedOps(policy));
+      return redactingInvalidKey(`unwrapped ${variant} JWK`, () =>
+        minting.importKeyJwk(variant, jwk, options),
+      );
     },
   };
+  return minting;
 }
 
 /** The `lann:webcrypto/aead` interface: its resource classes. */
@@ -1886,7 +2383,7 @@ export const aesGcm = {
       policy.extractable,
       usages,
     );
-    return new AeadKey(key, bits);
+    return new AeadKey(key, bits, aeadGrants(policy));
   },
 };
 
@@ -1933,18 +2430,52 @@ export class CipherKeyOptions {
 }
 
 /**
- * The WebCrypto usages granted by a cipher mint policy (encrypt/decrypt
- * map directly; wrap/unwrap onto wrapKey/unwrapKey), throwing
- * `{ tag: 'not-permitted' }` for a zero-usage grant.
+ * The WebCrypto usages for a cipher mint policy, throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant. As on `aeadUsages`,
+ * the WIT grants do not map onto the platform's usages one-to-one: `wrap`
+ * runs `subtle.encrypt` and `unwrap` runs `subtle.decrypt` (see
+ * `cipherKeyGrants`), so the platform key carries `encrypt` if (encrypt or
+ * wrap) and `decrypt` if (decrypt or unwrap).
  * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} policy
+ * @returns {KeyUsage[]}
  */
 function cipherUsages(policy) {
-  return grantedUsages([
-    ["encrypt", policy.encrypt],
-    ["decrypt", policy.decrypt],
-    ["wrapKey", policy.wrap],
-    ["unwrapKey", policy.unwrap],
-  ]);
+  /** @type {KeyUsage[]} */
+  const usages = [];
+  if (policy.encrypt || policy.wrap) usages.push("encrypt");
+  if (policy.decrypt || policy.unwrap) usages.push("decrypt");
+  if (usages.length === 0) {
+    throw errNotPermitted("a key with no enabled usage cannot be minted");
+  }
+  return usages;
+}
+
+/**
+ * The WIT-level grants of a cipher mint policy, as recorded on the minted
+ * key (see `cipherKeyGrants`).
+ * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} policy
+ */
+function cipherGrants(policy) {
+  return {
+    encrypt: policy.encrypt,
+    decrypt: policy.decrypt,
+    wrap: policy.wrap,
+    unwrap: policy.unwrap,
+  };
+}
+
+/**
+ * The granted operations' platform names for a cipher mint policy (the
+ * unwrap-path `key_ops` rule; see `aeadGrantedOps`).
+ * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} policy
+ */
+function cipherGrantedOps(policy) {
+  const ops = [];
+  if (policy.encrypt) ops.push("encrypt");
+  if (policy.decrypt) ops.push("decrypt");
+  if (policy.wrap) ops.push("wrapKey");
+  if (policy.unwrap) ops.push("unwrapKey");
+  return ops;
 }
 
 /**
@@ -1977,18 +2508,24 @@ function cipherParams(name, iv, counterLength) {
 }
 
 /**
+ * The usage grants recorded at mint for each `cipher-key` (the
+ * `aeadKeyGrants` pattern: `wrap`/`unwrap` run through the platform's
+ * `encrypt`/`decrypt`, so the WIT grants are enforced host-side).
+ * @type {WeakMap<CipherKey, { encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }>}
+ */
+const cipherKeyGrants = new WeakMap();
+
+const cipherGrantsOf = stateReader(cipherKeyGrants, "cipher-key");
+
+/**
  * The `cipher-key` resource: an unauthenticated AES-CBC or AES-CTR key
  * (see the WIT `cipher` interface's Security notes — nothing here
- * authenticates). Holds a `CryptoKey` imported with exactly the usages
- * its mint options granted; instances are minted only by the `aes-cbc`
- * and `aes-ctr` interface functions below.
+ * authenticates). Holds a `CryptoKey` whose platform usages cover the
+ * operations its mint options granted (see `cipherKeyGrants`); instances
+ * are minted only by the `aes-cbc` and `aes-ctr` interface functions
+ * below.
  */
-export class CipherKey extends symmetricKeyTail({
-  canEncrypt: "encrypt",
-  canDecrypt: "decrypt",
-  canWrap: "wrapKey",
-  canUnwrap: "unwrapKey",
-}) {
+export class CipherKey extends symmetricKeyTail({}) {
   /** @type {"AES-CBC" | "AES-CTR"} */
   #name;
   /** The key length in bits, fixed at mint (see `AeadKey.#lengthBits`). */
@@ -1998,11 +2535,13 @@ export class CipherKey extends symmetricKeyTail({
    * @param {CryptoKey} key
    * @param {"AES-CBC" | "AES-CTR"} name
    * @param {number} lengthBits
+   * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} grants
    */
-  constructor(key, name, lengthBits) {
+  constructor(key, name, lengthBits, grants) {
     super(key);
     this.#name = name;
     this.#lengthBits = lengthBits;
+    cipherKeyGrants.set(this, grants);
   }
 
   /**
@@ -2048,6 +2587,50 @@ export class CipherKey extends symmetricKeyTail({
     });
   }
 
+  /**
+   * Encrypt serialized key material under `iv`, exactly as `encrypt`
+   * encrypts a message (the `iv`/`counterLength` contracts and their
+   * error cases are `encrypt`'s). `input` is consumed first, on failure
+   * as on success. Throws `{ tag: 'not-permitted' }` on a key minted
+   * without the `wrap` grant.
+   * @param {Uint8Array} iv
+   * @param {number | undefined} counterLength
+   * @param {WrapInput} input
+   * @returns {Promise<Uint8Array>}
+   */
+  async wrap(iv, counterLength, input) {
+    const { bytes } = consumeWrapInput(input);
+    if (!this.canWrap()) throw notPermitted("wrap");
+    const params = cipherParams(this.#name, iv, counterLength);
+    const sealed = await platformCall(`${this.#name} wrap`, () =>
+      subtle.encrypt(params, platformKeyOf(this), asBufferSource(bytes)),
+    );
+    return new Uint8Array(sealed);
+  }
+
+  /**
+   * Decrypt wrapped key material under `iv`, eagerly (this host does not
+   * use the WIT's deferral latitude). The result is *unauthenticated*,
+   * and every malformed-input failure is one uniform `{ tag: 'other' }`,
+   * exactly as on `decrypt`. Throws `{ tag: 'not-permitted' }` on a key
+   * minted without the `unwrap` grant.
+   * @param {Uint8Array} iv
+   * @param {number | undefined} counterLength
+   * @param {Uint8Array} wrapped
+   * @returns {Promise<UnwrapInput>}
+   */
+  async unwrap(iv, counterLength, wrapped) {
+    if (!this.canUnwrap()) throw notPermitted("unwrap");
+    const params = cipherParams(this.#name, iv, counterLength);
+    let opened;
+    try {
+      opened = await subtle.decrypt(params, platformKeyOf(this), asBufferSource(wrapped));
+    } catch {
+      throw errOther(`${this.#name} decryption failed`);
+    }
+    return new UnwrapInput(MINT, new Uint8Array(opened));
+  }
+
   algorithmName() {
     return this.#name;
   }
@@ -2059,6 +2642,39 @@ export class CipherKey extends symmetricKeyTail({
   ivSize() {
     return 16;
   }
+
+  /** The usage grants: the mint policy recorded in `cipherKeyGrants`. */
+  canEncrypt() {
+    return cipherGrantsOf(this).encrypt;
+  }
+
+  canDecrypt() {
+    return cipherGrantsOf(this).decrypt;
+  }
+
+  canWrap() {
+    return cipherGrantsOf(this).wrap;
+  }
+
+  canUnwrap() {
+    return cipherGrantsOf(this).unwrap;
+  }
+
+  /**
+   * This key's raw material as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyRaw`.
+   */
+  async toWrapInputRaw() {
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
+  }
+
+  /**
+   * The JWK serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputJwk() {
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
+  }
 }
 
 /**
@@ -2068,7 +2684,7 @@ export class CipherKey extends symmetricKeyTail({
  * @param {"AES-CBC" | "AES-CTR"} name
  */
 function cipherMinting(name) {
-  return {
+  const minting = {
     /**
      * Import raw key material as the declared AES variant (the shared
      * `import-key-raw` contract; see `aesMinting`'s).
@@ -2091,7 +2707,7 @@ function cipherMinting(name) {
         policy.extractable,
         usages,
       );
-      return new CipherKey(key, name, expected * 8);
+      return new CipherKey(key, name, expected * 8, cipherGrants(policy));
     },
 
     /**
@@ -2118,7 +2734,7 @@ function cipherMinting(name) {
       if (gotBits !== lengthBits) {
         throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
       }
-      return new CipherKey(key, name, lengthBits);
+      return new CipherKey(key, name, lengthBits, cipherGrants(policy));
     },
 
     /**
@@ -2135,7 +2751,7 @@ function cipherMinting(name) {
           subtle.generateKey({ name, length: bits }, policy.extractable, usages),
         )
       );
-      return new CipherKey(key, name, bits);
+      return new CipherKey(key, name, bits, cipherGrants(policy));
     },
 
     /**
@@ -2151,9 +2767,41 @@ function cipherMinting(name) {
       const usages = cipherUsages(policy);
       const bits = aesVariantByteLength(variant) * 8;
       const key = await deriveKeyFrom(input, { name, length: bits }, policy.extractable, usages);
-      return new CipherKey(key, name, bits);
+      return new CipherKey(key, name, bits, cipherGrants(policy));
+    },
+
+    /**
+     * Mint a key from unwrapped material read as raw bytes (see
+     * `aesMinting.unwrapKeyRaw`).
+     * @param {string} variant
+     * @param {UnwrapInput} input
+     * @param {CipherKeyOptions} options
+     */
+    async unwrapKeyRaw(variant, input, options) {
+      const { bytes } = consumeUnwrapInput(input);
+      return redactingInvalidKey(`unwrapped ${variant} key material`, () =>
+        minting.importKeyRaw(variant, bytes, options),
+      );
+    },
+
+    /**
+     * Mint a key from unwrapped material read as an `oct` JWK (see
+     * `aesMinting.unwrapKeyJwk`).
+     * @param {string} variant
+     * @param {UnwrapInput} input
+     * @param {CipherKeyOptions} options
+     */
+    async unwrapKeyJwk(variant, input, options) {
+      const { bytes } = consumeUnwrapInput(input);
+      const policy = cipherPolicy(options);
+      cipherUsages(policy);
+      const jwk = unwrappedJwk(bytes, "enc", cipherGrantedOps(policy));
+      return redactingInvalidKey(`unwrapped ${variant} JWK`, () =>
+        minting.importKeyJwk(variant, jwk, options),
+      );
     },
   };
+  return minting;
 }
 
 /** The `lann:webcrypto/cipher` interface: its resource classes. */
@@ -2164,6 +2812,349 @@ export const aesCbc = cipherMinting("AES-CBC");
 
 /** The `lann:webcrypto/aes-ctr` interface. */
 export const aesCtr = cipherMinting("AES-CTR");
+
+/** @type {WeakMap<KwKeyOptions, { wrap: boolean, unwrap: boolean, extractable: boolean }>} */
+const kwPolicies = new WeakMap();
+
+const kwPolicy = stateReader(kwPolicies, "kw-key-options");
+
+export class KwKeyOptions {
+  constructor() {
+    kwPolicies.set(this, { wrap: false, unwrap: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canWrap(allowed) {
+    kwPolicy(this).wrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canUnwrap(allowed) {
+    kwPolicy(this).unwrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    kwPolicy(this).extractable = allowed;
+  }
+}
+
+/**
+ * The WebCrypto usages for a KW mint policy — one-to-one, since
+ * `wrapKey`/`unwrapKey` are exactly the operations an AES-KW platform key
+ * serves — throwing `{ tag: 'not-permitted' }` for a zero-usage grant.
+ * @param {{ wrap: boolean, unwrap: boolean }} policy
+ */
+function kwUsages(policy) {
+  return grantedUsages([
+    ["wrapKey", policy.wrap],
+    ["unwrapKey", policy.unwrap],
+  ]);
+}
+
+/**
+ * The granted operations' platform names for a KW mint policy (the
+ * unwrap-path `key_ops` rule): the same one-to-one names as `kwUsages`,
+ * without the at-least-one-usage throw.
+ * @param {{ wrap: boolean, unwrap: boolean }} policy
+ */
+function kwGrantedOps(policy) {
+  const ops = [];
+  if (policy.wrap) ops.push("wrapKey");
+  if (policy.unwrap) ops.push("unwrapKey");
+  return ops;
+}
+
+/**
+ * The mint policy recorded for each `kw-key` (the `aeadKeyGrants`
+ * pattern, stored whole for uniformity even though the platform usages
+ * carry the same pair).
+ * @type {WeakMap<KwKey, { wrap: boolean, unwrap: boolean, extractable: boolean }>}
+ */
+const kwKeyGrants = new WeakMap();
+
+const kwGrantsOf = stateReader(kwKeyGrants, "kw-key");
+
+/**
+ * The `key-wrap.kw-key` resource: an AES-KW key (RFC 3394; NIST SP
+ * 800-38F's KW). The platform's AES-KW operations wrap and unwrap
+ * `CryptoKey`s, not bytes, so both directions run the material through a
+ * throwaway HMAC-SHA-256 `CryptoKey`, whose "raw" import/export accepts
+ * any non-empty length: `wrap` imports the serialized material and
+ * `subtle.wrapKey`s it; `unwrap` `subtle.unwrapKey`s into one and exports
+ * its raw bytes into the minted `unwrap-input`. The wrapped wire format is
+ * RFC 3394's either way. Instances are minted only by the `aes-kw`
+ * interface functions below.
+ */
+export class KwKey {
+  #key;
+  /** The key length in bits, fixed at mint (see `AeadKey.#lengthBits`). */
+  #lengthBits;
+
+  /**
+   * @param {CryptoKey} key
+   * @param {number} lengthBits
+   * @param {{ wrap: boolean, unwrap: boolean, extractable: boolean }} grants
+   */
+  constructor(key, lengthBits, grants) {
+    this.#key = key;
+    this.#lengthBits = lengthBits;
+    kwKeyGrants.set(this, grants);
+  }
+
+  /**
+   * Encrypt serialized key material (RFC 3394). JWK-format material is
+   * first padded with ASCII spaces (0x20) to a multiple of 8 bytes — the
+   * `aes-kw` WIT contract; the JWK contract's trailing-space tolerance
+   * carries the round trip. Material outside the algorithm's input
+   * domain — not a multiple of 8 bytes, or shorter than 16 — throws
+   * `{ tag: 'invalid-key' }` with a fixed message (the material is not
+   * the caller's to see). `input` is consumed first, on failure as on
+   * success; throws `{ tag: 'not-permitted' }` without the `wrap` grant.
+   * @param {WrapInput} input
+   * @returns {Promise<Uint8Array>}
+   */
+  async wrap(input) {
+    const state = consumeWrapInput(input);
+    if (!this.canWrap()) throw notPermitted("wrap");
+    let bytes = state.bytes;
+    if (state.format === "jwk" && bytes.length % 8 !== 0) {
+      const padded = new Uint8Array(bytes.length + 8 - (bytes.length % 8));
+      padded.set(bytes);
+      padded.fill(0x20, bytes.length);
+      bytes = padded;
+    }
+    if (bytes.length % 8 !== 0 || bytes.length < 16) {
+      throw errInvalidKey("AES-KW wraps key material of at least 16 bytes, a multiple of 8");
+    }
+    const trampoline = await platformCall("AES-KW wrap", () =>
+      subtle.importKey("raw", asBufferSource(bytes), { name: "HMAC", hash: "SHA-256" }, true, [
+        "sign",
+      ]),
+    );
+    const wrapped = await platformCall("AES-KW wrap", () =>
+      subtle.wrapKey("raw", trampoline, this.#key, "AES-KW"),
+    );
+    return new Uint8Array(wrapped);
+  }
+
+  /**
+   * Decrypt and integrity-check wrapped key material, eagerly (this host
+   * does not use the WIT's deferral latitude). Input that cannot carry
+   * the RFC 3394 wire format — not a multiple of 8 bytes, or shorter
+   * than 24 — throws `{ tag: 'authentication-failed' }` with no detail,
+   * indistinguishable from an ICV failure, before the platform is asked.
+   * Throws `{ tag: 'not-permitted' }` without the `unwrap` grant.
+   * @param {Uint8Array} wrapped
+   * @returns {Promise<UnwrapInput>}
+   */
+  async unwrap(wrapped) {
+    if (!this.canUnwrap()) throw notPermitted("unwrap");
+    if (wrapped.length % 8 !== 0 || wrapped.length < 24) {
+      throw errAuthenticationFailed();
+    }
+    let trampoline;
+    try {
+      trampoline = await subtle.unwrapKey(
+        "raw",
+        asBufferSource(wrapped),
+        this.#key,
+        "AES-KW",
+        { name: "HMAC", hash: "SHA-256" },
+        true,
+        ["sign"],
+      );
+    } catch (err) {
+      throw decryptFailure(err, "unwrap");
+    }
+    const bytes = new Uint8Array(
+      await platformCall("AES-KW unwrap", () => subtle.exportKey("raw", trampoline)),
+    );
+    return new UnwrapInput(MINT, bytes);
+  }
+
+  /**
+   * The algorithm getters: `name` projects the `CryptoKey` (`"AES-KW"`),
+   * `length` comes from the mint (see `AeadKey.#lengthBits`).
+   */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmLength() {
+    return this.#lengthBits;
+  }
+
+  /** The mint policy getters: the record in `kwKeyGrants`. */
+  extractable() {
+    return kwGrantsOf(this).extractable;
+  }
+
+  canWrap() {
+    return kwGrantsOf(this).wrap;
+  }
+
+  canUnwrap() {
+    return kwGrantsOf(this).unwrap;
+  }
+
+  /**
+   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
+   * key was created with `extractable` true (see `exportRawGated`).
+   */
+  async exportKeyRaw() {
+    return exportRawGated(this.#key);
+  }
+
+  /**
+   * The key as an `oct` JWK (`alg` `"A128KW"`/`"A256KW"`, the platform's),
+   * behind the same extractability gate as `exportKeyRaw`.
+   */
+  async exportKeyJwk() {
+    return exportJwkGated(this.#key);
+  }
+
+  /**
+   * This key's raw material as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyRaw`.
+   */
+  async toWrapInputRaw() {
+    return new WrapInput(MINT, "raw", await exportRawGated(this.#key));
+  }
+
+  /**
+   * The JWK serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputJwk() {
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await exportJwkGated(this.#key)));
+  }
+}
+
+/** The `lann:webcrypto/key-wrap` interface: its resource classes. */
+export const keyWrap = { KwKey, KwKeyOptions };
+
+/**
+ * The `lann:webcrypto/aes-kw` interface: the `aesMinting`/`cipherMinting`
+ * minting contract at `AES-KW`.
+ */
+export const aesKw = {
+  /**
+   * Import raw key material as the declared AES variant (the shared
+   * `import-key-raw` contract; see `aesMinting`'s).
+   * @param {string} variant
+   * @param {Uint8Array} raw
+   * @param {KwKeyOptions} options
+   */
+  async importKeyRaw(variant, raw, options) {
+    const policy = kwPolicy(options);
+    const usages = kwUsages(policy);
+    const expected = aesVariantByteLength(variant);
+    if (raw.length !== expected) {
+      throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
+    }
+    const key = await importPlatformKey(
+      `${variant} key`,
+      "raw",
+      raw,
+      { name: "AES-KW" },
+      policy.extractable,
+      usages,
+    );
+    return new KwKey(key, expected * 8, { ...policy });
+  },
+
+  /**
+   * Import an `oct` JWK as the declared AES variant (the shared
+   * `import-key-jwk` contract; see `aesMinting`'s — here the platform
+   * additionally validates `alg`, when present, against the `A___KW`
+   * name `k`'s length selects).
+   * @param {string} variant
+   * @param {string} jwk
+   * @param {KwKeyOptions} options
+   */
+  async importKeyJwk(variant, jwk, options) {
+    const policy = kwPolicy(options);
+    const usages = kwUsages(policy);
+    const lengthBits = aesVariantByteLength(variant) * 8;
+    const material = jwkMaterial(jwk);
+    requireStrictBase64url(material.k);
+    const key = await importPlatformKeyJwk(
+      `${variant} JWK`,
+      material,
+      { name: "AES-KW" },
+      policy.extractable,
+      usages,
+    );
+    const gotBits = jwkKeyBytes(material.k) * 8;
+    if (gotBits !== lengthBits) {
+      throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
+    }
+    return new KwKey(key, lengthBits, { ...policy });
+  },
+
+  /**
+   * Generate a fresh random AES-KW key of the declared variant.
+   * @param {string} variant
+   * @param {KwKeyOptions} options
+   */
+  async generateKey(variant, options) {
+    const policy = kwPolicy(options);
+    const usages = kwUsages(policy);
+    const bits = aesVariantByteLength(variant) * 8;
+    const key = /** @type {CryptoKey} */ (
+      await platformCall(`${variant} key generation`, () =>
+        subtle.generateKey({ name: "AES-KW", length: bits }, policy.extractable, usages),
+      )
+    );
+    return new KwKey(key, bits, { ...policy });
+  },
+
+  /**
+   * Mint a key from a parameterized derivation (the shared `derive-key`
+   * contract; see `aesGcm.deriveKey`).
+   * @param {string} variant
+   * @param {DeriveInput} input
+   * @param {KwKeyOptions} options
+   */
+  async deriveKey(variant, input, options) {
+    const policy = kwPolicy(options);
+    const usages = kwUsages(policy);
+    const bits = aesVariantByteLength(variant) * 8;
+    const key = await deriveKeyFrom(input, { name: "AES-KW", length: bits }, policy.extractable, usages);
+    return new KwKey(key, bits, { ...policy });
+  },
+
+  /**
+   * Mint a key from unwrapped material read as raw bytes (see
+   * `aesMinting.unwrapKeyRaw`).
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {KwKeyOptions} options
+   */
+  async unwrapKeyRaw(variant, input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    return redactingInvalidKey(`unwrapped ${variant} key material`, () =>
+      aesKw.importKeyRaw(variant, bytes, options),
+    );
+  },
+
+  /**
+   * Mint a key from unwrapped material read as an `oct` JWK (see
+   * `aesMinting.unwrapKeyJwk`).
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {KwKeyOptions} options
+   */
+  async unwrapKeyJwk(variant, input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    const policy = kwPolicy(options);
+    kwUsages(policy);
+    const jwk = unwrappedJwk(bytes, "enc", kwGrantedOps(policy));
+    return redactingInvalidKey(`unwrapped ${variant} JWK`, () =>
+      aesKw.importKeyJwk(variant, jwk, options),
+    );
+  },
+};
 
 /**
  * Throw `{ tag: 'unsupported', val }` for an XChaCha construction: no
@@ -2235,7 +3226,7 @@ export const chacha20Poly1305 = {
         usages,
       ),
     );
-    return new AeadKey(key, 256);
+    return new AeadKey(key, 256, aeadGrants(policy));
   },
   /**
    * Generate a fresh random 256-bit ChaCha20-Poly1305 key.
@@ -2247,7 +3238,7 @@ export const chacha20Poly1305 = {
     const key = await chachaMint("generate-key", () =>
       subtle.generateKey({ name: "ChaCha20-Poly1305" }, policy.extractable, usages),
     );
-    return new AeadKey(/** @type {CryptoKey} */ (key), 256);
+    return new AeadKey(/** @type {CryptoKey} */ (key), 256, aeadGrants(policy));
   },
   /**
    * Import an `oct` JWK as a ChaCha20-Poly1305 key (the
@@ -2288,7 +3279,35 @@ export const chacha20Poly1305 = {
         usages,
       ),
     );
-    return new AeadKey(key, 256);
+    return new AeadKey(key, 256, aeadGrants(policy));
+  },
+  /**
+   * Mint a key from unwrapped material read as raw bytes (see
+   * `aesMinting.unwrapKeyRaw`): the `import-key-raw` path over the
+   * consumed input's bytes, with `invalid-key` details redacted.
+   * @param {UnwrapInput} input
+   * @param {AeadKeyOptions} options
+   */
+  async unwrapKeyRaw(input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    return redactingInvalidKey("unwrapped ChaCha20-Poly1305 key material", () =>
+      chacha20Poly1305.importKeyRaw(bytes, options),
+    );
+  },
+  /**
+   * Mint a key from unwrapped material read as an `oct` JWK (see
+   * `aesMinting.unwrapKeyJwk`).
+   * @param {UnwrapInput} input
+   * @param {AeadKeyOptions} options
+   */
+  async unwrapKeyJwk(input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    const policy = aeadPolicy(options);
+    aeadUsages(policy);
+    const jwk = unwrappedJwk(bytes, "enc", aeadGrantedOps(policy));
+    return redactingInvalidKey("unwrapped ChaCha20-Poly1305 JWK", () =>
+      chacha20Poly1305.importKeyJwk(jwk, options),
+    );
   },
 };
 
@@ -2296,12 +3315,29 @@ export const chacha20Poly1305 = {
 export const xchacha20Poly1305 = {
   importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  /**
+   * The unwrap mint consumes its input before declining, as the WIT
+   * requires (consumed on failure as on success).
+   * @param {UnwrapInput} input
+   */
+  unwrapKeyRaw: async (input) => {
+    consumeUnwrapInput(input);
+    return unsupportedChacha("XChaCha20-Poly1305");
+  },
 };
 
 /** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface. */
 export const xchacha20Poly1305InternalNonce = {
   importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
   generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
+  /**
+   * See `xchacha20Poly1305.unwrapKeyRaw`.
+   * @param {UnwrapInput} input
+   */
+  unwrapKeyRaw: async (input) => {
+    consumeUnwrapInput(input);
+    return unsupportedChacha("XChaCha20-Poly1305");
+  },
 };
 
 /**
@@ -2449,6 +3485,24 @@ export class InternalNonceKey extends symmetricKeyTail({ canSeal: "encrypt", can
   sealsRemaining() {
     const remaining = InternalNonceKey.#NONCE_BUDGET - this.#sealed;
     return remaining > 0n ? remaining : 0n;
+  }
+
+  /**
+   * This key's raw material as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyRaw`.
+   * As with the exports, the nonce budget does not travel with the
+   * material.
+   */
+  async toWrapInputRaw() {
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
+  }
+
+  /**
+   * The JWK serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputJwk() {
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
   }
 }
 
@@ -3292,6 +4346,21 @@ export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
       await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", privateKey)),
     );
   }
+
+  /**
+   * The private JWK serialization as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyJwk`.
+   */
+  async toWrapInputJwk() {
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await this.exportKeyJwk()));
+  }
+
+  /**
+   * The PKCS#8 serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputPkcs8() {
+    return new WrapInput(MINT, "pkcs8", await this.exportKeyPkcs8());
+  }
 }
 
 /**
@@ -3573,11 +4642,45 @@ async function importEd25519SigningKeyJwk(jwkText, options) {
   return new SigningKey(key, ED25519_ALGORITHM);
 }
 
+/**
+ * Mint an Ed25519 signing key from unwrapped key material read as a PKCS#8
+ * PrivateKeyInfo (see the `wrapping` interface): the
+ * `import-signing-key-pkcs8` path over the consumed input's bytes, with
+ * `invalid-key` details redacted (see `redactingInvalidKey`).
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapEd25519SigningKeyPkcs8(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped Ed25519 pkcs8", () =>
+    importEd25519SigningKeyPkcs8(bytes, options),
+  );
+}
+
+/**
+ * Mint an Ed25519 signing key from unwrapped key material read as an OKP
+ * private JWK: the unwrap-path `use`/`key_ops` checks (`sign` is the sole
+ * grantable usage, and the mint requires it), then the
+ * `import-signing-key-jwk` path, redacted like the PKCS#8 mint.
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapEd25519SigningKeyJwk(input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  requireSigningGrant(signingPolicy(options));
+  const jwk = unwrappedJwk(bytes, "sig", ["sign"]);
+  return redactingInvalidKey("unwrapped Ed25519 private JWK", () =>
+    importEd25519SigningKeyJwk(jwk, options),
+  );
+}
+
 /** The `lann:webcrypto/ed25519-sign` interface. */
 export const ed25519Sign = {
   generateKey: generateEd25519Key,
   importSigningKeyPkcs8: importEd25519SigningKeyPkcs8,
   importSigningKeyJwk: importEd25519SigningKeyJwk,
+  unwrapSigningKeyPkcs8: unwrapEd25519SigningKeyPkcs8,
+  unwrapSigningKeyJwk: unwrapEd25519SigningKeyJwk,
 };
 
 /**
@@ -3723,9 +4826,42 @@ async function importEcdsaSigningKeyJwk(variant, jwkText, options) {
   return new SigningKey(key, entry);
 }
 
+/**
+ * Mint an ECDSA signing key of the declared variant from unwrapped key
+ * material read as a PKCS#8 PrivateKeyInfo (see
+ * `unwrapEd25519SigningKeyPkcs8`).
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapEcdsaSigningKeyPkcs8(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey(`unwrapped ${variant} pkcs8`, () =>
+    importEcdsaSigningKeyPkcs8(variant, bytes, options),
+  );
+}
+
+/**
+ * Mint an ECDSA signing key of the declared variant from unwrapped key
+ * material read as an EC private JWK (see `unwrapEd25519SigningKeyJwk`).
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapEcdsaSigningKeyJwk(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  requireSigningGrant(signingPolicy(options));
+  const jwk = unwrappedJwk(bytes, "sig", ["sign"]);
+  return redactingInvalidKey(`unwrapped ${variant} private JWK`, () =>
+    importEcdsaSigningKeyJwk(variant, jwk, options),
+  );
+}
+
 /** The `lann:webcrypto/ecdsa-sign` interface. */
 export const ecdsaSign = {
   generateKey: generateEcdsaKey,
   importSigningKeyPkcs8: importEcdsaSigningKeyPkcs8,
   importSigningKeyJwk: importEcdsaSigningKeyJwk,
+  unwrapSigningKeyPkcs8: unwrapEcdsaSigningKeyPkcs8,
+  unwrapSigningKeyJwk: unwrapEcdsaSigningKeyJwk,
 };

@@ -69,11 +69,13 @@ mod kdf;
 mod mac;
 mod policy;
 mod sig;
+mod wrapping;
 
 pub use aead::AeadKeyMaterial;
 pub use agreement::{AgreementPublicMaterial, AgreementSecretMaterial};
 pub use cipher::{CipherKeyMaterial, CipherMode};
 pub use hash::{served_sha2, DigestKind, HmacHash, Sha1Posture, Sha2};
+pub use jwk::UseFamily;
 pub use kdf::{
     derive_aes_gcm_key, derive_cipher_key, derive_mac_key, derive_mac_key_sha1,
     DeriveInputMaterial, IkmMaterial, PasswordMaterial,
@@ -81,9 +83,20 @@ pub use kdf::{
 pub use mac::MacKeyMaterial;
 pub use policy::{
     not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, InternalNoncePolicy,
-    MacPolicy, SigningPolicy,
+    KwPolicy, MacPolicy, SigningPolicy,
 };
 pub use sig::{SigPublic, SigningKeyMaterial};
+pub use wrapping::{
+    derive_kw_key, unwrap_aes_gcm_internal_key, unwrap_aes_gcm_internal_key_jwk,
+    unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_chacha_key, unwrap_chacha_key_jwk,
+    unwrap_cipher_key, unwrap_cipher_key_jwk, unwrap_ed25519_signing_key_jwk,
+    unwrap_ed25519_signing_key_pkcs8, unwrap_ikm, unwrap_kw_key, unwrap_kw_key_jwk, unwrap_mac_key,
+    unwrap_mac_key_jwk, unwrap_mac_key_jwk_sha1, unwrap_mac_key_sha1, unwrap_password,
+    unwrap_x25519_secret_key_jwk, unwrap_x25519_secret_key_pkcs8, unwrap_xchacha_internal_key,
+    unwrap_xchacha_key, KwKeyMaterial, UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
+};
+#[cfg(not(target_family = "wasm"))]
+pub use wrapping::{unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8};
 
 /// A failure of the platform's random source, surfaced separately from WIT
 /// errors so each implementation can decide what it means (the host traps,
@@ -298,6 +311,10 @@ pub const HMAC_NAME: &str = "HMAC";
 /// The `algorithm-name` reported by AES-GCM keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub const AES_GCM_NAME: &str = "AES-GCM";
+
+/// The `algorithm-name` reported by AES-KW keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const AES_KW_NAME: &str = "AES-KW";
 
 /// The `algorithm-name` reported by ChaCha20-Poly1305 keys (the spelling of
 /// the WICG WebCrypto proposal; the algorithm is not in the W3C registry).

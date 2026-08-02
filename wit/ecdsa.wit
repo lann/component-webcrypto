@@ -96,6 +96,7 @@ interface ecdsa-sign {
     use types.{error};
     use signature.{signing-key, signing-key-options, verifying-key};
     use ecdsa-verify.{ecdsa-variant};
+    use wrapping.{unwrap-input};
 
     /// Generate a fresh random signing key of the declared variant,
     /// returning both halves — the only point at which every provider is
@@ -115,4 +116,20 @@ interface ecdsa-sign {
     /// `crv` and `alg` are validated as in `import-verifying-key-jwk`.
     /// See `mac-key.export-key-jwk` for the package-wide JWK contract.
     import-signing-key-jwk: async func(%variant: ecdsa-variant, jwk: string, options: signing-key-options) -> result<signing-key, error>;
+
+    /// Mint a signing key from unwrapped key material (see the `wrapping`
+    /// interface): `input`'s bytes are read as a PKCS#8 PrivateKeyInfo,
+    /// subject to `import-signing-key-pkcs8`'s contract. `input` is
+    /// consumed.
+    ///
+    /// The minted key's usages and extractability come from `options`
+    /// alone (the W3C Web Cryptography API's `unwrapKey` model).
+    unwrap-signing-key-pkcs8: async func(%variant: ecdsa-variant, input: unwrap-input, options: signing-key-options) -> result<signing-key, error>;
+
+    /// Mint a signing key from unwrapped key material read as an EC
+    /// private JWK, subject to `import-signing-key-jwk`'s contract plus
+    /// the unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed; see `unwrap-signing-key-pkcs8`
+    /// for the options model.
+    unwrap-signing-key-jwk: async func(%variant: ecdsa-variant, input: unwrap-input, options: signing-key-options) -> result<signing-key, error>;
 }

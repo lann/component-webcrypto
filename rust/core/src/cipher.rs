@@ -242,6 +242,17 @@ impl CipherKeyMaterial {
         if !self.policy.decrypt {
             return Err(crate::not_permitted("decrypt"));
         }
+        self.decrypt_checked(iv, counter_length, ciphertext)
+    }
+
+    /// The decryption behind both `decrypt` and `unwrap`, after their
+    /// respective grant checks.
+    fn decrypt_checked(
+        &self,
+        iv: &[u8],
+        counter_length: Option<u8>,
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         let iv = self.checked_iv(iv, counter_length)?;
         match self.mode {
             CipherMode::Cbc => self.cbc_decrypt(iv, ciphertext),
@@ -250,6 +261,46 @@ impl CipherKeyMaterial {
                 self.ctr_apply(iv, n, ciphertext)
             }
         }
+    }
+
+    /// Encrypt serialized key material (the `cipher-key.wrap` contract):
+    /// `encrypt`'s computation exactly — for raw-format input,
+    /// byte-identical to encrypting the exported bytes — behind the
+    /// `wrap` grant.
+    pub fn wrap(
+        &self,
+        iv: &[u8],
+        counter_length: Option<u8>,
+        input: crate::WrapInputMaterial,
+    ) -> Result<Vec<u8>, Error> {
+        if !self.policy.wrap {
+            return Err(crate::not_permitted("wrap"));
+        }
+        let bytes = input.into_bytes();
+        let iv = self.checked_iv(iv, counter_length)?;
+        match self.mode {
+            CipherMode::Cbc => Ok(self.cbc_encrypt(iv, &bytes)),
+            CipherMode::Ctr => {
+                let n = counter_length.expect("checked_iv requires it for CTR");
+                self.ctr_apply(iv, n, &bytes)
+            }
+        }
+    }
+
+    /// Decrypt wrapped key material into an unwrap intermediate (the
+    /// `cipher-key.unwrap` contract): unauthenticated by kind, with the
+    /// mode's one uniform failure, exactly as `decrypt`.
+    pub fn unwrap_wrapped(
+        &self,
+        iv: &[u8],
+        counter_length: Option<u8>,
+        wrapped: &[u8],
+    ) -> Result<crate::UnwrapInputMaterial, Error> {
+        if !self.policy.unwrap {
+            return Err(crate::not_permitted("unwrap"));
+        }
+        self.decrypt_checked(iv, counter_length, wrapped)
+            .map(crate::UnwrapInputMaterial::new)
     }
 
     /// Validate the per-call `iv` and `counter-length` against the mode's

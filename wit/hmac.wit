@@ -10,6 +10,7 @@ interface hmac-sha2 {
     use mac.{mac-key, mac-key-options};
     use sha2.{sha2-variant};
     use derivation.{derive-input};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as an HMAC key over the declared SHA-2
     /// variant.
@@ -63,6 +64,21 @@ interface hmac-sha2 {
     /// requesting an extractable key additionally requires
     /// `can-derive-bits` (see `aes-gcm.derive-key`).
     derive-key: async func(%variant: sha2-variant, input: borrow<derive-input>, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from unwrapped key material (see the `wrapping`
+    /// interface): `input`'s bytes are read as raw key material, subject
+    /// to `import-key-raw`'s contract. `input` is consumed.
+    ///
+    /// The minted key's usages and extractability come from `options`
+    /// alone (the W3C Web Cryptography API's `unwrapKey` model).
+    unwrap-key-raw: async func(%variant: sha2-variant, input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from unwrapped key material read as an RFC 7517 JSON
+    /// Web Key, subject to `import-key-jwk`'s contract plus the
+    /// unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed; see `unwrap-key-raw` for the
+    /// options model.
+    unwrap-key-jwk: async func(%variant: sha2-variant, input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
 }
 
 /// HMAC key minting (RFC 2104) over SHA-1 (FIPS 180-4), for
@@ -86,6 +102,7 @@ interface hmac-sha1 {
     use types.{error};
     use mac.{mac-key, mac-key-options};
     use derivation.{derive-input};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as an HMAC-SHA-1 key. See
     /// `hmac-sha2.import-key-raw` for the key-length contract.
@@ -103,4 +120,12 @@ interface hmac-sha1 {
     /// Mint a key from a parameterized derivation. See
     /// `hmac-sha2.derive-key`.
     derive-key: async func(input: borrow<derive-input>, length: option<u32>, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes. See
+    /// `hmac-sha2.unwrap-key-raw`.
+    unwrap-key-raw: async func(input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
+
+    /// Mint a key from unwrapped key material read as an RFC 7517 JSON
+    /// Web Key. See `hmac-sha2.unwrap-key-jwk`.
+    unwrap-key-jwk: async func(input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
 }

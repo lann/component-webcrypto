@@ -35,6 +35,8 @@ interface chacha20-poly1305 {
     use types.{error};
     @unstable(feature = chacha20-poly1305)
     use aead.{aead-key, aead-key-options};
+    @unstable(feature = chacha20-poly1305)
+    use wrapping.{unwrap-input};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
@@ -54,6 +56,21 @@ interface chacha20-poly1305 {
     /// Generate a fresh random 256-bit key.
     @unstable(feature = chacha20-poly1305)
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from unwrapped key material (see the `wrapping`
+    /// interface): `input`'s bytes are read as raw key material, subject
+    /// to `import-key-raw`'s contract. `input` is consumed.
+    ///
+    /// The minted key's usages and extractability come from `options`
+    /// alone (the W3C Web Cryptography API's `unwrapKey` model).
+    @unstable(feature = chacha20-poly1305)
+    unwrap-key-raw: async func(input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from unwrapped key material read as an RFC 7517 JSON
+    /// Web Key, subject to `import-key-jwk`'s contract. `input` is
+    /// consumed.
+    @unstable(feature = chacha20-poly1305)
+    unwrap-key-jwk: async func(input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// XChaCha20-Poly1305 key minting (draft-irtf-cfrg-xchacha, as deployed
@@ -83,6 +100,8 @@ interface xchacha20-poly1305 {
     use types.{error};
     @unstable(feature = xchacha20-poly1305)
     use aead.{aead-key, aead-key-options};
+    @unstable(feature = xchacha20-poly1305)
+    use wrapping.{unwrap-input};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
@@ -92,6 +111,12 @@ interface xchacha20-poly1305 {
     /// Generate a fresh random 256-bit key.
     @unstable(feature = xchacha20-poly1305)
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes, subject
+    /// to `import-key-raw`'s contract. `input` is consumed; see
+    /// `chacha20-poly1305.unwrap-key-raw` for the options model.
+    @unstable(feature = xchacha20-poly1305)
+    unwrap-key-raw: async func(input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// XChaCha20-Poly1305 internal-nonce key minting: `aead-internal-nonce`
@@ -117,6 +142,8 @@ interface xchacha20-poly1305-internal-nonce {
     use types.{error};
     @unstable(feature = xchacha20-poly1305)
     use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
+    @unstable(feature = xchacha20-poly1305)
+    use wrapping.{unwrap-input};
 
     /// Import exactly 32 bytes of raw key material as an internal-nonce
     /// key; anything else fails with `error.invalid-key`. See
@@ -128,4 +155,12 @@ interface xchacha20-poly1305-internal-nonce {
     /// Generate a fresh random internal-nonce key.
     @unstable(feature = xchacha20-poly1305)
     generate-key: async func(options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+
+    /// Mint an internal-nonce key from unwrapped key material read as
+    /// raw bytes, subject to `import-key-raw`'s contract — including the
+    /// shared-material caveat and policy-rejection allowance. `input` is
+    /// consumed; see `chacha20-poly1305.unwrap-key-raw` for the options
+    /// model.
+    @unstable(feature = xchacha20-poly1305)
+    unwrap-key-raw: async func(input: unwrap-input, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }

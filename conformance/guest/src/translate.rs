@@ -692,6 +692,23 @@ struct CbcTest {
 }
 
 #[derive(Deserialize)]
+struct KwGroup {
+    #[serde(rename = "keySize")]
+    key_size: u32,
+    tests: Vec<KwTest>,
+}
+
+#[derive(Deserialize)]
+struct KwTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    key: String,
+    msg: String,
+    ct: String,
+    result: String,
+}
+
+#[derive(Deserialize)]
 struct AeadGroup {
     #[serde(rename = "keySize")]
     key_size: u32,
@@ -934,6 +951,65 @@ fn translate_aead(
 /// One executed AES-CBC vector under one schedule (Wycheproof
 /// `aes_cbc_pkcs5_test.json`; PKCS5 and PKCS7 padding coincide for AES's
 /// 16-byte blocks).
+/// One AES-KW vector (RFC 3394; `aes_wrap_test.json`). Wrapping trades in
+/// `list<u8>`, so there are no chunking schedules.
+///
+/// Upstream's verdicts translate onto the WIT contract:
+/// - `valid`: `wrap` reproduces the vector's wrapped bytes exactly, and
+///   `unwrap` + a raw unwrap mint recovers the key data.
+/// - `acceptable` (8-byte key data, RFC 3394's n = 1): outside the WIT's
+///   wrap domain — `wrap` fails `invalid-key`, and the 16-byte wrapped
+///   form fails `unwrap` with `authentication-failed` (under the 24-byte
+///   minimum).
+/// - `invalid`: a present `msg` outside the wrap domain fails `wrap` with
+///   `invalid-key`; a present `ct` fails `unwrap` with
+///   `authentication-failed` (bad ICV and malformed lengths are
+///   deliberately indistinguishable).
+pub struct KwCase {
+    /// The key size in bits (128 or 256; AES-192 is declined at minting,
+    /// covered by probes).
+    pub key_bits: u32,
+    pub tc_id: u64,
+    pub key: Vec<u8>,
+    pub msg: Vec<u8>,
+    pub ct: Vec<u8>,
+    /// Upstream's verdict, translated: `true` round-trips both ways.
+    pub valid: bool,
+}
+
+impl VectorCase for KwCase {
+    fn case_id(&self) -> String {
+        vector_case_id("aes-kw", "wycheproof", self.tc_id, None)
+    }
+}
+
+/// The normalized AES-KW cases: every keySize-128 and -256 vector.
+pub fn kw_cases() -> Vec<KwCase> {
+    let file: VectorFile<KwGroup> =
+        serde_json::from_str(include_str!("../../vectors/aes_wrap_test.json"))
+            .unwrap_or_else(|err| panic!("parsing aes-kw vectors: {err}"));
+    let mut cases = Vec::new();
+    for group in &file.test_groups {
+        if group.key_size == 192 {
+            continue;
+        }
+        for test in &group.tests {
+            let field = format!("aes-kw tc{}", test.tc_id);
+            cases.push(KwCase {
+                key_bits: group.key_size,
+                tc_id: test.tc_id,
+                key: unhex(&field, &test.key),
+                msg: unhex(&field, &test.msg),
+                ct: unhex(&field, &test.ct),
+                // `acceptable` (the 8-byte ShortKey pair) is outside the
+                // WIT's wrap domain, so it lands with `invalid`.
+                valid: test.result == "valid",
+            });
+        }
+    }
+    cases
+}
+
 pub struct CbcCase {
     /// The key size in bits (128 or 256; AES-192 is declined at minting,
     /// covered by probes).

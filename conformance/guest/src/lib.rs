@@ -30,8 +30,8 @@ use std::collections::BTreeSet;
 use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
-    AeadCase, HkdfCase, HmacCase, InternalNonceCase, Pbkdf2Case, Sha2Case, SigCase, SpeccheckCase,
-    VectorCase, X25519Case,
+    AeadCase, HkdfCase, HmacCase, InternalNonceCase, KwCase, Pbkdf2Case, Sha2Case, SigCase,
+    SpeccheckCase, VectorCase, X25519Case,
 };
 
 /// Validate a `missing-features` declaration against
@@ -162,6 +162,7 @@ suites! {
         Hmac(HmacCase): translate::hmac_cases => vectors::run_hmac_case;
         Aead(AeadCase): translate::aead_cases => vectors::run_aead_case;
         Cbc(translate::CbcCase): translate::cbc_cases => vectors::run_cbc_case;
+        Kw(KwCase): translate::kw_cases => vectors::run_kw_case;
         InternalNonce(InternalNonceCase):
             translate::internal_nonce_cases => vectors::run_internal_nonce_case;
         Sha2(Sha2Case): translate::sha2_cases => vectors::run_sha2_case;

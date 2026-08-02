@@ -60,6 +60,12 @@ const GCM_CIPHERTEXT: &str = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c975
                               8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
 const GCM_TAG: &str = "76fc6ece0f4e1768cddf8853bb2d551b";
 
+// --- RFC 3394 §4.1 (AES-KW: a 128-bit KEK wrapping 128 bits of key data) -----
+
+const KW_KEK: &str = "000102030405060708090a0b0c0d0e0f";
+const KW_DATA: &str = "00112233445566778899aabbccddeeff";
+const KW_WRAPPED: &str = "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5";
+
 // --- RFC 8032 §7.1 test 2 (Ed25519) ------------------------------------------
 
 const ED25519_PUBLIC: &str = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
@@ -94,6 +100,7 @@ impl Guest for Component {
         check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
         check("concurrent-seal-open", concurrent_seal_open().await).await?;
         check("internal-nonce-wrapper", internal_nonce_wrapper().await).await?;
+        check("key-wrap-tour", key_wrap_tour().await).await?;
         check(
             "aes-ctr-wrapper-roundtrip",
             aes_ctr_wrapper_roundtrip().await,
@@ -767,6 +774,107 @@ impl futures_io::AsyncRead for FailingReader {
 }
 
 // --- small utilities ---------------------------------------------------------
+
+/// One key-wrap tour: the RFC 3394 known answer through `kw-key.wrap`, the
+/// unwrap half minting the key data back out through the raw unwrap mint,
+/// and the AEAD wrap identity (`wrap` equals `seal` over the exported
+/// bytes). The rejection surface and domains are the conformance suites'
+/// job.
+async fn key_wrap_tour() -> Result<()> {
+    use lann_webcrypto_guest::{aes_gcm, aes_kw, hmac_sha2, KwKeyOptions, MacKeyOptions};
+
+    let kek = aes_kw::import_key_raw(
+        AesVariant::Aes128,
+        unhex(KW_KEK),
+        KwKeyOptions {
+            wrap: true,
+            unwrap: true,
+            extractable: false,
+        },
+    )
+    .await
+    .context("aes-kw import-key-raw")?;
+    ensure!(
+        kek.algorithm_name() == "AES-KW",
+        "kw-key.algorithm-name: got {}",
+        kek.algorithm_name()
+    );
+
+    // The key data enters the wrap path as an extractable key's material.
+    let payload = hmac_sha2::import_key_raw(
+        Sha2Variant::Sha256,
+        unhex(KW_DATA),
+        MacKeyOptions {
+            sign: true,
+            verify: false,
+            extractable: true,
+        },
+    )
+    .await
+    .context("payload import")?;
+    let wrapped = kek
+        .wrap(payload.to_wrap_input_raw().await.context("to-wrap-input")?)
+        .await
+        .context("kw-key.wrap")?;
+    ensure!(
+        hex(&wrapped) == KW_WRAPPED,
+        "RFC 3394 wire format: got {}",
+        hex(&wrapped)
+    );
+
+    // Unwrap and mint the key data back out: the minted key must agree
+    // with the original on a tag.
+    let minted = hmac_sha2::unwrap_key_raw(
+        Sha2Variant::Sha256,
+        kek.unwrap(wrapped).await.context("kw-key.unwrap")?,
+        MacKeyOptions {
+            sign: true,
+            verify: false,
+            extractable: false,
+        },
+    )
+    .await
+    .context("hmac-sha2.unwrap-key-raw")?;
+    let via_wrap = minted.sign(HMAC_DATA).await.context("minted sign")?;
+    let direct = payload.sign(HMAC_DATA).await.context("payload sign")?;
+    ensure!(
+        via_wrap == direct,
+        "the unwrapped key disagrees with the original"
+    );
+
+    // The AEAD wrap identity: `wrap` is byte-identical to sealing the
+    // exported bytes.
+    let aead_kek = aes_gcm::import_key_raw(
+        AesVariant::Aes256,
+        unhex(GCM_KEY),
+        lann_webcrypto_guest::AeadKeyOptions {
+            seal: true,
+            wrap: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .context("aead kek import")?;
+    let nonce = unhex(GCM_IV);
+    let wrapped = aead_kek
+        .wrap(
+            nonce.clone(),
+            Vec::new(),
+            None,
+            payload.to_wrap_input_raw().await.context("to-wrap-input")?,
+        )
+        .await
+        .context("aead-key.wrap")?;
+    let sealed = aead_kek
+        .seal(&nonce[..], &[][..], &payload.export_key_raw().await?[..])
+        .await
+        .context("seal comparison")?;
+    ensure!(
+        wrapped == sealed,
+        "aead wrap must equal seal over the export"
+    );
+    Ok(())
+}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

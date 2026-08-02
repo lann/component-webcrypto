@@ -12,14 +12,82 @@
 //! - `k` decodes as strict unpadded base64url: padding, non-alphabet
 //!   bytes, and non-zero trailing bits are all `invalid-key` (OKP's `x`
 //!   and `d` likewise).
-//! - `use` and `key_ops` are ignored (the package has no usage model);
-//!   `ext` is validated against the requested extractability.
+//! - `use` and `key_ops` are ignored on the import path (the package has
+//!   no usage model; the caller holds the JWK); the unwrap path validates
+//!   them in the caller's stead ([`check_unwrap_members`]). `ext` is
+//!   validated against the requested extractability everywhere.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use serde_json::Value;
 
 use crate::Error;
+
+/// The `use`-member family an unwrap-path JWK must match when the member
+/// is present (the WIT JWK contract's unwrap-path rule).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UseFamily {
+    /// Encryption, wrapping, and agreement keys: `"enc"`.
+    Enc,
+    /// MAC and signature keys: `"sig"`.
+    Sig,
+}
+
+impl UseFamily {
+    fn member(self) -> &'static str {
+        match self {
+            Self::Enc => "enc",
+            Self::Sig => "sig",
+        }
+    }
+}
+
+/// The unwrap-path `use`/`key_ops` checks (the WIT JWK contract): a
+/// `key_ops` member, when present, must include every granted usage; a
+/// `use` member, when present, must match the key's family. Every failure
+/// is `invalid-key` with a fixed message — the JWK is decrypted material
+/// the caller must never see, so nothing from it reaches the error string.
+pub fn check_unwrap_members(
+    jwk: &str,
+    granted: &[&'static str],
+    family: UseFamily,
+) -> Result<(), Error> {
+    // A malformed envelope falls to the reused import path's parse, whose
+    // message the unwrap mints redact; only well-formed objects are
+    // checked here.
+    let Ok(Value::Object(jwk)) = serde_json::from_str::<Value>(jwk) else {
+        return Ok(());
+    };
+    match jwk.get("use") {
+        None => {}
+        Some(Value::String(member)) if member == family.member() => {}
+        Some(_) => {
+            return Err(Error::InvalidKey(
+                "the unwrapped JWK's `use` member does not match the key's family".into(),
+            ))
+        }
+    }
+    match jwk.get("key_ops") {
+        None => Ok(()),
+        Some(Value::Array(ops)) => {
+            let listed = |name: &str| {
+                ops.iter()
+                    .any(|op| matches!(op, Value::String(s) if s == name))
+            };
+            if granted.iter().all(|name| listed(name)) {
+                Ok(())
+            } else {
+                Err(Error::InvalidKey(
+                    "the unwrapped JWK's `key_ops` member does not include every granted usage"
+                        .into(),
+                ))
+            }
+        }
+        Some(_) => Err(Error::InvalidKey(
+            "the unwrapped JWK's `key_ops` member is malformed".into(),
+        )),
+    }
+}
 
 /// Parse an `oct` JWK, validate it against the declared algorithm and the
 /// requested extractability, and return the raw key material (the
