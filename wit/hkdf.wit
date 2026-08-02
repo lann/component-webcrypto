@@ -15,6 +15,7 @@ package lann:webcrypto@0.1.0;
 interface hkdf {
     use types.{error};
     use derivation.{derive-options};
+    use wrapping.{unwrap-input};
 
     /// Input keying material: consumable only by `prepare`, never
     /// readable. Usage grants are fixed at import and copied to every
@@ -33,6 +34,18 @@ interface hkdf {
     /// `hmac-sha2.import-key-raw`. Fails `error.not-permitted` if
     /// `options` grants nothing, per the package-wide options contract.
     import-ikm: async func(raw: list<u8>, options: derive-options) -> result<ikm, error>;
+
+    /// Mint input keying material from unwrapped bytes (see the
+    /// `wrapping` interface), subject to `import-ikm`'s contract: a KDF
+    /// secret can arrive under a wrapping key and parameterize
+    /// derivations without its bytes ever being observable. Like
+    /// `import-ikm`, this is not a format choice — the bytes are the
+    /// material. `input` is consumed.
+    ///
+    /// The grants come from `options` alone (the W3C Web Cryptography
+    /// API's `unwrapKey` model; its forced non-extractability on HKDF
+    /// base keys is structural here, as on `import-ikm`).
+    unwrap-ikm: async func(input: unwrap-input, options: derive-options) -> result<ikm, error>;
 }
 
 /// HKDF (RFC 5869) over the SHA-2 hash family: the extract-then-expand

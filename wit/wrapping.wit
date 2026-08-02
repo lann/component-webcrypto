@@ -13,12 +13,13 @@ package lann:webcrypto@0.1.0;
 ///   `cipher.cipher-key.wrap`, `key-wrap.kw-key.wrap`).
 /// - **Unwrap**: a wrapping-capable key decrypts wrapped bytes into an
 ///   `unwrap-input` (`aead.aead-key.unwrap` and siblings), and a minting
-///   interface's `unwrap-key` function mints a typed key from it
-///   (`aes-gcm.unwrap-key-raw`, `hmac-sha2.unwrap-key-jwk`, …).
+///   interface's unwrap function mints a typed resource from it — a key
+///   (`aes-gcm.unwrap-key-raw`, `hmac-sha2.unwrap-key-jwk`, …) or a KDF
+///   base secret (`hkdf.unwrap-ikm`, `pbkdf2.unwrap-password`).
 ///
 /// Each intermediate is named for the operation it feeds, as
 /// `derivation.derive-input` is: a `wrap-input` is the input to `wrap`,
-/// and an `unwrap-input` is the input to the `unwrap-key` mints — the
+/// and an `unwrap-input` is the input to the unwrap mints — the
 /// *output* of `unwrap`, never its argument (the wrapped bytes are).
 ///
 /// Security:
@@ -49,11 +50,14 @@ interface wrapping {
     ///
     /// Produced by a wrapping key's `unwrap` — for the authenticated
     /// wrapping kinds, only after the input's integrity verifies.
-    /// Consumed by one minting interface's `unwrap-key` function, which
-    /// declares how the bytes are read (raw, JWK, PKCS#8) the way the
-    /// per-format imports do; unwrap again to mint again.
+    /// Consumed by one unwrap mint, which declares how the bytes are
+    /// read (raw, JWK, PKCS#8) the way the per-format imports do;
+    /// unwrap again to mint again. The mint need not produce a key: the
+    /// KDF interfaces mint base secrets from it (`hkdf.unwrap-ikm`,
+    /// `pbkdf2.unwrap-password`), a strictly one-way door — no KDF
+    /// secret can produce a `wrap-input`.
     ///
-    /// No grants ride this resource: the minted key's usages and
+    /// No grants ride this resource: the minted resource's usages and
     /// extractability come from the mint's options alone (the W3C Web
     /// Cryptography API's `unwrapKey` model).
     resource unwrap-input;

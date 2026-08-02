@@ -16,6 +16,7 @@ package lann:webcrypto@0.1.0;
 interface pbkdf2 {
     use types.{error};
     use derivation.{derive-options};
+    use wrapping.{unwrap-input};
 
     /// A password: consumable only by `prepare`, never readable. Usage
     /// grants are fixed at import and copied to every input prepared from
@@ -34,6 +35,13 @@ interface pbkdf2 {
     /// `error.not-permitted` if `options` grants nothing, per the
     /// package-wide options contract (see `README.md`).
     import-password: async func(raw: list<u8>, options: derive-options) -> result<password, error>;
+
+    /// Mint a password from unwrapped bytes (see the `wrapping`
+    /// interface), subject to `import-password`'s contract. See
+    /// `hkdf.unwrap-ikm` for the model — the grants come from `options`
+    /// alone, and non-extractability stays structural. `input` is
+    /// consumed.
+    unwrap-password: async func(input: unwrap-input, options: derive-options) -> result<password, error>;
 }
 
 /// PBKDF2 (RFC 8018) over the SHA-2 hash family: password-based key
