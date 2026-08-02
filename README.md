@@ -156,6 +156,9 @@ just wpt-parity              # the WPT suites against the platform's own
                              #   crypto.subtle and through the jco round trip;
                              #   holds the round trip to the platform's pass set
                              #   (see js/componentize/wpt/README.md)
+just wpt-parity-firefox      # the same two legs in headless Firefox against
+                             #   that engine's own pinned loss set (needs
+                             #   Playwright Firefox; gates in CI)
 just wpt-web                 # serve the browser WPT parity page locally: the
                              #   same two legs run live in your browser
 just conformance             # the Wycheproof-derived conformance tests over the

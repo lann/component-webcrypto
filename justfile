@@ -20,6 +20,7 @@ jco-checks:
     @just _step test-jco-host
     @just _step test-node
     @just _step wpt-parity
+    @just _step _wpt-parity-firefox-gate
 
 # Everything the componentize CI job runs: the webcrypto-componentize JS
 # guest library's behavioral checks (the composed demo) and the WPT
@@ -264,6 +265,43 @@ update-wpt-parity: _wpt-parity-legs
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline.json \
         js/componentize/wpt/build/parity-roundtrip.json --update
+
+# Run the WPT parity gate in headless Firefox: the same two legs as
+# `just wpt-parity`, both executed in the browser (the round trip through
+# the same worker-loadable transpile the parity page uses), held to the
+# engine's own pinned loss set in js/componentize/wpt/parity/losses-firefox.js
+# — a loss set is a fact about one engine's baseline, so each engine
+# ratchets separately. The engine is Playwright's pinned Firefox build,
+# launched with Gecko's JSPI pref; install it once with
+# `cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`.
+wpt-parity-firefox: wpt-web-artifacts
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:firefox
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-firefox.json \
+        js/componentize/wpt/build/parity-roundtrip-firefox.json \
+        --losses losses-firefox.js
+
+# Re-record js/componentize/wpt/parity/losses-firefox.js from an actual
+# run, like update-wpt-parity.
+update-wpt-parity-firefox: wpt-web-artifacts
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:firefox
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-firefox.json \
+        js/componentize/wpt/build/parity-roundtrip-firefox.json \
+        --losses losses-firefox.js --update
+
+# Run the Firefox WPT parity gate when gating applies: always under GitHub
+# Actions, locally only with WPT_PARITY_FIREFOX=1 (skips with a notice
+# otherwise — the Playwright Firefox download is not a baseline local
+# dependency).
+_wpt-parity-firefox-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${WPT_PARITY_FIREFOX:-}" != "1" ]; then
+        echo "skipping the Firefox WPT parity gate (opt in with WPT_PARITY_FIREFOX=1; needs Playwright Firefox: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox)"
+        exit 0
+    fi
+    just wpt-parity-firefox
 
 # Produce both parity legs' results under js/componentize/wpt/build/:
 # componentize the ungated parity runner from the tree, transpile it with
