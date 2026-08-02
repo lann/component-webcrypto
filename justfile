@@ -346,8 +346,10 @@ _wpt-parity-chromium-gate:
 # Unlike the other legs this recipe does not build the page artifacts:
 # no componentize-js toolchain is published for darwin, so CI builds them
 # on ubuntu (`just wpt-web-artifacts`) and hands them to the macOS job.
+# No `timeout` wrapper either — macOS lacks it, and the adapter's own
+# launch/load/stall watchdogs bound the run.
 wpt-parity-webkit:
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:webkit
+    cd js/componentize/wpt/parity && npm run -s run:webkit
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline-webkit.json \
         js/componentize/wpt/build/parity-roundtrip-webkit.json \
@@ -357,7 +359,7 @@ wpt-parity-webkit:
 # run, like update-wpt-parity. Record from Playwright WebKit on macOS (the
 # CI job's engine); a Linux-port recording would pin the wrong backend.
 update-wpt-parity-webkit:
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:webkit
+    cd js/componentize/wpt/parity && npm run -s run:webkit
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline-webkit.json \
         js/componentize/wpt/build/parity-roundtrip-webkit.json \
