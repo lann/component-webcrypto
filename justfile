@@ -281,23 +281,28 @@ update-wpt-parity: _wpt-parity-legs
 # `cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`.
 wpt-parity-firefox: wpt-web-artifacts _wpt-parity-firefox-run
 
+# One browser engine's parity run + comparator: the shared body of the six
+# per-engine recipes (three engines x run/update), so the engines cannot
+# drift apart. `update` is "" or "--update". The run is bounded by
+# scripts/run-with-timeout.mjs, not GNU `timeout`: the WebKit leg runs on
+# macOS, which does not ship it, and Node (already required here) does the
+# same job portably.
+_wpt-parity-browser-run engine update="":
+    cd js/componentize/wpt/parity && \
+        node "{{justfile_directory()}}/scripts/run-with-timeout.mjs" 900 -- \
+        npm run -s run:{{engine}}
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-{{engine}}.json \
+        js/componentize/wpt/build/parity-roundtrip-{{engine}}.json \
+        --losses losses-{{engine}}.js {{update}}
+
 # The Firefox engine's run + comparator; the web artifacts are already
 # built (wpt-web-artifacts).
-_wpt-parity-firefox-run:
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:firefox
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-firefox.json \
-        js/componentize/wpt/build/parity-roundtrip-firefox.json \
-        --losses losses-firefox.js
+_wpt-parity-firefox-run: (_wpt-parity-browser-run "firefox")
 
 # Re-record js/componentize/wpt/parity/losses-firefox.js from an actual
 # run, like update-wpt-parity.
-update-wpt-parity-firefox: wpt-web-artifacts
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:firefox
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-firefox.json \
-        js/componentize/wpt/build/parity-roundtrip-firefox.json \
-        --losses losses-firefox.js --update
+update-wpt-parity-firefox: wpt-web-artifacts (_wpt-parity-browser-run "firefox" "--update")
 
 # Run the WPT parity gate in headless Chromium: like wpt-parity-firefox,
 # against Chromium's own pinned loss set in
@@ -308,21 +313,11 @@ wpt-parity-chromium: wpt-web-artifacts _wpt-parity-chromium-run
 
 # The Chromium engine's run + comparator; the web artifacts are already
 # built (wpt-web-artifacts).
-_wpt-parity-chromium-run:
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:chromium
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-chromium.json \
-        js/componentize/wpt/build/parity-roundtrip-chromium.json \
-        --losses losses-chromium.js
+_wpt-parity-chromium-run: (_wpt-parity-browser-run "chromium")
 
 # Re-record js/componentize/wpt/parity/losses-chromium.js from an actual
 # run, like update-wpt-parity.
-update-wpt-parity-chromium: wpt-web-artifacts
-    cd js/componentize/wpt/parity && timeout 900 npm run -s run:chromium
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-chromium.json \
-        js/componentize/wpt/build/parity-roundtrip-chromium.json \
-        --losses losses-chromium.js --update
+update-wpt-parity-chromium: wpt-web-artifacts (_wpt-parity-browser-run "chromium" "--update")
 
 # Run every applicable WPT parity gate, the engines in parallel over one
 # shared artifact build: Node always; Firefox and Chromium always under
@@ -382,24 +377,12 @@ _wpt-parity-node-legs:
 # Unlike the other legs this recipe does not build the page artifacts:
 # no componentize-js toolchain is published for darwin, so CI builds them
 # on ubuntu (`just wpt-web-artifacts`) and hands them to the macOS job.
-# No `timeout` wrapper either — macOS lacks it, and the adapter's own
-# launch/load/stall watchdogs bound the run.
-wpt-parity-webkit:
-    cd js/componentize/wpt/parity && npm run -s run:webkit
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-webkit.json \
-        js/componentize/wpt/build/parity-roundtrip-webkit.json \
-        --losses losses-webkit.js
+wpt-parity-webkit: (_wpt-parity-browser-run "webkit")
 
 # Re-record js/componentize/wpt/parity/losses-webkit.js from an actual
 # run, like update-wpt-parity. Record from Playwright WebKit on macOS (the
 # CI job's engine); a Linux-port recording would pin the wrong backend.
-update-wpt-parity-webkit:
-    cd js/componentize/wpt/parity && npm run -s run:webkit
-    node js/componentize/wpt/parity/compare.mjs \
-        js/componentize/wpt/build/parity-baseline-webkit.json \
-        js/componentize/wpt/build/parity-roundtrip-webkit.json \
-        --losses losses-webkit.js --update
+update-wpt-parity-webkit: (_wpt-parity-browser-run "webkit" "--update")
 
 # Build everything the browser WPT parity page (js/componentize/wpt/web/)
 # loads: the suite modules under build/, the web transpile of the parity
