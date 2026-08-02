@@ -109,12 +109,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: Cache Playwright browsers
+        # The browser downloads dominate the install step (~35s); the cache
+        # key follows the parity package's lockfile, which pins
+        # playwright-core and with it the browser builds. restore-keys lets
+        # a lockfile bump start from the previous browsers and download
+        # only what changed.
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('js/componentize/wpt/parity/package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Install Playwright browsers
         # The browser WPT parity gates' engines: Playwright's pinned builds
         # (Firefox launched with Gecko's JSPI pref; Chromium ships JSPI), so
         # the loss sets in losses-firefox.js and losses-chromium.js measure
-        # one engine each, everywhere.
-        run: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox chromium
+        # one engine each, everywhere. On a cache hit the install only
+        # verifies the browsers are present; --with-deps (an apt run) is
+        # needed only when the browsers were actually (re)downloaded.
+        run: |
+          cd js/componentize/wpt/parity
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright-core install firefox chromium
+          else
+            npx playwright-core install --with-deps firefox chromium
+          fi
 
       - name: Run the jco host checks
         run: just jco-checks
@@ -175,6 +196,14 @@ jobs:
         with:
           name: wpt-web-artifacts
           path: js/componentize/wpt
+
+      - name: Cache Playwright WebKit
+        # Same scheme as the jco job's browser cache (macOS cache path).
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('js/componentize/wpt/parity/package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
 
       - name: Install the parity package + Playwright WebKit
         run: |
