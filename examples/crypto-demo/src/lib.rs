@@ -57,6 +57,14 @@ fn aead_options(extractable: bool) -> lann_webcrypto_guest::bindings::aead::Aead
     options
 }
 
+fn kw_options(extractable: bool) -> lann_webcrypto_guest::bindings::key_wrap::KwKeyOptions {
+    let options = lann_webcrypto_guest::bindings::key_wrap::KwKeyOptions::new();
+    options.can_wrap(true);
+    options.can_unwrap(true);
+    options.extractable(extractable);
+    options
+}
+
 fn internal_nonce_options(
     extractable: bool,
 ) -> lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKeyOptions {
@@ -213,6 +221,9 @@ impl Guest for Component {
             ecdsa_verify_known_answer().await,
         )
         .await?;
+        check("aes-kw-known-answer", aes_kw_known_answer().await).await?;
+        check("aead-wrap-unwrap", aead_wrap_unwrap().await).await?;
+        check("wrap-gates", wrap_gates().await).await?;
         check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
         check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
         check("x25519-agreement", x25519_agreement().await).await?;
@@ -787,6 +798,178 @@ where
     let (result, fed) = futures::join!(op(rx), feed(tx, data, chunk));
     fed?;
     Ok(result)
+}
+
+// --- key-wrapping checks ---------------------------------------------------------
+
+/// RFC 3394 §4.1: wrap 128 bits of key data under a 128-bit KEK and match
+/// the wire format, then unwrap and mint the payload back and prove the
+/// minted key is the same material.
+async fn aes_kw_known_answer() -> Result<()> {
+    use lann_webcrypto_guest::bindings::{aes_gcm, aes_kw, hmac_sha2};
+    let kek_raw = unhex("000102030405060708090a0b0c0d0e0f");
+    let data_raw = unhex("00112233445566778899aabbccddeeff");
+    let expected = "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5";
+
+    let kek = aes_kw::import_key_raw(AesVariant::Aes128, kek_raw, kw_options(false))
+        .await
+        .context("aes-kw.import-key-raw")?;
+    ensure!(
+        kek.algorithm_name() == "AES-KW",
+        "kw-key.algorithm-name: got {}",
+        kek.algorithm_name()
+    );
+    ensure!(kek.algorithm_length() == 128);
+    ensure!(kek.can_wrap() && kek.can_unwrap());
+
+    // The payload enters the wrap path as an extractable key's material.
+    let payload = aes_gcm::import_key_raw(AesVariant::Aes128, data_raw.clone(), aead_options(true))
+        .await
+        .context("payload import")?;
+    let wrapped = kek
+        .wrap(
+            payload
+                .to_wrap_input_raw()
+                .await
+                .context("to-wrap-input-raw")?,
+        )
+        .await
+        .context("kw-key.wrap")?;
+    ensure!(
+        hex(&wrapped) == expected,
+        "RFC 3394 wire format: got {}",
+        hex(&wrapped)
+    );
+
+    // Tampering fails closed, indistinguishably from a malformed length.
+    let mut tampered = wrapped.clone();
+    tampered[0] ^= 1;
+    ensure!(
+        matches!(kek.unwrap(tampered).await, Err(Error::AuthenticationFailed)),
+        "tampered unwrap must fail authentication-failed"
+    );
+    ensure!(
+        matches!(
+            kek.unwrap(vec![0u8; 20]).await,
+            Err(Error::AuthenticationFailed)
+        ),
+        "out-of-domain unwrap must fail authentication-failed"
+    );
+
+    // Unwrap and mint as an HMAC key; its tag must match one minted from
+    // the same bytes directly.
+    let unwrapped = kek.unwrap(wrapped).await.context("kw-key.unwrap")?;
+    let minted = hmac_sha2::unwrap_key_raw(Sha2Variant::Sha256, unwrapped, mac_options(false))
+        .await
+        .context("hmac-sha2.unwrap-key-raw")?;
+    let direct = import_hmac_key(Sha2Variant::Sha256, data_raw, false)
+        .await
+        .context("direct import")?;
+    let msg = b"wrapped and direct keys must agree";
+    ensure!(
+        sign_chunked(&minted, msg, usize::MAX).await?
+            == sign_chunked(&direct, msg, usize::MAX).await?,
+        "minted key disagrees with the directly imported material"
+    );
+    Ok(())
+}
+
+/// AEAD wrapping: `wrap` is byte-identical to sealing the exported bytes,
+/// and a JWK-format wrap round-trips through `unwrap-key-jwk`.
+async fn aead_wrap_unwrap() -> Result<()> {
+    use lann_webcrypto_guest::bindings::{aes_gcm, hmac_sha2};
+    let kek = aes_gcm::generate_key(AesVariant::Aes256, aead_options(false))
+        .await
+        .context("kek generate")?;
+    let payload = import_hmac_key(Sha2Variant::Sha256, vec![0x42; 20], true)
+        .await
+        .context("payload import")?;
+    let nonce = vec![7u8; 12];
+
+    // Byte identity with seal over the exported bytes (raw format).
+    let wrapped = kek
+        .wrap(
+            nonce.clone(),
+            b"aad".to_vec(),
+            None,
+            payload.to_wrap_input_raw().await?,
+        )
+        .await
+        .context("aead-key.wrap")?;
+    let sealed = seal_chunked(
+        &kek,
+        &nonce,
+        b"aad",
+        &payload.export_key_raw().await?,
+        usize::MAX,
+    )
+    .await?
+    .context("seal comparison")?;
+    ensure!(wrapped == sealed, "wrap must equal seal over the export");
+
+    // JWK-format wrap round-trips through the unwrap mint.
+    let jwk_wrapped = kek
+        .wrap(
+            nonce.clone(),
+            Vec::new(),
+            None,
+            payload.to_wrap_input_jwk().await?,
+        )
+        .await?;
+    let input = kek
+        .unwrap(nonce.clone(), Vec::new(), None, jwk_wrapped)
+        .await
+        .context("aead-key.unwrap")?;
+    let minted = hmac_sha2::unwrap_key_jwk(Sha2Variant::Sha256, input, mac_options(false))
+        .await
+        .context("hmac-sha2.unwrap-key-jwk")?;
+    let msg = b"jwk round trip";
+    ensure!(
+        sign_chunked(&minted, msg, usize::MAX).await?
+            == sign_chunked(&payload, msg, usize::MAX).await?,
+        "JWK-wrapped key disagrees with the original"
+    );
+
+    // A tampered wrap fails closed.
+    let mut tampered = wrapped;
+    tampered[0] ^= 1;
+    ensure!(
+        matches!(
+            kek.unwrap(nonce, b"aad".to_vec(), None, tampered).await,
+            Err(Error::AuthenticationFailed)
+        ),
+        "tampered aead unwrap must fail authentication-failed"
+    );
+    Ok(())
+}
+
+/// The wrap gates: `to-wrap-input-*` sits behind the extractability gate,
+/// and the wrap grants refuse ungranted operations.
+async fn wrap_gates() -> Result<()> {
+    use lann_webcrypto_guest::bindings::aes_kw;
+    let sealed_key = import_hmac_key(Sha2Variant::Sha256, vec![9; 32], false).await?;
+    ensure!(
+        matches!(
+            sealed_key.to_wrap_input_raw().await,
+            Err(Error::NotExtractable)
+        ),
+        "to-wrap-input-raw on a non-extractable key must fail not-extractable"
+    );
+
+    let wrap_only_options = lann_webcrypto_guest::bindings::key_wrap::KwKeyOptions::new();
+    wrap_only_options.can_wrap(true);
+    let wrap_only = aes_kw::generate_key(AesVariant::Aes256, wrap_only_options)
+        .await
+        .context("wrap-only generate")?;
+    ensure!(wrap_only.can_wrap() && !wrap_only.can_unwrap());
+    ensure!(
+        matches!(
+            wrap_only.unwrap(vec![0u8; 24]).await,
+            Err(Error::NotPermitted(_))
+        ),
+        "unwrap on a wrap-only key must fail not-permitted"
+    );
+    Ok(())
 }
 
 /// `sign`, feeding `data` in `chunk`-byte pieces.

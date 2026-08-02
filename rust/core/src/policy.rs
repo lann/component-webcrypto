@@ -20,10 +20,14 @@ impl MacPolicy {
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.sign || self.verify)
     }
+
+    /// The granted usages under their W3C Web Cryptography API names.
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[(self.sign, "sign"), (self.verify, "verify")])
+    }
 }
 
-/// `cipher.cipher-key-options`. `wrap`/`unwrap` are vocabulary ahead of
-/// operations, as on [`AeadPolicy`].
+/// `cipher.cipher-key-options`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CipherPolicy {
     pub encrypt: bool,
@@ -38,10 +42,20 @@ impl CipherPolicy {
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.encrypt || self.decrypt || self.wrap || self.unwrap)
     }
+
+    /// The granted usages under their W3C Web Cryptography API names (the
+    /// unwrap-path JWK `key_ops` check's reference set).
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[
+            (self.encrypt, "encrypt"),
+            (self.decrypt, "decrypt"),
+            (self.wrap, "wrapKey"),
+            (self.unwrap, "unwrapKey"),
+        ])
+    }
 }
 
-/// `aead.aead-key-options`. `wrap`/`unwrap` are vocabulary ahead of
-/// operations: recorded and reported, nothing here consumes them yet.
+/// `aead.aead-key-options`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AeadPolicy {
     pub seal: bool,
@@ -55,6 +69,38 @@ impl AeadPolicy {
     /// The at-least-one-usage mint check (the options contract).
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.seal || self.open || self.wrap || self.unwrap)
+    }
+
+    /// The granted usages under their W3C Web Cryptography API names
+    /// (`seal` → `"encrypt"`, `open` → `"decrypt"`; the unwrap-path JWK
+    /// `key_ops` check's reference set).
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[
+            (self.seal, "encrypt"),
+            (self.open, "decrypt"),
+            (self.wrap, "wrapKey"),
+            (self.unwrap, "unwrapKey"),
+        ])
+    }
+}
+
+/// `key-wrap.kw-key-options`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KwPolicy {
+    pub wrap: bool,
+    pub unwrap: bool,
+    pub extractable: bool,
+}
+
+impl KwPolicy {
+    /// The at-least-one-usage mint check (the options contract).
+    pub fn check_useful(&self) -> Result<(), Error> {
+        useful(self.wrap || self.unwrap)
+    }
+
+    /// The granted usages under their W3C Web Cryptography API names.
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[(self.wrap, "wrapKey"), (self.unwrap, "unwrapKey")])
     }
 }
 
@@ -95,6 +141,11 @@ impl SigningPolicy {
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.sign)
     }
+
+    /// The granted usages under their W3C Web Cryptography API names.
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[(self.sign, "sign")])
+    }
 }
 
 /// `key-agreement.agreement-key-options`: the derive pair that flows to
@@ -112,6 +163,14 @@ impl AgreementPolicy {
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.derive_bits || self.derive_key)
     }
+
+    /// The granted usages under their W3C Web Cryptography API names.
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[
+            (self.derive_bits, "deriveBits"),
+            (self.derive_key, "deriveKey"),
+        ])
+    }
 }
 
 /// `derivation.derive-options`.
@@ -126,6 +185,14 @@ impl DerivePolicy {
     pub fn check_useful(&self) -> Result<(), Error> {
         useful(self.derive_bits || self.derive_key)
     }
+}
+
+/// Collect the granted usage names from `(granted, name)` pairs.
+fn granted(pairs: &[(bool, &'static str)]) -> Vec<&'static str> {
+    pairs
+        .iter()
+        .filter_map(|&(on, name)| on.then_some(name))
+        .collect()
 }
 
 /// The at-least-one-usage mint check: a key with no enabled usage fails at

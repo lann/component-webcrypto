@@ -18,3 +18,12 @@ pub async fn import_ikm(raw: impl Into<Vec<u8>>, options: DeriveOptions) -> Resu
         bindings::hkdf::import_ikm(raw.into(), options.lower()).await?,
     ))
 }
+
+/// Mint input keying material from unwrapped bytes, subject to
+/// [`import_ikm`]'s contract. Consumes the
+/// [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_ikm(input: crate::UnwrapInput, options: DeriveOptions) -> Result<Ikm, Error> {
+    Ok(Ikm::from_raw(
+        bindings::hkdf::unwrap_ikm(input.into_raw(), options.lower()).await?,
+    ))
+}

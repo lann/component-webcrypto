@@ -17,14 +17,15 @@ use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
 use lann_webcrypto_guest::bindings::key_agreement::{
     AgreementKeyOptions, PublicKey as AgreementPublicKey, SecretKey as AgreementSecretKey,
 };
+use lann_webcrypto_guest::bindings::key_wrap::{KwKey, KwKeyOptions};
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
 use lann_webcrypto_guest::bindings::pbkdf2::{self, Password};
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ed25519_sign, hmac_sha1,
-    hmac_sha2, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw, chacha20_poly1305, ed25519_sign,
+    hmac_sha1, hmac_sha2, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -54,6 +55,29 @@ pub fn internal_nonce_options(extractable: bool) -> InternalNonceKeyOptions {
     options.can_open(true);
     options.extractable(extractable);
     options
+}
+
+/// A `kw-key-options` granting both usages.
+pub fn kw_options(extractable: bool) -> KwKeyOptions {
+    let options = KwKeyOptions::new();
+    options.can_wrap(true);
+    options.can_unwrap(true);
+    options.extractable(extractable);
+    options
+}
+
+/// Import raw material as an AES-KW key with every usage granted.
+pub async fn import_kw_key(
+    variant: AesVariant,
+    raw: Vec<u8>,
+    extractable: bool,
+) -> Result<KwKey, Error> {
+    aes_kw::import_key_raw(variant, raw, kw_options(extractable)).await
+}
+
+/// Generate an AES-KW key with every usage granted.
+pub async fn generate_kw_key(variant: AesVariant, extractable: bool) -> Result<KwKey, Error> {
+    aes_kw::generate_key(variant, kw_options(extractable)).await
 }
 
 /// A `cipher-key-options` granting every usage.

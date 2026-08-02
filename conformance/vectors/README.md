@@ -28,6 +28,10 @@ commit
   parameter space, and the invalid vectors (`SizeTooLarge`) map onto the
   RFC 5869 output bound, reported as `error.other`.
 - `aes_gcm_test.json` — AES-GCM AEAD vectors.
+- `aes_wrap_test.json` — AES-KW (RFC 3394) key-wrapping vectors for the
+  `key-wrap` kind. Valid vectors pin the wrapped wire format in both
+  directions; invalid and `acceptable` ones map onto the WIT's domains
+  (see the translation policy below).
 - `aes_cbc_pkcs5_test.json` — AES-CBC vectors for the unauthenticated
   `cipher` kind (PKCS5 and PKCS7 padding coincide for AES's 16-byte
   blocks). Valid vectors round-trip both ways; invalid ones (bad or
@@ -111,6 +115,10 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | Internal-nonce AEAD (same AEAD files, `aes-gcm-internal-nonce`/`*-internal-nonce` cases), keySize 256, variant ivSize, `valid` | `open(iv ‖ ct ‖ tag)` recovers `msg` — the only deterministic direction; a fresh `seal` is additionally round-tripped for self-consistency (its nonce is random, so only shape and reopening are checkable). |
 | Internal-nonce AEAD, anything else (`invalid` result, or ivSize ≠ the algorithm's) | `open(iv ‖ ct ‖ tag)` fails `authentication-failed` — the nonce is carried in-band, so there is no invalid-nonce case: a wrong-length IV just misparses as a malformed sealed message. |
 | HMAC, truncated tagSize | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
+| AES-KW, keySize 192 | **Skipped** — as GCM's keySize-192 rule (declined at minting; probed). |
+| AES-KW, `valid` | `kw-key.wrap` (over a `to-wrap-input-raw` of the key data) produces exactly `ct`; `unwrap` + `hmac-sha2.unwrap-key-raw` recovers `msg`. No chunking schedules: wrapping trades in `list<u8>`. |
+| AES-KW, `acceptable` (8-byte key data, RFC 3394's n = 1) | Outside the WIT's domains: `wrap` fails `invalid-key`, and the 16-byte wrapped form fails `unwrap` with `authentication-failed` (under the 24-byte minimum). |
+| AES-KW, `invalid` | A `msg` outside the wrap domain fails `wrap` with `invalid-key` (an in-domain `msg` on a modified-`ct` vector wraps successfully and must not reproduce the tampered bytes); a present `ct` fails `unwrap` with `authentication-failed` — bad ICVs and malformed lengths are deliberately indistinguishable. |
 | HMAC, full-length tagSize, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
 | HMAC, full-length tagSize, `invalid` | `verify(tag)` fails with `authentication-failed`. |
 | SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |

@@ -14,8 +14,9 @@ use std::cell::Cell;
 
 use lann_webcrypto_core::{
     served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, CipherKeyMaterial, CipherMode,
-    CipherPolicy, InternalNoncePolicy, MacKeyMaterial, MacPolicy, SigPublic, SigningKeyMaterial,
-    SigningPolicy, HMAC_NAME,
+    CipherPolicy, InternalNoncePolicy, KwKeyMaterial, KwPolicy, MacKeyMaterial, MacPolicy,
+    SigPublic, SigningKeyMaterial, SigningPolicy, UnwrapInputMaterial, WrapFormat,
+    WrapInputMaterial, HMAC_NAME,
 };
 
 use crate::exports::lann::webcrypto::aead::{
@@ -31,6 +32,7 @@ use crate::exports::lann::webcrypto::aes_cbc::Guest as AesCbcGuest;
 use crate::exports::lann::webcrypto::aes_ctr::Guest as AesCtrGuest;
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
 use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
+use crate::exports::lann::webcrypto::aes_kw::Guest as AesKwGuest;
 use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
 use crate::exports::lann::webcrypto::chacha20_poly1305::Guest as ChaChaPoly1305Guest;
 use crate::exports::lann::webcrypto::cipher::{
@@ -53,6 +55,9 @@ use crate::exports::lann::webcrypto::key_agreement::{
     self as key_agreement_iface, Guest as KeyAgreementGuest, GuestAgreementKeyOptions,
     GuestPublicKey, GuestSecretKey,
 };
+use crate::exports::lann::webcrypto::key_wrap::{
+    self as key_wrap_iface, Guest as KeyWrapGuest, GuestKwKey, GuestKwKeyOptions,
+};
 use crate::exports::lann::webcrypto::mac::{
     self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
 };
@@ -66,6 +71,9 @@ use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
     GuestVerifyingKey,
+};
+use crate::exports::lann::webcrypto::wrapping::{
+    self as wrapping_iface, Guest as WrappingGuest, GuestUnwrapInput, GuestWrapInput,
 };
 use crate::exports::lann::webcrypto::x25519::Guest as X25519Guest;
 use crate::exports::lann::webcrypto::xchacha20_poly1305::Guest as XChaChaPoly1305Guest;
@@ -131,6 +139,241 @@ fn stream_of(bytes: Vec<u8>) -> wit_bindgen::StreamReader<u8> {
         drop(tx);
     });
     rx
+}
+
+// --- wrapping (the provider-held intermediates) ----------------------------------
+
+impl WrappingGuest for Component {
+    type WrapInput = WrapInput;
+    type UnwrapInput = UnwrapInput;
+}
+
+/// An exported `wrapping.wrap-input`. The material sits in a `Cell` so the
+/// consuming operation can move it out through its owned handle (wasm is
+/// single-threaded); the handle itself is destroyed with the call, on
+/// failure as on success.
+pub struct WrapInput {
+    material: Cell<Option<WrapInputMaterial>>,
+}
+
+impl WrapInput {
+    fn handle(
+        material: Result<WrapInputMaterial, lann_webcrypto_core::Error>,
+    ) -> Result<wrapping_iface::WrapInput, Error> {
+        Ok(wrapping_iface::WrapInput::new(Self {
+            material: Cell::new(Some(material?)),
+        }))
+    }
+
+    /// Move the material out of an owned handle: each intermediate is
+    /// consumed by exactly one operation, so the cell is always full.
+    fn take(handle: wrapping_iface::WrapInput) -> WrapInputMaterial {
+        handle
+            .get::<Self>()
+            .material
+            .take()
+            .expect("an owned wrap-input handle is consumed exactly once")
+    }
+}
+
+impl GuestWrapInput for WrapInput {}
+
+/// An exported `wrapping.unwrap-input`. See [`WrapInput`] for the cell.
+pub struct UnwrapInput {
+    material: Cell<Option<UnwrapInputMaterial>>,
+}
+
+impl UnwrapInput {
+    fn handle(
+        material: Result<UnwrapInputMaterial, lann_webcrypto_core::Error>,
+    ) -> Result<wrapping_iface::UnwrapInput, Error> {
+        Ok(wrapping_iface::UnwrapInput::new(Self {
+            material: Cell::new(Some(material?)),
+        }))
+    }
+
+    /// Move the material out of an owned handle. See [`WrapInput::take`].
+    fn take(handle: wrapping_iface::UnwrapInput) -> UnwrapInputMaterial {
+        handle
+            .get::<Self>()
+            .material
+            .take()
+            .expect("an owned unwrap-input handle is consumed exactly once")
+    }
+}
+
+impl GuestUnwrapInput for UnwrapInput {}
+
+// --- key-wrap ----------------------------------------------------------------
+
+impl KeyWrapGuest for Component {
+    type KwKey = KwKey;
+    type KwKeyOptions = KwKeyOptions;
+}
+
+/// An exported `kw-key-options`. See [`MacKeyOptions`].
+pub struct KwKeyOptions {
+    policy: Cell<KwPolicy>,
+}
+
+impl GuestKwKeyOptions for KwKeyOptions {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(KwPolicy::default()),
+        }
+    }
+
+    fn can_wrap(&self, allowed: bool) {
+        self.policy.set(KwPolicy {
+            wrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn can_unwrap(&self, allowed: bool) {
+        self.policy.set(KwPolicy {
+            unwrap: allowed,
+            ..self.policy.get()
+        });
+    }
+
+    fn extractable(&self, allowed: bool) {
+        self.policy.set(KwPolicy {
+            extractable: allowed,
+            ..self.policy.get()
+        });
+    }
+}
+
+/// An exported `key-wrap.kw-key`: the AES-KW key-encryption key.
+pub struct KwKey {
+    material: KwKeyMaterial,
+}
+
+impl GuestKwKey for KwKey {
+    async fn wrap(&self, input: wrapping_iface::WrapInput) -> Result<Vec<u8>, Error> {
+        Ok(self.material.wrap(WrapInput::take(input))?)
+    }
+
+    async fn unwrap(&self, wrapped: Vec<u8>) -> Result<wrapping_iface::UnwrapInput, Error> {
+        UnwrapInput::handle(self.material.unwrap(&wrapped))
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.material.name().to_string()
+    }
+
+    fn algorithm_length(&self) -> u32 {
+        self.material.length_bits()
+    }
+
+    fn extractable(&self) -> bool {
+        self.material.extractable()
+    }
+
+    fn can_wrap(&self) -> bool {
+        self.material.can_wrap()
+    }
+
+    fn can_unwrap(&self) -> bool {
+        self.material.can_unwrap()
+    }
+
+    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export()
+                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
+        )
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
+    }
+
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.material.export()?)
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        Ok(self.material.export_jwk()?)
+    }
+}
+
+// --- aes-kw (key minting) --------------------------------------------------------
+
+impl AesKwGuest for Component {
+    async fn import_key_raw(
+        variant: AesVariant,
+        raw: Vec<u8>,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material = KwKeyMaterial::import(variant.into(), raw, policy)?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
+
+    async fn import_key_jwk(
+        variant: AesVariant,
+        jwk: String,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material = KwKeyMaterial::import_jwk(variant.into(), &jwk, policy)?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
+
+    async fn generate_key(
+        variant: AesVariant,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material = rng_infallible(KwKeyMaterial::generate(variant.into(), policy))?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
+
+    async fn derive_key(
+        variant: AesVariant,
+        input: derivation::DeriveInputBorrow<'_>,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::derive_kw_key(
+            variant.into(),
+            &input.get::<DeriveInput>().material,
+            policy,
+        )?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
+
+    async fn unwrap_key_raw(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_kw_key(variant.into(), UnwrapInput::take(input), policy)?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
+
+    async fn unwrap_key_jwk(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: key_wrap_iface::KwKeyOptions,
+    ) -> Result<key_wrap_iface::KwKey, Error> {
+        let policy = options.get::<KwKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_kw_key_jwk(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(key_wrap_iface::KwKey::new(KwKey { material }))
+    }
 }
 
 // --- mac ---------------------------------------------------------------------
@@ -224,6 +467,22 @@ impl GuestMacKey for MacKey {
 
     async fn export_key_jwk(&self) -> Result<String, Error> {
         Ok(self.material.export_jwk()?)
+    }
+
+    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export()
+                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
+        )
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
     }
 }
 
@@ -347,6 +606,47 @@ impl GuestAeadKey for AeadKey {
 
     fn can_unwrap(&self) -> bool {
         self.material.can_unwrap()
+    }
+
+    async fn wrap(
+        &self,
+        nonce: Vec<u8>,
+        aad: Vec<u8>,
+        tag_size: Option<u8>,
+        input: wrapping_iface::WrapInput,
+    ) -> Result<Vec<u8>, Error> {
+        Ok(self
+            .material
+            .wrap(&nonce, &aad, tag_size, WrapInput::take(input))?)
+    }
+
+    async fn unwrap(
+        &self,
+        nonce: Vec<u8>,
+        aad: Vec<u8>,
+        tag_size: Option<u8>,
+        wrapped: Vec<u8>,
+    ) -> Result<wrapping_iface::UnwrapInput, Error> {
+        UnwrapInput::handle(
+            self.material
+                .unwrap_wrapped(&nonce, &aad, tag_size, &wrapped),
+        )
+    }
+
+    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export()
+                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
+        )
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
     }
 
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
@@ -474,6 +774,31 @@ impl HmacSha2Guest for Component {
         )?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
+
+    async fn unwrap_key_raw(
+        variant: Sha2Variant,
+        input: wrapping_iface::UnwrapInput,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_mac_key(variant.into(), UnwrapInput::take(input), policy)?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn unwrap_key_jwk(
+        variant: Sha2Variant,
+        input: wrapping_iface::UnwrapInput,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_mac_key_jwk(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
 }
 
 impl HmacSha1Guest for Component {
@@ -515,6 +840,25 @@ impl HmacSha1Guest for Component {
             length,
             policy,
         )?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn unwrap_key_raw(
+        input: wrapping_iface::UnwrapInput,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_mac_key_sha1(UnwrapInput::take(input), policy)?;
+        Ok(mac::MacKey::new(MacKey { material }))
+    }
+
+    async fn unwrap_key_jwk(
+        input: wrapping_iface::UnwrapInput,
+        options: mac::MacKeyOptions,
+    ) -> Result<mac::MacKey, Error> {
+        let policy = options.get::<MacKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_mac_key_jwk_sha1(UnwrapInput::take(input), policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 }
@@ -627,6 +971,15 @@ impl HkdfGuest for Component {
         let material = lann_webcrypto_core::IkmMaterial::import(raw, policy)?;
         Ok(hkdf_iface::Ikm::new(Ikm { material }))
     }
+
+    async fn unwrap_ikm(
+        input: wrapping_iface::UnwrapInput,
+        options: derivation::DeriveOptions,
+    ) -> Result<hkdf_iface::Ikm, Error> {
+        let policy = options.get::<DeriveOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_ikm(UnwrapInput::take(input), policy)?;
+        Ok(hkdf_iface::Ikm::new(Ikm { material }))
+    }
 }
 
 impl HkdfSha2Guest for Component {
@@ -685,6 +1038,15 @@ impl Pbkdf2Guest for Component {
     ) -> Result<pbkdf2_iface::Password, Error> {
         let policy = options.get::<DeriveOptions>().policy.get();
         let material = lann_webcrypto_core::PasswordMaterial::import(raw, policy)?;
+        Ok(pbkdf2_iface::Password::new(Password { material }))
+    }
+
+    async fn unwrap_password(
+        input: wrapping_iface::UnwrapInput,
+        options: derivation::DeriveOptions,
+    ) -> Result<pbkdf2_iface::Password, Error> {
+        let policy = options.get::<DeriveOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_password(UnwrapInput::take(input), policy)?;
         Ok(pbkdf2_iface::Password::new(Password { material }))
     }
 }
@@ -827,6 +1189,22 @@ impl GuestSecretKey for AgreementSecretKey {
     async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export_pkcs8()?)
     }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
+    }
+
+    async fn to_wrap_input_pkcs8(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_pkcs8()
+                .map(|der| WrapInputMaterial::new(WrapFormat::Pkcs8, der)),
+        )
+    }
 }
 
 impl X25519Guest for Component {
@@ -893,6 +1271,30 @@ impl X25519Guest for Component {
             key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
         ))
     }
+
+    async fn unwrap_secret_key_jwk(
+        input: wrapping_iface::UnwrapInput,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_x25519_secret_key_jwk(UnwrapInput::take(input), policy)?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+
+    async fn unwrap_secret_key_pkcs8(
+        input: wrapping_iface::UnwrapInput,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_x25519_secret_key_pkcs8(UnwrapInput::take(input), policy)?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
 }
 
 // --- aes-gcm (key minting) -------------------------------------------------------
@@ -936,6 +1338,34 @@ impl AesGcmGuest for Component {
         let material = lann_webcrypto_core::derive_aes_gcm_key(
             &input.get::<DeriveInput>().material,
             variant.into(),
+            policy,
+        )?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn unwrap_key_raw(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_aes_gcm_key(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn unwrap_key_jwk(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_aes_gcm_key_jwk(
+            variant.into(),
+            UnwrapInput::take(input),
             policy,
         )?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
@@ -1064,6 +1494,42 @@ impl GuestCipherKey for CipherKey {
         self.material.policy().unwrap
     }
 
+    async fn wrap(
+        &self,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        input: wrapping_iface::WrapInput,
+    ) -> Result<Vec<u8>, Error> {
+        Ok(self
+            .material
+            .wrap(&iv, counter_length, WrapInput::take(input))?)
+    }
+
+    async fn unwrap(
+        &self,
+        iv: Vec<u8>,
+        counter_length: Option<u8>,
+        wrapped: Vec<u8>,
+    ) -> Result<wrapping_iface::UnwrapInput, Error> {
+        UnwrapInput::handle(self.material.unwrap_wrapped(&iv, counter_length, &wrapped))
+    }
+
+    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export()
+                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
+        )
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
+    }
+
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -1124,6 +1590,36 @@ macro_rules! cipher_minting {
                 )?;
                 Ok(ExportedCipherKey::new(CipherKey { material }))
             }
+
+            async fn unwrap_key_raw(
+                variant: AesVariant,
+                input: wrapping_iface::UnwrapInput,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material = lann_webcrypto_core::unwrap_cipher_key(
+                    $mode,
+                    variant.into(),
+                    UnwrapInput::take(input),
+                    policy,
+                )?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
+
+            async fn unwrap_key_jwk(
+                variant: AesVariant,
+                input: wrapping_iface::UnwrapInput,
+                options: ExportedCipherKeyOptions,
+            ) -> Result<ExportedCipherKey, Error> {
+                let policy = options.get::<CipherKeyOptions>().policy.get();
+                let material = lann_webcrypto_core::unwrap_cipher_key_jwk(
+                    $mode,
+                    variant.into(),
+                    UnwrapInput::take(input),
+                    policy,
+                )?;
+                Ok(ExportedCipherKey::new(CipherKey { material }))
+            }
         }
     };
 }
@@ -1157,6 +1653,25 @@ impl ChaChaPoly1305Guest for Component {
         let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(policy))?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
+
+    async fn unwrap_key_raw(
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_chacha_key(UnwrapInput::take(input), policy)?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn unwrap_key_jwk(
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_chacha_key_jwk(UnwrapInput::take(input), policy)?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
 }
 
 impl XChaChaPoly1305Guest for Component {
@@ -1172,6 +1687,15 @@ impl XChaChaPoly1305Guest for Component {
     async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
         let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy))?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
+    async fn unwrap_key_raw(
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_xchacha_key(UnwrapInput::take(input), policy)?;
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 }
@@ -1287,6 +1811,22 @@ impl GuestInternalNonceKey for InternalNonceKey {
         self.material.can_open()
     }
 
+    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export()
+                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
+        )
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
+    }
+
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export()?)
     }
@@ -1336,6 +1876,38 @@ impl AesGcmInternalNonceGuest for Component {
             material,
         )))
     }
+
+    async fn unwrap_key_raw(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedInternalNonceKeyOptions,
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_aes_gcm_internal_key(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
+    }
+
+    async fn unwrap_key_jwk(
+        variant: AesVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedInternalNonceKeyOptions,
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_aes_gcm_internal_key_jwk(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
+    }
 }
 
 // --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
@@ -1357,6 +1929,18 @@ impl XChachaInternalNonceGuest for Component {
     ) -> Result<ExportedInternalNonceKey, Error> {
         let policy = options.get::<InternalNonceKeyOptions>().policy.get();
         let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy.into()))?;
+        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
+            material,
+        )))
+    }
+
+    async fn unwrap_key_raw(
+        input: wrapping_iface::UnwrapInput,
+        options: ExportedInternalNonceKeyOptions,
+    ) -> Result<ExportedInternalNonceKey, Error> {
+        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_xchacha_internal_key(UnwrapInput::take(input), policy)?;
         Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
             material,
         )))
@@ -1483,6 +2067,22 @@ impl GuestSigningKey for SigningKey {
     async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
         Ok(self.material.export_pkcs8()?)
     }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_jwk()
+                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
+        )
+    }
+
+    async fn to_wrap_input_pkcs8(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        WrapInput::handle(
+            self.material
+                .export_pkcs8()
+                .map(|der| WrapInputMaterial::new(WrapFormat::Pkcs8, der)),
+        )
+    }
 }
 
 // --- ed25519 (key minting) -----------------------------------------------------
@@ -1536,6 +2136,28 @@ impl Ed25519SignGuest for Component {
     ) -> Result<signature_iface::SigningKey, Error> {
         let policy = options.get::<SigningKeyOptions>().policy.get();
         let material = SigningKeyMaterial::import_ed25519_jwk(&jwk, policy)?;
+        Ok(signature_iface::SigningKey::new(SigningKey { material }))
+    }
+
+    async fn unwrap_signing_key_pkcs8(
+        input: wrapping_iface::UnwrapInput,
+        options: signature_iface::SigningKeyOptions,
+    ) -> Result<signature_iface::SigningKey, Error> {
+        let policy = options.get::<SigningKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_ed25519_signing_key_pkcs8(
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(signature_iface::SigningKey::new(SigningKey { material }))
+    }
+
+    async fn unwrap_signing_key_jwk(
+        input: wrapping_iface::UnwrapInput,
+        options: signature_iface::SigningKeyOptions,
+    ) -> Result<signature_iface::SigningKey, Error> {
+        let policy = options.get::<SigningKeyOptions>().policy.get();
+        let material =
+            lann_webcrypto_core::unwrap_ed25519_signing_key_jwk(UnwrapInput::take(input), policy)?;
         Ok(signature_iface::SigningKey::new(SigningKey { material }))
     }
 }

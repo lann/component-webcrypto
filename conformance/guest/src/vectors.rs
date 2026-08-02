@@ -3,14 +3,15 @@
 
 use crate::mint::{
     import_cbc_key, import_chacha_key, import_hmac_key, import_hmac_sha1_key, import_ikm,
-    import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_password,
-    import_x25519_public_key, import_x25519_secret_key,
+    import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_kw_key,
+    import_password, import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
+    mac_options,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, CbcCase, HkdfAlg, HkdfCase, HmacAlg, HmacCase,
-    InternalNonceAlg, InternalNonceCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase,
-    SpeccheckCase, X25519Case,
+    InternalNonceAlg, InternalNonceCase, KwCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg,
+    SigCase, SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
     ci_decrypt, ci_encrypt, compute, in_open, in_seal, open, seal, sig_verify, sign, verify,
@@ -401,4 +402,76 @@ pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
             "verify(sig) succeeded",
         )
     }
+}
+
+/// Run one AES-KW vector: both directions, list-based (no schedules).
+///
+/// The wrap direction routes the vector's key data through an extractable
+/// HMAC import and `to-wrap-input-raw` — the only door into the wrap path,
+/// by design. The unwrap direction mints the recovered data back out
+/// through `hmac-sha2.unwrap-key-raw` and compares the export.
+pub async fn run_kw_case(case: &KwCase) -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::hmac_sha2;
+
+    let kek = import_kw_key(aes_variant(case.key_bits)?, case.key.clone(), false)
+        .await
+        .map_err(|e| describe("aes-kw import-key-raw", &e))?;
+
+    // Wrap direction: possible only for a non-empty msg (the wrap-input
+    // enters as an extractable key's material, and empty material has no
+    // importable form).
+    if !case.msg.is_empty() {
+        let payload = import_hmac_key(Sha2Variant::Sha256, case.msg.clone(), true)
+            .await
+            .map_err(|e| describe("payload import", &e))?;
+        let input = payload
+            .to_wrap_input_raw()
+            .await
+            .map_err(|e| describe("to-wrap-input-raw", &e))?;
+        let wrapped = kek.wrap(input).await;
+        let in_domain = case.msg.len() >= 16 && case.msg.len().is_multiple_of(8);
+        if case.valid {
+            let wrapped = wrapped.map_err(|e| describe("kw-key.wrap", &e))?;
+            expect_bytes(&wrapped, &case.ct, "wrapped bytes")?;
+        } else if !in_domain {
+            expect_err(
+                "wrap outside the input domain",
+                ErrKind::InvalidKey,
+                wrapped,
+                "wrapped material outside the RFC 3394 domain",
+            )?;
+        } else {
+            // An in-domain msg on a rejection vector (a modified-ct case):
+            // wrapping it succeeds and must NOT reproduce the vector's
+            // tampered bytes.
+            let wrapped = wrapped.map_err(|e| describe("kw-key.wrap", &e))?;
+            if wrapped == case.ct {
+                return Err("wrap reproduced a wrapped form upstream marks invalid".into());
+            }
+        }
+    }
+
+    // Unwrap direction: possible only for a non-empty ct.
+    if !case.ct.is_empty() {
+        let unwrapped = kek.unwrap(case.ct.clone()).await;
+        if case.valid {
+            let input = unwrapped.map_err(|e| describe("kw-key.unwrap", &e))?;
+            let minted = hmac_sha2::unwrap_key_raw(Sha2Variant::Sha256, input, mac_options(true))
+                .await
+                .map_err(|e| describe("hmac-sha2.unwrap-key-raw", &e))?;
+            let recovered = minted
+                .export_key_raw()
+                .await
+                .map_err(|e| describe("recovered-material export", &e))?;
+            expect_bytes(&recovered, &case.msg, "unwrapped key data")?;
+        } else {
+            expect_err(
+                "unwrap of an invalid wrapped form",
+                ErrKind::AuthenticationFailed,
+                unwrapped,
+                "unwrapped a wrapped form upstream marks invalid",
+            )?;
+        }
+    }
+    Ok(())
 }

@@ -63,3 +63,29 @@ pub async fn derive_key(
         bindings::hmac_sha2::derive_key(variant, input.as_raw(), length, options.lower()).await?,
     ))
 }
+
+/// Mint an HMAC key over the declared SHA-2 variant from unwrapped key
+/// material read as raw bytes. Consumes the
+/// [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_key_raw(
+    variant: Sha2Variant,
+    input: crate::UnwrapInput,
+    options: MacKeyOptions,
+) -> Result<Mac, Error> {
+    Ok(Mac::from_raw(
+        bindings::hmac_sha2::unwrap_key_raw(variant, input.into_raw(), options.lower()).await?,
+    ))
+}
+
+/// Mint an HMAC key from unwrapped key material read as an `oct` JWK,
+/// with the unwrap-path `use`/`key_ops` checks. Consumes the
+/// [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_key_jwk(
+    variant: Sha2Variant,
+    input: crate::UnwrapInput,
+    options: MacKeyOptions,
+) -> Result<Mac, Error> {
+    Ok(Mac::from_raw(
+        bindings::hmac_sha2::unwrap_key_jwk(variant, input.into_raw(), options.lower()).await?,
+    ))
+}

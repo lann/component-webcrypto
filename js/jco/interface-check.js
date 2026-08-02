@@ -29,14 +29,18 @@ import {
   Digest,
   Ikm,
   InternalNonceKey,
+  KwKey,
   MacKey,
   Password,
   SigningKey,
+  UnwrapInput,
   VerifyingKey,
+  WrapInput,
   aesCbc,
   aesCtr,
   aesGcm,
   aesGcmInternalNonce,
+  aesKw,
   bytes,
   chacha20Poly1305,
   ecdsaSign,
@@ -46,6 +50,7 @@ import {
   hkdf,
   hkdfSha1,
   hkdfSha2,
+  keyWrap,
   pbkdf2,
   pbkdf2Sha1,
   pbkdf2Sha2,
@@ -53,6 +58,7 @@ import {
   hmacSha2,
   sha2,
   sha1Checked,
+  wrapping,
   x25519,
   xchacha20Poly1305,
   xchacha20Poly1305InternalNonce,
@@ -67,6 +73,8 @@ import {
 /** @import * as Hkdf from "./generated/interfaces/lann-webcrypto-hkdf.js" */
 /** @import * as Pbkdf2 from "./generated/interfaces/lann-webcrypto-pbkdf2.js" */
 /** @import * as KeyAgreement from "./generated/interfaces/lann-webcrypto-key-agreement.js" */
+/** @import * as KeyWrap from "./generated/interfaces/lann-webcrypto-key-wrap.js" */
+/** @import * as Wrapping from "./generated/interfaces/lann-webcrypto-wrapping.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
 //
@@ -136,6 +144,27 @@ const keyAgreementServesAgreementPublicKey = (key) => key;
 
 /** @type {(key: AgreementSecretKey) => KeyAgreement.SecretKey} */
 const agreementSecretKeyServesKeyAgreement = (key) => key;
+
+/**
+ * Both directions, like `derive-input`: `wrap-input` and `unwrap-input`
+ * appear as *parameters* of other interfaces' functions (`wrap` and the
+ * unwrap mints), so the generated instances must be assignable to this
+ * host's classes too.
+ * @type {(input: WrapInput) => Wrapping.WrapInput}
+ */
+const wrapInputServesWrapping = (input) => input;
+
+/** @type {(input: Wrapping.WrapInput) => WrapInput} */
+const wrappingServesWrapInput = (input) => input;
+
+/** @type {(input: UnwrapInput) => Wrapping.UnwrapInput} */
+const unwrapInputServesWrapping = (input) => input;
+
+/** @type {(input: Wrapping.UnwrapInput) => UnwrapInput} */
+const wrappingServesUnwrapInput = (input) => input;
+
+/** @type {(key: KwKey) => KeyWrap.KwKey} */
+const kwKeyServesKeyWrap = (key) => key;
 
 // --- minting and utility interfaces ----------------------------------------
 
@@ -218,6 +247,23 @@ const ecdsaSignInterface = ecdsaSign;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
 const x25519Interface = x25519;
 
+/**
+ * `Omit` of the token-constructor resource classes, like `hkdfInterface`:
+ * the instance assertions above carry them.
+ * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-wrapping.js"), "WrapInput" | "UnwrapInput">}
+ */
+const wrappingInterface = wrapping;
+
+/**
+ * See `wrappingInterface`; `KwKeyOptions` has a public constructor, so
+ * only `KwKey` is carried by its instance assertion.
+ * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-key-wrap.js"), "KwKey">}
+ */
+const keyWrapInterface = keyWrap;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-kw.js")} */
+const aesKwInterface = aesKw;
+
 export const checked = {
   macKeyServesMac,
   aeadKeyServesAead,
@@ -238,6 +284,14 @@ export const checked = {
   agreementPublicKeyServesKeyAgreement,
   keyAgreementServesAgreementPublicKey,
   agreementSecretKeyServesKeyAgreement,
+  wrapInputServesWrapping,
+  wrappingServesWrapInput,
+  unwrapInputServesWrapping,
+  wrappingServesUnwrapInput,
+  kwKeyServesKeyWrap,
+  wrappingInterface,
+  keyWrapInterface,
+  aesKwInterface,
   hmacSha2Interface,
   sha2Interface,
   bytesInterface,

@@ -348,6 +348,38 @@ minted_resources! {
         policy: lann_webcrypto_core::SigningPolicy,
     }
 
+    /// A `kw-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct KwKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::KwPolicy,
+    }
+
+    /// Backing type for the `key-wrap.kw-key` resource: the AES-KW
+    /// key-encryption key's material.
+    #[derive(Debug)]
+    pub struct KwKey {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::KwKeyMaterial,
+    }
+
+    /// Backing type for the `wrapping.wrap-input` resource: one key's
+    /// serialized material awaiting encryption under a wrapping key,
+    /// consumed by the wrap operations.
+    #[derive(Debug)]
+    pub struct WrapInput {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::WrapInputMaterial,
+    }
+
+    /// Backing type for the `wrapping.unwrap-input` resource: decrypted
+    /// key material awaiting a typed mint, consumed by the unwrap mints.
+    #[derive(Debug)]
+    pub struct UnwrapInput {
+        #[payload(retains = byte_len)]
+        material: lann_webcrypto_core::UnwrapInputMaterial,
+    }
+
     /// A `derive-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct DeriveOptions {
@@ -577,6 +609,9 @@ where
     bindings::webcrypto::bytes::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::mac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::wrapping::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::key_wrap::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::aes_kw::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
         linker,
         T::webcrypto,

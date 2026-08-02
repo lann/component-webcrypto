@@ -22,3 +22,14 @@ pub async fn import_password(
         bindings::pbkdf2::import_password(raw.into(), options.lower()).await?,
     ))
 }
+
+/// Mint a password from unwrapped bytes, subject to [`import_password`]'s
+/// contract. Consumes the [`UnwrapInput`](crate::UnwrapInput).
+pub async fn unwrap_password(
+    input: crate::UnwrapInput,
+    options: DeriveOptions,
+) -> Result<Password, Error> {
+    Ok(Password::from_raw(
+        bindings::pbkdf2::unwrap_password(input.into_raw(), options.lower()).await?,
+    ))
+}

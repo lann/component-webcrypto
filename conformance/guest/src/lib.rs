@@ -30,8 +30,8 @@ use std::collections::BTreeSet;
 use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
-    AeadCase, HkdfCase, HmacCase, InternalNonceCase, Pbkdf2Case, Sha2Case, SigCase, SpeccheckCase,
-    X25519Case,
+    AeadCase, HkdfCase, HmacCase, InternalNonceCase, KwCase, Pbkdf2Case, Sha2Case, SigCase,
+    SpeccheckCase, X25519Case,
 };
 
 /// Validate a `missing-features` declaration against
@@ -60,6 +60,7 @@ enum CaseKind {
     Hmac(HmacCase),
     Aead(AeadCase),
     Cbc(translate::CbcCase),
+    Kw(KwCase),
     InternalNonce(InternalNonceCase),
     Sha2(Sha2Case),
     Sig(SigCase),
@@ -101,6 +102,7 @@ impl GuestTestCase for Case {
                 CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
                 CaseKind::Aead(case) => vectors::run_aead_case(case).await,
                 CaseKind::Cbc(case) => vectors::run_cbc_case(case).await,
+                CaseKind::Kw(case) => vectors::run_kw_case(case).await,
                 CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
                 CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
@@ -182,6 +184,14 @@ impl Guest for Component {
                 &[],
                 &missing,
                 CaseKind::Cbc(case),
+            ));
+        }
+        for case in translate::kw_cases() {
+            cases.push(materialize(
+                case.case_id(),
+                &[],
+                &missing,
+                CaseKind::Kw(case),
             ));
         }
         for case in translate::internal_nonce_cases() {
