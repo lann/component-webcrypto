@@ -457,12 +457,7 @@ pub fn derive_aes_gcm_key(
     policy: crate::AeadPolicy,
 ) -> Result<crate::AeadKeyMaterial, Error> {
     policy.check_useful()?;
-    let bits = match variant {
-        crate::AesVariant::Aes128 => 128,
-        crate::AesVariant::Aes192 => 192,
-        crate::AesVariant::Aes256 => 256,
-    };
-    let okm = input.derive_for_key(bits, policy.extractable)?;
+    let okm = input.derive_for_key(variant.length_bits(), policy.extractable)?;
     crate::AeadKeyMaterial::import_aes_gcm(variant, okm.to_vec(), policy)
 }
 
@@ -477,12 +472,7 @@ pub fn derive_cipher_key(
     policy: crate::CipherPolicy,
 ) -> Result<crate::CipherKeyMaterial, Error> {
     policy.check_useful()?;
-    let bits = match variant {
-        crate::AesVariant::Aes128 => 128,
-        crate::AesVariant::Aes192 => 192,
-        crate::AesVariant::Aes256 => 256,
-    };
-    let okm = input.derive_for_key(bits, policy.extractable)?;
+    let okm = input.derive_for_key(variant.length_bits(), policy.extractable)?;
     crate::CipherKeyMaterial::import(mode, variant, okm.to_vec(), policy)
 }
 
