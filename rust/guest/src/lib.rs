@@ -688,6 +688,59 @@ impl SigningKeyOptions {
     }
 }
 
+/// Mint-time policy for a derivation base secret ([`Ikm`] or [`Password`]).
+/// See [`MacKeyOptions`] for the options contract. The grants are copied
+/// onto every [`DeriveInput`] built on the secret; parameterization
+/// neither grants nor revokes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DeriveOptions {
+    /// Whether inputs built on this secret may yield raw bits through
+    /// [`DeriveInput::derive_bits`] — and, because an exportable key is
+    /// bits disclosure by other means, whether they may mint
+    /// *extractable* keys.
+    pub derive_bits: bool,
+    /// Whether inputs built on this secret may mint keys through the
+    /// target interfaces' `derive_key` (e.g. [`hmac_sha2::derive_key`]).
+    pub derive_key: bool,
+}
+
+impl DeriveOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::derivation::DeriveOptions {
+        let options = bindings::derivation::DeriveOptions::new();
+        options.can_derive_bits(self.derive_bits);
+        options.can_derive_key(self.derive_key);
+        options
+    }
+}
+
+/// Mint-time policy for an [`AgreementSecretKey`]. See [`MacKeyOptions`]
+/// for the options contract; the derive grants are copied onto every
+/// [`DeriveInput`] the key [`agree`](AgreementSecretKey::agree)s
+/// (WebCrypto's model: derive usages live on the secret key).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AgreementKeyOptions {
+    /// Whether inputs agreed by the key may yield raw bits. See
+    /// [`DeriveOptions::derive_bits`].
+    pub derive_bits: bool,
+    /// Whether inputs agreed by the key may mint keys. See
+    /// [`DeriveOptions::derive_key`].
+    pub derive_key: bool,
+    /// Whether the secret key's material may be exported.
+    pub extractable: bool,
+}
+
+impl AgreementKeyOptions {
+    /// The WIT options resource carrying this policy.
+    pub(crate) fn lower(self) -> bindings::key_agreement::AgreementKeyOptions {
+        let options = bindings::key_agreement::AgreementKeyOptions::new();
+        options.can_derive_bits(self.derive_bits);
+        options.can_derive_key(self.derive_key);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
 // --- newtypes ------------------------------------------------------------------
 
 /// Generate the shared newtype plumbing: constructors, raw accessors, and
@@ -1306,6 +1359,204 @@ impl CipherKey {
     }
 }
 
+// --- derivation ------------------------------------------------------------------
+
+/// An `hkdf.ikm`: imported input keying material for HKDF, minted by
+/// [`hkdf::import_ikm`]. Never readable back through the API under any
+/// grant; the grants recorded at import are copied onto every
+/// [`DeriveInput`] built on it (via [`hkdf_sha2::prepare`] and friends).
+pub struct Ikm(bindings::hkdf::Ikm);
+newtype_common!(Ikm, bindings::hkdf::Ikm, "ikm");
+
+impl Ikm {
+    /// Whether inputs built on this material may yield raw bits. See
+    /// [`DeriveOptions::derive_bits`].
+    pub fn can_derive_bits(&self) -> bool {
+        self.0.can_derive_bits()
+    }
+
+    /// Whether inputs built on this material may mint keys. See
+    /// [`DeriveOptions::derive_key`].
+    pub fn can_derive_key(&self) -> bool {
+        self.0.can_derive_key()
+    }
+}
+
+/// A `pbkdf2.password`: an imported password, minted by
+/// [`pbkdf2::import_password`]. Never readable back through the API under
+/// any grant; the grants recorded at import are copied onto every
+/// [`DeriveInput`] built on it (via [`pbkdf2_sha2::prepare`] and friends).
+pub struct Password(bindings::pbkdf2::Password);
+newtype_common!(Password, bindings::pbkdf2::Password, "password");
+
+impl Password {
+    /// Whether inputs built on this password may yield raw bits. See
+    /// [`DeriveOptions::derive_bits`].
+    pub fn can_derive_bits(&self) -> bool {
+        self.0.can_derive_bits()
+    }
+
+    /// Whether inputs built on this password may mint keys. See
+    /// [`DeriveOptions::derive_key`].
+    pub fn can_derive_key(&self) -> bool {
+        self.0.can_derive_key()
+    }
+}
+
+/// A `derivation.derive-input`: a fully parameterized derivation — base
+/// secret plus every parameter, minted by the `prepare` functions
+/// ([`hkdf_sha2::prepare`], [`pbkdf2_sha2::prepare`], …) and by
+/// [`AgreementSecretKey::agree`].
+///
+/// Consume it through [`derive_bits`](Self::derive_bits) or hand it to a
+/// target interface's `derive_key` (e.g. [`hmac_sha2::derive_key`],
+/// [`aes_gcm::derive_key`]); both may run any number of times. While an
+/// input is live it may hold derivation state of its own (for HKDF, the
+/// PRK), so a base secret's sensitivity extends to the inputs built on it.
+pub struct DeriveInput(bindings::derivation::DeriveInput);
+newtype_common!(
+    DeriveInput,
+    bindings::derivation::DeriveInput,
+    "derive-input"
+);
+
+impl DeriveInput {
+    /// The derived bits.
+    ///
+    /// `length` is in bits — WebCrypto's denomination for this parameter —
+    /// and must be a multiple of 8 (none of the package's implementations
+    /// serve sub-byte outputs). `None` means the source's natural output
+    /// length: an agreement's full shared secret (32 bytes for X25519).
+    /// KDF sources have none — their output length is a caller choice —
+    /// so `None` fails [`Error::Other`] there, matching the platform's
+    /// own null-length behavior.
+    ///
+    /// Fails [`Error::NotPermitted`] without the
+    /// [`derive_bits`](DeriveOptions::derive_bits) grant.
+    pub async fn derive_bits(&self, length: Option<u32>) -> Result<Vec<u8>, Error> {
+        self.0.derive_bits(length).await.map_err(Error::from)
+    }
+
+    /// Whether [`derive_bits`](Self::derive_bits) (and minting
+    /// *extractable* keys) is permitted — the grant copied from the base
+    /// secret. A refused operation fails [`Error::NotPermitted`].
+    pub fn can_derive_bits(&self) -> bool {
+        self.0.can_derive_bits()
+    }
+
+    /// Whether the target interfaces' `derive_key` is permitted. See
+    /// [`can_derive_bits`](Self::can_derive_bits).
+    pub fn can_derive_key(&self) -> bool {
+        self.0.can_derive_key()
+    }
+}
+
+/// A `key-agreement.public-key`: the exchangeable half of an agreement
+/// keypair, minted by [`x25519`]'s imports and
+/// [`generate_key`](x25519::generate_key). Secret-free.
+pub struct AgreementPublicKey(bindings::key_agreement::PublicKey);
+newtype_common!(
+    AgreementPublicKey,
+    bindings::key_agreement::PublicKey,
+    "public-key"
+);
+
+impl AgreementPublicKey {
+    /// The name of the key's algorithm family, e.g. `"X25519"` —
+    /// WebCrypto's `KeyAlgorithm.name`.
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// The public key material, in the minting interface's documented
+    /// public format (32 bytes for X25519).
+    ///
+    /// There is no extractability gate on public material, so this never
+    /// fails [`Error::NotExtractable`] — but it can fail [`Error::Other`]:
+    /// a provider may hold the key as a handle it can use but not read
+    /// (see [`VerifyingKey::export_key_raw`]).
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
+    }
+
+    /// The public key as a JWK (an RFC 8037 OKP public key for X25519),
+    /// with the same handle-not-bytes fallibility as
+    /// [`export_key_raw`](Self::export_key_raw).
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
+
+    /// The public key as an X.509 SubjectPublicKeyInfo (DER), with the
+    /// same handle-not-bytes fallibility as
+    /// [`export_key_raw`](Self::export_key_raw).
+    pub async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_spki().await.map_err(Error::from)
+    }
+}
+
+/// A `key-agreement.secret-key`: the private half of an agreement keypair.
+/// [`agree`](Self::agree) is one-shot on the immutable key; the derivation
+/// state lives in the [`DeriveInput`] it returns.
+pub struct AgreementSecretKey(bindings::key_agreement::SecretKey);
+newtype_common!(
+    AgreementSecretKey,
+    bindings::key_agreement::SecretKey,
+    "secret-key"
+);
+
+impl AgreementSecretKey {
+    /// The shared secret with `peer`, as a [`DeriveInput`] whose grants
+    /// are copied from this key's mint options.
+    ///
+    /// The returned input has a *natural* output length — the agreement's
+    /// full shared secret — so `derive_bits(None)` returns the whole
+    /// secret and [`hkdf_sha2::prepare_from`] accepts it as IKM.
+    ///
+    /// Fails [`Error::InvalidKey`] if the shared secret is the all-zero
+    /// value (a small-order `peer`; the mandatory contributory check,
+    /// performed in constant time) or if `peer` is bound to a different
+    /// algorithm than this key.
+    pub async fn agree(&self, peer: &AgreementPublicKey) -> Result<DeriveInput, Error> {
+        Ok(DeriveInput::from_raw(self.0.agree(&peer.0).await?))
+    }
+
+    /// See [`AgreementPublicKey::algorithm_name`].
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// Whether inputs agreed by this key may yield raw bits. See
+    /// [`DeriveOptions::derive_bits`].
+    pub fn can_derive_bits(&self) -> bool {
+        self.0.can_derive_bits()
+    }
+
+    /// Whether inputs agreed by this key may mint keys. See
+    /// [`DeriveOptions::derive_key`].
+    pub fn can_derive_key(&self) -> bool {
+        self.0.can_derive_key()
+    }
+
+    /// Whether the export functions may return this key's material (see
+    /// [`Mac::extractable`]).
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
+    /// The secret key as a JWK (an RFC 8037 OKP private key for X25519);
+    /// fails [`Error::NotExtractable`] unless the key was minted
+    /// extractable.
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
+
+    /// The secret key as a PKCS#8 PrivateKeyInfo (DER), behind the same
+    /// extractability gate as [`export_key_jwk`](Self::export_key_jwk).
+    pub async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_pkcs8().await.map_err(Error::from)
+    }
+}
+
 pub mod aes_cbc;
 pub mod aes_ctr;
 pub mod aes_gcm;
@@ -1314,10 +1565,17 @@ pub mod aes_gcm_internal_nonce;
 pub mod chacha20_poly1305;
 pub mod ecdsa;
 pub mod ed25519;
+pub mod hkdf;
+pub mod hkdf_sha1;
+pub mod hkdf_sha2;
 pub mod hmac_sha1;
 pub mod hmac_sha2;
+pub mod pbkdf2;
+pub mod pbkdf2_sha1;
+pub mod pbkdf2_sha2;
 pub mod sha1_checked;
 pub mod sha2;
+pub mod x25519;
 #[cfg(feature = "chacha")]
 pub mod xchacha20_poly1305;
 #[cfg(feature = "chacha")]
