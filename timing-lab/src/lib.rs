@@ -32,6 +32,7 @@ mod bindings {
     wit_bindgen::generate!({
         path: "wit",
         world: "lab",
+        features: ["chacha20-poly1305"],
         generate_all,
     });
 }

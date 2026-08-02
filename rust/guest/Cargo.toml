@@ -11,6 +11,12 @@ bytes = ["dep:bytes"]
 # `DataSource::from_reader`: feed an operation from any
 # `futures_io::AsyncRead`.
 futures-io = ["dep:futures-io"]
+# The `@unstable`-gated ChaCha interfaces (`chacha20-poly1305`,
+# `xchacha20-poly1305`, `xchacha20-poly1305-internal-nonce` — see
+# wit/README.md, "Stability gates"). Off by default: enabling it adds the
+# three imports to the generated world, so every composition of a consumer
+# component must then provide them.
+chacha = []
 
 [dependencies]
 # `async` pulls in the component-model `stream`/`future` runtime support and

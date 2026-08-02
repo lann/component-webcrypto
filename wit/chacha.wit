@@ -23,12 +23,22 @@ package lann:webcrypto@0.1.0;
 /// while libsodium-lineage providers center XChaCha), so the support
 /// boundary belongs at the interface, where a composition that needs the
 /// missing one fails at composition time rather than at minting.
+///
+/// Gated `@unstable`: browser WebCrypto's ChaCha20-Poly1305 is a proposal
+/// (W3C "Modern Algorithms in the Web Cryptography API"), and this
+/// interface tracks it — the JWK contract already moved once to follow
+/// the proposal's registered `"C20P"` (see `README.md`, "Stability
+/// gates"). Consumers opt in by enabling the feature in their tooling.
+@unstable(feature = chacha20-poly1305)
 interface chacha20-poly1305 {
+    @unstable(feature = chacha20-poly1305)
     use types.{error};
+    @unstable(feature = chacha20-poly1305)
     use aead.{aead-key, aead-key-options};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
+    @unstable(feature = chacha20-poly1305)
     import-key-raw: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Import a key from an RFC 7517 JSON Web Key. See `README.md`,
@@ -38,9 +48,11 @@ interface chacha20-poly1305 {
     /// proposal: `kty` must be `"oct"` and `k` must decode to exactly 32
     /// bytes. `alg`, when present, must be the proposal's registered
     /// `"C20P"`; any other value fails with `error.invalid-key`.
+    @unstable(feature = chacha20-poly1305)
     import-key-jwk: async func(jwk: string, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
+    @unstable(feature = chacha20-poly1305)
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
 }
 
@@ -60,15 +72,25 @@ interface chacha20-poly1305 {
 /// `"C20P"` form is the W3C Modern Algorithms proposal's), so
 /// `aead-key.export-key-jwk` fails `error.unsupported` for keys minted
 /// here.
+///
+/// Gated `@unstable`: the construction is deployed but not
+/// IETF-standardized, and no platform WebCrypto serves it (see
+/// `README.md`, "Stability gates"). Consumers opt in by enabling the
+/// feature in their tooling.
+@unstable(feature = xchacha20-poly1305)
 interface xchacha20-poly1305 {
+    @unstable(feature = xchacha20-poly1305)
     use types.{error};
+    @unstable(feature = xchacha20-poly1305)
     use aead.{aead-key, aead-key-options};
 
     /// Import exactly 32 bytes of raw key material; anything else fails
     /// with `error.invalid-key`.
+    @unstable(feature = xchacha20-poly1305)
     import-key-raw: async func(raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
+    @unstable(feature = xchacha20-poly1305)
     generate-key: async func(options: aead-key-options) -> result<aead-key, error>;
 }
 
@@ -86,16 +108,24 @@ interface xchacha20-poly1305 {
 /// wire format is this package's own, so nothing forces the 12-byte
 /// construction here, and every provider position is better served by this
 /// interface or `aes-gcm-internal-nonce`.
+///
+/// Gated `@unstable` with `xchacha20-poly1305`, whose construction and
+/// standardization status it shares (see `README.md`, "Stability gates").
+@unstable(feature = xchacha20-poly1305)
 interface xchacha20-poly1305-internal-nonce {
+    @unstable(feature = xchacha20-poly1305)
     use types.{error};
+    @unstable(feature = xchacha20-poly1305)
     use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
 
     /// Import exactly 32 bytes of raw key material as an internal-nonce
     /// key; anything else fails with `error.invalid-key`. See
     /// `aes-gcm-internal-nonce.import-key-raw` for the shared-material caveat
     /// and policy-rejection allowance, which apply identically here.
+    @unstable(feature = xchacha20-poly1305)
     import-key-raw: async func(raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 
     /// Generate a fresh random internal-nonce key.
+    @unstable(feature = xchacha20-poly1305)
     generate-key: async func(options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }

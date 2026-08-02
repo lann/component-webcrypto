@@ -191,6 +191,21 @@ the wart without buying the compatibility. What ends this regime is
 publishing the package for consumption; the change that does so should say
 it does.
 
+The ChaCha interfaces are additionally gated `@unstable` (features
+`chacha20-poly1305` and `xchacha20-poly1305` — see `wit/README.md`,
+"Stability gates"): tooling hides them unless the feature is enabled, and
+only test builds enable them by default. The conformance guest, the demo
+and WPT componentize-js builds (`--features`), the jco `types` script
+(`--feature`), the timing lab, and the standalone Wasmtime embedding all
+opt in; the library surfaces default off — the guest SDK behind its
+`chacha` cargo feature, the Wasmtime host behind
+`add_to_linker_with_options`'s `LinkOptions` (plain `add_to_linker` serves
+no gated interface). A world line importing or exporting a gated interface
+carries the same gate. Adding a WIT-resolving build without the flags
+silently drops the interfaces rather than erroring, so a "missing
+import/export" for a ChaCha interface usually means a missing feature
+flag.
+
 Changing an interface identifier means updating everyone who names it as a
 string: the guest bindings (`examples/crypto-demo/src/lib.rs`), the host
 bindgen configs (`rust/wasmtime/src/bindings.rs`,

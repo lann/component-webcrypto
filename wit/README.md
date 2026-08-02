@@ -232,6 +232,61 @@ then fails at composition (`wac plug`) time rather than at run time. This
 repository's in-guest provider documents its classification and policy in
 `rust/guest-provider/README.md`.
 
+## Stability gates
+
+Most of the package is ungated. The ChaCha interfaces are marked
+`@unstable`, so tooling hides them unless a consumer enables the feature
+(for example `wasm-tools ... --features`, wit-bindgen's `features` option,
+componentize-js's `--features`).
+
+A gate records one or both of two kinds of provisionality, and each
+gate's reasons and exit conditions are listed here:
+
+- **Shape**: the interface definition may still move to follow a named
+  external. Semver-minor changes may reshape gated interfaces in place.
+- **Linkage**: the interface is not servable by every implementation, and
+  the component model cannot yet express that at the layer where it
+  belongs. Today a guest imports such an interface unconditionally and
+  implementations decline minting at runtime with `error.unsupported` —
+  a stopgap for instantiation-time-optional imports. These gates lift
+  when the toolchains this package rides can express an optional import,
+  so consumers never stabilize onto the stopgap as if it were the final
+  consumption story.
+
+The gates:
+
+- `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305` —
+  both reasons. Shape: the algorithm is IETF-standard (RFC 8439), but
+  its browser WebCrypto surface is a proposal (W3C ["Modern Algorithms
+  in the Web Cryptography API"]) this package tracks; the JWK contract
+  has already moved once to follow the proposal's registered `"C20P"`.
+  Exits when the proposal settles *and* optional imports are
+  expressible.
+- `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
+  `xchacha20-poly1305-internal-nonce` — both reasons. Shape: the
+  construction is deployed (libsodium lineage) but not
+  IETF-standardized, and no platform WebCrypto serves it. Exits on a
+  standardization-or-durability judgment once optional imports are
+  expressible.
+
+Neither kind of gate speaks to per-call runtime availability: an
+implementation may decline any minting path with `error.unsupported`
+either way, and a gated interface a consumer enables still needs the
+same handling. Stabilization replaces a gate with `@since` once its
+listed exits arrive. Interfaces whose absence is already expressed
+structurally carry no gate — `ecdsa-sign` is withheld from
+timing-observable providers by *their worlds*, enforced at composition
+time, which is the designed end state rather than a stopgap.
+
+Within this repository, only test builds enable the features by default
+(the conformance and demo guests, the WPT runners, the timing lab, and
+the standalone Wasmtime embedding). The library surfaces keep the gated
+default: the guest SDK's ChaCha wrappers and imports sit behind its
+`chacha` cargo feature, and the Wasmtime host's plain `add_to_linker`
+serves no gated interface (`add_to_linker_with_options` opts in).
+
+["Modern Algorithms in the Web Cryptography API"]: https://wicg.github.io/webcrypto-modern-algos/
+
 ## Design notes
 
 Decisions that shape the surface, recorded so the doc comments can stay

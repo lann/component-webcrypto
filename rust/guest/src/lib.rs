@@ -45,8 +45,9 @@
 //!   limits as recoverable [`Error::Other`] values (see the WIT
 //!   `types.error` docs); nothing here retries or special-cases them.
 //! - **Nonces are the caller's problem only on `aead`.** Prefer
-//!   [`AeadInternalNonce`] (minted by [`aes_gcm_internal_nonce`] /
-//!   [`xchacha20_poly1305_internal_nonce`]), whose nonces are
+//!   [`AeadInternalNonce`] (minted by [`aes_gcm_internal_nonce`], or by
+//!   `xchacha20_poly1305_internal_nonce` under the `chacha` cargo
+//!   feature), whose nonces are
 //!   implementation-managed and carried in the sealed message.
 
 #![deny(missing_docs)]
@@ -66,6 +67,18 @@ pub use wit_bindgen::StreamReader;
 
 mod generated {
     #![allow(missing_docs)]
+    // Two mutually exclusive expansions rather than one parameterized by
+    // the cargo feature: `generate!`'s `features` list is static, and the
+    // arms must stay option-for-option identical apart from it.
+    #[cfg(feature = "chacha")]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(not(feature = "chacha"))]
     wit_bindgen::generate!({
         path: "wit",
         world: "imports",
@@ -86,10 +99,13 @@ pub mod bindings {
     // enum.
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, bytes,
-        chacha20_poly1305, cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign,
-        ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, mac,
-        pbkdf2, pbkdf2_sha1, pbkdf2_sha2, sha1_checked, sha2, signature, types, x25519,
-        xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+        cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hkdf,
+        hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, mac, pbkdf2, pbkdf2_sha1,
+        pbkdf2_sha2, sha1_checked, sha2, signature, types, x25519,
+    };
+    #[cfg(feature = "chacha")]
+    pub use super::generated::lann::webcrypto::{
+        chacha20_poly1305, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
 }
 
@@ -1545,6 +1561,7 @@ pub mod aes_cbc;
 pub mod aes_ctr;
 pub mod aes_gcm;
 pub mod aes_gcm_internal_nonce;
+#[cfg(feature = "chacha")]
 pub mod chacha20_poly1305;
 pub mod ecdsa;
 pub mod ed25519;
@@ -1559,7 +1576,9 @@ pub mod pbkdf2_sha2;
 pub mod sha1_checked;
 pub mod sha2;
 pub mod x25519;
+#[cfg(feature = "chacha")]
 pub mod xchacha20_poly1305;
+#[cfg(feature = "chacha")]
 pub mod xchacha20_poly1305_internal_nonce;
 
 /// `bytes.constant-time-equal`: whether `a` and `b` are equal, in time
