@@ -38,3 +38,16 @@ pub async fn generate_key(
         bindings::aes_cbc::generate_key(variant, options.lower()).await?,
     ))
 }
+
+/// Mint an AES-CBC key of the declared variant from a parameterized
+/// derivation. See [`aes_gcm::derive_key`](crate::aes_gcm::derive_key)
+/// for the grant contracts.
+pub async fn derive_key(
+    variant: AesVariant,
+    input: &crate::DeriveInput,
+    options: CipherKeyOptions,
+) -> Result<CipherKey, Error> {
+    Ok(CipherKey::from_raw(
+        bindings::aes_cbc::derive_key(variant, input.as_raw(), options.lower()).await?,
+    ))
+}

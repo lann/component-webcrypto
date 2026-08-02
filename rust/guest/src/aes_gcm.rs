@@ -36,3 +36,21 @@ pub async fn generate_key(variant: AesVariant, options: AeadKeyOptions) -> Resul
         bindings::aes_gcm::generate_key(variant, options.lower()).await?,
     ))
 }
+
+/// Mint an AES-GCM key of the declared variant from a parameterized
+/// derivation: the derivation runs at the variant's key length and the
+/// result is subject to [`import_key_raw`]'s contract.
+///
+/// Requires the input's [`derive_key`](crate::DeriveOptions::derive_key)
+/// grant — and, for an *extractable* key,
+/// [`derive_bits`](crate::DeriveOptions::derive_bits) too; refusals fail
+/// [`Error::NotPermitted`].
+pub async fn derive_key(
+    variant: AesVariant,
+    input: &crate::DeriveInput,
+    options: AeadKeyOptions,
+) -> Result<Aead, Error> {
+    Ok(Aead::from_raw(
+        bindings::aes_gcm::derive_key(variant, input.as_raw(), options.lower()).await?,
+    ))
+}
