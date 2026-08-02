@@ -54,26 +54,146 @@ pub struct Case {
     kind: CaseKind,
 }
 
-enum CaseKind {
-    Hkdf(HkdfCase),
-    Pbkdf2(Pbkdf2Case),
-    Hmac(HmacCase),
-    Aead(AeadCase),
-    Cbc(translate::CbcCase),
-    InternalNonce(InternalNonceCase),
-    Sha2(Sha2Case),
-    Sig(SigCase),
-    Speccheck(SpeccheckCase),
-    X25519(X25519Case),
-    AeadContract(&'static contract::AeadFamily, contract::AeadArea),
-    MacContract(&'static contract::MacFamily, contract::MacArea),
-    CipherContract(&'static contract::CipherFamily, contract::CipherArea),
-    InternalNonceContract(
-        &'static contract::InternalNonceFamily,
-        contract::InternalNonceArea,
-    ),
-    DeriveContract(&'static contract::DeriveSourceFamily, contract::DeriveArea),
-    Probe(usize),
+/// The suite registry: one row per suite, in census order.
+///
+/// Each row generates its `CaseKind` variant, its materialize loop in
+/// `all_cases` (rows materialize in table order — the census order
+/// `tests.lock` pins), its dispatch arm in `CaseKind::execute`, and its
+/// skip posture in `CaseKind::asserts_decline`, so pairing a suite's
+/// cases with the wrong runner is unrepresentable — the guarantee
+/// [`conformance_harness::probes!`] gives the probe table.
+///
+/// Two row shapes:
+///
+/// - `vectors`: `Variant(CaseType): iterator => runner;` — one case per
+///   translated vector, named by `case.case_id()` and tagged by
+///   `case.features()` unless the row overrides the tags with
+///   `, features: <expr>`.
+/// - `contracts`: `Variant(FamilyType, AreaType): for <family> in FAMILIES,
+///   <areas> => runner;` — one case per family × area. The `<areas>`
+///   expression may name the `<family>` binder and must yield areas by
+///   value.
+///
+/// The probe suite is part of the expansion rather than a row: its case
+/// data is an index into [`probes::PROBES`], whose own table pairs each
+/// probe with its runner.
+macro_rules! suites {
+    (
+        vectors {
+            $( $vvar:ident($vty:ty): $viter:path => $vrun:path $(, features: $vfeat:expr)? ; )*
+        }
+        contracts {
+            $( $cvar:ident($cfam:ty, $carea:ty):
+                for $fam:ident in $cfams:expr, $careas:expr => $crun:path ; )*
+        }
+    ) => {
+        enum CaseKind {
+            $( $vvar($vty), )*
+            $( $cvar(&'static $cfam, $carea), )*
+            Probe(usize),
+        }
+
+        impl CaseKind {
+            /// Run the case's subject, yielding the failure detail on
+            /// expectation mismatch.
+            async fn execute(&self) -> Result<(), String> {
+                match self {
+                    $( CaseKind::$vvar(case) => $vrun(case).await, )*
+                    $( CaseKind::$cvar(family, area) => $crun(family, *area).await, )*
+                    CaseKind::Probe(index) => {
+                        conformance_harness::run_probe(probes::PROBES, *index).await
+                    }
+                }
+            }
+
+            /// Whether this case, when its features are declared missing,
+            /// asserts the correct decline before reporting `skipped`. The
+            /// contract batteries and feature-tagged probes assert the
+            /// decline on every minting path (the two-way guarantee that a
+            /// target cannot serve a feature it declares missing); vector
+            /// cases skip without re-asserting it thousands of times.
+            fn asserts_decline(&self) -> bool {
+                matches!(self, $( CaseKind::$cvar(..) | )* CaseKind::Probe(_))
+            }
+        }
+
+        /// Materialize every suite for a target missing `missing`, in
+        /// census order.
+        fn all_cases(missing: &BTreeSet<&str>) -> Vec<TestCase> {
+            let mut cases = Vec::new();
+            $(
+                for case in $viter() {
+                    let features = suites!(@features case $($vfeat)?);
+                    cases.push(materialize(
+                        case.case_id(),
+                        features,
+                        missing,
+                        CaseKind::$vvar(case),
+                    ));
+                }
+            )*
+            $(
+                for $fam in $cfams {
+                    for area in $careas {
+                        cases.push(materialize(
+                            $fam.case_id(area),
+                            $fam.features,
+                            missing,
+                            CaseKind::$cvar($fam, area),
+                        ));
+                    }
+                }
+            )*
+            for (index, probe) in probes::PROBES.iter().enumerate() {
+                cases.push(materialize(
+                    probe.case_id(),
+                    probe.features,
+                    missing,
+                    CaseKind::Probe(index),
+                ));
+            }
+            cases
+        }
+    };
+    (@features $case:ident) => {
+        $case.features()
+    };
+    (@features $case:ident $feat:expr) => {
+        $feat
+    };
+}
+
+suites! {
+    vectors {
+        Hkdf(HkdfCase): translate::hkdf_cases => vectors::run_hkdf_case;
+        Pbkdf2(Pbkdf2Case): translate::pbkdf2_cases => vectors::run_pbkdf2_case;
+        Hmac(HmacCase): translate::hmac_cases => vectors::run_hmac_case;
+        Aead(AeadCase): translate::aead_cases => vectors::run_aead_case;
+        // CbcCase carries no features accessor: AES-CBC is baseline surface.
+        Cbc(translate::CbcCase): translate::cbc_cases => vectors::run_cbc_case, features: &[];
+        InternalNonce(InternalNonceCase):
+            translate::internal_nonce_cases => vectors::run_internal_nonce_case;
+        Sha2(Sha2Case): translate::sha2_cases => vectors::run_sha2_case;
+        Sig(SigCase): translate::sig_cases => vectors::run_sig_case;
+        Speccheck(SpeccheckCase): translate::speccheck_cases => vectors::run_speccheck_case;
+        X25519(X25519Case): translate::x25519_cases => vectors::run_x25519_case;
+    }
+    contracts {
+        AeadContract(contract::AeadFamily, contract::AeadArea):
+            for family in contract::AEAD_FAMILIES, family.areas() => contract::run;
+        MacContract(contract::MacFamily, contract::MacArea):
+            for family in contract::MAC_FAMILIES,
+            contract::MacArea::ALL.iter().copied() => contract::run_mac;
+        CipherContract(contract::CipherFamily, contract::CipherArea):
+            for family in contract::CIPHER_FAMILIES,
+            contract::CipherArea::ALL.iter().copied() => contract::run_cipher;
+        InternalNonceContract(contract::InternalNonceFamily, contract::InternalNonceArea):
+            for family in contract::INTERNAL_NONCE_FAMILIES,
+            family.areas() => contract::run_internal_nonce;
+        DeriveContract(contract::DeriveSourceFamily, contract::DeriveArea):
+            for family in contract::DERIVE_SOURCE_FAMILIES,
+            contract::DeriveArea::ALL.iter().copied() => contract::run_derive;
+    }
 }
 
 /// Materialize one case as an exported `test-case` resource.
@@ -102,49 +222,21 @@ impl GuestTestCase for Case {
 
     async fn run(&self) -> Outcome {
         if self.provided {
-            let outcome = match &self.kind {
-                CaseKind::Hkdf(case) => vectors::run_hkdf_case(case).await,
-                CaseKind::Pbkdf2(case) => vectors::run_pbkdf2_case(case).await,
-                CaseKind::Hmac(case) => vectors::run_hmac_case(case).await,
-                CaseKind::Aead(case) => vectors::run_aead_case(case).await,
-                CaseKind::Cbc(case) => vectors::run_cbc_case(case).await,
-                CaseKind::InternalNonce(case) => vectors::run_internal_nonce_case(case).await,
-                CaseKind::Sha2(case) => vectors::run_sha2_case(case).await,
-                CaseKind::Sig(case) => vectors::run_sig_case(case).await,
-                CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
-                CaseKind::X25519(case) => vectors::run_x25519_case(case).await,
-                CaseKind::AeadContract(family, area) => contract::run(family, *area).await,
-                CaseKind::MacContract(family, area) => contract::run_mac(family, *area).await,
-                CaseKind::CipherContract(family, area) => contract::run_cipher(family, *area).await,
-                CaseKind::InternalNonceContract(family, area) => {
-                    contract::run_internal_nonce(family, *area).await
-                }
-                CaseKind::DeriveContract(family, area) => contract::run_derive(family, *area).await,
-                CaseKind::Probe(index) => {
-                    conformance_harness::run_probe(probes::PROBES, *index).await
-                }
-            };
-            match outcome {
+            match self.kind.execute().await {
                 Ok(()) => Outcome::Pass,
                 Err(detail) => Outcome::Fail(detail),
             }
         } else {
-            // The target declares this case's feature missing. The
-            // feature-tagged *probes* assert the correct decline on every
-            // minting path (the two-way guarantee that a target cannot
-            // serve a feature it declares missing); vector cases skip
-            // without re-asserting it thousands of times.
-            let asserted = match &self.kind {
-                CaseKind::AeadContract(..)
-                | CaseKind::MacContract(..)
-                | CaseKind::CipherContract(..)
-                | CaseKind::InternalNonceContract(..)
-                | CaseKind::DeriveContract(..)
-                | CaseKind::Probe(_) => probes::run_declined(self.features).await,
-                _ => Ok(format!(
+            // The target declares this case's feature missing; see
+            // `CaseKind::asserts_decline` for which cases assert the
+            // correct decline before skipping.
+            let asserted = if self.kind.asserts_decline() {
+                probes::run_declined(self.features).await
+            } else {
+                Ok(format!(
                     "feature {} declared missing by the target",
                     self.features.join("+")
-                )),
+                ))
             };
             match asserted {
                 Ok(detail) => Outcome::Skipped(detail),
@@ -159,146 +251,7 @@ impl Guest for Component {
 
     fn all(missing_features: Vec<String>) -> Vec<TestCase> {
         let missing = missing_set(&missing_features);
-        let mut cases = Vec::new();
-        for case in translate::hkdf_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Hkdf(case),
-            ));
-        }
-        for case in translate::pbkdf2_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Pbkdf2(case),
-            ));
-        }
-        for case in translate::hmac_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Hmac(case),
-            ));
-        }
-        for case in translate::aead_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Aead(case),
-            ));
-        }
-        for case in translate::cbc_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                &[],
-                &missing,
-                CaseKind::Cbc(case),
-            ));
-        }
-        for case in translate::internal_nonce_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::InternalNonce(case),
-            ));
-        }
-        for case in translate::sha2_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Sha2(case),
-            ));
-        }
-        for case in translate::sig_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Sig(case),
-            ));
-        }
-        for case in translate::speccheck_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::Speccheck(case),
-            ));
-        }
-        for case in translate::x25519_cases() {
-            cases.push(materialize(
-                case.case_id(),
-                case.features(),
-                &missing,
-                CaseKind::X25519(case),
-            ));
-        }
-        for family in contract::AEAD_FAMILIES {
-            for area in family.areas() {
-                cases.push(materialize(
-                    family.case_id(area),
-                    family.features,
-                    &missing,
-                    CaseKind::AeadContract(family, area),
-                ));
-            }
-        }
-        for family in contract::MAC_FAMILIES {
-            for &area in contract::MacArea::ALL {
-                cases.push(materialize(
-                    family.case_id(area),
-                    family.features,
-                    &missing,
-                    CaseKind::MacContract(family, area),
-                ));
-            }
-        }
-        for family in contract::CIPHER_FAMILIES {
-            for &area in contract::CipherArea::ALL {
-                cases.push(materialize(
-                    family.case_id(area),
-                    family.features,
-                    &missing,
-                    CaseKind::CipherContract(family, area),
-                ));
-            }
-        }
-        for family in contract::INTERNAL_NONCE_FAMILIES {
-            for area in family.areas() {
-                cases.push(materialize(
-                    family.case_id(area),
-                    family.features,
-                    &missing,
-                    CaseKind::InternalNonceContract(family, area),
-                ));
-            }
-        }
-        for family in contract::DERIVE_SOURCE_FAMILIES {
-            for &area in contract::DeriveArea::ALL {
-                cases.push(materialize(
-                    family.case_id(area),
-                    family.features,
-                    &missing,
-                    CaseKind::DeriveContract(family, area),
-                ));
-            }
-        }
-        for (index, probe) in probes::PROBES.iter().enumerate() {
-            cases.push(materialize(
-                probe.case_id(),
-                probe.features,
-                &missing,
-                CaseKind::Probe(index),
-            ));
-        }
-        cases
+        all_cases(&missing)
     }
 }
 
