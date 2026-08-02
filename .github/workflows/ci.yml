@@ -85,7 +85,7 @@ jobs:
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
   jco:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -108,6 +108,12 @@ jobs:
         run: ./scripts/setup.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Install Playwright Firefox
+        # The Firefox WPT parity gate's engine: Playwright's pinned build
+        # (launched with Gecko's JSPI pref), so the loss set in
+        # losses-firefox.js measures one engine everywhere.
+        run: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox
 
       - name: Run the jco host checks
         run: just jco-checks

@@ -115,6 +115,23 @@ recomputed per run, never pinned, so a platform upgrade moves both legs
 together; the loss set is sensitive to the platform only where the
 platform itself is.
 
+### The Firefox leg
+
+`just wpt-parity-firefox` runs the same two legs in headless Firefox —
+Playwright's pinned build, launched with Gecko's JSPI pref, driven by
+`parity/run-browser.mjs` over the same legs module the parity page uses
+(web/legs.mjs) — and holds the round trip to
+[`parity/losses-firefox.js`](parity/losses-firefox.js), maintained via
+`just update-wpt-parity-firefox`. A loss set is a fact about one engine's
+baseline, so each engine ratchets separately: Firefox's baseline passes
+tests Node's platform does not (and vice versa), and the same package
+ruling can surface as a loss on one engine and a divergent pass on
+another (the Ed25519 strict small-order rejection does exactly that).
+The engine only moves when the pinned playwright-core version does, so
+the ratchet moves in reviewable diffs. Gates in CI (the jco job); local
+runs opt in with `WPT_PARITY_FIREFOX=1` after
+`cd parity && npx playwright-core install --with-deps firefox`.
+
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
 ## The browser parity page (web/)
@@ -130,9 +147,10 @@ worker and stream: the round trip's records arrive through the runner's
 reporter import as each test settles, so the page shows live progress
 mid-run; a main-thread fallback runs the same legs if the worker path
 fails. The round trip needs JSPI; without it the page runs the baseline
-alone. Nothing on the page gates, and the pinned loss ratchet does not
-apply to it: `losses.js` records the *Node* baseline's losses, and a
-browser's baseline legitimately differs. Serve it locally with
+alone. Nothing on the page gates, and the pinned ratchets do not apply to
+it: loss sets are recorded from pinned engines (`losses.js` from Node,
+`losses-firefox.js` from Playwright's Firefox), and a visiting browser's
+baseline legitimately differs. Serve it locally with
 `just wpt-web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
