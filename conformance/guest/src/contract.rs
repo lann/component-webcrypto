@@ -19,7 +19,9 @@
 
 use crate::mint;
 use conformance_harness::stream::{
-    ci_decrypt, ci_encrypt, in_open, in_seal, open, seal, sign, try_sign, verify, Schedule,
+    ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, ci_encrypt_op, in_open, in_open_ok, in_seal_ok,
+    in_seal_op, open_ok, open_op, seal_ok, seal_op, sign_ok, try_sign, verify_ok, verify_op,
+    Schedule,
 };
 use conformance_harness::{
     b64url, describe, expect, expect_bytes, expect_err, unhex, ErrKind, FEATURE_CHACHA,
@@ -396,11 +398,17 @@ async fn usage(family: &AeadFamily) -> Result<(), String> {
 
     let nonce = vec![3u8; family.nonce_len];
     let plaintext = b"battery usage plaintext";
-    let (sealed, fed) = seal(&seal_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal under a seal-only key", &e))?;
-    let (refused, fed) = open(&seal_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let sealed = seal_ok(
+        &seal_only,
+        &nonce,
+        b"",
+        None,
+        plaintext,
+        Schedule::Whole,
+        "seal under a seal-only key",
+    )
+    .await?;
+    let refused = open_op(&seal_only, &nonce, b"", None, &sealed, Schedule::Whole).await?;
     expect_err(
         "open on a seal-only key",
         ErrKind::NotPermitted,
@@ -415,12 +423,18 @@ async fn usage(family: &AeadFamily) -> Result<(), String> {
         .map_err(|e| describe("open-only import-key-raw", &e))?;
     expect(open_only.can_seal(), false, "open-only key can-seal")?;
     expect(open_only.can_open(), true, "open-only key can-open")?;
-    let (opened, fed) = open(&open_only, &nonce, b"", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open under an open-only key", &e))?;
+    let opened = open_ok(
+        &open_only,
+        &nonce,
+        b"",
+        None,
+        &sealed,
+        Schedule::Whole,
+        "open under an open-only key",
+    )
+    .await?;
     expect_bytes(&opened, plaintext, "plaintext under an open-only key")?;
-    let (refused, fed) = seal(&open_only, &nonce, b"", None, plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let refused = seal_op(&open_only, &nonce, b"", None, plaintext, Schedule::Whole).await?;
     expect_err(
         "seal on an open-only key",
         ErrKind::NotPermitted,
@@ -440,18 +454,23 @@ async fn roundtrip(family: &AeadFamily) -> Result<(), String> {
     let aad = b"battery roundtrip aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(3 * 16 + 5).collect();
 
-    let (sealed, fed) = seal(&key, &nonce, aad, None, &plaintext, Schedule::Straddle).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    let sealed = seal_ok(
+        &key,
+        &nonce,
+        aad,
+        None,
+        &plaintext,
+        Schedule::Straddle,
+        "seal",
+    )
+    .await?;
     expect(
         sealed.len(),
         plaintext.len() + family.tag_len,
         "sealed length",
     )?;
 
-    let (opened, fed) = open(&key, &nonce, aad, None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open", &e))?;
+    let opened = open_ok(&key, &nonce, aad, None, &sealed, Schedule::Whole, "open").await?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
 }
 
@@ -787,10 +806,8 @@ async fn mac_usage(family: &MacFamily) -> Result<(), String> {
     expect(sign_only.can_verify(), false, "sign-only key can-verify")?;
 
     let payload = b"battery usage payload";
-    let (tag, fed) = sign(&sign_only, payload, Schedule::Whole).await;
-    fed.map_err(|e| format!("sign data feeder: {e}"))?;
-    let (refused, fed) = verify(&sign_only, payload, &tag, Schedule::Whole).await;
-    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    let tag = sign_ok(&sign_only, payload, Schedule::Whole).await?;
+    let refused = verify_op(&sign_only, payload, &tag, Schedule::Whole).await?;
     expect_err(
         "verify on a sign-only key",
         ErrKind::NotPermitted,
@@ -805,9 +822,14 @@ async fn mac_usage(family: &MacFamily) -> Result<(), String> {
         .map_err(|e| describe("verify-only import-key-raw", &e))?;
     expect(verify_only.can_sign(), false, "verify-only key can-sign")?;
     expect(verify_only.can_verify(), true, "verify-only key can-verify")?;
-    let (verified, fed) = verify(&verify_only, payload, &tag, Schedule::Whole).await;
-    fed.map_err(|e| format!("verify data feeder: {e}"))?;
-    verified.map_err(|e| describe("valid tag under a verify-only key", &e))?;
+    verify_ok(
+        &verify_only,
+        payload,
+        &tag,
+        Schedule::Whole,
+        "valid tag under a verify-only key",
+    )
+    .await?;
     let (refused, fed) = try_sign(&verify_only, payload, Schedule::Whole).await;
     fed.map_err(|e| format!("sign data feeder: {e}"))?;
     expect_err(
@@ -824,12 +846,16 @@ async fn mac_roundtrip(family: &MacFamily) -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload: Vec<u8> = (0..=255u8).cycle().take(3 * 16 + 5).collect();
-    let (tag, fed) = sign(&key, &payload, Schedule::Straddle).await;
-    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let tag = sign_ok(&key, &payload, Schedule::Straddle).await?;
     expect(tag.len(), family.tag_len, "tag length")?;
-    let (verified, fed) = verify(&key, &payload, &tag, Schedule::Whole).await;
-    fed.map_err(|e| format!("verify data feeder: {e}"))?;
-    verified.map_err(|e| describe("round-trip tag did not verify", &e))
+    verify_ok(
+        &key,
+        &payload,
+        &tag,
+        Schedule::Whole,
+        "round-trip tag did not verify",
+    )
+    .await
 }
 
 /// The oct-JWK contract, per family (the [`jwk`] script over MAC entry
@@ -1173,25 +1199,23 @@ async fn cipher_usage(family: &CipherFamily) -> Result<(), String> {
 
     let iv = vec![0u8; family.iv_len];
     let payload = b"battery usage payload";
-    let (sealed, fed) = ci_encrypt(
+    let sealed = ci_encrypt_ok(
         &encrypt_only,
         &iv,
         family.counter_length,
         payload,
         Schedule::Whole,
+        "encrypt under an encrypt-only key",
     )
-    .await;
-    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("encrypt under an encrypt-only key", &e))?;
-    let (refused, fed) = ci_decrypt(
+    .await?;
+    let refused = ci_decrypt_op(
         &encrypt_only,
         &iv,
         family.counter_length,
         &sealed,
         Schedule::Whole,
     )
-    .await;
-    fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+    .await?;
     expect_err(
         "decrypt on an encrypt-only key",
         ErrKind::NotPermitted,
@@ -1210,26 +1234,24 @@ async fn cipher_usage(family: &CipherFamily) -> Result<(), String> {
         "decrypt-only can-encrypt",
     )?;
     expect(decrypt_only.can_decrypt(), true, "decrypt-only can-decrypt")?;
-    let (opened, fed) = ci_decrypt(
+    let opened = ci_decrypt_ok(
         &decrypt_only,
         &iv,
         family.counter_length,
         &sealed,
         Schedule::Whole,
+        "decrypt under a decrypt-only key",
     )
-    .await;
-    fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("decrypt under a decrypt-only key", &e))?;
+    .await?;
     expect_bytes(&opened, payload, "plaintext under a decrypt-only key")?;
-    let (refused, fed) = ci_encrypt(
+    let refused = ci_encrypt_op(
         &decrypt_only,
         &iv,
         family.counter_length,
         payload,
         Schedule::Whole,
     )
-    .await;
-    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    .await?;
     expect_err(
         "encrypt on a decrypt-only key",
         ErrKind::NotPermitted,
@@ -1620,9 +1642,14 @@ async fn internal_nonce_usage(family: &InternalNonceFamily) -> Result<(), String
     expect(seal_only.can_open(), false, "seal-only key can-open")?;
 
     let plaintext = b"battery usage plaintext";
-    let (sealed, fed) = in_seal(&seal_only, b"", plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal under a seal-only key", &e))?;
+    let sealed = in_seal_ok(
+        &seal_only,
+        b"",
+        plaintext,
+        Schedule::Whole,
+        "seal under a seal-only key",
+    )
+    .await?;
     let (refused, fed) = in_open(&seal_only, b"", &sealed, Schedule::Whole).await;
     fed.map_err(|e| format!("open input feeder: {e}"))?;
     expect_err(
@@ -1643,8 +1670,7 @@ async fn internal_nonce_usage(family: &InternalNonceFamily) -> Result<(), String
     fed.map_err(|e| format!("open input feeder: {e}"))?;
     let opened = opened.map_err(|e| describe("open under an open-only key", &e))?;
     expect_bytes(&opened, plaintext, "plaintext under an open-only key")?;
-    let (refused, fed) = in_seal(&open_only, b"", plaintext, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let refused = in_seal_op(&open_only, b"", plaintext, Schedule::Whole).await?;
     expect_err(
         "seal on an open-only key",
         ErrKind::NotPermitted,
@@ -1663,18 +1689,14 @@ async fn internal_nonce_roundtrip(family: &InternalNonceFamily) -> Result<(), St
     let aad = b"battery roundtrip aad";
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(3 * 16 + 5).collect();
 
-    let (sealed, fed) = in_seal(&key, aad, &plaintext, Schedule::Straddle).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    let sealed = in_seal_ok(&key, aad, &plaintext, Schedule::Straddle, "seal").await?;
     expect(
         sealed.len(),
         plaintext.len() + family.nonce_len + family.tag_len,
         "sealed length",
     )?;
 
-    let (opened, fed) = in_open(&key, aad, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open sealed feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open", &e))?;
+    let opened = in_open_ok(&key, aad, &sealed, Schedule::Whole, "open").await?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")
 }
 

@@ -16,8 +16,10 @@ use crate::mint::{
     RFC7748_BOB_X, RFC7748_SHARED,
 };
 use conformance_harness::stream::{
-    ci_decrypt, ci_encrypt, compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify,
-    sign, verify, Schedule,
+    ci_decrypt_ok, ci_decrypt_op, ci_encrypt, ci_encrypt_ok, ci_encrypt_op, compute, compute_ok,
+    compute_op, feed, in_open, in_open_ok, in_seal, in_seal_ok, open, open_ok, open_op, seal,
+    seal_ok, seal_op, sig_sign_ok, sig_verify_ok, sig_verify_op, sign, sign_ok, verify_ok,
+    verify_op, Schedule,
 };
 use conformance_harness::{
     b64url, describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
@@ -131,16 +133,14 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
         .map_err(|detail| format!("minting an AES-256 key: {detail}"))?;
     for len in [8usize, 257] {
         let iv = vec![0x11u8; len];
-        let (sealed, fed) = seal(&key, &iv, b"", None, b"msg", Schedule::Whole).await;
-        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        let sealed = seal_op(&key, &iv, b"", None, b"msg", Schedule::Whole).await?;
         expect_err(
             &format!("seal ({len}-byte nonce)"),
             ErrKind::Unsupported,
             sealed,
             "served a nonce length the target declares missing",
         )?;
-        let (opened, fed) = open(&key, &iv, b"", None, &[0u8; 32], Schedule::Whole).await;
-        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+        let opened = open_op(&key, &iv, b"", None, &[0u8; 32], Schedule::Whole).await?;
         expect_err(
             &format!("open ({len}-byte nonce)"),
             ErrKind::Unsupported,
@@ -253,12 +253,16 @@ async fn hmac_sha384_sha512() -> Result<(), String> {
             &format!("{hash} key algorithm-hash"),
         )?;
         let want = unhex(want_hex);
-        let (tag, fed) = sign(&key, DATA, Schedule::Whole).await;
-        fed.map_err(|e| format!("sign data feeder: {e}"))?;
+        let tag = sign_ok(&key, DATA, Schedule::Whole).await?;
         expect_bytes(&tag, &want, &format!("HMAC-{hash} known-answer tag"))?;
-        let (verified, fed) = verify(&key, DATA, &tag, Schedule::Whole).await;
-        fed.map_err(|e| format!("verify data feeder: {e}"))?;
-        verified.map_err(|e| describe("known-answer tag did not verify", &e))?;
+        verify_ok(
+            &key,
+            DATA,
+            &tag,
+            Schedule::Whole,
+            "known-answer tag did not verify",
+        )
+        .await?;
     }
     Ok(())
 }
@@ -407,12 +411,10 @@ async fn mac_verify_rejects_truncated() -> Result<(), String> {
     .map_err(|e| describe("import-key-raw", &e))?;
     let payload = b"truncated-tag payload";
 
-    let (tag, fed) = sign(&key, payload, Schedule::Whole).await;
-    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let tag = sign_ok(&key, payload, Schedule::Whole).await?;
     expect(tag.len(), 32, "tag length")?;
 
-    let (verified, fed) = verify(&key, payload, &tag[..31], Schedule::Whole).await;
-    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    let verified = verify_op(&key, payload, &tag[..31], Schedule::Whole).await?;
     expect_err(
         "verify",
         ErrKind::AuthenticationFailed,
@@ -545,28 +547,33 @@ async fn nonce_lengths_for(feature: &'static str) -> Result<(), String> {
         )
         .await
         .map_err(|e| describe("import-key-raw", &e))?;
-        let (sealed, fed) = seal(&key, &vec![0u8; bad_len], b"", None, msg, Schedule::Whole).await;
-        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+        let sealed = seal_op(&key, &vec![0u8; bad_len], b"", None, msg, Schedule::Whole).await?;
         expect_err(
             &format!("{name} seal ({bad_len}-byte nonce)"),
             ErrKind::InvalidNonce,
             sealed,
             "sealed under the other construction's nonce length",
         )?;
-        let (sealed, fed) = seal(&key, &vec![0u8; good_len], b"", None, msg, Schedule::Whole).await;
-        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-        let sealed = sealed.map_err(|e| describe("seal", &e))?;
-        let (opened, fed) = open(
+        let sealed = seal_ok(
+            &key,
+            &vec![0u8; good_len],
+            b"",
+            None,
+            msg,
+            Schedule::Whole,
+            "seal",
+        )
+        .await?;
+        let opened = open_ok(
             &key,
             &vec![0u8; good_len],
             b"",
             None,
             &sealed,
             Schedule::Whole,
+            "open",
         )
-        .await;
-        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe("open", &e))?;
+        .await?;
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
@@ -592,18 +599,21 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"conformance signature payload";
-    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
     expect(sig.len(), 64, "Ed25519 signature length")?;
 
-    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("round-trip signature did not verify", &e))?;
+    sig_verify_ok(
+        &public,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "round-trip signature did not verify",
+    )
+    .await?;
 
     let mut corrupted = sig.clone();
     corrupted[0] ^= 0x01;
-    let (verified, fed) = sig_verify(&public, payload, &corrupted, Schedule::Whole).await;
-    fed?;
+    let verified = sig_verify_op(&public, payload, &corrupted, Schedule::Whole).await?;
     expect_err(
         "verify",
         ErrKind::AuthenticationFailed,
@@ -614,8 +624,7 @@ async fn ed25519_sign_roundtrip() -> Result<(), String> {
     let (_other, other_public) = generate_ed25519_key(false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    let (verified, fed) = sig_verify(&other_public, payload, &sig, Schedule::Whole).await;
-    fed?;
+    let verified = sig_verify_op(&other_public, payload, &sig, Schedule::Whole).await?;
     expect_err(
         "verify",
         ErrKind::AuthenticationFailed,
@@ -743,8 +752,7 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let payload = b"export roundtrip payload";
-    let (sig, fed) = sig_sign(&signing, payload, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&signing, payload, Schedule::Whole).await?;
 
     let exported = public
         .export_key_raw()
@@ -754,9 +762,14 @@ async fn verifying_key_export_roundtrip() -> Result<(), String> {
     let reimported = import_ed25519_verifying_key(exported)
         .await
         .map_err(|e| describe("re-import of exported public key", &e))?;
-    let (verified, fed) = sig_verify(&reimported, payload, &sig, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("re-imported key did not verify", &e))?;
+    sig_verify_ok(
+        &reimported,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "re-imported key did not verify",
+    )
+    .await?;
 
     // ECDSA verifying keys: SEC1 import -> export is the identity, on
     // every target serving ecdsa-verify (including the composed provider,
@@ -799,13 +812,9 @@ async fn internal_nonce_shape() -> Result<(), String> {
         .ok_or("AES-GCM internal-nonce key reports no nonce budget")?;
 
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(1024 + 7).collect();
-    let (sealed, fed) = in_seal(&key, b"shape aad", &plaintext, Schedule::Straddle).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal", &e))?;
+    let sealed = in_seal_ok(&key, b"shape aad", &plaintext, Schedule::Straddle, "seal").await?;
 
-    let (opened, fed) = in_open(&key, b"shape aad", &sealed, Schedule::Bytes).await;
-    fed.map_err(|e| format!("open sealed feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open", &e))?;
+    let opened = in_open_ok(&key, b"shape aad", &sealed, Schedule::Bytes, "open").await?;
     expect_bytes(&opened, &plaintext, "round-tripped plaintext")?;
 
     // The budget hint decreases as seals consume it: permitting N further
@@ -1083,24 +1092,51 @@ async fn gcm_full_parameters() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     let msg = b"gcm-full-parameters";
 
-    let (sealed, fed) = seal(&key, &[7u8; 16], b"aad", None, msg, Schedule::Straddle).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("seal (16-byte nonce)", &e))?;
-    let (opened, fed) = open(&key, &[7u8; 16], b"aad", None, &sealed, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open (16-byte nonce)", &e))?;
+    let sealed = seal_ok(
+        &key,
+        &[7u8; 16],
+        b"aad",
+        None,
+        msg,
+        Schedule::Straddle,
+        "seal (16-byte nonce)",
+    )
+    .await?;
+    let opened = open_ok(
+        &key,
+        &[7u8; 16],
+        b"aad",
+        None,
+        &sealed,
+        Schedule::Whole,
+        "open (16-byte nonce)",
+    )
+    .await?;
     expect_bytes(&opened, msg, "opened bytes (16-byte nonce)")?;
 
-    let (short, fed) = seal(&key, &[9u8; 12], b"aad", Some(4), msg, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    let short = short.map_err(|e| describe("seal (4-byte tag)", &e))?;
+    let short = seal_ok(
+        &key,
+        &[9u8; 12],
+        b"aad",
+        Some(4),
+        msg,
+        Schedule::Whole,
+        "seal (4-byte tag)",
+    )
+    .await?;
     expect(short.len(), msg.len() + 4, "sealed length (4-byte tag)")?;
-    let (opened, fed) = open(&key, &[9u8; 12], b"aad", Some(4), &short, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-    let opened = opened.map_err(|e| describe("open (4-byte tag)", &e))?;
+    let opened = open_ok(
+        &key,
+        &[9u8; 12],
+        b"aad",
+        Some(4),
+        &short,
+        Schedule::Whole,
+        "open (4-byte tag)",
+    )
+    .await?;
     expect_bytes(&opened, msg, "opened bytes (4-byte tag)")?;
-    let (opened, fed) = open(&key, &[9u8; 12], b"aad", None, &short, Schedule::Whole).await;
-    fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+    let opened = open_op(&key, &[9u8; 12], b"aad", None, &short, Schedule::Whole).await?;
     expect_err(
         "open of a 4-byte-tag message at the default size",
         ErrKind::AuthenticationFailed,
@@ -1108,8 +1144,7 @@ async fn gcm_full_parameters() -> Result<(), String> {
         "verified with the wrong declared tag size",
     )?;
 
-    let (sealed, fed) = seal(&key, &[9u8; 12], b"", Some(5), msg, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = seal_op(&key, &[9u8; 12], b"", Some(5), msg, Schedule::Whole).await?;
     expect_err(
         "seal with a 5-byte tag size",
         ErrKind::Unsupported,
@@ -1128,17 +1163,23 @@ async fn chacha_tag_size_fixed() -> Result<(), String> {
     let chacha = import_chacha_key(vec![0x42u8; 32], false)
         .await
         .map_err(|e| describe("chacha import-key-raw", &e))?;
-    let (sealed, fed) = seal(&chacha, &[0u8; 12], b"", Some(12), msg, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    let sealed = seal_op(&chacha, &[0u8; 12], b"", Some(12), msg, Schedule::Whole).await?;
     expect_err(
         "ChaCha20-Poly1305 seal with a 12-byte tag size",
         ErrKind::Unsupported,
         sealed,
         "sealed with a non-default tag size",
     )?;
-    let (sealed, fed) = seal(&chacha, &[0u8; 12], b"", Some(16), msg, Schedule::Whole).await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-    sealed.map_err(|e| describe("seal with the explicit default tag size", &e))?;
+    seal_ok(
+        &chacha,
+        &[0u8; 12],
+        b"",
+        Some(16),
+        msg,
+        Schedule::Whole,
+        "seal with the explicit default tag size",
+    )
+    .await?;
     Ok(())
 }
 
@@ -1150,12 +1191,26 @@ async fn gcm_any_iv() -> Result<(), String> {
     let msg = b"gcm-any-iv";
     for len in [8usize, 257] {
         let iv = vec![0x11u8; len];
-        let (sealed, fed) = seal(&key, &iv, b"aad", None, msg, Schedule::Whole).await;
-        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-        let sealed = sealed.map_err(|e| describe(&format!("seal ({len}-byte nonce)"), &e))?;
-        let (opened, fed) = open(&key, &iv, b"aad", None, &sealed, Schedule::Whole).await;
-        fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe(&format!("open ({len}-byte nonce)"), &e))?;
+        let sealed = seal_ok(
+            &key,
+            &iv,
+            b"aad",
+            None,
+            msg,
+            Schedule::Whole,
+            &format!("seal ({len}-byte nonce)"),
+        )
+        .await?;
+        let opened = open_ok(
+            &key,
+            &iv,
+            b"aad",
+            None,
+            &sealed,
+            Schedule::Whole,
+            &format!("open ({len}-byte nonce)"),
+        )
+        .await?;
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
@@ -1253,8 +1308,7 @@ async fn jwk_semantics() -> Result<(), String> {
     let key = import_hmac_key_jwk(Sha2Variant::Sha256, policy, false)
         .await
         .map_err(|e| describe("use/key_ops-carrying import", &e))?;
-    let (tag, fed) = sign(&key, b"jwk-semantics", Schedule::Whole).await;
-    fed.map_err(|e| format!("sign data feeder: {e}"))?;
+    let tag = sign_ok(&key, b"jwk-semantics", Schedule::Whole).await?;
     if tag.len() != 32 {
         return Err(format!("tag length {} from JWK-imported key", tag.len()));
     }
@@ -1297,7 +1351,7 @@ async fn aead_wrap_grants() -> Result<(), String> {
     expect(wrap_only.can_wrap(), true, "wrap-only key can-wrap")?;
     expect(wrap_only.can_unwrap(), false, "wrap-only key can-unwrap")?;
     expect(wrap_only.can_seal(), false, "wrap-only key can-seal")?;
-    let (refused, fed) = seal(
+    let refused = seal_op(
         &wrap_only,
         &[3u8; 12],
         b"",
@@ -1305,8 +1359,7 @@ async fn aead_wrap_grants() -> Result<(), String> {
         b"usage-policy plaintext",
         Schedule::Whole,
     )
-    .await;
-    fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+    .await?;
     expect_err(
         "seal on a wrap-only key",
         ErrKind::NotPermitted,
@@ -1964,9 +2017,14 @@ async fn sig_public_format_imports() -> Result<(), String> {
             .await
             .map_err(|e| describe("export-key-raw", &e))?;
         expect_bytes(&exported, &public_raw, &format!("raw export after {what}"))?;
-        let (verified, fed) = sig_verify(&key, &msg, &sig, Schedule::Whole).await;
-        fed?;
-        verified.map_err(|e| describe(&format!("TEST 3 signature under the {what}"), &e))?;
+        sig_verify_ok(
+            &key,
+            &msg,
+            &sig,
+            Schedule::Whole,
+            &format!("TEST 3 signature under the {what}"),
+        )
+        .await?;
     }
 
     // ECDSA: the A.2.5 point through all three formats.
@@ -2108,8 +2166,7 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
         ed25519_sign::import_signing_key_pkcs8(rfc8410_pkcs8(0x70, &seed), signing_options(false))
             .await
             .map_err(|e| describe("import-signing-key-pkcs8", &e))?;
-    let (sig, fed) = sig_sign(&from_pkcs8, &msg, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&from_pkcs8, &msg, Schedule::Whole).await?;
     expect_bytes(
         &sig,
         &expected_sig,
@@ -2124,8 +2181,7 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
     let from_jwk = ed25519_sign::import_signing_key_jwk(jwk, signing_options(false))
         .await
         .map_err(|e| describe("import-signing-key-jwk", &e))?;
-    let (sig, fed) = sig_sign(&from_jwk, &msg, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&from_jwk, &msg, Schedule::Whole).await?;
     expect_bytes(&sig, &expected_sig, "TEST 3 signature from the JWK import")?;
 
     // Generated keys: the gated exports round-trip through both formats.
@@ -2158,11 +2214,15 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
                 .map_err(|e| describe("re-import of exported JWK", &e))?,
         ),
     ] {
-        let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-        fed?;
-        let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-        fed?;
-        verified.map_err(|e| describe(&format!("{what} re-import did not verify"), &e))?;
+        let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
+        sig_verify_ok(
+            &public,
+            payload,
+            &sig,
+            Schedule::Whole,
+            &format!("{what} re-import did not verify"),
+        )
+        .await?;
     }
 
     // The extractability gate, in the failing direction.
@@ -2426,9 +2486,7 @@ async fn sha1_checked_postures() -> Result<(), String> {
             "checked-SHA-1 algorithm-name",
         )?;
         for schedule in [Schedule::Whole, Schedule::Bytes] {
-            let (got, fed) = compute(digest, b"abc", schedule).await;
-            fed.map_err(|e| format!("compute data feeder: {e}"))?;
-            let got = got.map_err(|e| describe("compute (honest input)", &e))?;
+            let got = compute_ok(digest, b"abc", schedule, "compute (honest input)").await?;
             expect_bytes(&got, &abc, "honest-input digest is standard SHA-1")?;
         }
     }
@@ -2441,8 +2499,7 @@ async fn sha1_checked_postures() -> Result<(), String> {
     // human-only, and its pin is implementation-convergence hygiene, like
     // every other message-string pin — not consumer contract.
     for m in [&m1, &m2] {
-        let (got, fed) = compute(&rejecting, m, Schedule::Whole).await;
-        fed.map_err(|e| format!("compute data feeder: {e}"))?;
+        let got = compute_op(&rejecting, m, Schedule::Whole).await?;
         match got {
             Err(Error::Extension(ext))
                 if ext.origin == "lann:webcrypto"
@@ -2461,12 +2518,8 @@ async fn sha1_checked_postures() -> Result<(), String> {
     // The mitigating posture: the deterministic safe hashes — never the
     // raw SHA-1 the pair collides under — and the pair no longer
     // collides.
-    let (d1, fed) = compute(&mitigating, &m1, Schedule::Whole).await;
-    fed.map_err(|e| format!("compute data feeder: {e}"))?;
-    let d1 = d1.map_err(|e| describe("mitigating compute", &e))?;
-    let (d2, fed) = compute(&mitigating, &m2, Schedule::Whole).await;
-    fed.map_err(|e| format!("compute data feeder: {e}"))?;
-    let d2 = d2.map_err(|e| describe("mitigating compute", &e))?;
+    let d1 = compute_ok(&mitigating, &m1, Schedule::Whole, "mitigating compute").await?;
+    let d2 = compute_ok(&mitigating, &m2, Schedule::Whole, "mitigating compute").await?;
     expect_bytes(
         &d1,
         &unhex("7117b3cb9225aaf0d8ef1a40e493957b0bf8693d"),
@@ -2530,14 +2583,11 @@ async fn ctr_known_answers() -> Result<(), String> {
             .await
             .map_err(|e| describe("import-key-raw", &e))?;
         for schedule in [Schedule::Whole, Schedule::Straddle] {
-            let (sealed, fed) = ci_encrypt(&key, &iv, Some(128), &plaintext, schedule).await;
-            fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-            let sealed = sealed.map_err(|e| describe("encrypt", &e))?;
+            let sealed = ci_encrypt_ok(&key, &iv, Some(128), &plaintext, schedule, "encrypt").await?;
             expect_bytes(&sealed, &expected, "SP 800-38A ciphertext")?;
         }
-        let (opened, fed) = ci_decrypt(&key, &iv, Some(128), &expected, Schedule::Whole).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe("decrypt", &e))?;
+        let opened =
+            ci_decrypt_ok(&key, &iv, Some(128), &expected, Schedule::Whole, "decrypt").await?;
         expect_bytes(&opened, &plaintext, "SP 800-38A round trip")?;
     }
 
@@ -2548,9 +2598,15 @@ async fn ctr_known_answers() -> Result<(), String> {
         .map_err(|e| describe("import-key-raw", &e))?;
     let mut iv = [0xabu8; 16];
     iv[15] = 0xff;
-    let (sealed, fed) = ci_encrypt(&key, &iv, Some(2), &[0; 64], Schedule::Whole).await;
-    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-    let sealed = sealed.map_err(|e| describe("encrypt (2-bit counter)", &e))?;
+    let sealed = ci_encrypt_ok(
+        &key,
+        &iv,
+        Some(2),
+        &[0; 64],
+        Schedule::Whole,
+        "encrypt (2-bit counter)",
+    )
+    .await?;
     for (i, low) in [0xffu8, 0xfc, 0xfd, 0xfe].into_iter().enumerate() {
         let mut counter = [0xabu8; 16];
         counter[15] = low;
@@ -2566,8 +2622,7 @@ async fn ctr_known_answers() -> Result<(), String> {
 
     // And a message needing more blocks than the counter space holds
     // fails rather than reuse counter values.
-    let (sealed, fed) = ci_encrypt(&key, &iv, Some(2), &[0; 80], Schedule::Whole).await;
-    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+    let sealed = ci_encrypt_op(&key, &iv, Some(2), &[0; 80], Schedule::Whole).await?;
     expect_err(
         "encrypt past the counter space",
         ErrKind::Other,
@@ -2596,17 +2651,15 @@ async fn cipher_params_contract() -> Result<(), String> {
         ("ctr counter length 129", &ctr, 16, Some(129)),
         ("15-byte ctr counter block", &ctr, 15, Some(64)),
     ] {
-        let (sealed, fed) = ci_encrypt(key, &vec![0; iv_len], counter, b"x", Schedule::Whole).await;
-        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
+        let sealed = ci_encrypt_op(key, &vec![0; iv_len], counter, b"x", Schedule::Whole).await?;
         expect_err(
             what,
             ErrKind::InvalidNonce,
             sealed,
             "accepted bad parameters",
         )?;
-        let (opened, fed) =
-            ci_decrypt(key, &vec![0; iv_len], counter, &[0; 16], Schedule::Whole).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened =
+            ci_decrypt_op(key, &vec![0; iv_len], counter, &[0; 16], Schedule::Whole).await?;
         expect_err(
             what,
             ErrKind::InvalidNonce,
@@ -2629,10 +2682,15 @@ async fn cbc_uniform_failure() -> Result<(), String> {
 
     // A ciphertext with valid shape but corrupt padding: encrypt, then
     // flip a bit in the final block.
-    let (sealed, fed) =
-        ci_encrypt(&key, &iv, None, b"uniform failure payload", Schedule::Whole).await;
-    fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-    let mut corrupted = sealed.map_err(|e| describe("encrypt", &e))?;
+    let mut corrupted = ci_encrypt_ok(
+        &key,
+        &iv,
+        None,
+        b"uniform failure payload",
+        Schedule::Whole,
+        "encrypt",
+    )
+    .await?;
     let last = corrupted.len() - 1;
     corrupted[last] ^= 0x01;
 
@@ -2641,8 +2699,7 @@ async fn cbc_uniform_failure() -> Result<(), String> {
         ("misaligned ciphertext", vec![1; 15]),
         ("corrupt padding", corrupted),
     ] {
-        let (opened, fed) = ci_decrypt(&key, &iv, None, &ciphertext, Schedule::Whole).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened = ci_decrypt_op(&key, &iv, None, &ciphertext, Schedule::Whole).await?;
         match opened {
             Err(Error::Other(detail)) if detail == "AES-CBC decryption failed" => {}
             Err(other) => {
@@ -2708,12 +2765,24 @@ async fn cipher_derive_key() -> Result<(), String> {
         .map_err(|e| describe("import-key-raw of the derived bits", &e))?;
 
         let counter = if mode == "ctr" { Some(64) } else { None };
-        let (sealed, fed) = ci_encrypt(&derived, &iv, counter, payload, Schedule::Whole).await;
-        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-        let sealed = sealed.map_err(|e| describe("encrypt (derived key)", &e))?;
-        let (opened, fed) = ci_decrypt(&imported, &iv, counter, &sealed, Schedule::Whole).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe("decrypt (imported bits)", &e))?;
+        let sealed = ci_encrypt_ok(
+            &derived,
+            &iv,
+            counter,
+            payload,
+            Schedule::Whole,
+            "encrypt (derived key)",
+        )
+        .await?;
+        let opened = ci_decrypt_ok(
+            &imported,
+            &iv,
+            counter,
+            &sealed,
+            Schedule::Whole,
+            "decrypt (imported bits)",
+        )
+        .await?;
         expect_bytes(&opened, payload, &format!("{mode} derive-key equivalence"))?;
     }
     Ok(())
@@ -2749,11 +2818,15 @@ async fn sha1_derive_surface() -> Result<(), String> {
     let imported = import_hmac_sha1_key(bits.clone(), false)
         .await
         .map_err(|e| describe("import of the derived bits", &e))?;
-    let (tag, fed) = sign(&derived, payload, Schedule::Whole).await;
-    fed.map_err(|e| format!("sign data feeder: {e}"))?;
-    let (verified, fed) = verify(&imported, payload, &tag, Schedule::Whole).await;
-    fed.map_err(|e| format!("verify data feeder: {e}"))?;
-    verified.map_err(|e| describe("derive-key disagreed with derive-bits + import", &e))?;
+    let tag = sign_ok(&derived, payload, Schedule::Whole).await?;
+    verify_ok(
+        &imported,
+        payload,
+        &tag,
+        Schedule::Whole,
+        "derive-key disagreed with derive-bits + import",
+    )
+    .await?;
 
     // Chaining: `hkdf-sha1.prepare-from` rejects a KDF source exactly as
     // `hkdf-sha2.prepare-from` does (only agreements have a natural length).

@@ -13,8 +13,8 @@ use crate::translate::{
     SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
-    ci_decrypt, ci_encrypt, compute, in_open, in_seal, open, seal, sig_verify, sign, verify,
-    Schedule,
+    ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, in_open, in_open_op, in_seal_ok,
+    open_ok, open_op, seal_ok, seal_op, sig_verify, sign_ok, verify_ok, verify_op, Schedule,
 };
 use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
@@ -47,9 +47,7 @@ pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
         Sha2Alg::Sha512 => Sha2Variant::Sha512,
     };
     let digest = make_digest(variant).map_err(|e| describe("make-digest", &e))?;
-    let (got, fed) = compute(&digest, &case.msg, case.schedule).await;
-    fed.map_err(|e| format!("compute data feeder: {e}"))?;
-    let got = got.map_err(|e| describe("compute", &e))?;
+    let got = compute_ok(&digest, &case.msg, case.schedule, "compute").await?;
     expect_bytes(&got, &case.md, "computed digest")?;
     // The comparison every caller of a digest vector makes; pins
     // `constant-time-equal`'s agreement with plain equality on real data.
@@ -69,16 +67,19 @@ pub async fn run_hmac_case(case: &HmacCase) -> Result<(), String> {
     }
     .map_err(|e| describe("import-key-raw", &e))?;
     if case.valid {
-        let (tag, fed) = sign(&key, &case.msg, case.schedule).await;
-        fed.map_err(|e| format!("sign data feeder: {e}"))?;
+        let tag = sign_ok(&key, &case.msg, case.schedule).await?;
         expect_bytes(&tag, &case.tag, "sign tag")?;
 
-        let (verified, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
-        fed.map_err(|e| format!("verify data feeder: {e}"))?;
-        verified.map_err(|e| describe("verify(tag) failed for a valid vector", &e))?;
+        verify_ok(
+            &key,
+            &case.msg,
+            &case.tag,
+            case.schedule,
+            "verify(tag) failed for a valid vector",
+        )
+        .await?;
     } else {
-        let (verified, fed) = verify(&key, &case.msg, &case.tag, case.schedule).await;
-        fed.map_err(|e| format!("verify data feeder: {e}"))?;
+        let verified = verify_op(&key, &case.msg, &case.tag, case.schedule).await?;
         expect_err(
             "verify of an invalid vector",
             ErrKind::AuthenticationFailed,
@@ -211,17 +212,14 @@ pub async fn run_cbc_case(case: &CbcCase) -> Result<(), String> {
         .await
         .map_err(|e| describe("import-key-raw", &e))?;
     if case.valid {
-        let (sealed, fed) = ci_encrypt(&key, &case.iv, None, &case.msg, case.schedule).await;
-        fed.map_err(|e| format!("encrypt plaintext feeder: {e}"))?;
-        let sealed = sealed.map_err(|e| describe("encrypt", &e))?;
+        let sealed =
+            ci_encrypt_ok(&key, &case.iv, None, &case.msg, case.schedule, "encrypt").await?;
         expect_bytes(&sealed, &case.ct, "computed ciphertext")?;
-        let (opened, fed) = ci_decrypt(&key, &case.iv, None, &case.ct, case.schedule).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
-        let opened = opened.map_err(|e| describe("decrypt", &e))?;
+        let opened =
+            ci_decrypt_ok(&key, &case.iv, None, &case.ct, case.schedule, "decrypt").await?;
         expect_bytes(&opened, &case.msg, "decrypted plaintext")
     } else {
-        let (opened, fed) = ci_decrypt(&key, &case.iv, None, &case.ct, case.schedule).await;
-        fed.map_err(|e| format!("decrypt ciphertext feeder: {e}"))?;
+        let opened = ci_decrypt_op(&key, &case.iv, None, &case.ct, case.schedule).await?;
         match opened {
             Err(Error::Other(detail)) if detail == "AES-CBC decryption failed" => Ok(()),
             Err(other) => Err(describe(
@@ -268,16 +266,14 @@ async fn run_aead_expectation(
 ) -> Result<(), String> {
     match expectation {
         AeadExpectation::InvalidNonce => {
-            let (sealed, fed) = seal(key, iv, aad, None, msg, schedule).await;
-            fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
+            let sealed = seal_op(key, iv, aad, None, msg, schedule).await?;
             expect_err(
                 "seal",
                 ErrKind::InvalidNonce,
                 sealed,
                 &format!("accepted a {}-byte nonce", iv.len()),
             )?;
-            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
-            fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+            let opened = open_op(key, iv, aad, None, ct_tag, schedule).await?;
             expect_err(
                 "open",
                 ErrKind::InvalidNonce,
@@ -286,19 +282,14 @@ async fn run_aead_expectation(
             )
         }
         AeadExpectation::Valid => {
-            let (sealed, fed) = seal(key, iv, aad, None, msg, schedule).await;
-            fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-            let sealed = sealed.map_err(|e| describe("seal", &e))?;
+            let sealed = seal_ok(key, iv, aad, None, msg, schedule, "seal").await?;
             expect_bytes(&sealed, ct_tag, "sealed bytes")?;
 
-            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
-            fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
-            let opened = opened.map_err(|e| describe("open", &e))?;
+            let opened = open_ok(key, iv, aad, None, ct_tag, schedule, "open").await?;
             expect_bytes(&opened, msg, "opened bytes")
         }
         AeadExpectation::AuthenticationFailed => {
-            let (opened, fed) = open(key, iv, aad, None, ct_tag, schedule).await;
-            fed.map_err(|e| format!("open ciphertext feeder: {e}"))?;
+            let opened = open_op(key, iv, aad, None, ct_tag, schedule).await?;
             expect_err(
                 "open",
                 ErrKind::AuthenticationFailed,
@@ -324,15 +315,12 @@ pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), Str
             .await
             .map_err(|e| describe("import-key-raw", &e))?,
     };
-    let (opened, fed) = in_open(&key, &case.aad, &case.sealed, case.schedule).await;
-    fed.map_err(|e| format!("open sealed feeder: {e}"))?;
+    let opened = in_open_op(&key, &case.aad, &case.sealed, case.schedule).await?;
     if case.valid {
         let opened = opened.map_err(|e| describe("open", &e))?;
         expect_bytes(&opened, &case.msg, "opened bytes")?;
 
-        let (resealed, fed) = in_seal(&key, &case.aad, &case.msg, case.schedule).await;
-        fed.map_err(|e| format!("seal plaintext feeder: {e}"))?;
-        let resealed = resealed.map_err(|e| describe("seal", &e))?;
+        let resealed = in_seal_ok(&key, &case.aad, &case.msg, case.schedule, "seal").await?;
         expect(resealed.len(), case.sealed.len(), "resealed length")?;
         let (reopened, fed) = in_open(&key, &case.aad, &resealed, Schedule::Whole).await;
         fed.map_err(|e| format!("re-open sealed feeder: {e}"))?;

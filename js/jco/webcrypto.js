@@ -321,6 +321,94 @@ function stateReader(store, what) {
 }
 
 /**
+ * The platform `CryptoKey` behind every key resource built on
+ * `keyResourceTail`. It lives in a module-private `WeakMap` rather than a
+ * base-class private field because a `#`-private field is invisible to
+ * subclasses: the tail methods and the key classes' own operations read
+ * the same key through `platformKeyOf`.
+ */
+/** @type {WeakMap<object, CryptoKey>} */
+const platformKeys = new WeakMap();
+
+const platformKeyOf = stateReader(platformKeys, "key");
+
+/**
+ * One usage projection: whether the resource's platform key carries
+ * `usage`. The key was imported or generated with exactly the usages its
+ * mint options granted, so the `CryptoKey`'s own usage list is the
+ * authority.
+ * @param {KeyUsage} usage
+ */
+function usageProjection(usage) {
+  /** @this {object} */
+  function projection() {
+    return platformKeyOf(this).usages.includes(usage);
+  }
+  return projection;
+}
+
+/**
+ * The common tail of the key resource classes: a constructor storing the
+ * platform key in `platformKeys`, `extractable()` — the `CryptoKey`'s own
+ * flag, the gate `export-key-*` checks — and one usage projection per
+ * `projections` entry, mapping the WIT getter name onto the WebCrypto
+ * usage it reports (`canSeal` → `"encrypt"`, …).
+ * @template {Record<string, KeyUsage>} P
+ * @param {P} projections
+ * @returns {new (key: CryptoKey) => { extractable(): boolean } & Record<keyof P, () => boolean>}
+ */
+function keyResourceTail(projections) {
+  class Tail {
+    /** @param {CryptoKey} key */
+    constructor(key) {
+      platformKeys.set(this, key);
+    }
+
+    extractable() {
+      return platformKeyOf(this).extractable;
+    }
+  }
+  for (const [method, usage] of Object.entries(projections)) {
+    Object.defineProperty(Tail.prototype, method, {
+      value: usageProjection(usage),
+      writable: true,
+      configurable: true,
+    });
+  }
+  return /** @type {new (key: CryptoKey) => { extractable(): boolean } & Record<keyof P, () => boolean>} */ (
+    /** @type {unknown} */ (Tail)
+  );
+}
+
+/**
+ * `keyResourceTail` plus the symmetric key classes' export pair:
+ * `exportKeyRaw` and `exportKeyJwk` behind the shared extractability gates
+ * (`exportRawGated`/`exportJwkGated`; the JWK is the WIT's `oct` form).
+ * @template {Record<string, KeyUsage>} P
+ * @param {P} projections
+ * @returns {new (key: CryptoKey) => { extractable(): boolean, exportKeyRaw(): Promise<Uint8Array>, exportKeyJwk(): Promise<string> } & Record<keyof P, () => boolean>}
+ */
+function symmetricKeyTail(projections) {
+  // The base is narrowed to its statically known members: a generic
+  // `Record<keyof P, …>` cannot appear in an `extends` clause. The
+  // projections re-enter through the return type.
+  /** @type {new (key: CryptoKey) => { extractable(): boolean }} */
+  const Base = keyResourceTail(projections);
+  class Tail extends Base {
+    async exportKeyRaw() {
+      return exportRawGated(platformKeyOf(this));
+    }
+
+    async exportKeyJwk() {
+      return exportJwkGated(platformKeyOf(this));
+    }
+  }
+  return /** @type {new (key: CryptoKey) => { extractable(): boolean, exportKeyRaw(): Promise<Uint8Array>, exportKeyJwk(): Promise<string> } & Record<keyof P, () => boolean>} */ (
+    /** @type {unknown} */ (Tail)
+  );
+}
+
+/**
  * The `mac-key-options` resource: mint-time policy under construction. Per
  * the package-wide options contract the constructor grants nothing; the
  * setters are opt-in, and a mint consumes the accumulated policy through
@@ -365,8 +453,7 @@ export class MacKeyOptions {
  * `subtle.sign`/`verify` exactly (WebCrypto has no incremental HMAC): each
  * call collects its entire input stream, then signs or verifies it whole.
  */
-export class MacKey {
-  #key;
+export class MacKey extends symmetricKeyTail({ canSign: "sign", canVerify: "verify" }) {
   /**
    * The algorithm parameters, fixed at mint. The getters are declared
    * *total* in the WIT — they have no error case — so they must not depend
@@ -384,7 +471,7 @@ export class MacKey {
    * @param {string} hashName
    */
   constructor(key, lengthBits, hashName) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
     this.#hashName = hashName;
   }
@@ -399,7 +486,7 @@ export class MacKey {
     return withCollectedInput(data, async (message) => {
       if (!this.canSign()) throw notPermitted("sign");
       return new Uint8Array(
-        await platformCall("HMAC sign", () => subtle.sign("HMAC", this.#key, message)),
+        await platformCall("HMAC sign", () => subtle.sign("HMAC", platformKeyOf(this), message)),
       );
     });
   }
@@ -416,7 +503,7 @@ export class MacKey {
     await withCollectedInput(data, async (message) => {
       if (!this.canVerify()) throw notPermitted("verify");
       const ok = await platformCall("HMAC verify", () =>
-        subtle.verify("HMAC", this.#key, asBufferSource(tag), message),
+        subtle.verify("HMAC", platformKeyOf(this), asBufferSource(tag), message),
       );
       if (!ok) {
         throw errAuthenticationFailed();
@@ -429,7 +516,7 @@ export class MacKey {
    * `length` come from the mint instead (see `#lengthBits`).
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmHash() {
@@ -438,36 +525,6 @@ export class MacKey {
 
   algorithmLength() {
     return this.#lengthBits;
-  }
-
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
-  }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canSign() {
-    return this.#key.usages.includes("sign");
-  }
-
-  canVerify() {
-    return this.#key.usages.includes("verify");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (JSON text; the `mac-key.export-key-jwk`
-   * contract), behind the same extractability gate as `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
   }
 }
 
@@ -526,8 +583,12 @@ export class AeadKeyOptions {
  * resource reports; instances are minted only by the `aes-gcm` and
  * `chacha20-poly1305` interface functions below.
  */
-export class AeadKey {
-  #key;
+export class AeadKey extends symmetricKeyTail({
+  canSeal: "encrypt",
+  canOpen: "decrypt",
+  canWrap: "wrapKey",
+  canUnwrap: "unwrapKey",
+}) {
   /**
    * The key length in bits, fixed at mint. `aead-key.algorithm-length` is
    * declared *total* in the WIT, so it must not depend on
@@ -541,13 +602,8 @@ export class AeadKey {
    * @param {number} lengthBits
    */
   constructor(key, lengthBits) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
-  }
-
-  /** Whether this key drives the ChaCha20-Poly1305 construction. */
-  #isChacha() {
-    return this.#key.algorithm.name === "ChaCha20-Poly1305";
   }
 
   /**
@@ -569,45 +625,7 @@ export class AeadKey {
   async seal(nonce, aad, tagSize, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
       if (!this.canSeal()) throw notPermitted("seal");
-      if (this.#isChacha()) {
-        requireChachaNonce(nonce);
-        requireChachaTagSize(tagSize);
-        const sealed = await platformCall("ChaCha20-Poly1305 seal", () =>
-          subtle.encrypt(
-            {
-              name: "ChaCha20-Poly1305",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-            },
-            this.#key,
-            message,
-          ),
-        );
-        return new Uint8Array(sealed);
-      }
-      requireGcmNonce(nonce);
-      const tagLength = gcmTagLengthBits(tagSize);
-      let sealed;
-      try {
-        sealed = await platformCall("AES-GCM seal", () =>
-          subtle.encrypt(
-            {
-              name: "AES-GCM",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-              tagLength,
-            },
-            this.#key,
-            message,
-          ),
-        );
-      } catch (err) {
-        if (gcmNonceUnservable(nonce)) {
-          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-        }
-        throw err;
-      }
-      return new Uint8Array(sealed);
+      return aeadSealOpen("seal", platformKeyOf(this), nonce, aad, tagSize, message);
     });
   }
 
@@ -626,46 +644,7 @@ export class AeadKey {
   async open(nonce, aad, tagSize, ciphertext) {
     return withCollectedInputToStream(ciphertext, async (message) => {
       if (!this.canOpen()) throw notPermitted("open");
-      if (this.#isChacha()) {
-        requireChachaNonce(nonce);
-        requireChachaTagSize(tagSize);
-        let opened;
-        try {
-          opened = await subtle.decrypt(
-            {
-              name: "ChaCha20-Poly1305",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-            },
-            this.#key,
-            message,
-          );
-        } catch (err) {
-          throw decryptFailure(err);
-        }
-        return new Uint8Array(opened);
-      }
-      requireGcmNonce(nonce);
-      const tagLength = gcmTagLengthBits(tagSize);
-      let opened;
-      try {
-        opened = await subtle.decrypt(
-          {
-            name: "AES-GCM",
-            iv: asBufferSource(nonce),
-            additionalData: asBufferSource(aad),
-            tagLength,
-          },
-          this.#key,
-          message,
-        );
-      } catch (err) {
-        if (gcmNonceUnservable(nonce)) {
-          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-        }
-        throw decryptFailure(err);
-      }
-      return new Uint8Array(opened);
+      return aeadSealOpen("open", platformKeyOf(this), nonce, aad, tagSize, message);
     });
   }
 
@@ -677,7 +656,7 @@ export class AeadKey {
    * with other GCM sizes accepted per call.
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmLength() {
@@ -691,46 +670,59 @@ export class AeadKey {
   tagSize() {
     return 16;
   }
+}
 
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
+/**
+ * The shared `seal`/`open` body of `aead-key`, over the collected message:
+ * validate the per-call nonce and tag size for the key's construction
+ * (RFC 8439 fixes ChaCha20-Poly1305's; AES-GCM takes any non-empty nonce
+ * and the registry tag-size set), run the platform call, and lift its
+ * failure by direction — a `seal` failure through `platformCall`'s
+ * taxonomy, an `open` failure through `decryptFailure` (a failed tag check
+ * is `open`'s expected outcome). An AES-GCM failure under a nonce outside
+ * the platform's window is reinterpreted as `{ tag: 'unsupported', val }`
+ * in either direction (see `gcmNonceUnservable`).
+ * @param {"seal" | "open"} direction
+ * @param {CryptoKey} key
+ * @param {Uint8Array} nonce
+ * @param {Uint8Array} aad
+ * @param {number | undefined} tagSize
+ * @param {Uint8Array<ArrayBuffer>} message
+ */
+async function aeadSealOpen(direction, key, nonce, aad, tagSize, message) {
+  const chacha = key.algorithm.name === "ChaCha20-Poly1305";
+  /** @type {AesGcmParams} */
+  let params;
+  if (chacha) {
+    requireChachaNonce(nonce);
+    requireChachaTagSize(tagSize);
+    params = {
+      name: "ChaCha20-Poly1305",
+      iv: asBufferSource(nonce),
+      additionalData: asBufferSource(aad),
+    };
+  } else {
+    requireGcmNonce(nonce);
+    params = {
+      name: "AES-GCM",
+      iv: asBufferSource(nonce),
+      additionalData: asBufferSource(aad),
+      tagLength: gcmTagLengthBits(tagSize),
+    };
   }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canSeal() {
-    return this.#key.usages.includes("encrypt");
+  let result;
+  try {
+    result =
+      direction === "seal"
+        ? await platformCall(`${params.name} seal`, () => subtle.encrypt(params, key, message))
+        : await subtle.decrypt(params, key, message);
+  } catch (err) {
+    if (!chacha && gcmNonceUnservable(nonce)) {
+      throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
+    }
+    throw direction === "seal" ? err : decryptFailure(err);
   }
-
-  canOpen() {
-    return this.#key.usages.includes("decrypt");
-  }
-
-  canWrap() {
-    return this.#key.usages.includes("wrapKey");
-  }
-
-  canUnwrap() {
-    return this.#key.usages.includes("unwrapKey");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
-   * the package-wide contract), behind the same extractability gate as
-   * `exportKeyRaw`. ChaCha20-Poly1305 keys carry the Modern Algorithms
-   * proposal's registered `alg`, `"C20P"`, which the platform emits.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
-  }
+  return new Uint8Array(result);
 }
 
 /**
@@ -1991,8 +1983,12 @@ function cipherParams(name, iv, counterLength) {
  * its mint options granted; instances are minted only by the `aes-cbc`
  * and `aes-ctr` interface functions below.
  */
-export class CipherKey {
-  #key;
+export class CipherKey extends symmetricKeyTail({
+  canEncrypt: "encrypt",
+  canDecrypt: "decrypt",
+  canWrap: "wrapKey",
+  canUnwrap: "unwrapKey",
+}) {
   /** @type {"AES-CBC" | "AES-CTR"} */
   #name;
   /** The key length in bits, fixed at mint (see `AeadKey.#lengthBits`). */
@@ -2004,7 +2000,7 @@ export class CipherKey {
    * @param {number} lengthBits
    */
   constructor(key, name, lengthBits) {
-    this.#key = key;
+    super(key);
     this.#name = name;
     this.#lengthBits = lengthBits;
   }
@@ -2022,7 +2018,7 @@ export class CipherKey {
       if (!this.canEncrypt()) throw notPermitted("encrypt");
       const params = cipherParams(this.#name, iv, counterLength);
       const sealed = await platformCall(`${this.#name} encrypt`, () =>
-        subtle.encrypt(params, this.#key, message),
+        subtle.encrypt(params, platformKeyOf(this), message),
       );
       return new Uint8Array(sealed);
     });
@@ -2044,7 +2040,7 @@ export class CipherKey {
       const params = cipherParams(this.#name, iv, counterLength);
       let opened;
       try {
-        opened = await subtle.decrypt(params, this.#key, message);
+        opened = await subtle.decrypt(params, platformKeyOf(this), message);
       } catch {
         throw errOther(`${this.#name} decryption failed`);
       }
@@ -2062,44 +2058,6 @@ export class CipherKey {
 
   ivSize() {
     return 16;
-  }
-
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
-  }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canEncrypt() {
-    return this.#key.usages.includes("encrypt");
-  }
-
-  canDecrypt() {
-    return this.#key.usages.includes("decrypt");
-  }
-
-  canWrap() {
-    return this.#key.usages.includes("wrapKey");
-  }
-
-  canUnwrap() {
-    return this.#key.usages.includes("unwrapKey");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
-   * key was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK, behind the same extractability gate as
-   * `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
   }
 }
 
@@ -2388,8 +2346,7 @@ export class InternalNonceKeyOptions {
  * The key counts its `seal` invocations against the WIT nonce budget (2^32
  * for 12-byte nonces) and throws `{ tag: 'key-exhausted' }` beyond it.
  */
-export class InternalNonceKey {
-  #key;
+export class InternalNonceKey extends symmetricKeyTail({ canSeal: "encrypt", canOpen: "decrypt" }) {
   /** The key length in bits, fixed at mint. See `AeadKey`. */
   #lengthBits;
   #sealed = 0n;
@@ -2405,7 +2362,7 @@ export class InternalNonceKey {
    * @param {number} lengthBits
    */
   constructor(key, lengthBits) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
   }
 
@@ -2430,7 +2387,7 @@ export class InternalNonceKey {
         await platformCall("AES-GCM seal", () =>
           subtle.encrypt(
             { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-            this.#key,
+            platformKeyOf(this),
             message,
           ),
         ),
@@ -2463,7 +2420,7 @@ export class InternalNonceKey {
       try {
         opened = await subtle.decrypt(
           { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-          this.#key,
+          platformKeyOf(this),
           body,
         );
       } catch (err) {
@@ -2478,7 +2435,7 @@ export class InternalNonceKey {
    * from the mint (see `#lengthBits`).
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmLength() {
@@ -2492,36 +2449,6 @@ export class InternalNonceKey {
   sealsRemaining() {
     const remaining = InternalNonceKey.#NONCE_BUDGET - this.#sealed;
     return remaining > 0n ? remaining : 0n;
-  }
-
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
-  }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canSeal() {
-    return this.#key.usages.includes("encrypt");
-  }
-
-  canOpen() {
-    return this.#key.usages.includes("decrypt");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
-   * key was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (the `internal-nonce-key.export-key-jwk`
-   * contract), behind the same extractability gate as `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
   }
 }
 
@@ -2822,6 +2749,8 @@ async function exportRawGated(key) {
  * The key as an `oct` JWK, per the WIT contract: exactly the
  * material-bearing members (`kty`, `k`, `alg`) — the platform's `key_ops`/
  * `ext` are the consumer's to stamp, so they are dropped here.
+ * ChaCha20-Poly1305 keys carry the Modern Algorithms proposal's registered
+ * `alg`, `"C20P"`, which the platform emits.
  * @param {CryptoKey} key
  */
 async function exportJwkGated(key) {
@@ -3295,8 +3224,7 @@ function requireSigningGrant(policy) {
  * derive — `generate-key` returns the pair, and importers mint the
  * verifying key from the public bytes they hold.
  */
-export class SigningKey {
-  #privateKey;
+export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
   #algorithm;
 
   /**
@@ -3304,7 +3232,7 @@ export class SigningKey {
    * @param {typeof ED25519_ALGORITHM} algorithm the mint-bound algorithm record
    */
   constructor(privateKey, algorithm) {
-    this.#privateKey = privateKey;
+    super(privateKey);
     this.#algorithm = algorithm;
   }
 
@@ -3319,7 +3247,7 @@ export class SigningKey {
       const params = signParams(this.#algorithm);
       return new Uint8Array(
         await platformCall(`${this.#algorithm.name} sign`, () =>
-          subtle.sign(params, this.#privateKey, message),
+          subtle.sign(params, platformKeyOf(this), message),
         ),
       );
     });
@@ -3338,24 +3266,14 @@ export class SigningKey {
     return this.#algorithm.hash;
   }
 
-  extractable() {
-    return this.#privateKey.extractable;
-  }
-
-  /** The `sign` grant: a projection of the `CryptoKey`'s own usage list. */
-  canSign() {
-    return this.#privateKey.usages.includes("sign");
-  }
-
   /**
    * The private JWK, material members only, behind the extractability
    * gate (checked on the `CryptoKey` itself, like `exportRawGated`).
    */
   async exportKeyJwk() {
-    if (!this.#privateKey.extractable) throw errNotExtractable();
-    const jwk = await platformCall("jwk key export", () =>
-      subtle.exportKey("jwk", this.#privateKey),
-    );
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
+    const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", privateKey));
     return JSON.stringify(
       jwk.kty === "OKP"
         ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d }
@@ -3368,9 +3286,10 @@ export class SigningKey {
    * @returns {Promise<Uint8Array>}
    */
   async exportKeyPkcs8() {
-    if (!this.#privateKey.extractable) throw errNotExtractable();
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
     return new Uint8Array(
-      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", this.#privateKey)),
+      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", privateKey)),
     );
   }
 }
