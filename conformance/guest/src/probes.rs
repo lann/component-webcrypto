@@ -1,6 +1,7 @@
 //! Hand-written API-contract probes: the parts of the `lann:webcrypto`
 //! contract the Wycheproof vectors cannot express — key import/export and
-//! extractability, error variants for misuse, the seal/open drain rule,
+//! extractability, error variants for misuse, the seal/open
+//! stream-closure rule,
 //! generated-key shape, and algorithm naming.
 
 use crate::mint::{
@@ -55,8 +56,8 @@ probes! {
     sha2_truncated_unsupported,
     aes_import_wrong_length,
     aes192_unsupported,
-    seal_drains_on_invalid_nonce,
-    open_drains_on_invalid_nonce,
+    seal_input_ends_on_invalid_nonce,
+    open_input_ends_on_invalid_nonce,
     sealed_length,
     key_export_roundtrip,
     not_extractable,
@@ -333,9 +334,12 @@ async fn aes192_unsupported() -> Result<(), String> {
     )
 }
 
-/// `seal` with a bad nonce still drains the plaintext stream: the concurrent
-/// feeder must complete, and the error must be `invalid-nonce`.
-async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
+/// `seal` with a bad nonce fails `invalid-nonce`, and the concurrent
+/// feeder settles: the closure rule lets the implementation drain in full
+/// (the feeder completes) or drop the reader early on the error (the
+/// feeder reports leftover) — either way the call must not leave the
+/// feeder wedged, which reaching the assertions at all demonstrates.
+async fn seal_input_ends_on_invalid_nonce() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (sealed, fed) = seal(
@@ -347,7 +351,9 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
         Schedule::Straddle,
     )
     .await;
-    fed.map_err(|e| format!("plaintext feeder did not complete: {e}"))?;
+    // Either feed outcome conforms on an error result; only the verdict
+    // is contract.
+    drop(fed);
     expect_err(
         "seal",
         ErrKind::InvalidNonce,
@@ -356,9 +362,9 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
     )
 }
 
-/// `open` with a bad nonce still drains the ciphertext stream: the concurrent
-/// feeder must complete, and the error must be `invalid-nonce`.
-async fn open_drains_on_invalid_nonce() -> Result<(), String> {
+/// `open` with a bad nonce fails `invalid-nonce`, and the concurrent
+/// feeder settles; see `seal_input_ends_on_invalid_nonce`.
+async fn open_input_ends_on_invalid_nonce() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     let ciphertext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (opened, fed) = open(
@@ -370,7 +376,9 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
         Schedule::Straddle,
     )
     .await;
-    fed.map_err(|e| format!("ciphertext feeder did not complete: {e}"))?;
+    // Either feed outcome conforms on an error result; only the verdict
+    // is contract.
+    drop(fed);
     expect_err(
         "open",
         ErrKind::InvalidNonce,

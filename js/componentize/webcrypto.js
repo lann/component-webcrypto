@@ -372,9 +372,10 @@ async function collectStream(rx) {
 /**
  * Run one stream-taking operation over an in-memory input: mint a stream
  * pair, hand the readable end to `start`, and feed the input concurrently
- * (operations resolve only once their input stream is fully drained, and
- * the package's drain rule guarantees the feed completes even when the
- * operation fails).
+ * (a success resolves only once the input is fully drained, and the
+ * streaming contract's closure rule guarantees the feed settles no later
+ * than the operation; on an operation error the feed's own outcome is
+ * ignored, since a failing operation may close its input early).
  * @param {(rx: any) => unknown} start
  * @param {Uint8Array} input
  * @returns {Promise<any>}

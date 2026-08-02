@@ -32,9 +32,18 @@ variant carries no misuse cases.
 
 Every stream-taking operation in the package follows these rules.
 
-**Drain rule.** An input stream is fully drained before the operation's
-result resolves, even when the result is an error. A caller that feeds the
-stream concurrently never observes its writer failing instead of the error.
+**Stream-closure rule.** An operation's input stream ends before the
+operation completes. Completion is the result resolving — except a success
+carrying an output stream, which completes when that stream ends (its `ok`
+may resolve while the input is still being consumed; see the `seal` docs).
+Either side may end the input: the caller by dropping the writer (end of
+input), or the implementation by dropping the reader — the latter only
+when the operation fails, with the error resolving only after the drop.
+Consequences: an operation that completes without error consumed the
+entire input; a concurrent feeder always completes its feed no later than
+the operation; and a write returning unwritten bytes is never itself the
+verdict — await the result and report its error. A completed operation
+alongside unwritten input indicates a defective implementation.
 
 **Truncating producers (security-critical).** Dropping the writer is a
 stream's only end-of-input signal, and it carries no verdict. A producer

@@ -2524,7 +2524,9 @@ export class InternalNonceKey {
   /**
    * Encrypt and authenticate the plaintext stream under a fresh random IV
    * with `aad`, returning `iv ‖ ciphertext ‖ tag`. The plaintext stream is
-   * drained before any failure is raised, per the WIT drain rule.
+   * drained before any failure is raised (this host drains to completion
+   * rather than exercising the streaming contract's early-close
+   * permission).
    * @param {Uint8Array} aad
    * @param {AsyncIterable<unknown> | ReadableStream} plaintext
    */
@@ -2719,7 +2721,8 @@ function gcmTagLengthBits(tagSize) {
  * per-call cap from a shared pool before collecting, waiting FIFO when the
  * pool is full, and releases when its buffers are gone (including the
  * returned output stream). Inputs beyond the per-call cap are drained and
- * discarded (the WIT drain rule holds) and the operation throws a
+ * discarded (this host drains to completion rather than exercising the
+ * streaming contract's early-close permission) and the operation throws a
  * recoverable `{ tag: 'other' }`.
  *
  * Two divergences from the Wasmtime host, both structural rather than
@@ -3070,9 +3073,9 @@ function toByteChunk(value) {
 
 /**
  * Collect every byte of a WIT byte stream into one `Uint8Array`, retaining
- * at most `cap` bytes: past the cap the stream is still drained (the WIT
- * drain rule) but discarded, and a recoverable `{ tag: 'other' }` is thrown
- * once the stream ends.
+ * at most `cap` bytes: past the cap the stream is still drained but
+ * discarded (this host drains to completion rather than closing early),
+ * and a recoverable `{ tag: 'other' }` is thrown once the stream ends.
  * @param {ByteStream} stream
  * @param {number} [cap]
  */
@@ -3280,7 +3283,8 @@ export class VerifyingKey {
       // truncated encodings (observed accepting a 2-byte signature), so
       // enforce the width here — a pure length check on public data,
       // strictly monotone: it only adds rejections in front of the engine.
-      // The message stream is drained first, per the WIT drain rule.
+      // The message stream is drained first (this host drains to
+      // completion rather than closing early).
       if (sig.length !== this.#algorithm.signatureLength) {
         throw errAuthenticationFailed();
       }
