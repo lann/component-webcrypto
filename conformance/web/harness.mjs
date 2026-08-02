@@ -69,8 +69,8 @@ export async function runAll(missing, report, shard = { index: 0, count: 1 }) {
  * one unliftable host error must not end the run and discard every
  * remaining case's verdict.
  *
- * Exported so the Node adapter's loop (adapters/jco/src/report.mjs) shares
- * this rule; this module stays browser-safe, so it is the lower layer.
+ * Exported so the Node adapter's workers (adapters/jco/src/worker-node.mjs)
+ * share this rule; this module stays browser-safe, so it is the lower layer.
  * @param {{ run: () => Promise<{ tag: string, val?: unknown }> }} testCase
  */
 export async function runCase(testCase) {

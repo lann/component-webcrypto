@@ -84,9 +84,9 @@ adapters/
   jco/             # Node + headless-Chromium adapters over webcrypto-jco's
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
-                   #   with Chrome/Chromium 137+ installed); the browser
-                   #   adapter drives the suites through web/'s harness
-                   #   (parallel workers), so gate and viewer cannot drift
+                   #   with Chrome/Chromium 137+ installed); both stripe the
+                   #   cases across parallel workers, the browser adapter
+                   #   through web/'s harness, so gate and viewer cannot drift
 report/            # the results-file and lockfile wire shapes the Rust
                    #   adapters serialize and the runner deserializes
 runner/            # aggregation: transport invariants + matrix.md rendering

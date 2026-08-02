@@ -114,7 +114,8 @@ test-node: transpile
     cd examples/jco-demo && npm test
 
 # Run the jco host's own unit tests: the input-buffering admission subsystem,
-# which the conformance suite cannot reach because it runs cases sequentially.
+# which the conformance suite cannot reach because its workers each run their
+# cases sequentially against their own host instance.
 test-jco-host:
     cd js/jco && npm test
 
