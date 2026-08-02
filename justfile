@@ -96,12 +96,17 @@ test:
     cargo test --workspace --exclude crypto-demo --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
+# The output is renamed into place: `wasm-tools component new -o` truncates
+# in place, so a direct write would expose an empty or partial component to
+# a concurrent reader (the wasmtime-demo tests load this path).
 build-component:
     cargo build --release -p crypto-demo --target wasm32-unknown-unknown
     mkdir -p examples/crypto-demo/build
     wasm-tools component new \
         target/wasm32-unknown-unknown/release/crypto_demo.wasm \
-        -o examples/crypto-demo/build/crypto-demo.component.wasm
+        -o examples/crypto-demo/build/crypto-demo.component.wasm.tmp
+    mv -f examples/crypto-demo/build/crypto-demo.component.wasm.tmp \
+        examples/crypto-demo/build/crypto-demo.component.wasm
 
 # Transpile the crypto-demo component for the Node host (runs build-component).
 transpile: build-component
