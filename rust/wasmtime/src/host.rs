@@ -28,14 +28,13 @@ use crate::bindings::webcrypto::cipher::{
     self as cipher_iface, HostCipherKey, HostCipherKeyWithStore,
 };
 use crate::bindings::webcrypto::derivation::{
-    self as derivation_iface, HostDeriveInput, HostDeriveInputWithStore, HostDeriveOptions,
-    HostDeriveOptionsWithStore,
+    self as derivation_iface, HostDeriveInput, HostDeriveInputWithStore,
 };
 use crate::bindings::webcrypto::digest::{HostDigest, HostDigestWithStore};
 use crate::bindings::webcrypto::hkdf::{self as hkdf_iface, HostIkm, HostIkmWithStore};
 use crate::bindings::webcrypto::key_agreement::{
-    self as key_agreement_iface, HostAgreementKeyOptions, HostAgreementKeyOptionsWithStore,
-    HostPublicKey, HostPublicKeyWithStore, HostSecretKey, HostSecretKeyWithStore,
+    self as key_agreement_iface, HostPublicKey, HostPublicKeyWithStore, HostSecretKey,
+    HostSecretKeyWithStore,
 };
 use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::pbkdf2::{
@@ -156,6 +155,41 @@ async fn drop_resource<T: Send, R: 'static>(
     })
 }
 
+/// The shared shape of every `*-options` resource: `new` charges the
+/// retention floor and mints an all-deny policy holder into the table, each
+/// setter writes one boolean policy field, and `drop` deletes the table
+/// entry. One invocation per options resource, listing its WIT setters as
+/// `method => policy field` rows.
+macro_rules! host_options {
+    (
+        $iface:ident::{$host:ident, $host_with_store:ident} for $ty:ty {
+            $($method:ident => $field:ident),+ $(,)?
+        }
+    ) => {
+        impl $iface::$host for WasiWebcryptoCtxView<'_> {
+            fn new(&mut self) -> Result<Resource<$ty>> {
+                let retention = charge_floor_or_trap(self.ctx)?;
+                Ok(self
+                    .table
+                    .push(<$ty>::minted(Default::default(), retention))?)
+            }
+
+            $(
+                fn $method(&mut self, self_: Resource<$ty>, allowed: bool) -> Result<()> {
+                    self.table.get_mut(&self_)?.policy.$field = allowed;
+                    Ok(())
+                }
+            )+
+        }
+
+        impl<T: Send> $iface::$host_with_store<T> for WasiWebcrypto {
+            async fn drop(accessor: &Accessor<T, Self>, rep: Resource<$ty>) -> Result<()> {
+                drop_resource(accessor, rep).await
+            }
+        }
+    };
+}
+
 /// Admit one operation, drain its whole input under the admitted cap, then
 /// run `op` on the table-held resource over the buffered bytes — the shape
 /// of every buffer-then-compute operation. Per the WIT contract the input
@@ -247,33 +281,11 @@ impl HostMacKey for WasiWebcryptoCtxView<'_> {
     }
 }
 
-impl mac::HostMacKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::MacKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self
-            .table
-            .push(crate::MacKeyOptions::minted(Default::default(), retention))?)
-    }
-
-    fn can_sign(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.sign = allowed;
-        Ok(())
-    }
-
-    fn can_verify(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.verify = allowed;
-        Ok(())
-    }
-
-    fn extractable(&mut self, self_: Resource<crate::MacKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> mac::HostMacKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<crate::MacKeyOptions>) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    mac::{HostMacKeyOptions, HostMacKeyOptionsWithStore} for crate::MacKeyOptions {
+        can_sign => sign,
+        can_verify => verify,
+        extractable => extractable,
     }
 }
 
@@ -370,46 +382,13 @@ impl HostAeadKey for WasiWebcryptoCtxView<'_> {
     }
 }
 
-impl aead::HostAeadKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::AeadKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self
-            .table
-            .push(crate::AeadKeyOptions::minted(Default::default(), retention))?)
-    }
-
-    fn can_seal(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.seal = allowed;
-        Ok(())
-    }
-
-    fn can_open(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.open = allowed;
-        Ok(())
-    }
-
-    fn can_wrap(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.wrap = allowed;
-        Ok(())
-    }
-
-    fn can_unwrap(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.unwrap = allowed;
-        Ok(())
-    }
-
-    fn extractable(&mut self, self_: Resource<crate::AeadKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> aead::HostAeadKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(
-        accessor: &Accessor<T, Self>,
-        rep: Resource<crate::AeadKeyOptions>,
-    ) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    aead::{HostAeadKeyOptions, HostAeadKeyOptionsWithStore} for crate::AeadKeyOptions {
+        can_seal => seal,
+        can_open => open,
+        can_wrap => wrap,
+        can_unwrap => unwrap,
+        extractable => extractable,
     }
 }
 
@@ -512,63 +491,14 @@ impl HostCipherKey for WasiWebcryptoCtxView<'_> {
     }
 }
 
-impl cipher_iface::HostCipherKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::CipherKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self.table.push(crate::CipherKeyOptions::minted(
-            Default::default(),
-            retention,
-        ))?)
-    }
-
-    fn can_encrypt(
-        &mut self,
-        self_: Resource<crate::CipherKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.encrypt = allowed;
-        Ok(())
-    }
-
-    fn can_decrypt(
-        &mut self,
-        self_: Resource<crate::CipherKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.decrypt = allowed;
-        Ok(())
-    }
-
-    fn can_wrap(&mut self, self_: Resource<crate::CipherKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.wrap = allowed;
-        Ok(())
-    }
-
-    fn can_unwrap(
-        &mut self,
-        self_: Resource<crate::CipherKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.unwrap = allowed;
-        Ok(())
-    }
-
-    fn extractable(
-        &mut self,
-        self_: Resource<crate::CipherKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> cipher_iface::HostCipherKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(
-        accessor: &Accessor<T, Self>,
-        rep: Resource<crate::CipherKeyOptions>,
-    ) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    cipher_iface::{HostCipherKeyOptions, HostCipherKeyOptionsWithStore}
+    for crate::CipherKeyOptions {
+        can_encrypt => encrypt,
+        can_decrypt => decrypt,
+        can_wrap => wrap,
+        can_unwrap => unwrap,
+        extractable => extractable,
     }
 }
 
@@ -719,36 +649,10 @@ cipher_minting!(aes_ctr_iface, lann_webcrypto_core::CipherMode::Ctr);
 
 impl derivation_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-impl HostDeriveOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::DeriveOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self
-            .table
-            .push(crate::DeriveOptions::minted(Default::default(), retention))?)
-    }
-
-    fn can_derive_bits(
-        &mut self,
-        self_: Resource<crate::DeriveOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.derive_bits = allowed;
-        Ok(())
-    }
-
-    fn can_derive_key(
-        &mut self,
-        self_: Resource<crate::DeriveOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.derive_key = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> HostDeriveOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<crate::DeriveOptions>) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    derivation_iface::{HostDeriveOptions, HostDeriveOptionsWithStore} for crate::DeriveOptions {
+        can_derive_bits => derive_bits,
+        can_derive_key => derive_key,
     }
 }
 
@@ -1022,49 +926,12 @@ impl<T: Send> pbkdf2_sha2_iface::HostWithStore<T> for WasiWebcrypto {
 
 impl key_agreement_iface::Host for WasiWebcryptoCtxView<'_> {}
 
-impl HostAgreementKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::AgreementKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self.table.push(crate::AgreementKeyOptions::minted(
-            Default::default(),
-            retention,
-        ))?)
-    }
-
-    fn can_derive_bits(
-        &mut self,
-        self_: Resource<crate::AgreementKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.derive_bits = allowed;
-        Ok(())
-    }
-
-    fn can_derive_key(
-        &mut self,
-        self_: Resource<crate::AgreementKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.derive_key = allowed;
-        Ok(())
-    }
-
-    fn extractable(
-        &mut self,
-        self_: Resource<crate::AgreementKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> HostAgreementKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(
-        accessor: &Accessor<T, Self>,
-        rep: Resource<crate::AgreementKeyOptions>,
-    ) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    key_agreement_iface::{HostAgreementKeyOptions, HostAgreementKeyOptionsWithStore}
+    for crate::AgreementKeyOptions {
+        can_derive_bits => derive_bits,
+        can_derive_key => derive_key,
+        extractable => extractable,
     }
 }
 
@@ -1508,49 +1375,12 @@ impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
     }
 }
 
-impl aead_internal_nonce::HostInternalNonceKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::InternalNonceKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self.table.push(crate::InternalNonceKeyOptions::minted(
-            Default::default(),
-            retention,
-        ))?)
-    }
-
-    fn can_seal(
-        &mut self,
-        self_: Resource<crate::InternalNonceKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.seal = allowed;
-        Ok(())
-    }
-
-    fn can_open(
-        &mut self,
-        self_: Resource<crate::InternalNonceKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.open = allowed;
-        Ok(())
-    }
-
-    fn extractable(
-        &mut self,
-        self_: Resource<crate::InternalNonceKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> aead_internal_nonce::HostInternalNonceKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(
-        accessor: &Accessor<T, Self>,
-        rep: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    aead_internal_nonce::{HostInternalNonceKeyOptions, HostInternalNonceKeyOptionsWithStore}
+    for crate::InternalNonceKeyOptions {
+        can_seal => seal,
+        can_open => open,
+        extractable => extractable,
     }
 }
 
@@ -1761,36 +1591,11 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
     }
 }
 
-impl signature_iface::HostSigningKeyOptions for WasiWebcryptoCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<crate::SigningKeyOptions>> {
-        let retention = charge_floor_or_trap(self.ctx)?;
-        Ok(self.table.push(crate::SigningKeyOptions::minted(
-            Default::default(),
-            retention,
-        ))?)
-    }
-
-    fn can_sign(&mut self, self_: Resource<crate::SigningKeyOptions>, allowed: bool) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.sign = allowed;
-        Ok(())
-    }
-
-    fn extractable(
-        &mut self,
-        self_: Resource<crate::SigningKeyOptions>,
-        allowed: bool,
-    ) -> Result<()> {
-        self.table.get_mut(&self_)?.policy.extractable = allowed;
-        Ok(())
-    }
-}
-
-impl<T: Send> signature_iface::HostSigningKeyOptionsWithStore<T> for WasiWebcrypto {
-    async fn drop(
-        accessor: &Accessor<T, Self>,
-        rep: Resource<crate::SigningKeyOptions>,
-    ) -> Result<()> {
-        drop_resource(accessor, rep).await
+host_options! {
+    signature_iface::{HostSigningKeyOptions, HostSigningKeyOptionsWithStore}
+    for crate::SigningKeyOptions {
+        can_sign => sign,
+        extractable => extractable,
     }
 }
 
