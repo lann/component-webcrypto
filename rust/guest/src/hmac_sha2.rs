@@ -41,3 +41,25 @@ pub async fn generate_key(
         bindings::hmac_sha2::generate_key(variant, length, options.lower()).await?,
     ))
 }
+
+/// Mint an HMAC key over `variant` from a parameterized derivation: the
+/// derivation runs at `length` bits (`None` means the hash's block size,
+/// the `generate_key` default) and the result is subject to
+/// [`import_key_raw`]'s contract.
+///
+/// Requires the input's [`derive_key`](crate::DeriveOptions::derive_key)
+/// grant — and, for an *extractable* key, [`derive_bits`] too (an
+/// exportable key is bits disclosure by other means); refusals fail
+/// [`Error::NotPermitted`].
+///
+/// [`derive_bits`]: crate::DeriveOptions::derive_bits
+pub async fn derive_key(
+    variant: Sha2Variant,
+    input: &crate::DeriveInput,
+    length: Option<u32>,
+    options: MacKeyOptions,
+) -> Result<Mac, Error> {
+    Ok(Mac::from_raw(
+        bindings::hmac_sha2::derive_key(variant, input.as_raw(), length, options.lower()).await?,
+    ))
+}

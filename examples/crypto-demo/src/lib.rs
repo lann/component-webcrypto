@@ -213,6 +213,9 @@ impl Guest for Component {
             ecdsa_verify_known_answer().await,
         )
         .await?;
+        check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
+        check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
+        check("x25519-agreement", x25519_agreement().await).await?;
 
         Ok(format!(
             "{} checks passed: {}",
@@ -1000,4 +1003,111 @@ async fn ecdsa_verify_known_answer() -> Result<()> {
         Error::AuthenticationFailed,
         "corrupted signature verified",
     )
+}
+
+// --- derivation checks -----------------------------------------------------------
+
+/// HKDF-SHA-256 against RFC 5869 test case 1, through the SDK wrappers:
+/// import the IKM, prepare with the vector's salt and info, and derive its
+/// 42-byte OKM; a null-length derive must fail (a KDF has no natural
+/// output length); the same input then mints an HMAC key that round-trips
+/// sign/verify.
+async fn hkdf_derive() -> Result<()> {
+    use lann_webcrypto_guest::{hkdf, hkdf_sha2, DeriveOptions, MacKeyOptions};
+    let options = DeriveOptions {
+        derive_bits: true,
+        derive_key: true,
+    };
+    let ikm = hkdf::import_ikm(vec![0x0b; 22], options).await?;
+    let input = hkdf_sha2::prepare(
+        Sha2Variant::Sha256,
+        &ikm,
+        unhex("000102030405060708090a0b0c"),
+        unhex("f0f1f2f3f4f5f6f7f8f9"),
+    )
+    .await?;
+    let okm = input.derive_bits(Some(42 * 8)).await?;
+    ensure!(
+        okm == unhex(
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+        ),
+        "OKM mismatch: got {}",
+        hex(&okm)
+    );
+    ensure!(
+        input.derive_bits(None).await.is_err(),
+        "null-length derive on a KDF source succeeded"
+    );
+
+    let mac = lann_webcrypto_guest::hmac_sha2::derive_key(
+        Sha2Variant::Sha256,
+        &input,
+        None,
+        MacKeyOptions {
+            sign: true,
+            verify: true,
+            extractable: false,
+        },
+    )
+    .await?;
+    let payload = &b"derived-key payload"[..];
+    let tag = mac.sign(payload).await?;
+    mac.verify(payload, tag)
+        .await
+        .context("derived HMAC key did not round-trip")
+}
+
+/// PBKDF2-HMAC-SHA-256 against RFC 7914 §11's first PBKDF2 vector
+/// (P="passwd", S="salt", c=1, dkLen=64), through the SDK wrappers.
+async fn pbkdf2_derive() -> Result<()> {
+    use lann_webcrypto_guest::{pbkdf2, pbkdf2_sha2, DeriveOptions};
+    let options = DeriveOptions {
+        derive_bits: true,
+        derive_key: false,
+    };
+    let password = pbkdf2::import_password(b"passwd", options).await?;
+    let input = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &password, b"salt", 1).await?;
+    let dk = input.derive_bits(Some(64 * 8)).await?;
+    ensure!(
+        dk == unhex(
+            "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc\
+             49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
+        ),
+        "derived key mismatch: got {}",
+        hex(&dk)
+    );
+    Ok(())
+}
+
+/// X25519 agreement through the SDK wrappers: two generated keypairs
+/// agree in both directions on the same 32-byte secret, and both agreed
+/// inputs chain into HKDF (WebCrypto's `deriveKey(ECDH -> HKDF)` shape)
+/// to the same bits.
+async fn x25519_agreement() -> Result<()> {
+    use lann_webcrypto_guest::{hkdf_sha2, x25519, AgreementKeyOptions};
+    let options = AgreementKeyOptions {
+        derive_bits: true,
+        derive_key: true,
+        extractable: false,
+    };
+    let (a_secret, a_public) = x25519::generate_key(options).await?;
+    let (b_secret, b_public) = x25519::generate_key(options).await?;
+    let ab = a_secret.agree(&b_public).await?;
+    let ba = b_secret.agree(&a_public).await?;
+    let ab_bits = ab.derive_bits(None).await?;
+    let ba_bits = ba.derive_bits(None).await?;
+    ensure!(
+        ab_bits.len() == 32,
+        "shared secret is {} bytes",
+        ab_bits.len()
+    );
+    ensure!(ab_bits == ba_bits, "shared secrets disagree by direction");
+
+    let a_input = hkdf_sha2::prepare_from(Sha2Variant::Sha256, &ab, b"salt", b"info").await?;
+    let b_input = hkdf_sha2::prepare_from(Sha2Variant::Sha256, &ba, b"salt", b"info").await?;
+    ensure!(
+        a_input.derive_bits(Some(256)).await? == b_input.derive_bits(Some(256)).await?,
+        "chained derivations disagree by direction"
+    );
+    Ok(())
 }

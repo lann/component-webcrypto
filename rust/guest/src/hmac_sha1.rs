@@ -27,3 +27,16 @@ pub async fn generate_key(length: Option<u32>, options: MacKeyOptions) -> Result
         bindings::hmac_sha1::generate_key(length, options.lower()).await?,
     ))
 }
+
+/// Mint an HMAC-SHA-1 key from a parameterized derivation. See
+/// [`hmac_sha2::derive_key`](crate::hmac_sha2::derive_key) for the
+/// `length` and grant contracts.
+pub async fn derive_key(
+    input: &crate::DeriveInput,
+    length: Option<u32>,
+    options: MacKeyOptions,
+) -> Result<Mac, Error> {
+    Ok(Mac::from_raw(
+        bindings::hmac_sha1::derive_key(input.as_raw(), length, options.lower()).await?,
+    ))
+}
