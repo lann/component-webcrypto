@@ -64,10 +64,6 @@
 //     withholds it, so the world cannot import it without failing every
 //     composition at `wac plug` time. `NotSupportedError`, with the
 //     reason in the message.
-//   - WIT-forced: an empty HKDF key imports on the platform but not here —
-//     `hkdf.import-ikm` rejects empty input keying material by ruling
-//     (`wit/README.md`, "Design notes": a zero-entropy IKM is never what a
-//     caller meant), so it fails with `DataError` instead.
 //   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
 //     served through the package's `sha1-checked` interface (sha1dc
 //     collision detection; the package never serves plain SHA-1), in the

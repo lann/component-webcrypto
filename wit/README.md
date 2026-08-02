@@ -266,11 +266,14 @@ short:
   seeds or scalars, per the format-admission rule above. No import derives
   the public half (see the no-derive rule above); importers supply it
   separately through the public-key import.
-- **Empty PBKDF2 passwords are accepted; empty HKDF IKM is not.** RFC 8018
-  admits an empty `P`, the platform serves it, and the upstream test
-  vectors exercise it as valid, so rejecting it would break platform
-  fidelity without a safety win. A zero-entropy HKDF IKM, by contrast, is
-  never what a caller meant.
+- **Empty KDF secrets are accepted.** RFC 8018 admits an empty PBKDF2
+  `P` and RFC 5869 an empty HKDF IKM; the platform serves both, and the
+  upstream PBKDF2 vectors exercise the empty password as valid.
+  Rejecting either would break platform fidelity without a safety win: a
+  zero-length secret is not meaningfully weaker than a one-byte one, so
+  no security line falls at empty. An implementation under an explicit
+  security policy MAY still reject degenerate material (the same
+  allowance as the HMAC import's short-key bound).
 - **Per-algorithm interfaces instead of variant enums** where platform
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one

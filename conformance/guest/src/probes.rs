@@ -1984,12 +1984,19 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
         import_ikm(vec![1; 32], false, false).await,
         "minted material with no enabled grant",
     )?;
-    expect_err(
-        "empty ikm",
-        ErrKind::InvalidKey,
-        import_ikm(Vec::new(), true, true).await,
-        "minted empty input keying material",
-    )?;
+    // Empty IKM mints and derives, like the empty PBKDF2 password (RFC
+    // 5869 admits it and the platform serves it — see `wit/README.md`,
+    // "Empty KDF secrets are accepted").
+    let empty = import_ikm(Vec::new(), true, true)
+        .await
+        .map_err(|e| describe("empty import-ikm", &e))?;
+    let empty_input = hkdf_sha2::prepare(Sha2Variant::Sha256, &empty, b"salt".to_vec(), Vec::new())
+        .await
+        .map_err(|e| describe("prepare (empty ikm)", &e))?;
+    empty_input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (empty ikm)", &e))?;
 
     let bits_only = import_ikm(vec![2; 32], true, false)
         .await
@@ -2164,7 +2171,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
         "prepared over an unserved variant",
     )?;
 
-    // Empty passwords mint and derive (unlike empty IKM).
+    // Empty passwords mint and derive, like empty IKM.
     let empty = import_password(Vec::new(), true, true)
         .await
         .map_err(|e| describe("empty import-password", &e))?;
