@@ -756,18 +756,14 @@ async function importHmacKey(resolved, raw, options) {
   const usages = macUsages(policy);
   const { hash } = resolved;
   if (raw.length === 0) throw errInvalidKey("empty key");
-  let key;
-  try {
-    key = await subtle.importKey(
-      "raw",
-      asBufferSource(raw),
-      { name: "HMAC", hash },
-      policy.extractable,
-      usages,
-    );
-  } catch (err) {
-    invalidKey(err, "HMAC key");
-  }
+  const key = await importPlatformKey(
+    "HMAC key",
+    "raw",
+    raw,
+    { name: "HMAC", hash },
+    policy.extractable,
+    usages,
+  );
   return new MacKey(key, raw.length * 8, hash);
 }
 
@@ -814,18 +810,13 @@ async function importHmacKeyJwk(resolved, jwk, options) {
   const { hash } = resolved;
   const material = jwkMaterial(jwk);
   requireStrictBase64url(material.k);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      material,
-      { name: "HMAC", hash },
-      policy.extractable,
-      usages,
-    );
-  } catch (err) {
-    invalidKey(err, "HMAC JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "HMAC JWK",
+    material,
+    { name: "HMAC", hash },
+    policy.extractable,
+    usages,
+  );
   // Length comes from `k`, not `key.algorithm.length`, which an engine may
   // omit for an imported key (see `MacKey`'s field doc).
   return new MacKey(key, jwkKeyBytes(material.k) * 8, hash);
@@ -1155,12 +1146,14 @@ function isAgreementParams(params) {
 async function importIkm(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "HKDF", false, usages);
-  } catch (err) {
-    invalidKey(err, "HKDF input keying material");
-  }
+  const key = await importPlatformKey(
+    "HKDF input keying material",
+    "raw",
+    raw,
+    "HKDF",
+    false,
+    usages,
+  );
   return new Ikm(MINT, key, { ...policy });
 }
 
@@ -1316,12 +1309,7 @@ export class Password {
 async function importPassword(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "PBKDF2", false, usages);
-  } catch (err) {
-    invalidKey(err, "PBKDF2 password");
-  }
+  const key = await importPlatformKey("PBKDF2 password", "raw", raw, "PBKDF2", false, usages);
   return new Password(MINT, key, { ...policy });
 }
 
@@ -1607,12 +1595,7 @@ function requireAgreementGrant(policy) {
  * @param {Uint8Array} raw
  */
 async function importX25519PublicKey(raw) {
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 public key");
-  }
+  const key = await importPlatformKey("X25519 public key", "raw", raw, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -1634,18 +1617,13 @@ async function importX25519SecretKeyJwk(jwkText, options) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      "X25519",
-      policy.extractable,
-      AGREEMENT_PLATFORM_USAGES,
-    );
-  } catch (err) {
-    invalidKey(err, "X25519 private JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "X25519 private JWK",
+    jwk,
+    "X25519",
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
   if (key.type !== "private") {
     throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
   }
@@ -1681,12 +1659,7 @@ export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey
  * @param {Uint8Array} spki
  */
 async function importX25519PublicKeySpki(spki) {
-  let key;
-  try {
-    key = await subtle.importKey("spki", asBufferSource(spki), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 spki");
-  }
+  const key = await importPlatformKey("X25519 spki", "spki", spki, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -1699,12 +1672,7 @@ async function importX25519PublicKeySpki(spki) {
 async function importX25519PublicKeyJwk(jwkText) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
-  let key;
-  try {
-    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 public JWK");
-  }
+  const key = await importPlatformKeyJwk("X25519 public JWK", jwk, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -1717,18 +1685,14 @@ async function importX25519PublicKeyJwk(jwkText) {
 async function importX25519SecretKeyPkcs8(pkcs8, options) {
   const policy = agreementPolicy(options);
   requireAgreementGrant(policy);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "pkcs8",
-      asBufferSource(pkcs8),
-      "X25519",
-      policy.extractable,
-      AGREEMENT_PLATFORM_USAGES,
-    );
-  } catch (err) {
-    invalidKey(err, "X25519 pkcs8");
-  }
+  const key = await importPlatformKey(
+    "X25519 pkcs8",
+    "pkcs8",
+    pkcs8,
+    "X25519",
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
   return new AgreementSecretKey(MINT, key, { ...policy });
 }
 
@@ -1892,18 +1856,14 @@ function aesMinting(Ctor, readPolicy) {
       if (raw.length !== expected) {
         throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
       }
-      let key;
-      try {
-        key = await subtle.importKey(
-          "raw",
-          asBufferSource(raw),
-          { name: "AES-GCM" },
-          policy.extractable,
-          usages,
-        );
-      } catch (err) {
-        invalidKey(err, `${variant} key`);
-      }
+      const key = await importPlatformKey(
+        `${variant} key`,
+        "raw",
+        raw,
+        { name: "AES-GCM" },
+        policy.extractable,
+        usages,
+      );
       return new Ctor(key, expected * 8);
     },
 
@@ -1925,18 +1885,13 @@ function aesMinting(Ctor, readPolicy) {
       const lengthBits = aesVariantByteLength(variant) * 8;
       const material = jwkMaterial(jwk);
       requireStrictBase64url(material.k);
-      let key;
-      try {
-        key = await subtle.importKey(
-          "jwk",
-          material,
-          { name: "AES-GCM" },
-          policy.extractable,
-          usages,
-        );
-      } catch (err) {
-        invalidKey(err, `${variant} JWK`);
-      }
+      const key = await importPlatformKeyJwk(
+        `${variant} JWK`,
+        material,
+        { name: "AES-GCM" },
+        policy.extractable,
+        usages,
+      );
       // The variant check derives from `k` (exact once the platform
       // accepted the encoding), not `key.algorithm.length`, which an
       // engine may omit for an imported key (see `MacKey`'s field doc).
@@ -2230,12 +2185,14 @@ function cipherMinting(name) {
       if (raw.length !== expected) {
         throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
       }
-      let key;
-      try {
-        key = await subtle.importKey("raw", asBufferSource(raw), { name }, policy.extractable, usages);
-      } catch (err) {
-        invalidKey(err, `${variant} key`);
-      }
+      const key = await importPlatformKey(
+        `${variant} key`,
+        "raw",
+        raw,
+        { name },
+        policy.extractable,
+        usages,
+      );
       return new CipherKey(key, name, expected * 8);
     },
 
@@ -2252,12 +2209,13 @@ function cipherMinting(name) {
       const lengthBits = aesVariantByteLength(variant) * 8;
       const material = jwkMaterial(jwk);
       requireStrictBase64url(material.k);
-      let key;
-      try {
-        key = await subtle.importKey("jwk", material, { name }, policy.extractable, usages);
-      } catch (err) {
-        invalidKey(err, `${variant} JWK`);
-      }
+      const key = await importPlatformKeyJwk(
+        `${variant} JWK`,
+        material,
+        { name },
+        policy.extractable,
+        usages,
+      );
       const gotBits = jwkKeyBytes(material.k) * 8;
       if (gotBits !== lengthBits) {
         throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
@@ -3592,15 +3550,61 @@ function ed25519PointStrict(encoded) {
 /**
  * Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`.
  *
- * Annotated `never` deliberately: every call site relies on this throwing
- * and constructs a resource immediately afterwards, so a version that fell
- * through would mint a key over an `undefined` `CryptoKey`.
+ * Annotated `never` deliberately: the `importPlatformKey*` helpers rely on
+ * this throwing to make their catch arms non-completing, so a version that
+ * fell through would resolve them with an `undefined` `CryptoKey`.
  * @param {unknown} err
  * @param {string} what
  * @returns {never}
  */
 function invalidKey(err, what) {
   throw errInvalidKey(`invalid ${what}: ${asPlatformError(err).detail}`);
+}
+
+/**
+ * Import binary key material via the platform. An import failure throws
+ * `{ tag: 'invalid-key', val }` naming `what`; every other validation
+ * (length checks, strict-point predicates, post-import shape checks)
+ * stays at the call site.
+ * @param {string} what
+ * @param {Exclude<KeyFormat, "jwk">} format
+ * @param {Uint8Array} bytes
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usages
+ * @returns {Promise<CryptoKey>}
+ */
+async function importPlatformKey(what, format, bytes, algorithm, extractable, usages) {
+  try {
+    return await subtle.importKey(format, asBufferSource(bytes), algorithm, extractable, usages);
+  } catch (err) {
+    invalidKey(err, what);
+  }
+}
+
+/**
+ * Import a parsed JWK (a `jwkMaterial` result) via the platform. An import
+ * failure throws `{ tag: 'invalid-key', val }` naming `what`; member
+ * strictness and post-import shape checks stay at the call site.
+ * @param {string} what
+ * @param {Record<string, unknown>} jwk
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usages
+ * @returns {Promise<CryptoKey>}
+ */
+async function importPlatformKeyJwk(what, jwk, algorithm, extractable, usages) {
+  try {
+    return await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      algorithm,
+      extractable,
+      usages,
+    );
+  } catch (err) {
+    invalidKey(err, what);
+  }
 }
 
 /**
@@ -3618,12 +3622,9 @@ async function importEd25519VerifyingKey(raw) {
   if (!ed25519PointStrict(raw)) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "Ed25519", true, ["verify"]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 public key");
-  }
+  const key = await importPlatformKey("Ed25519 public key", "raw", raw, "Ed25519", true, [
+    "verify",
+  ]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -3641,12 +3642,7 @@ async function importEd25519VerifyingKeySpki(spki) {
   if (!ed25519PointStrict(point)) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("spki", asBufferSource(spki), "Ed25519", true, ["verify"]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 spki");
-  }
+  const key = await importPlatformKey("Ed25519 spki", "spki", spki, "Ed25519", true, ["verify"]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -3662,14 +3658,7 @@ async function importEd25519VerifyingKeyJwk(jwkText) {
   if (typeof jwk.x !== "string" || !ed25519PointStrict(b64urlDecode(jwk.x))) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "Ed25519", true, [
-      "verify",
-    ]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 public JWK");
-  }
+  const key = await importPlatformKeyJwk("Ed25519 public JWK", jwk, "Ed25519", true, ["verify"]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -3708,14 +3697,14 @@ async function generateEd25519Key(options) {
 async function importEd25519SigningKeyPkcs8(pkcs8, options) {
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
-  let key;
-  try {
-    key = await subtle.importKey("pkcs8", asBufferSource(pkcs8), "Ed25519", policy.extractable, [
-      "sign",
-    ]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 pkcs8");
-  }
+  const key = await importPlatformKey(
+    "Ed25519 pkcs8",
+    "pkcs8",
+    pkcs8,
+    "Ed25519",
+    policy.extractable,
+    ["sign"],
+  );
   return new SigningKey(key, ED25519_ALGORITHM);
 }
 
@@ -3732,18 +3721,13 @@ async function importEd25519SigningKeyJwk(jwkText, options) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      "Ed25519",
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, "Ed25519 private JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "Ed25519 private JWK",
+    jwk,
+    "Ed25519",
+    policy.extractable,
+    ["sign"],
+  );
   if (key.type !== "private") {
     throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
   }
@@ -3769,18 +3753,14 @@ async function importEcdsaVerifyingKey(variant, raw) {
       `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
     );
   }
-  let key;
-  try {
-    key = await subtle.importKey(
-      "raw",
-      asBufferSource(raw),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} public key`);
-  }
+  const key = await importPlatformKey(
+    `${variant} public key`,
+    "raw",
+    raw,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -3793,18 +3773,14 @@ async function importEcdsaVerifyingKey(variant, raw) {
  */
 async function importEcdsaVerifyingKeySpki(variant, spki) {
   const entry = ecdsaVariant(variant);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "spki",
-      asBufferSource(spki),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} spki`);
-  }
+  const key = await importPlatformKey(
+    `${variant} spki`,
+    "spki",
+    spki,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -3820,18 +3796,13 @@ async function importEcdsaVerifyingKeyJwk(variant, jwkText) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.y);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} public JWK`);
-  }
+  const key = await importPlatformKeyJwk(
+    `${variant} public JWK`,
+    jwk,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -3873,18 +3844,14 @@ async function importEcdsaSigningKeyPkcs8(variant, pkcs8, options) {
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
   const entry = ecdsaVariant(variant);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "pkcs8",
-      asBufferSource(pkcs8),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} pkcs8`);
-  }
+  const key = await importPlatformKey(
+    `${variant} pkcs8`,
+    "pkcs8",
+    pkcs8,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    policy.extractable,
+    ["sign"],
+  );
   return new SigningKey(key, entry);
 }
 
@@ -3904,18 +3871,13 @@ async function importEcdsaSigningKeyJwk(variant, jwkText, options) {
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.y);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} private JWK`);
-  }
+  const key = await importPlatformKeyJwk(
+    `${variant} private JWK`,
+    jwk,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    policy.extractable,
+    ["sign"],
+  );
   if (key.type !== "private") {
     throw errInvalidKey("EC private JWK must carry `d` (base64url private scalar)");
   }
