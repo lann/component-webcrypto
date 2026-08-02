@@ -7,14 +7,15 @@
 //! [`contract`]: crate::contract
 
 use crate::mint::{
-    agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
+    agreement_options, cipher_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_kw_key, generate_x25519_key,
     generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
     import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
     import_internal_nonce_key, import_key_raw, import_kw_key, import_password,
     import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
-    import_xchacha_key, kw_options, mac_options, x25519_secret_jwk, RFC7748_ALICE_D,
-    RFC7748_ALICE_X, RFC7748_BOB_D, RFC7748_BOB_X, RFC7748_SHARED,
+    import_xchacha_key, internal_nonce_options, kw_options, mac_options, signing_options,
+    x25519_secret_jwk, RFC7748_ALICE_D, RFC7748_ALICE_X, RFC7748_BOB_D, RFC7748_BOB_X,
+    RFC7748_SHARED,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt, ci_encrypt_ok, ci_encrypt_op, compute, compute_ok,
@@ -93,6 +94,12 @@ probes! {
     cipher_wrap_uniform_failure,
     unwrap_jwk_usage_members,
     kdf_secret_unwrap,
+    signing_key_unwrap,
+    agreement_key_unwrap,
+    cipher_key_unwrap,
+    internal_nonce_key_unwrap,
+    chacha_key_unwrap(chacha),
+    xchacha_key_unwrap(xchacha),
     signing_usage_policy,
     hkdf_derive_key_equivalence,
     hkdf_params_and_chaining,
@@ -160,7 +167,8 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
 }
 
 /// Assert that every ChaCha20-Poly1305 minting path declines
-/// `unsupported`: raw import, generation, and the JWK import.
+/// `unsupported`: raw import, generation, the JWK import, and the two
+/// unwrap mints.
 async fn chacha_minting_declined() -> Result<String, String> {
     minting_declined_for(FEATURE_CHACHA).await?;
     expect_err(
@@ -170,12 +178,32 @@ async fn chacha_minting_declined() -> Result<String, String> {
             .await,
         "minted a key: the target serves a feature it declares missing",
     )?;
+    expect_err(
+        "chacha20-poly1305 unwrap-key-raw",
+        ErrKind::Unsupported,
+        lann_webcrypto_guest::bindings::chacha20_poly1305::unwrap_key_raw(
+            unwrap_input_of_32_bytes().await?,
+            crate::mint::aead_options(false),
+        )
+        .await,
+        "minted a key: the target serves a feature it declares missing",
+    )?;
+    expect_err(
+        "chacha20-poly1305 unwrap-key-jwk",
+        ErrKind::Unsupported,
+        lann_webcrypto_guest::bindings::chacha20_poly1305::unwrap_key_jwk(
+            unwrap_input_of_32_bytes().await?,
+            crate::mint::aead_options(false),
+        )
+        .await,
+        "minted a key: the target serves a feature it declares missing",
+    )?;
     Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
 }
 
 /// Assert that every XChaCha20-Poly1305 minting path declines
-/// `unsupported`: the caller-nonce construction's two entry points, and
-/// the internal-nonce interface's two.
+/// `unsupported`: the caller-nonce construction's entry points (import,
+/// generate, unwrap) and the internal-nonce interface's.
 async fn xchacha_minting_declined() -> Result<String, String> {
     minting_declined_for(FEATURE_XCHACHA).await?;
     expect_err(
@@ -191,6 +219,26 @@ async fn xchacha_minting_declined() -> Result<String, String> {
         "xchacha internal-nonce import-key-raw",
         ErrKind::Unsupported,
         import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
+        "minted a key for a feature declared missing",
+    )?;
+    expect_err(
+        "xchacha unwrap-key-raw",
+        ErrKind::Unsupported,
+        lann_webcrypto_guest::bindings::xchacha20_poly1305::unwrap_key_raw(
+            unwrap_input_of_32_bytes().await?,
+            crate::mint::aead_options(false),
+        )
+        .await,
+        "minted a key for a feature declared missing",
+    )?;
+    expect_err(
+        "xchacha internal-nonce unwrap-key-raw",
+        ErrKind::Unsupported,
+        lann_webcrypto_guest::bindings::xchacha20_poly1305_internal_nonce::unwrap_key_raw(
+            unwrap_input_of_32_bytes().await?,
+            internal_nonce_options(false),
+        )
+        .await,
         "minted a key for a feature declared missing",
     )?;
     Ok("every XChaCha20-Poly1305 minting path declined unsupported".into())
@@ -3314,4 +3362,485 @@ async fn kdf_secret_unwrap() -> Result<(), String> {
         .await
         .map_err(|e| describe("pbkdf2 derive-bits (direct)", &e))?;
     expect_bytes(&via_unwrap, &via_import, "PBKDF2 bits via unwrap-password")
+}
+
+/// Wrap `input` under the AEAD `kek` and unwrap it back: the transport
+/// leg every unwrap-mint probe shares.
+async fn wrap_then_unwrap(
+    kek: &lann_webcrypto_guest::bindings::aead::AeadKey,
+    input: lann_webcrypto_guest::bindings::wrapping::WrapInput,
+) -> Result<lann_webcrypto_guest::bindings::wrapping::UnwrapInput, String> {
+    let nonce = [0x51u8; 12];
+    let wrapped = kek
+        .wrap(nonce.to_vec(), b"unwrap-mint probe".to_vec(), None, input)
+        .await
+        .map_err(|e| describe("aead-key.wrap", &e))?;
+    kek.unwrap(nonce.to_vec(), b"unwrap-mint probe".to_vec(), None, wrapped)
+        .await
+        .map_err(|e| describe("aead-key.unwrap", &e))
+}
+
+/// An `unwrap-input` carrying 32 bytes, for decline assertions on unwrap
+/// mints: built over AES-GCM, which every target serves.
+async fn unwrap_input_of_32_bytes(
+) -> Result<lann_webcrypto_guest::bindings::wrapping::UnwrapInput, String> {
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let material = import_hmac_key(Sha2Variant::Sha256, vec![0x42u8; 32], true)
+        .await
+        .map_err(|e| describe("carrier import", &e))?;
+    let input = material
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    wrap_then_unwrap(&kek, input).await
+}
+
+/// The private-signature unwrap mints: an Ed25519 signing key wrapped as
+/// PKCS#8 and as a JWK mints back out through `unwrap-signing-key-*`,
+/// signs, and verifies under the original public half; the minted key
+/// carries the mint's options.
+async fn signing_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ed25519_sign;
+
+    let (key, public) = generate_ed25519_key(true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let payload = b"unwrap-minted signature";
+
+    let input = key
+        .to_wrap_input_pkcs8()
+        .await
+        .map_err(|e| describe("to-wrap-input-pkcs8", &e))?;
+    let minted = ed25519_sign::unwrap_signing_key_pkcs8(
+        wrap_then_unwrap(&kek, input).await?,
+        signing_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-signing-key-pkcs8", &e))?;
+    expect(
+        minted.extractable(),
+        false,
+        "pkcs8-minted extractable getter",
+    )?;
+    expect(minted.can_sign(), true, "pkcs8-minted can-sign getter")?;
+    let sig = sig_sign_ok(&minted, payload, Schedule::Whole).await?;
+    sig_verify_ok(
+        &public,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "pkcs8-minted signature did not verify",
+    )
+    .await?;
+
+    let input = key
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let minted = ed25519_sign::unwrap_signing_key_jwk(
+        wrap_then_unwrap(&kek, input).await?,
+        signing_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-signing-key-jwk", &e))?;
+    let sig = sig_sign_ok(&minted, payload, Schedule::Whole).await?;
+    sig_verify_ok(
+        &public,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "jwk-minted signature did not verify",
+    )
+    .await
+}
+
+/// The agreement unwrap mints: RFC 7748 §6.1's Alice secret, wrapped as a
+/// JWK and as PKCS#8, mints back out through `unwrap-secret-key-*` and
+/// agrees with Bob's public to the vector's shared secret.
+async fn agreement_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::x25519;
+
+    let secret = x25519::import_secret_key_jwk(
+        x25519_secret_jwk(&unhex(RFC7748_ALICE_X), &unhex(RFC7748_ALICE_D)),
+        agreement_options(true, true, true),
+    )
+    .await
+    .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    let peer = import_x25519_public_key(unhex(RFC7748_BOB_X))
+        .await
+        .map_err(|e| describe("import-public-key-raw", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+
+    let input = secret
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let minted = x25519::unwrap_secret_key_jwk(
+        wrap_then_unwrap(&kek, input).await?,
+        agreement_options(true, true, false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-secret-key-jwk", &e))?;
+    let shared = minted
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree (jwk-minted)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (jwk-minted)", &e))?;
+    expect_bytes(&shared, &unhex(RFC7748_SHARED), "jwk-minted shared secret")?;
+
+    let input = secret
+        .to_wrap_input_pkcs8()
+        .await
+        .map_err(|e| describe("to-wrap-input-pkcs8", &e))?;
+    let minted = x25519::unwrap_secret_key_pkcs8(
+        wrap_then_unwrap(&kek, input).await?,
+        agreement_options(true, true, false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-secret-key-pkcs8", &e))?;
+    let shared = minted
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree (pkcs8-minted)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (pkcs8-minted)", &e))?;
+    expect_bytes(
+        &shared,
+        &unhex(RFC7748_SHARED),
+        "pkcs8-minted shared secret",
+    )
+}
+
+/// The unauthenticated modes' unwrap mints: an AES-CBC key travels raw
+/// under an AES-KW KEK, an AES-CTR key travels as a JWK under an AEAD
+/// KEK, and each minted key agrees with its original across an
+/// encrypt/decrypt round trip.
+async fn cipher_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr};
+
+    let plaintext = b"cipher unwrap-mint probe";
+
+    let original = import_cbc_key(AesVariant::Aes256, vec![0x2au8; 32], true)
+        .await
+        .map_err(|e| describe("cbc import", &e))?;
+    let kw_kek = generate_kw_key(AesVariant::Aes128, false)
+        .await
+        .map_err(|e| describe("kw kek generate", &e))?;
+    let input = original
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    let wrapped = kw_kek
+        .wrap(input)
+        .await
+        .map_err(|e| describe("kw-key.wrap", &e))?;
+    let minted = aes_cbc::unwrap_key_raw(
+        AesVariant::Aes256,
+        kw_kek
+            .unwrap(wrapped)
+            .await
+            .map_err(|e| describe("kw-key.unwrap", &e))?,
+        cipher_options(false),
+    )
+    .await
+    .map_err(|e| describe("aes-cbc.unwrap-key-raw", &e))?;
+    let iv = [7u8; 16];
+    let sealed = ci_encrypt_ok(
+        &minted,
+        &iv,
+        None,
+        plaintext,
+        Schedule::Whole,
+        "encrypt under the raw-minted key",
+    )
+    .await?;
+    let opened = ci_decrypt_ok(
+        &original,
+        &iv,
+        None,
+        &sealed,
+        Schedule::Whole,
+        "decrypt under the original",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "CBC unwrap-mint round trip")?;
+
+    let original = import_ctr_key(AesVariant::Aes128, vec![0x3cu8; 16], true)
+        .await
+        .map_err(|e| describe("ctr import", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+    let input = original
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let minted = aes_ctr::unwrap_key_jwk(
+        AesVariant::Aes128,
+        wrap_then_unwrap(&kek, input).await?,
+        cipher_options(false),
+    )
+    .await
+    .map_err(|e| describe("aes-ctr.unwrap-key-jwk", &e))?;
+    let sealed = ci_encrypt_ok(
+        &original,
+        &iv,
+        Some(64),
+        plaintext,
+        Schedule::Whole,
+        "encrypt under the original",
+    )
+    .await?;
+    let opened = ci_decrypt_ok(
+        &minted,
+        &iv,
+        Some(64),
+        &sealed,
+        Schedule::Whole,
+        "decrypt under the jwk-minted key",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "CTR unwrap-mint round trip")
+}
+
+/// The internal-nonce unwrap mints: material travels wrapped in both
+/// formats, and the minted keys agree with the original across
+/// seal/open in both directions.
+async fn internal_nonce_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aes_gcm_internal_nonce;
+
+    let plaintext = b"internal-nonce unwrap-mint probe";
+    let original = import_internal_nonce_key(AesVariant::Aes256, vec![0x4du8; 32], true)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+
+    let input = original
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    let minted = aes_gcm_internal_nonce::unwrap_key_raw(
+        AesVariant::Aes256,
+        wrap_then_unwrap(&kek, input).await?,
+        internal_nonce_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-key-raw", &e))?;
+    let sealed = in_seal_ok(
+        &minted,
+        b"in aad",
+        plaintext,
+        Schedule::Whole,
+        "seal under the raw-minted key",
+    )
+    .await?;
+    let opened = in_open_ok(
+        &original,
+        b"in aad",
+        &sealed,
+        Schedule::Whole,
+        "open under the original",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "raw unwrap-mint round trip")?;
+
+    let input = original
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let minted = aes_gcm_internal_nonce::unwrap_key_jwk(
+        AesVariant::Aes256,
+        wrap_then_unwrap(&kek, input).await?,
+        internal_nonce_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-key-jwk", &e))?;
+    let sealed = in_seal_ok(
+        &original,
+        b"in aad",
+        plaintext,
+        Schedule::Whole,
+        "seal under the original",
+    )
+    .await?;
+    let opened = in_open_ok(
+        &minted,
+        b"in aad",
+        &sealed,
+        Schedule::Whole,
+        "open under the jwk-minted key",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "jwk unwrap-mint round trip")
+}
+
+/// The ChaCha20-Poly1305 unwrap mints, in both formats and both
+/// directions against the original key.
+async fn chacha_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::chacha20_poly1305 as chacha;
+
+    let plaintext = b"chacha unwrap-mint probe";
+    let nonce = [3u8; 12];
+    let original = import_chacha_key(vec![0x66u8; 32], true)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+
+    let input = original
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    let minted = chacha::unwrap_key_raw(
+        wrap_then_unwrap(&kek, input).await?,
+        crate::mint::aead_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-key-raw", &e))?;
+    let sealed = seal_ok(
+        &minted,
+        &nonce,
+        b"",
+        None,
+        plaintext,
+        Schedule::Whole,
+        "seal under the raw-minted key",
+    )
+    .await?;
+    let opened = open_ok(
+        &original,
+        &nonce,
+        b"",
+        None,
+        &sealed,
+        Schedule::Whole,
+        "open under the original",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "raw unwrap-mint round trip")?;
+
+    let input = original
+        .to_wrap_input_jwk()
+        .await
+        .map_err(|e| describe("to-wrap-input-jwk", &e))?;
+    let minted = chacha::unwrap_key_jwk(
+        wrap_then_unwrap(&kek, input).await?,
+        crate::mint::aead_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-key-jwk", &e))?;
+    let sealed = seal_ok(
+        &original,
+        &nonce,
+        b"",
+        None,
+        plaintext,
+        Schedule::Whole,
+        "seal under the original",
+    )
+    .await?;
+    let opened = open_ok(
+        &minted,
+        &nonce,
+        b"",
+        None,
+        &sealed,
+        Schedule::Whole,
+        "open under the jwk-minted key",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "jwk unwrap-mint round trip")
+}
+
+/// The XChaCha20-Poly1305 unwrap mints (caller-nonce and internal-nonce
+/// kinds; raw is the construction's only format).
+async fn xchacha_key_unwrap() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::{
+        xchacha20_poly1305 as xchacha, xchacha20_poly1305_internal_nonce as xchacha_in,
+    };
+
+    let plaintext = b"xchacha unwrap-mint probe";
+    let original = import_xchacha_key(vec![0x77u8; 32], true)
+        .await
+        .map_err(|e| describe("import-key-raw", &e))?;
+    let kek = generate_key(AesVariant::Aes256, false)
+        .await
+        .map_err(|e| describe("kek generate", &e))?;
+
+    let input = original
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("to-wrap-input-raw", &e))?;
+    let minted = xchacha::unwrap_key_raw(
+        wrap_then_unwrap(&kek, input).await?,
+        crate::mint::aead_options(false),
+    )
+    .await
+    .map_err(|e| describe("unwrap-key-raw", &e))?;
+    let nonce = [9u8; 24];
+    let sealed = seal_ok(
+        &minted,
+        &nonce,
+        b"",
+        None,
+        plaintext,
+        Schedule::Whole,
+        "seal under the minted key",
+    )
+    .await?;
+    let opened = open_ok(
+        &original,
+        &nonce,
+        b"",
+        None,
+        &sealed,
+        Schedule::Whole,
+        "open under the original",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "xchacha unwrap-mint round trip")?;
+
+    let original = import_xchacha_internal_nonce_key(vec![0x78u8; 32], true)
+        .await
+        .map_err(|e| describe("internal-nonce import", &e))?;
+    let input = original
+        .to_wrap_input_raw()
+        .await
+        .map_err(|e| describe("internal-nonce to-wrap-input-raw", &e))?;
+    let minted = xchacha_in::unwrap_key_raw(
+        wrap_then_unwrap(&kek, input).await?,
+        internal_nonce_options(false),
+    )
+    .await
+    .map_err(|e| describe("internal-nonce unwrap-key-raw", &e))?;
+    let sealed = in_seal_ok(
+        &minted,
+        b"",
+        plaintext,
+        Schedule::Whole,
+        "seal under the minted key",
+    )
+    .await?;
+    let opened = in_open_ok(
+        &original,
+        b"",
+        &sealed,
+        Schedule::Whole,
+        "open under the original",
+    )
+    .await?;
+    expect_bytes(&opened, plaintext, "internal-nonce unwrap-mint round trip")
 }
