@@ -299,28 +299,40 @@ function sha2Variant(variant) {
 }
 
 /**
+ * The reader for a resource class's module-private `WeakMap` state (the
+ * options classes' accumulated policies, read by the setters and at mint;
+ * the parameter-position resources' platform keys): the map lookup doubles
+ * as the same-provider check the WIT requires (a foreign object is not a
+ * key).
+ * @template {object} K
+ * @template V
+ * @param {WeakMap<K, V>} store
+ * @param {string} what
+ * @returns {(resource: K) => V}
+ */
+function stateReader(store, what) {
+  return (resource) => {
+    const state = store.get(resource);
+    if (state === undefined) {
+      throw errOther(`${what} minted by another provider`);
+    }
+    return state;
+  };
+}
+
+/**
  * The `mac-key-options` resource: mint-time policy under construction. Per
  * the package-wide options contract the constructor grants nothing; the
  * setters are opt-in, and a mint consumes the accumulated policy through
  * `macPolicy`. The state lives in a module-private `WeakMap` rather than
  * private fields, so the class stays structurally compatible with the
- * generated interface types; the map lookup doubles as the same-provider
- * check the WIT requires (a foreign object is not a key).
+ * generated interface types; its `stateReader` supplies the same-provider
+ * check.
  */
 /** @type {WeakMap<MacKeyOptions, { sign: boolean, verify: boolean, extractable: boolean }>} */
 const macPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {MacKeyOptions} options
- */
-function macPolicy(options) {
-  const policy = macPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("mac-key-options minted by another provider");
-  }
-  return policy;
-}
+const macPolicy = stateReader(macPolicies, "mac-key-options");
 
 export class MacKeyOptions {
   constructor() {
@@ -468,17 +480,7 @@ export class MacKey {
 /** @type {WeakMap<AeadKeyOptions, { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const aeadPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {AeadKeyOptions} options
- */
-function aeadPolicy(options) {
-  const policy = aeadPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("aead-key-options minted by another provider");
-  }
-  return policy;
-}
+const aeadPolicy = stateReader(aeadPolicies, "aead-key-options");
 
 export class AeadKeyOptions {
   constructor() {
@@ -922,17 +924,7 @@ export const hmacSha2 = {
 /** @type {WeakMap<DeriveOptions, { deriveBits: boolean, deriveKey: boolean }>} */
 const derivePolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {DeriveOptions} options
- */
-function derivePolicy(options) {
-  const policy = derivePolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("derive-options minted by another provider");
-  }
-  return policy;
-}
+const derivePolicy = stateReader(derivePolicies, "derive-options");
 
 export class DeriveOptions {
   constructor() {
@@ -979,14 +971,7 @@ function deriveUsages(policy) {
  */
 const ikmState = new WeakMap();
 
-/** @param {Ikm} ikm */
-function ikmOf(ikm) {
-  const state = ikmState.get(ikm);
-  if (state === undefined) {
-    throw errOther("ikm minted by another provider");
-  }
-  return state;
-}
+const ikmOf = stateReader(ikmState, "ikm");
 
 /** A mint token so the resource classes have no public constructor path. */
 const MINT = Symbol("webcrypto mint");
@@ -1113,14 +1098,7 @@ async function deriveKeyFrom(input, derived, extractable, usages) {
  */
 const inputState = new WeakMap();
 
-/** @param {DeriveInput} input */
-function inputOf(input) {
-  const state = inputState.get(input);
-  if (state === undefined) {
-    throw errOther("derive-input minted by another provider");
-  }
-  return state;
-}
+const inputOf = stateReader(inputState, "derive-input");
 
 /**
  * Whether a derive-input's params are an agreement's (a `{ name, public }`
@@ -1262,14 +1240,7 @@ export const hkdfSha1 = {
  */
 const passwordState = new WeakMap();
 
-/** @param {Password} password */
-function passwordOf(password) {
-  const state = passwordState.get(password);
-  if (state === undefined) {
-    throw errOther("password minted by another provider");
-  }
-  return state;
-}
+const passwordOf = stateReader(passwordState, "password");
 
 /**
  * The `pbkdf2.password` resource: a password as a platform `CryptoKey`
@@ -1364,17 +1335,7 @@ export const pbkdf2Sha1 = {
 /** @type {WeakMap<AgreementKeyOptions, { deriveBits: boolean, deriveKey: boolean, extractable: boolean }>} */
 const agreementPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {AgreementKeyOptions} options
- */
-function agreementPolicy(options) {
-  const policy = agreementPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("agreement-key-options minted by another provider");
-  }
-  return policy;
-}
+const agreementPolicy = stateReader(agreementPolicies, "agreement-key-options");
 
 export class AgreementKeyOptions {
   constructor() {
@@ -1400,14 +1361,7 @@ export class AgreementKeyOptions {
 /** @type {WeakMap<AgreementPublicKey, { key: CryptoKey }>} */
 const agreementPublicState = new WeakMap();
 
-/** @param {AgreementPublicKey} publicKey */
-function agreementPublicOf(publicKey) {
-  const state = agreementPublicState.get(publicKey);
-  if (state === undefined) {
-    throw errOther("public-key minted by another provider");
-  }
-  return state;
-}
+const agreementPublicOf = stateReader(agreementPublicState, "public-key");
 
 /**
  * The `key-agreement.public-key` resource: public material behind a
@@ -1466,14 +1420,7 @@ export class AgreementPublicKey {
 /** @type {WeakMap<AgreementSecretKey, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean, extractable: boolean } }>} */
 const agreementSecretState = new WeakMap();
 
-/** @param {AgreementSecretKey} secretKey */
-function agreementSecretOf(secretKey) {
-  const state = agreementSecretState.get(secretKey);
-  if (state === undefined) {
-    throw errOther("secret-key minted by another provider");
-  }
-  return state;
-}
+const agreementSecretOf = stateReader(agreementSecretState, "secret-key");
 
 /**
  * The usages every platform agreement secret key is minted with. Unlike
@@ -1954,14 +1901,7 @@ export const aesGcm = {
 /** @type {WeakMap<CipherKeyOptions, { encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const cipherPolicies = new WeakMap();
 
-/** @param {CipherKeyOptions} options */
-function cipherPolicy(options) {
-  const policy = cipherPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("cipher-key-options minted by another provider");
-  }
-  return policy;
-}
+const cipherPolicy = stateReader(cipherPolicies, "cipher-key-options");
 
 export class CipherKeyOptions {
   constructor() {
@@ -2414,17 +2354,7 @@ export const xchacha20Poly1305InternalNonce = {
 /** @type {WeakMap<InternalNonceKeyOptions, { seal: boolean, open: boolean, extractable: boolean }>} */
 const internalNoncePolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {InternalNonceKeyOptions} options
- */
-function internalNoncePolicy(options) {
-  const policy = internalNoncePolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("internal-nonce-key-options minted by another provider");
-  }
-  return policy;
-}
+const internalNoncePolicy = stateReader(internalNoncePolicies, "internal-nonce-key-options");
 
 export class InternalNonceKeyOptions {
   constructor() {
@@ -3329,17 +3259,7 @@ export class VerifyingKey {
 /** @type {WeakMap<SigningKeyOptions, { sign: boolean, extractable: boolean }>} */
 const signingPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {SigningKeyOptions} options
- */
-function signingPolicy(options) {
-  const policy = signingPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("signing-key-options minted by another provider");
-  }
-  return policy;
-}
+const signingPolicy = stateReader(signingPolicies, "signing-key-options");
 
 export class SigningKeyOptions {
   constructor() {
