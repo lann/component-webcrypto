@@ -134,6 +134,30 @@ async fn mint<T: Send, R: Minted + Send + 'static>(
     })
 }
 
+/// Charge the retention floor for each half of a generated key pair, then
+/// push both into the store's table (both halves are floor-only resources).
+/// An exhausted budget mints neither half.
+async fn mint_key_pair<T: Send, A, B>(
+    accessor: &Accessor<T, WasiWebcrypto>,
+    first: A::Payload,
+    second: B::Payload,
+) -> Result<std::result::Result<(Resource<A>, Resource<B>), Error>>
+where
+    A: Minted + Send + 'static,
+    B: Minted + Send + 'static,
+{
+    accessor.with(|mut access| {
+        let view = access.get();
+        let (Some(r1), Some(r2)) = (view.ctx.charge_retention(0), view.ctx.charge_retention(0))
+        else {
+            return Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes())));
+        };
+        let a = view.table.push(A::minted(first, r1))?;
+        let b = view.table.push(B::minted(second, r2))?;
+        Ok(Ok((a, b)))
+    })
+}
+
 /// Run `op` on the table-held resource behind `self_`.
 async fn with_resource<T: Send, R: 'static, O>(
     accessor: &Accessor<T, WasiWebcrypto>,
@@ -1085,17 +1109,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let material = lann_webcrypto_core::AgreementSecretMaterial::generate(policy)
             .map_err(rng_trap("random key generation"))?;
         match material {
-            Ok((secret, public)) => accessor.with(|mut access| {
-                let view = access.get();
-                let (Some(r1), Some(r2)) =
-                    (view.ctx.charge_retention(0), view.ctx.charge_retention(0))
-                else {
-                    return Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes())));
-                };
-                let secret = view.table.push(AgreementSecretKey::minted(secret, r1))?;
-                let public = view.table.push(AgreementPublicKey::minted(public, r2))?;
-                Ok(Ok((secret, public)))
-            }),
+            Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
             Err(err) => Ok(Err(err.into())),
         }
     }
@@ -1679,7 +1693,7 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
             Ok(material) => material,
             Err(err) => return Ok(Err(err.into())),
         };
-        mint_key_pair(accessor, material).await
+        mint_signing_pair(accessor, material).await
     }
 
     async fn import_signing_key_pkcs8(
@@ -1704,21 +1718,12 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
 }
 
 /// Push a generated signing key and the public half returned with it.
-async fn mint_key_pair<T: Send>(
+async fn mint_signing_pair<T: Send>(
     accessor: &Accessor<T, WasiWebcrypto>,
     material: SigningKeyMaterial,
 ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
     let public = material.public();
-    accessor.with(|mut access| {
-        let view = access.get();
-        let (Some(r1), Some(r2)) = (view.ctx.charge_retention(0), view.ctx.charge_retention(0))
-        else {
-            return Ok(Err(retention_exhausted(view.ctx.retention_limit_bytes())));
-        };
-        let signing = view.table.push(SigningKey::minted(material, r1))?;
-        let verifying = view.table.push(VerifyingKey::minted(public, r2))?;
-        Ok(Ok((signing, verifying)))
-    })
+    mint_key_pair(accessor, material, public).await
 }
 
 // --- ecdsa (key minting) ---------------------------------------------------------
@@ -1768,7 +1773,7 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
             Ok(material) => material,
             Err(err) => return Ok(Err(err.into())),
         };
-        mint_key_pair(accessor, material).await
+        mint_signing_pair(accessor, material).await
     }
 
     async fn import_signing_key_pkcs8(
