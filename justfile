@@ -331,10 +331,10 @@ update-wpt-parity-chromium: wpt-web-artifacts
 # Playwright browser downloads are not baseline local dependencies; see
 # wpt-parity-firefox / wpt-parity-chromium for the installs). The engines
 # are independent — each writes its own record files and pins its own loss
-# set — so they parallelize cleanly; each engine's output is buffered to
-# target/wpt-parity/<engine>.log and printed whole when it finishes, so
-# failures read per engine. (The WebKit leg is not driven from here: it
-# needs macOS — see wpt-parity-webkit.)
+# set — so they parallelize cleanly (scripts/parallel-recipes.sh buffers
+# each engine's output and prints it whole, so failures read per engine).
+# (The WebKit leg is not driven from here: it needs macOS — see
+# wpt-parity-webkit.)
 _wpt-parity-gates:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -345,28 +345,14 @@ _wpt-parity-gates:
     if [ -n "$firefox" ] || [ -n "$chromium" ]; then
         just _wpt-web-transpile
     fi
-    engines=(node)
-    if [ -n "$firefox" ]; then engines+=(firefox); else
+    engines=(_wpt-parity-node-run)
+    if [ -n "$firefox" ]; then engines+=(_wpt-parity-firefox-run); else
         echo "skipping the Firefox WPT parity gate (opt in with WPT_PARITY_FIREFOX=1; needs Playwright Firefox: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox)"
     fi
-    if [ -n "$chromium" ]; then engines+=(chromium); else
+    if [ -n "$chromium" ]; then engines+=(_wpt-parity-chromium-run); else
         echo "skipping the Chromium WPT parity gate (opt in with WPT_PARITY_CHROMIUM=1; needs Playwright Chromium: cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium)"
     fi
-    mkdir -p target/wpt-parity
-    echo "wpt parity: running engines in parallel: ${engines[*]} (logs in target/wpt-parity/)"
-    pids=()
-    for engine in "${engines[@]}"; do
-        just "_wpt-parity-${engine}-run" > "target/wpt-parity/${engine}.log" 2>&1 &
-        pids+=($!)
-    done
-    status=0
-    for i in "${!engines[@]}"; do
-        verdict=ok
-        wait "${pids[$i]}" || { verdict="FAILED (exit $?)"; status=1; }
-        echo "--- wpt parity (${engines[$i]}): ${verdict} ---"
-        cat "target/wpt-parity/${engines[$i]}.log"
-    done
-    exit $status
+    scripts/parallel-recipes.sh target/wpt-parity "${engines[@]}"
 
 # Produce both of the Node engine's parity legs' results under
 # js/componentize/wpt/build/ (artifacts + legs; the update recipe's hook).
@@ -457,20 +443,31 @@ wpt-web: wpt-web-artifacts
 # The whole-run safety cap (seconds) for each conformance target invocation.
 conformance-timeout := "600"
 
-# Run the cross-implementation conformance tests: build the conformance
-# guests, run the enabled targets over the self-describing cases, then
-# aggregate — validating every results file against the target facts in
-# conformance/targets.toml and the checked-in suite lockfiles — and render
-# conformance/matrix.md plus the results-viewer data
-# (conformance/results/matrix.json), exiting nonzero on any failure or
-# transport problem.
+# Run the cross-implementation conformance tests: build everything the
+# targets consume, run the enabled targets in parallel (their runs are
+# independent — each writes only its own results files — so they
+# parallelize cleanly; scripts/parallel-recipes.sh buffers each target's
+# output and prints it whole), then aggregate — validating every results
+# file against the target facts in conformance/targets.toml and the
+# checked-in suite lockfiles — and render conformance/matrix.md plus the
+# results-viewer data (conformance/results/matrix.json), exiting nonzero
+# on any failure or transport problem.
 #
 # Enabled targets: wasmtime, composed, and jco-node (Node 24+ with npm
 # required) — plus jco-browser under GitHub Actions (the runner image ships
 # Chrome) or when opted in locally with CONFORMANCE_BROWSER=1 (needs
 # Chrome/Chromium 137+; targets.toml marks it optional, so the runner warns
 # on its missing results rather than failing).
-conformance: _conformance-clean class-d-composition conformance-wasmtime conformance-composed conformance-jco-node _conformance-jco-browser-gate
+conformance: _conformance-clean _conformance-artifacts class-d-composition
+    #!/usr/bin/env bash
+    set -euo pipefail
+    runs=(_conformance-wasmtime-run _conformance-composed-run _conformance-jco-node-run)
+    if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CONFORMANCE_BROWSER:-}" = "1" ]; then
+        runs+=(_conformance-jco-browser-run)
+    else
+        echo "skipping the jco-browser conformance target (opt in with CONFORMANCE_BROWSER=1; needs Chrome/Chromium 137+)"
+    fi
+    scripts/parallel-recipes.sh target/conformance-logs "${runs[@]}"
     cargo run --release -p conformance-runner -- \
         --targets conformance/targets.toml \
         --results conformance/results \
@@ -478,6 +475,19 @@ conformance: _conformance-clean class-d-composition conformance-wasmtime conform
         --lock signing=conformance/signing-guest/tests.lock \
         --matrix-out conformance/matrix.md \
         --json-out conformance/results/matrix.json
+
+# Everything the conformance targets consume, built once before the
+# parallel run phase: the guest components, the composed component, the
+# jco transpiles, and the adapter + runner binaries (prebuilt so the run
+# phase's `cargo run`s only verify freshness).
+_conformance-artifacts: build-conformance-guest build-signing-guest build-conformance-composed _conformance-jco-transpiles
+    cargo build --release -p conformance-adapter-wasmtime -p conformance-runner
+
+# Transpile both conformance guests for the jco adapters (shared by the
+# jco-node and jco-browser targets, so it must not run inside their
+# parallelized run recipes).
+_conformance-jco-transpiles: build-conformance-guest build-signing-guest
+    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing
 
 # The class-D negative-composition gate: composing a consumer whose world
 # imports `ecdsa-sign` (the signing guest) with the in-guest provider must
@@ -583,19 +593,6 @@ update-conformance-lock: build-conformance-guest build-signing-guest
         --guest conformance/signing-guest/build/conformance-signing-guest.component.wasm \
         --lock-out conformance/signing-guest/tests.lock
 
-# Run the jco-browser conformance target when gating applies: always under
-# GitHub Actions, locally only with CONFORMANCE_BROWSER=1 (skips with a
-# notice otherwise). The `conformance` recipe's runner pass classifies the
-# results.
-_conformance-jco-browser-gate:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CONFORMANCE_BROWSER:-}" != "1" ]; then
-        echo "skipping the jco-browser conformance target (opt in with CONFORMANCE_BROWSER=1; needs Chrome/Chromium 137+)"
-        exit 0
-    fi
-    just conformance-jco-browser
-
 # Build a wasm32-unknown-unknown guest crate and wrap it into a component
 # at `out`.
 _build-guest crate out:
@@ -616,7 +613,10 @@ build-signing-guest: (_build-guest "conformance-signing-guest" "conformance/sign
 # Run both conformance suites under the Wasmtime host (the shared guest plus
 # the host-only signing guest). Writes conformance/results/wasmtime.json and
 # wasmtime-signing.json (both target `wasmtime`; the runner merges them).
-conformance-wasmtime: build-conformance-guest build-signing-guest
+conformance-wasmtime: build-conformance-guest build-signing-guest _conformance-wasmtime-run
+
+# The wasmtime target's run (the guests are already built).
+_conformance-wasmtime-run:
     timeout {{conformance-timeout}} cargo run --release -p conformance-adapter-wasmtime -- \
         --guest conformance/guest/build/conformance-guest.component.wasm \
         --suite shared --out conformance/results/wasmtime.json
@@ -631,7 +631,10 @@ build-conformance-composed: build-conformance-guest (_compose "conformance" "con
 
 # Run the shared conformance suite fully in-guest (RustCrypto in wasm). Writes
 # conformance/results/composed.json.
-conformance-composed: build-conformance-composed
+conformance-composed: build-conformance-composed _conformance-composed-run
+
+# The composed target's run (the composed component is already built).
+_conformance-composed-run:
     mkdir -p conformance/results
     timeout {{conformance-timeout}} wasmtime run -W component-model-async=y -S cli \
         target/conformance-composed.wasm \
@@ -639,8 +642,11 @@ conformance-composed: build-conformance-composed
 
 # Run both conformance suites under the jco host on Node (24+; JSPI). Writes
 # conformance/results/jco-node.json. Part of `just conformance`.
-conformance-jco-node: build-conformance-guest build-signing-guest
-    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
+conformance-jco-node: _conformance-jco-transpiles _conformance-jco-node-run
+
+# The jco-node target's run (the guests are already transpiled).
+_conformance-jco-node-run:
+    cd conformance/adapters/jco && \
         timeout {{conformance-timeout}} npm run run:node && \
         timeout {{conformance-timeout}} npm run run:node-signing
 
@@ -648,8 +654,11 @@ conformance-jco-node: build-conformance-guest build-signing-guest
 # auto-detected, or set CHROME_PATH). Writes conformance/results/jco-browser.json
 # and jco-browser-signing.json. Gates in CI; local `just conformance` runs it
 # only with CONFORMANCE_BROWSER=1.
-conformance-jco-browser: build-conformance-guest build-signing-guest
-    cd conformance/adapters/jco && npm run transpile && npm run transpile:signing && \
+conformance-jco-browser: _conformance-jco-transpiles _conformance-jco-browser-run
+
+# The jco-browser target's run (the guests are already transpiled).
+_conformance-jco-browser-run:
+    cd conformance/adapters/jco && \
         timeout {{conformance-timeout}} npm run run:browser
 
 # --- timing lab ---------------------------------------------------------------
