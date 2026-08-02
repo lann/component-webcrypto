@@ -1,8 +1,8 @@
 // Tests for the input-buffering admission subsystem — the only gate that
-// sees two operations in flight at once (the conformance adapter runs cases
-// strictly sequentially). These run the host directly — no component, no
-// jco — because the subsystem is reached through the same class methods a
-// transpiled component calls.
+// sees two operations in flight at once (each conformance worker runs its
+// cases strictly sequentially against its own host instance). These run the
+// host directly — no component, no jco — because the subsystem is reached
+// through the same class methods a transpiled component calls.
 //
 // Every test that runs several operations drives them the way the package's
 // making-progress note requires: each operation's output is drained by the
