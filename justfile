@@ -21,6 +21,7 @@ jco-checks:
     @just _step test-node
     @just _step wpt-parity
     @just _step _wpt-parity-firefox-gate
+    @just _step _wpt-parity-chromium-gate
 
 # Everything the componentize CI job runs: the webcrypto-componentize JS
 # guest library's behavioral checks (the composed demo) and the WPT
@@ -302,6 +303,39 @@ _wpt-parity-firefox-gate:
         exit 0
     fi
     just wpt-parity-firefox
+
+# Run the WPT parity gate in headless Chromium: like wpt-parity-firefox,
+# against Chromium's own pinned loss set in
+# js/componentize/wpt/parity/losses-chromium.js. The engine is Playwright's
+# pinned Chromium build (which ships JSPI); install it once with
+# `cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium`.
+wpt-parity-chromium: wpt-web-artifacts
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:chromium
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-chromium.json \
+        js/componentize/wpt/build/parity-roundtrip-chromium.json \
+        --losses losses-chromium.js
+
+# Re-record js/componentize/wpt/parity/losses-chromium.js from an actual
+# run, like update-wpt-parity.
+update-wpt-parity-chromium: wpt-web-artifacts
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:chromium
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-chromium.json \
+        js/componentize/wpt/build/parity-roundtrip-chromium.json \
+        --losses losses-chromium.js --update
+
+# Run the Chromium WPT parity gate when gating applies: always under
+# GitHub Actions, locally only with WPT_PARITY_CHROMIUM=1 (skips with a
+# notice otherwise).
+_wpt-parity-chromium-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${WPT_PARITY_CHROMIUM:-}" != "1" ]; then
+        echo "skipping the Chromium WPT parity gate (opt in with WPT_PARITY_CHROMIUM=1; needs Playwright Chromium: cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium)"
+        exit 0
+    fi
+    just wpt-parity-chromium
 
 # Produce both parity legs' results under js/componentize/wpt/build/:
 # componentize the ungated parity runner from the tree, transpile it with

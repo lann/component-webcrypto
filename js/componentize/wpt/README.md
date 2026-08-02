@@ -115,22 +115,26 @@ recomputed per run, never pinned, so a platform upgrade moves both legs
 together; the loss set is sensitive to the platform only where the
 platform itself is.
 
-### The Firefox leg
+### The browser legs (Firefox, Chromium)
 
-`just wpt-parity-firefox` runs the same two legs in headless Firefox —
-Playwright's pinned build, launched with Gecko's JSPI pref, driven by
+`just wpt-parity-firefox` and `just wpt-parity-chromium` run the same two
+legs in a headless browser — Playwright's pinned builds (Firefox launched
+with Gecko's JSPI pref; Chromium ships JSPI), driven by
 `parity/run-browser.mjs` over the same legs module the parity page uses
-(web/legs.mjs) — and holds the round trip to
-[`parity/losses-firefox.js`](parity/losses-firefox.js), maintained via
-`just update-wpt-parity-firefox`. A loss set is a fact about one engine's
-baseline, so each engine ratchets separately: Firefox's baseline passes
-tests Node's platform does not (and vice versa), and the same package
-ruling can surface as a loss on one engine and a divergent pass on
-another (the Ed25519 strict small-order rejection does exactly that).
-The engine only moves when the pinned playwright-core version does, so
-the ratchet moves in reviewable diffs. Gates in CI (the jco job); local
-runs opt in with `WPT_PARITY_FIREFOX=1` after
-`cd parity && npx playwright-core install --with-deps firefox`.
+(web/legs.mjs) — and hold each round trip to that engine's own ratchet:
+[`parity/losses-firefox.js`](parity/losses-firefox.js) and
+[`parity/losses-chromium.js`](parity/losses-chromium.js), maintained via
+`just update-wpt-parity-firefox` / `-chromium`. A loss set is a fact
+about one engine's baseline, so each engine ratchets separately: the
+engines pass different platform surfaces (AES-192 and P-521 exist on
+Firefox and Node but not Chromium; buffer-copy timing differs on all
+three), and the same package ruling can surface as a loss on one engine
+and a divergent pass on another (the Ed25519 strict small-order
+rejection does exactly that). An engine only moves when the pinned
+playwright-core version does, so the ratchets move in reviewable diffs.
+Both gate in CI (the jco job); local runs opt in with
+`WPT_PARITY_FIREFOX=1` / `WPT_PARITY_CHROMIUM=1` after
+`cd parity && npx playwright-core install --with-deps firefox chromium`.
 
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
@@ -149,9 +153,9 @@ mid-run; a main-thread fallback runs the same legs if the worker path
 fails. The round trip needs JSPI; without it the page runs the baseline
 alone. Nothing on the page gates, and the pinned ratchets do not apply to
 it: loss sets are recorded from pinned engines (`losses.js` from Node,
-`losses-firefox.js` from Playwright's Firefox), and a visiting browser's
-baseline legitimately differs. Serve it locally with
-`just wpt-web`.
+`losses-firefox.js` and `losses-chromium.js` from Playwright's builds),
+and a visiting browser's baseline legitimately differs. Serve it locally
+with `just wpt-web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
 repository layout: the transpiled runner imports `js/jco/webcrypto.js` by
