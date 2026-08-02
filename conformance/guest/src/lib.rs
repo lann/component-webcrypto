@@ -31,7 +31,7 @@ use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
     AeadCase, HkdfCase, HmacCase, InternalNonceCase, Pbkdf2Case, Sha2Case, SigCase, SpeccheckCase,
-    X25519Case,
+    VectorCase, X25519Case,
 };
 
 /// Validate a `missing-features` declaration against
@@ -67,8 +67,7 @@ pub struct Case {
 ///
 /// - `vectors`: `Variant(CaseType): iterator => runner;` — one case per
 ///   translated vector, named by `case.case_id()` and tagged by
-///   `case.features()` unless the row overrides the tags with
-///   `, features: <expr>`.
+///   `case.features()` (the [`VectorCase`] trait).
 /// - `contracts`: `Variant(FamilyType, AreaType): for <family> in FAMILIES,
 ///   <areas> => runner;` — one case per family × area. The `<areas>`
 ///   expression may name the `<family>` binder and must yield areas by
@@ -80,7 +79,7 @@ pub struct Case {
 macro_rules! suites {
     (
         vectors {
-            $( $vvar:ident($vty:ty): $viter:path => $vrun:path $(, features: $vfeat:expr)? ; )*
+            $( $vvar:ident($vty:ty): $viter:path => $vrun:path ; )*
         }
         contracts {
             $( $cvar:ident($cfam:ty, $carea:ty):
@@ -123,10 +122,9 @@ macro_rules! suites {
             let mut cases = Vec::new();
             $(
                 for case in $viter() {
-                    let features = suites!(@features case $($vfeat)?);
                     cases.push(materialize(
                         case.case_id(),
-                        features,
+                        case.features(),
                         missing,
                         CaseKind::$vvar(case),
                     ));
@@ -155,12 +153,6 @@ macro_rules! suites {
             cases
         }
     };
-    (@features $case:ident) => {
-        $case.features()
-    };
-    (@features $case:ident $feat:expr) => {
-        $feat
-    };
 }
 
 suites! {
@@ -169,8 +161,7 @@ suites! {
         Pbkdf2(Pbkdf2Case): translate::pbkdf2_cases => vectors::run_pbkdf2_case;
         Hmac(HmacCase): translate::hmac_cases => vectors::run_hmac_case;
         Aead(AeadCase): translate::aead_cases => vectors::run_aead_case;
-        // CbcCase carries no features accessor: AES-CBC is baseline surface.
-        Cbc(translate::CbcCase): translate::cbc_cases => vectors::run_cbc_case, features: &[];
+        Cbc(translate::CbcCase): translate::cbc_cases => vectors::run_cbc_case;
         InternalNonce(InternalNonceCase):
             translate::internal_nonce_cases => vectors::run_internal_nonce_case;
         Sha2(Sha2Case): translate::sha2_cases => vectors::run_sha2_case;
