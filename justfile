@@ -567,7 +567,7 @@ conformance-web-site: rust-docs
     cp -r js/componentize/wpt/web target/conformance-site/js/componentize/wpt/web
     rm target/conformance-site/js/componentize/wpt/web/.gitignore
     cp js/componentize/wpt/groups.js js/componentize/wpt/harness.js \
-        js/componentize/wpt/reporter.js \
+        js/componentize/wpt/parity-helpers.js js/componentize/wpt/reporter.js \
         target/conformance-site/js/componentize/wpt/
     cp js/componentize/wpt/build/group-*.js \
         target/conformance-site/js/componentize/wpt/build/

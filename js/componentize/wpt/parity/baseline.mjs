@@ -5,20 +5,17 @@
 // out of scope without an exclusion list.
 //
 // Emits the same `{ group, name, status, message? }` records as
-// parity-runner.js, as JSON on stdout. Both read the shared group table in
-// ../groups.js, so a vendored group cannot reach one leg and miss the
-// other; this leg resolves each group's suite module against ../build/ and
-// imports it dynamically.
+// parity-runner.js, as JSON on stdout. The group loop is the shared
+// baseline helper in ../parity-helpers.js, which runs ../groups.js's
+// group table — the same table the round trip's runner compiles in, so a
+// vendored group cannot reach one leg and miss the other.
 
-import { GROUPS } from "../groups.js";
-import { drain, takeResults } from "../harness.js";
+import { runBaselineGroups } from "../parity-helpers.js";
 
 const records = [];
-for (const { name: group, module, start } of GROUPS) {
-  start(await import(new URL(`../build/${module}`, import.meta.url)));
-  await drain();
-  for (const { name, status, message } of takeResults()) {
+await runBaselineGroups((group, results) => {
+  for (const { name, status, message } of results) {
     records.push(message === undefined ? { group, name, status } : { group, name, status, message });
   }
-}
+});
 process.stdout.write(JSON.stringify(records));
