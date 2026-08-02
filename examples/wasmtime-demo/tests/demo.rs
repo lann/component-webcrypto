@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Once;
 
 /// Run `program` with `args` in `dir`, panicking (with the captured output)
 /// if it fails.
@@ -22,9 +23,13 @@ fn run(dir: &Path, program: &str, args: &[&str]) {
 }
 
 /// Build the guest component through `just build-component` — the single
-/// definition of that build — and return the component path.
+/// definition of that build — and return the component path. The build runs
+/// once per test binary: the tests run in parallel, and a concurrent
+/// rebuild's `wasm-tools component new -o` truncates the component file in
+/// place while another test may be loading it.
 fn build_component(workspace_root: &Path) -> PathBuf {
-    run(workspace_root, "just", &["build-component"]);
+    static BUILD: Once = Once::new();
+    BUILD.call_once(|| run(workspace_root, "just", &["build-component"]));
     workspace_root.join("examples/crypto-demo/build/crypto-demo.component.wasm")
 }
 
