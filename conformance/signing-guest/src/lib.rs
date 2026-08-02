@@ -21,8 +21,11 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use conformance_harness::stream::{sig_sign, sig_verify, Schedule};
-use conformance_harness::{describe, expect, expect_err, export_probe_suite, probes, ErrKind};
+use conformance_harness::stream::{sig_sign_ok, sig_verify_ok, sig_verify_op, Schedule};
+use conformance_harness::{
+    b64url, describe, expect, expect_err, export_probe_suite, probes, ErrKind, P256_A25_X,
+    P256_A25_Y,
+};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
@@ -79,12 +82,16 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     )?;
 
     let payload = b"host-only signing payload";
-    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
     expect(sig.len(), 64, "P-256 signature length")?;
-    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("generated public half did not verify", &e))?;
+    sig_verify_ok(
+        &public,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "generated public half did not verify",
+    )
+    .await?;
 
     // The generated point survives an export → ecdsa-verify import round
     // trip (65-byte uncompressed SEC1), and the re-imported key verifies.
@@ -101,14 +108,18 @@ async fn ecdsa_p256_sign_roundtrip() -> Result<(), String> {
     let imported = import_verifying_key_raw(EcdsaVariant::P256Sha256, point)
         .await
         .map_err(|e| describe("import-verifying-key-raw of the exported point", &e))?;
-    let (verified, fed) = sig_verify(&imported, payload, &sig, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("re-imported key did not verify", &e))?;
+    sig_verify_ok(
+        &imported,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "re-imported key did not verify",
+    )
+    .await?;
 
     let mut corrupted = sig;
     corrupted[0] ^= 0x01;
-    let (verified, fed) = sig_verify(&imported, payload, &corrupted, Schedule::Whole).await;
-    fed?;
+    let verified = sig_verify_op(&imported, payload, &corrupted, Schedule::Whole).await?;
     expect_err(
         "verify",
         ErrKind::AuthenticationFailed,
@@ -135,18 +146,21 @@ async fn ecdsa_p384_generate_roundtrip() -> Result<(), String> {
     )?;
 
     let payload = b"host-only signing payload";
-    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
     expect(sig.len(), 96, "P-384 signature length")?;
-    let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-    fed?;
-    verified.map_err(|e| describe("round-trip signature did not verify", &e))?;
+    sig_verify_ok(
+        &public,
+        payload,
+        &sig,
+        Schedule::Whole,
+        "round-trip signature did not verify",
+    )
+    .await?;
 
     let (_other, other_public) = generate_key(EcdsaVariant::P384Sha384, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    let (verified, fed) = sig_verify(&other_public, payload, &sig, Schedule::Whole).await;
-    fed?;
+    let verified = sig_verify_op(&other_public, payload, &sig, Schedule::Whole).await?;
     expect_err(
         "verify",
         ErrKind::AuthenticationFailed,
@@ -196,29 +210,10 @@ async fn ecdsa_p521_unsupported() -> Result<(), String> {
     )
 }
 
-/// Unpadded base64url, for building the EC private JWK the import takes.
-fn b64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
-        for i in 0..=chunk.len() {
-            out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
-        }
-    }
-    out
-}
-
-// The RFC 6979 A.2.5 P-256 key: private scalar, public coordinates, and
-// the PKCS#8 encoding of the private key.
+// The RFC 6979 A.2.5 P-256 key's private half: the scalar and its PKCS#8
+// encoding (the public coordinates are the harness's
+// `P256_A25_X`/`P256_A25_Y`).
 const P256_A25_D: &str = "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721";
-const P256_A25_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
-const P256_A25_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
 const P256_A25_PKCS8: &str = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721a1440342000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
 
 /// The RFC 6979 A.2.5 public key as an uncompressed SEC1 point.
@@ -277,12 +272,16 @@ async fn ecdsa_private_format_imports() -> Result<(), String> {
             Some("P-256".to_string()),
             "imported signing-key algorithm-curve",
         )?;
-        let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-        fed?;
+        let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
         expect(sig.len(), 64, "P-256 signature length")?;
-        let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-        fed?;
-        verified.map_err(|e| describe(&format!("{what}-imported key did not verify"), &e))?;
+        sig_verify_ok(
+            &public,
+            payload,
+            &sig,
+            Schedule::Whole,
+            &format!("{what}-imported key did not verify"),
+        )
+        .await?;
     }
 
     expect_err(
@@ -352,11 +351,15 @@ async fn ecdsa_signing_key_exports() -> Result<(), String> {
                 .map_err(|e| describe("re-import of exported JWK", &e))?,
         ),
     ] {
-        let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-        fed?;
-        let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-        fed?;
-        verified.map_err(|e| describe(&format!("{what} re-import did not verify"), &e))?;
+        let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
+        sig_verify_ok(
+            &public,
+            payload,
+            &sig,
+            Schedule::Whole,
+            &format!("{what} re-import did not verify"),
+        )
+        .await?;
     }
 
     let (non_extractable, _) = generate_key(EcdsaVariant::P256Sha256, false)
@@ -401,12 +404,16 @@ async fn ecdsa_cross_hash_sign_roundtrip() -> Result<(), String> {
             Some(hash.to_string()),
             "cross-variant signing-key algorithm-hash",
         )?;
-        let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-        fed?;
+        let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
         expect(sig.len(), sig_len, "cross-variant signature length")?;
-        let (verified, fed) = sig_verify(&public, payload, &sig, Schedule::Whole).await;
-        fed?;
-        verified.map_err(|e| describe(&format!("{curve}/{hash} round trip"), &e))?;
+        sig_verify_ok(
+            &public,
+            payload,
+            &sig,
+            Schedule::Whole,
+            &format!("{curve}/{hash} round trip"),
+        )
+        .await?;
     }
 
     // The hash is part of the key's identity: the same point under a
@@ -414,8 +421,7 @@ async fn ecdsa_cross_hash_sign_roundtrip() -> Result<(), String> {
     let (key, public) = generate_key(EcdsaVariant::P256Sha512, false)
         .await
         .map_err(|e| describe("generate-key", &e))?;
-    let (sig, fed) = sig_sign(&key, payload, Schedule::Whole).await;
-    fed?;
+    let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;
     let point = public
         .export_key_raw()
         .await
@@ -423,8 +429,7 @@ async fn ecdsa_cross_hash_sign_roundtrip() -> Result<(), String> {
     let rebound = import_verifying_key_raw(EcdsaVariant::P256Sha256, point)
         .await
         .map_err(|e| describe("import-verifying-key-raw (rebound hash)", &e))?;
-    let (verified, fed) = sig_verify(&rebound, payload, &sig, Schedule::Whole).await;
-    fed?;
+    let verified = sig_verify_op(&rebound, payload, &sig, Schedule::Whole).await?;
     expect_err(
         "verify under the wrong hash binding",
         ErrKind::AuthenticationFailed,

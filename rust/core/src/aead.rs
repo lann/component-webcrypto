@@ -8,8 +8,8 @@ use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use zeroize::Zeroizing;
 
 use crate::{
-    not_permitted, random_bytes, AeadPolicy, AesVariant, Error, RngError, AES_GCM_NAME,
-    CHACHA20_POLY1305_NAME, XCHACHA20_POLY1305_NAME,
+    aes192_unsupported, not_permitted, random_bytes, AeadPolicy, AesVariant, Error, RngError,
+    AES_GCM_NAME, CHACHA20_POLY1305_NAME, XCHACHA20_POLY1305_NAME,
 };
 
 /// The length in bytes of a ChaCha20-Poly1305 key (either construction).
@@ -91,12 +91,6 @@ fn check_chacha_key(name: &str, raw: &[u8]) -> Result<(), Error> {
     }
 }
 
-/// The AES-192 decline every AES minting path renders (see the WIT
-/// `aes-variant` doc).
-fn aes192_unsupported() -> Error {
-    Error::Unsupported("AES-192 is not served by this implementation".into())
-}
-
 /// Import 32 bytes of key material for either ChaCha construction.
 fn import_chacha_like<C: KeyInit>(
     name: &'static str,
@@ -124,24 +118,24 @@ impl AeadKeyMaterial {
         policy: AeadPolicy,
     ) -> Result<Self, Error> {
         policy.check_useful()?;
-        type Make = fn(&[u8]) -> AeadCipher;
-        let (expected, make): (usize, Make) = match variant {
-            AesVariant::Aes128 => (16, |raw| {
-                AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(raw).expect("length checked"))
-            }),
-            AesVariant::Aes192 => return Err(aes192_unsupported()),
-            AesVariant::Aes256 => (32, |raw| {
-                AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(raw).expect("length checked"))
-            }),
-        };
+        let expected = variant.served_key_len()?;
         if raw.len() != expected {
             return Err(Error::InvalidKey(format!(
                 "{variant:?} requires {expected} bytes of key material, got {} bytes",
                 raw.len()
             )));
         }
+        let cipher = match variant {
+            AesVariant::Aes128 => {
+                AeadCipher::Aes128Gcm(Aes128Gcm::new_from_slice(&raw).expect("length checked"))
+            }
+            AesVariant::Aes192 => unreachable!("declined by served_key_len"),
+            AesVariant::Aes256 => {
+                AeadCipher::Aes256Gcm(Aes256Gcm::new_from_slice(&raw).expect("length checked"))
+            }
+        };
         Ok(Self {
-            cipher: make(&raw),
+            cipher,
             raw: Zeroizing::new(raw),
             policy,
         })
@@ -196,10 +190,9 @@ impl AeadKeyMaterial {
         if let Err(err) = policy.check_useful() {
             return Ok(Err(err));
         }
-        let len = match variant {
-            AesVariant::Aes128 => 16,
-            AesVariant::Aes192 => return Ok(Err(aes192_unsupported())),
-            AesVariant::Aes256 => 32,
+        let len = match variant.served_key_len() {
+            Ok(len) => len,
+            Err(err) => return Ok(Err(err)),
         };
         Ok(Ok(Self::import_aes_gcm(
             variant,

@@ -18,7 +18,7 @@
 wit_bindgen::generate!({
     path: "wit",
     world: "provider",
-    features: ["chacha20-poly1305", "xchacha20-poly1305"],
+    features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"],
     generate_all,
 });
 

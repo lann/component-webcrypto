@@ -109,12 +109,107 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: Cache Playwright browsers
+        # The browser downloads dominate the install step (~35s); the cache
+        # key follows the parity package's lockfile, which pins
+        # playwright-core and with it the browser builds. restore-keys lets
+        # a lockfile bump start from the previous browsers and download
+        # only what changed.
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('js/componentize/wpt/parity/package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Install Playwright browsers
         # The browser WPT parity gates' engines: Playwright's pinned builds
         # (Firefox launched with Gecko's JSPI pref; Chromium ships JSPI), so
         # the loss sets in losses-firefox.js and losses-chromium.js measure
-        # one engine each, everywhere.
-        run: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox chromium
+        # one engine each, everywhere. On a cache hit the install only
+        # verifies the browsers are present; --with-deps (an apt run) is
+        # needed only when the browsers were actually (re)downloaded.
+        run: |
+          cd js/componentize/wpt/parity
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright-core install firefox chromium
+          else
+            npx playwright-core install --with-deps firefox chromium
+          fi
 
       - name: Run the jco host checks
         run: just jco-checks
+
+  # The WebKit WPT parity gate runs on macOS: Playwright's WebKit there
+  # uses Apple's crypto backend — the closest CI proxy for mobile Safari —
+  # where the Linux port (libgcrypt) serves less and crashes under this
+  # workload. No componentize-js toolchain is published for darwin, so the
+  # page artifacts are built on ubuntu and handed over.
+  wpt-parity-webkit-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install just
+        run: sudo apt-get update && sudo apt-get install -y just
+
+      - name: Install the parity package's dependencies
+        run: cd js/componentize/wpt/parity && npm ci --no-audit --no-fund
+
+      - name: Build the parity page artifacts
+        run: just wpt-web-artifacts
+
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-web-artifacts
+          path: |
+            js/componentize/wpt/parity/generated-web/**
+            js/componentize/wpt/build/group-*.js
+            js/componentize/wpt/web/preview2-shim/**
+
+  wpt-parity-webkit:
+    needs: wpt-parity-webkit-artifacts
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install just
+        run: brew install just
+
+      - name: Download the parity page artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wpt-web-artifacts
+          path: js/componentize/wpt
+
+      - name: Cache Playwright WebKit
+        # Same scheme as the jco job's browser cache (macOS cache path).
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('js/componentize/wpt/parity/package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install the parity package + Playwright WebKit
+        run: |
+          cd js/componentize/wpt/parity
+          npm ci --no-audit --no-fund
+          npx playwright-core install webkit
+
+      - name: Run the WebKit WPT parity gate
+        run: just wpt-parity-webkit

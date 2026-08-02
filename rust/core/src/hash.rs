@@ -41,6 +41,30 @@ pub enum HmacHash {
     Sha2(Sha2),
 }
 
+/// One-shot HMAC over `data` with `key` material, for the concrete HMAC
+/// type `M`. Infallible: HMAC accepts key material of any length
+/// (longer-than-block keys are hashed first), so setup cannot fail for
+/// material accepted at import/generation time.
+fn hmac_tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut hmac = <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+    hmac.update(data);
+    hmac.finalize().into_bytes().to_vec()
+}
+
+/// One-shot HMAC verification of `tag` over `data`, for the concrete HMAC
+/// type `M`.
+fn hmac_check<M: hmac::Mac + hmac::digest::KeyInit>(
+    key: &[u8],
+    data: &[u8],
+    tag: &[u8],
+) -> Result<(), Error> {
+    let mut hmac = <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+    hmac.update(data);
+    // `verify_slice` compares in constant time, per the WIT contract.
+    hmac.verify_slice(tag)
+        .map_err(|_| Error::AuthenticationFailed)
+}
+
 impl HmacHash {
     /// The hash name (`mac-key.algorithm-hash`, and the KDF inputs'
     /// diagnostics).
@@ -63,33 +87,16 @@ impl HmacHash {
     /// One-shot HMAC over `data` with `key` material. See
     /// [`Sha2::hmac_sign`].
     pub(crate) fn hmac_sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
-        fn tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Vec<u8> {
-            let mut hmac =
-                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
-            hmac.update(data);
-            hmac.finalize().into_bytes().to_vec()
-        }
         match self {
-            Self::Sha1 => tag::<hmac::Hmac<sha1::Sha1>>(key, data),
+            Self::Sha1 => hmac_tag::<hmac::Hmac<sha1::Sha1>>(key, data),
             Self::Sha2(variant) => variant.hmac_sign(key, data),
         }
     }
 
     /// One-shot constant-time HMAC verification. See [`Sha2::hmac_verify`].
     pub(crate) fn hmac_verify(self, key: &[u8], data: &[u8], tag: &[u8]) -> Result<(), Error> {
-        fn check<M: hmac::Mac + hmac::digest::KeyInit>(
-            key: &[u8],
-            data: &[u8],
-            tag: &[u8],
-        ) -> Result<(), Error> {
-            let mut hmac =
-                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
-            hmac.update(data);
-            hmac.verify_slice(tag)
-                .map_err(|_| Error::AuthenticationFailed)
-        }
         match self {
-            Self::Sha1 => check::<hmac::Hmac<sha1::Sha1>>(key, data, tag),
+            Self::Sha1 => hmac_check::<hmac::Hmac<sha1::Sha1>>(key, data, tag),
             Self::Sha2(variant) => variant.hmac_verify(key, data, tag),
         }
     }
@@ -187,42 +194,22 @@ impl Sha2 {
         }
     }
 
-    /// One-shot HMAC over `data` with `key` material. Infallible: HMAC
-    /// accepts key material of any length (longer-than-block keys are
-    /// hashed first), so setup cannot fail for material accepted at
-    /// import/generation time.
+    /// One-shot HMAC over `data` with `key` material. Infallible: see
+    /// [`hmac_tag`].
     pub(crate) fn hmac_sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
-        fn tag<M: hmac::Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8]) -> Vec<u8> {
-            let mut hmac =
-                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
-            hmac.update(data);
-            hmac.finalize().into_bytes().to_vec()
-        }
         match self {
-            Self::Sha256 => tag::<hmac::Hmac<sha2::Sha256>>(key, data),
-            Self::Sha384 => tag::<hmac::Hmac<sha2::Sha384>>(key, data),
-            Self::Sha512 => tag::<hmac::Hmac<sha2::Sha512>>(key, data),
+            Self::Sha256 => hmac_tag::<hmac::Hmac<sha2::Sha256>>(key, data),
+            Self::Sha384 => hmac_tag::<hmac::Hmac<sha2::Sha384>>(key, data),
+            Self::Sha512 => hmac_tag::<hmac::Hmac<sha2::Sha512>>(key, data),
         }
     }
 
     /// One-shot constant-time HMAC verification of `tag` over `data`.
     pub(crate) fn hmac_verify(self, key: &[u8], data: &[u8], tag: &[u8]) -> Result<(), Error> {
-        fn check<M: hmac::Mac + hmac::digest::KeyInit>(
-            key: &[u8],
-            data: &[u8],
-            tag: &[u8],
-        ) -> Result<(), Error> {
-            let mut hmac =
-                <M as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key length");
-            hmac.update(data);
-            // `verify_slice` compares in constant time, per the WIT contract.
-            hmac.verify_slice(tag)
-                .map_err(|_| Error::AuthenticationFailed)
-        }
         match self {
-            Self::Sha256 => check::<hmac::Hmac<sha2::Sha256>>(key, data, tag),
-            Self::Sha384 => check::<hmac::Hmac<sha2::Sha384>>(key, data, tag),
-            Self::Sha512 => check::<hmac::Hmac<sha2::Sha512>>(key, data, tag),
+            Self::Sha256 => hmac_check::<hmac::Hmac<sha2::Sha256>>(key, data, tag),
+            Self::Sha384 => hmac_check::<hmac::Hmac<sha2::Sha384>>(key, data, tag),
+            Self::Sha512 => hmac_check::<hmac::Hmac<sha2::Sha512>>(key, data, tag),
         }
     }
 }

@@ -579,6 +579,7 @@ where
 pub struct LinkOptions {
     chacha20_poly1305: bool,
     xchacha20_poly1305: bool,
+    sha1_checked: bool,
 }
 
 impl LinkOptions {
@@ -592,6 +593,12 @@ impl LinkOptions {
     /// `lann:webcrypto/xchacha20-poly1305-internal-nonce`.
     pub fn xchacha20_poly1305(&mut self, enabled: bool) -> &mut Self {
         self.xchacha20_poly1305 = enabled;
+        self
+    }
+
+    /// Serve `lann:webcrypto/sha1-checked`.
+    pub fn sha1_checked(&mut self, enabled: bool) -> &mut Self {
+        self.sha1_checked = enabled;
         self
     }
 }
@@ -657,7 +664,12 @@ where
         T::webcrypto,
     )?;
     bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
-    bindings::webcrypto::sha1_checked::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::sha1_checked::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        bindings::webcrypto::sha1_checked::LinkOptions::default()
+            .sha1_checked(options.sha1_checked),
+        T::webcrypto,
+    )?;
     bindings::webcrypto::signature::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ed25519_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ed25519_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;

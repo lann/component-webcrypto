@@ -30,8 +30,16 @@ package lann:webcrypto@0.1.0;
 /// - Detection branches only on the input, which this interface treats as
 ///   public (the digest kind is unkeyed), so providers in shared timing
 ///   domains can serve it (see `README.md`, "Timing-channel policy").
+///
+/// Gated `@unstable`: platform WebCrypto carries no sha1dc, so
+/// platform-backed providers cannot serve this interface (see
+/// `README.md`, "Stability gates"). Consumers opt in by enabling the
+/// feature in their tooling.
+@unstable(feature = sha1-checked)
 interface sha1-checked {
+    @unstable(feature = sha1-checked)
     use types.{error};
+    @unstable(feature = sha1-checked)
     use digest.{digest};
 
     /// Mint a SHA-1 digest that *rejects* on a detected collision attack:
@@ -40,6 +48,7 @@ interface sha1-checked {
     /// pattern, and returns the standard SHA-1 digest for everything
     /// else. Choose this posture to surface an attack as a diagnosable
     /// error.
+    @unstable(feature = sha1-checked)
     make-rejecting-digest: func() -> result<digest, error>;
 
     /// Mint a SHA-1 digest that *mitigates* a detected collision attack:
@@ -52,5 +61,6 @@ interface sha1-checked {
     /// addressing, where an error would wedge the pipeline; the cost is
     /// that an attack surfaces as an external hash mismatch rather than a
     /// named error.
+    @unstable(feature = sha1-checked)
     make-mitigating-digest: func() -> result<digest, error>;
 }

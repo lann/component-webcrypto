@@ -191,14 +191,15 @@ the wart without buying the compatibility. What ends this regime is
 publishing the package for consumption; the change that does so should say
 it does.
 
-The ChaCha interfaces are additionally gated `@unstable` (features
-`chacha20-poly1305` and `xchacha20-poly1305` — see `wit/README.md`,
+The ChaCha interfaces and `sha1-checked` are additionally gated
+`@unstable` (features `chacha20-poly1305`, `xchacha20-poly1305`, and
+`sha1-checked` — see `wit/README.md`,
 "Stability gates"): tooling hides them unless the feature is enabled, and
 only test builds enable them by default. The conformance guest, the demo
 and WPT componentize-js builds (`--features`), the jco `types` script
 (`--feature`), the timing lab, and the standalone Wasmtime embedding all
 opt in; the library surfaces default off — the guest SDK behind its
-`chacha` cargo feature, the Wasmtime host behind
+`chacha` and `sha1-checked` cargo features, the Wasmtime host behind
 `add_to_linker_with_options`'s `LinkOptions` (plain `add_to_linker` serves
 no gated interface). A world line importing or exporting a gated interface
 carries the same gate. Adding a WIT-resolving build without the flags
@@ -310,12 +311,13 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just test-webcrypto-componentize-wpt` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
 | `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
 | `just transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
-| `just test-jco-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since it runs cases sequentially. |
+| `just test-jco-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since its workers each run their cases sequentially against their own host instance. |
 | `just typecheck-jco` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
 | `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
 | `just wpt-parity` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `js/componentize/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
 | `just wpt-parity-firefox` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_FIREFOX=1. The same two legs run in headless Firefox (Playwright's pinned build, Gecko's JSPI pref) against the engine's own ratchet, `js/componentize/wpt/parity/losses-firefox.js` — loss sets are per-engine facts, so intentional changes need `just update-wpt-parity-firefox`. Needs Playwright Firefox (`cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`). |
 | `just wpt-parity-chromium` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_CHROMIUM=1. Like the Firefox row, in Playwright's pinned Chromium against `js/componentize/wpt/parity/losses-chromium.js`; intentional changes need `just update-wpt-parity-chromium`. |
+| `just wpt-parity-webkit` | the same surfaces as `just wpt-parity`. Gates in CI as its own macOS job pair (no componentize-js toolchain exists for darwin, so an ubuntu job builds the page artifacts and hands them over). The ratchet `js/componentize/wpt/parity/losses-webkit.js` is recorded from Playwright WebKit on macOS — Apple's crypto backend, the mobile-Safari proxy; the Linux port serves less and crashes, so record intentional changes (`just update-wpt-parity-webkit`) on a mac or from the CI job's artifacts. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
@@ -485,9 +487,11 @@ closed numbers remain stable references.
   by enriching the `aead` kind with per-call parameters). Class D is not implicated: the crypto runs host-side on the
   platform. A browser leg exists as the live parity page on the Pages
   site (js/componentize/wpt/web/ — see that README's "The browser parity
-  page"), and gating Firefox and Chromium legs run in CI, each against
-  its own pinned loss set (`just wpt-parity-firefox` /
-  `wpt-parity-chromium`; losses-firefox.js, losses-chromium.js).
+  page"), and gating Firefox, Chromium, and WebKit legs run in CI, each
+  against its own pinned loss set (`just wpt-parity-firefox` /
+  `-chromium` / `-webkit`; the WebKit leg runs on a macOS runner, where
+  Playwright's WebKit uses Apple's crypto backend — the mobile-Safari
+  proxy).
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
 - `stream-aead`: a segmented AEAD primitive kind (libsodium

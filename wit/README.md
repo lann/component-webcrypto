@@ -259,7 +259,8 @@ repository's in-guest provider documents its classification and policy in
 
 ## Stability gates
 
-Most of the package is ungated. The ChaCha interfaces are marked
+Most of the package is ungated. The ChaCha interfaces and
+`sha1-checked` are marked
 `@unstable`, so tooling hides them unless a consumer enables the feature
 (for example `wasm-tools ... --features`, wit-bindgen's `features` option,
 componentize-js's `--features`).
@@ -293,6 +294,11 @@ The gates:
   IETF-standardized, and no platform WebCrypto serves it. Exits on a
   standardization-or-durability judgment once optional imports are
   expressible.
+- `@unstable(feature = sha1-checked)` on `sha1-checked` — linkage only.
+  The interface shape is settled (sha1dc is a decade stable, with
+  nothing external pending), but platform WebCrypto carries no sha1dc,
+  so platform-backed providers can never serve it. Exits when optional
+  imports are expressible.
 
 Neither kind of gate speaks to per-call runtime availability: an
 implementation may decline any minting path with `error.unsupported`
@@ -306,9 +312,10 @@ time, which is the designed end state rather than a stopgap.
 Within this repository, only test builds enable the features by default
 (the conformance and demo guests, the WPT runners, the timing lab, and
 the standalone Wasmtime embedding). The library surfaces keep the gated
-default: the guest SDK's ChaCha wrappers and imports sit behind its
-`chacha` cargo feature, and the Wasmtime host's plain `add_to_linker`
-serves no gated interface (`add_to_linker_with_options` opts in).
+default: the guest SDK's gated wrappers and imports sit behind its
+`chacha` and `sha1-checked` cargo features, and the Wasmtime host's
+plain `add_to_linker` serves no gated interface
+(`add_to_linker_with_options` opts in).
 
 ["Modern Algorithms in the Web Cryptography API"]: https://wicg.github.io/webcrypto-modern-algos/
 

@@ -2,11 +2,19 @@
 //! [`Schedule`]s and helpers that run one operation while feeding its input
 //! concurrently.
 //!
-//! Every helper returns the operation's outcome and the feeder's outcome
-//! *separately*, so the feeder's fate (fully written, or rejected by an
-//! early close the closure rule permits on error) is distinguishable from
-//! the call's own error. The lann-webcrypto-guest wrappers deliberately
-//! merge the two; the stream-closure probes are why these helpers do not.
+//! Every base helper returns the operation's outcome and the feeder's
+//! outcome *separately*, so the feeder's fate (fully written, or rejected
+//! by an early close the closure rule permits on error) is distinguishable
+//! from the call's own error. The lann-webcrypto-guest wrappers
+//! deliberately merge the two; the stream-closure probes are why these
+//! helpers do not.
+//!
+//! Two folding layers serve the callers that treat both outcomes as one
+//! error path. The `*_op` helpers fold the feeder's failure (under the
+//! operation's fixed feeder context) and surface the operation's own
+//! result, for sites that assert on the operation's error. The `*_ok`
+//! helpers additionally fold the operation's error through [`describe`]
+//! under the caller's context, for the plain ok path.
 
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
@@ -278,4 +286,268 @@ pub async fn sig_verify(
     schedule: Schedule,
 ) -> (Result<(), Error>, Result<(), String>) {
     run_split(schedule.chunks(data), |rx| key.verify(rx, sig.to_vec())).await
+}
+
+/// Fold a feeder failure under `feeder`, surfacing the operation's outcome.
+fn folded<T>((result, fed): (T, Result<(), String>), feeder: &str) -> Result<T, String> {
+    fed.map_err(|e| format!("{feeder}: {e}"))?;
+    Ok(result)
+}
+
+/// [`sign`], with the feeder's outcome folded into the error path.
+pub async fn sign_ok(key: &MacKey, data: &[u8], schedule: Schedule) -> Result<Vec<u8>, String> {
+    folded(sign(key, data, schedule).await, "sign data feeder")
+}
+
+/// [`verify`], with the feeder's outcome folded into the error path.
+pub async fn verify_op(
+    key: &MacKey,
+    data: &[u8],
+    tag: &[u8],
+    schedule: Schedule,
+) -> Result<Result<(), Error>, String> {
+    folded(verify(key, data, tag, schedule).await, "verify data feeder")
+}
+
+/// [`verify_op`], additionally folding the operation's error under `what`.
+pub async fn verify_ok(
+    key: &MacKey,
+    data: &[u8],
+    tag: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<(), String> {
+    verify_op(key, data, tag, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`compute`], with the feeder's outcome folded into the error path.
+pub async fn compute_op(
+    digest: &Digest,
+    data: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(compute(digest, data, schedule).await, "compute data feeder")
+}
+
+/// [`compute_op`], additionally folding the operation's error under `what`.
+pub async fn compute_ok(
+    digest: &Digest,
+    data: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    compute_op(digest, data, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`ci_encrypt`], with the feeder's outcome folded into the error path.
+pub async fn ci_encrypt_op(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    plaintext: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        ci_encrypt(key, iv, counter_length, plaintext, schedule).await,
+        "encrypt plaintext feeder",
+    )
+}
+
+/// [`ci_encrypt_op`], additionally folding the operation's error under
+/// `what`.
+pub async fn ci_encrypt_ok(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    plaintext: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    ci_encrypt_op(key, iv, counter_length, plaintext, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`ci_decrypt`], with the feeder's outcome folded into the error path.
+pub async fn ci_decrypt_op(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    ciphertext: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        ci_decrypt(key, iv, counter_length, ciphertext, schedule).await,
+        "decrypt ciphertext feeder",
+    )
+}
+
+/// [`ci_decrypt_op`], additionally folding the operation's error under
+/// `what`.
+pub async fn ci_decrypt_ok(
+    key: &CipherKey,
+    iv: &[u8],
+    counter_length: Option<u8>,
+    ciphertext: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    ci_decrypt_op(key, iv, counter_length, ciphertext, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`seal`], with the feeder's outcome folded into the error path.
+pub async fn seal_op(
+    key: &AeadKey,
+    nonce: &[u8],
+    aad: &[u8],
+    tag_size: Option<u8>,
+    plaintext: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        seal(key, nonce, aad, tag_size, plaintext, schedule).await,
+        "seal plaintext feeder",
+    )
+}
+
+/// [`seal_op`], additionally folding the operation's error under `what`.
+pub async fn seal_ok(
+    key: &AeadKey,
+    nonce: &[u8],
+    aad: &[u8],
+    tag_size: Option<u8>,
+    plaintext: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    seal_op(key, nonce, aad, tag_size, plaintext, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`open`], with the feeder's outcome folded into the error path.
+pub async fn open_op(
+    key: &AeadKey,
+    nonce: &[u8],
+    aad: &[u8],
+    tag_size: Option<u8>,
+    ciphertext: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        open(key, nonce, aad, tag_size, ciphertext, schedule).await,
+        "open ciphertext feeder",
+    )
+}
+
+/// [`open_op`], additionally folding the operation's error under `what`.
+pub async fn open_ok(
+    key: &AeadKey,
+    nonce: &[u8],
+    aad: &[u8],
+    tag_size: Option<u8>,
+    ciphertext: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    open_op(key, nonce, aad, tag_size, ciphertext, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`in_seal`], with the feeder's outcome folded into the error path.
+pub async fn in_seal_op(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    plaintext: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        in_seal(key, aad, plaintext, schedule).await,
+        "seal plaintext feeder",
+    )
+}
+
+/// [`in_seal_op`], additionally folding the operation's error under `what`.
+pub async fn in_seal_ok(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    plaintext: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    in_seal_op(key, aad, plaintext, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`in_open`], with the feeder's outcome folded into the error path.
+pub async fn in_open_op(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    sealed: &[u8],
+    schedule: Schedule,
+) -> Result<Result<Vec<u8>, Error>, String> {
+    folded(
+        in_open(key, aad, sealed, schedule).await,
+        "open sealed feeder",
+    )
+}
+
+/// [`in_open_op`], additionally folding the operation's error under `what`.
+pub async fn in_open_ok(
+    key: &InternalNonceKey,
+    aad: &[u8],
+    sealed: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    in_open_op(key, aad, sealed, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
+}
+
+/// [`sig_sign`], with the feeder's outcome folded into the error path
+/// as-is (the feeder slot already carries [`sig_sign`]'s merged context).
+pub async fn sig_sign_ok(
+    key: &SigningKey,
+    data: &[u8],
+    schedule: Schedule,
+) -> Result<Vec<u8>, String> {
+    let (sig, fed) = sig_sign(key, data, schedule).await;
+    fed?;
+    Ok(sig)
+}
+
+/// [`sig_verify`], with the feeder's outcome folded into the error path
+/// as-is.
+pub async fn sig_verify_op(
+    key: &VerifyingKey,
+    data: &[u8],
+    sig: &[u8],
+    schedule: Schedule,
+) -> Result<Result<(), Error>, String> {
+    let (verified, fed) = sig_verify(key, data, sig, schedule).await;
+    fed?;
+    Ok(verified)
+}
+
+/// [`sig_verify_op`], additionally folding the operation's error under
+/// `what`.
+pub async fn sig_verify_ok(
+    key: &VerifyingKey,
+    data: &[u8],
+    sig: &[u8],
+    schedule: Schedule,
+    what: &str,
+) -> Result<(), String> {
+    sig_verify_op(key, data, sig, schedule)
+        .await?
+        .map_err(|e| describe(what, &e))
 }

@@ -383,39 +383,46 @@ impl MacGuest for Component {
     type MacKeyOptions = MacKeyOptions;
 }
 
-/// An exported `mac-key-options`: mint-time policy under construction. The
-/// policy sits in a `Cell` because the setters take `&self` (wasm is
-/// single-threaded).
-pub struct MacKeyOptions {
-    policy: Cell<MacPolicy>,
+/// The shared shape of every exported `*-options` resource: an all-deny
+/// policy held in a `Cell` (the setters take `&self`; wasm is
+/// single-threaded), with one setter per WIT method writing one boolean
+/// policy field, listed as `method => policy field` rows.
+macro_rules! options_resource {
+    (
+        $(#[$meta:meta])*
+        pub struct $ty:ident($policy:path): $guest:ident {
+            $($method:ident => $field:ident),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        pub struct $ty {
+            policy: Cell<$policy>,
+        }
+
+        impl $guest for $ty {
+            fn new() -> Self {
+                Self {
+                    policy: Cell::new(<$policy>::default()),
+                }
+            }
+
+            $(
+                fn $method(&self, allowed: bool) {
+                    let mut policy = self.policy.get();
+                    policy.$field = allowed;
+                    self.policy.set(policy);
+                }
+            )+
+        }
+    };
 }
 
-impl GuestMacKeyOptions for MacKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(MacPolicy::default()),
-        }
-    }
-
-    fn can_sign(&self, allowed: bool) {
-        self.policy.set(MacPolicy {
-            sign: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_verify(&self, allowed: bool) {
-        self.policy.set(MacPolicy {
-            verify: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(MacPolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `mac-key-options`: mint-time policy under construction.
+    pub struct MacKeyOptions(MacPolicy): GuestMacKeyOptions {
+        can_sign => sign,
+        can_verify => verify,
+        extractable => extractable,
     }
 }
 
@@ -493,51 +500,14 @@ impl AeadGuest for Component {
     type AeadKeyOptions = AeadKeyOptions;
 }
 
-/// An exported `aead-key-options`. See [`MacKeyOptions`].
-pub struct AeadKeyOptions {
-    policy: Cell<AeadPolicy>,
-}
-
-impl GuestAeadKeyOptions for AeadKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(AeadPolicy::default()),
-        }
-    }
-
-    fn can_seal(&self, allowed: bool) {
-        self.policy.set(AeadPolicy {
-            seal: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_open(&self, allowed: bool) {
-        self.policy.set(AeadPolicy {
-            open: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_wrap(&self, allowed: bool) {
-        self.policy.set(AeadPolicy {
-            wrap: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_unwrap(&self, allowed: bool) {
-        self.policy.set(AeadPolicy {
-            unwrap: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(AeadPolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `aead-key-options`. See [`MacKeyOptions`].
+    pub struct AeadKeyOptions(AeadPolicy): GuestAeadKeyOptions {
+        can_seal => seal,
+        can_open => open,
+        can_wrap => wrap,
+        can_unwrap => unwrap,
+        extractable => extractable,
     }
 }
 
@@ -913,30 +883,11 @@ impl DerivationGuest for Component {
     type DeriveInput = DeriveInput;
 }
 
-/// An exported `derive-options`. See [`MacKeyOptions`].
-pub struct DeriveOptions {
-    policy: Cell<lann_webcrypto_core::DerivePolicy>,
-}
-
-impl GuestDeriveOptions for DeriveOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(lann_webcrypto_core::DerivePolicy::default()),
-        }
-    }
-
-    fn can_derive_bits(&self, allowed: bool) {
-        self.policy.set(lann_webcrypto_core::DerivePolicy {
-            derive_bits: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_derive_key(&self, allowed: bool) {
-        self.policy.set(lann_webcrypto_core::DerivePolicy {
-            derive_key: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `derive-options`. See [`MacKeyOptions`].
+    pub struct DeriveOptions(lann_webcrypto_core::DerivePolicy): GuestDeriveOptions {
+        can_derive_bits => derive_bits,
+        can_derive_key => derive_key,
     }
 }
 
@@ -1091,37 +1042,12 @@ impl KeyAgreementGuest for Component {
     type SecretKey = AgreementSecretKey;
 }
 
-/// An exported `agreement-key-options`. See [`MacKeyOptions`].
-pub struct AgreementKeyOptions {
-    policy: Cell<AgreementPolicy>,
-}
-
-impl GuestAgreementKeyOptions for AgreementKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(AgreementPolicy::default()),
-        }
-    }
-
-    fn can_derive_bits(&self, allowed: bool) {
-        self.policy.set(AgreementPolicy {
-            derive_bits: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_derive_key(&self, allowed: bool) {
-        self.policy.set(AgreementPolicy {
-            derive_key: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(AgreementPolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `agreement-key-options`. See [`MacKeyOptions`].
+    pub struct AgreementKeyOptions(AgreementPolicy): GuestAgreementKeyOptions {
+        can_derive_bits => derive_bits,
+        can_derive_key => derive_key,
+        extractable => extractable,
     }
 }
 
@@ -1379,51 +1305,14 @@ impl CipherGuest for Component {
     type CipherKeyOptions = CipherKeyOptions;
 }
 
-/// An exported `cipher-key-options`. See [`MacKeyOptions`].
-pub struct CipherKeyOptions {
-    policy: Cell<CipherPolicy>,
-}
-
-impl GuestCipherKeyOptions for CipherKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(CipherPolicy::default()),
-        }
-    }
-
-    fn can_encrypt(&self, allowed: bool) {
-        self.policy.set(CipherPolicy {
-            encrypt: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_decrypt(&self, allowed: bool) {
-        self.policy.set(CipherPolicy {
-            decrypt: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_wrap(&self, allowed: bool) {
-        self.policy.set(CipherPolicy {
-            wrap: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_unwrap(&self, allowed: bool) {
-        self.policy.set(CipherPolicy {
-            unwrap: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(CipherPolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `cipher-key-options`. See [`MacKeyOptions`].
+    pub struct CipherKeyOptions(CipherPolicy): GuestCipherKeyOptions {
+        can_encrypt => encrypt,
+        can_decrypt => decrypt,
+        can_wrap => wrap,
+        can_unwrap => unwrap,
+        extractable => extractable,
     }
 }
 
@@ -1707,37 +1596,12 @@ impl AeadInternalNonceGuest for Component {
     type InternalNonceKeyOptions = InternalNonceKeyOptions;
 }
 
-/// An exported `internal-nonce-key-options`. See [`MacKeyOptions`].
-pub struct InternalNonceKeyOptions {
-    policy: Cell<InternalNoncePolicy>,
-}
-
-impl GuestInternalNonceKeyOptions for InternalNonceKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(InternalNoncePolicy::default()),
-        }
-    }
-
-    fn can_seal(&self, allowed: bool) {
-        self.policy.set(InternalNoncePolicy {
-            seal: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn can_open(&self, allowed: bool) {
-        self.policy.set(InternalNoncePolicy {
-            open: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(InternalNoncePolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `internal-nonce-key-options`. See [`MacKeyOptions`].
+    pub struct InternalNonceKeyOptions(InternalNoncePolicy): GuestInternalNonceKeyOptions {
+        can_seal => seal,
+        can_open => open,
+        extractable => extractable,
     }
 }
 
@@ -1955,30 +1819,11 @@ impl SignatureGuest for Component {
     type SigningKeyOptions = SigningKeyOptions;
 }
 
-/// An exported `signing-key-options`. See [`MacKeyOptions`].
-pub struct SigningKeyOptions {
-    policy: Cell<SigningPolicy>,
-}
-
-impl GuestSigningKeyOptions for SigningKeyOptions {
-    fn new() -> Self {
-        Self {
-            policy: Cell::new(SigningPolicy::default()),
-        }
-    }
-
-    fn can_sign(&self, allowed: bool) {
-        self.policy.set(SigningPolicy {
-            sign: allowed,
-            ..self.policy.get()
-        });
-    }
-
-    fn extractable(&self, allowed: bool) {
-        self.policy.set(SigningPolicy {
-            extractable: allowed,
-            ..self.policy.get()
-        });
+options_resource! {
+    /// An exported `signing-key-options`. See [`MacKeyOptions`].
+    pub struct SigningKeyOptions(SigningPolicy): GuestSigningKeyOptions {
+        can_sign => sign,
+        extractable => extractable,
     }
 }
 

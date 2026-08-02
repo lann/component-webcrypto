@@ -50,10 +50,12 @@ The component's world must import `lann:webcrypto/hmac-sha2@0.1.0` and
 `lann:webcrypto/aes-gcm@0.1.0` (WIT elaboration pulls in their
 `mac`/`aead`/`types` dependencies) — see
 [`examples/componentize-demo`](../examples/componentize-demo) for a complete
-world, guest, and composition. The `chacha20-poly1305` import is gated
-`@unstable` in the package (see `wit/README.md`, "Stability gates"), so the
-world line carries `@unstable(feature = chacha20-poly1305)` and the
-componentize-js invocation passes `--features chacha20-poly1305`. The
+world, guest, and composition. The `chacha20-poly1305` and `sha1-checked`
+imports are gated
+`@unstable` in the package (see `wit/README.md`, "Stability gates"), so
+those world lines carry `@unstable(feature = ...)` gates and the
+componentize-js invocation passes
+`--features chacha20-poly1305,sha1-checked`. The
 library is a single file with no
 dependencies; componentize-js resolves its `lann:webcrypto/...` module
 specifiers against the world at componentize time, and resolves the library

@@ -1,7 +1,8 @@
 // The vendored WPT groups and the subset definition, shared by every
 // environment that runs them: `runner.js` and `parity-runner.js`
-// (componentize-js guests, static imports), `parity/baseline.mjs` (Node,
-// dynamic imports), and the browser parity page (`web/`). This module is
+// (componentize-js guests, static imports), and the parity legs' shared
+// baseline loop in `parity-helpers.js` (Node and the browser parity page,
+// dynamic imports). This module is
 // dependency-free — it names each group's suite module instead of importing
 // it — so its specifier resolves identically under componentize-js's
 // base-directory resolution and ordinary ESM.

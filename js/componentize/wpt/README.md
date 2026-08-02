@@ -115,7 +115,7 @@ recomputed per run, never pinned, so a platform upgrade moves both legs
 together; the loss set is sensitive to the platform only where the
 platform itself is.
 
-### The browser legs (Firefox, Chromium)
+### The browser legs (Firefox, Chromium, WebKit)
 
 `just wpt-parity-firefox` and `just wpt-parity-chromium` run the same two
 legs in a headless browser — Playwright's pinned builds (Firefox launched
@@ -136,6 +136,20 @@ Both gate in CI (the jco job); local runs opt in with
 `WPT_PARITY_FIREFOX=1` / `WPT_PARITY_CHROMIUM=1` after
 `cd parity && npx playwright-core install --with-deps firefox chromium`.
 
+`just wpt-parity-webkit` is the same gate for WebKit, with two venue
+constraints. Its ratchet ([`parity/losses-webkit.js`](parity/losses-webkit.js),
+via `just update-wpt-parity-webkit`) is recorded from Playwright's WebKit
+on *macOS*, where WebCore sits on Apple's crypto backend — the closest
+available proxy for mobile Safari, and the point of the leg; the Linux
+port's libgcrypt backend serves less (no Ed25519/X25519) and its
+WebContent process crashes under this workload, so it can neither gate
+nor record. And no componentize-js toolchain is published for darwin, so
+the CI gate is a two-job handoff: ubuntu builds the page artifacts
+(`just wpt-web-artifacts`), the macOS job downloads them and runs the
+leg. WebKit's baseline is the strongest of the gated engines
+(JavaScriptCore ships JSPI; Apple's backend serves Ed25519, X25519,
+P-521, and AES-192).
+
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
 ## The browser parity page (web/)
@@ -153,9 +167,9 @@ mid-run; a main-thread fallback runs the same legs if the worker path
 fails. The round trip needs JSPI; without it the page runs the baseline
 alone. Nothing on the page gates, and the pinned ratchets do not apply to
 it: loss sets are recorded from pinned engines (`losses.js` from Node,
-`losses-firefox.js` and `losses-chromium.js` from Playwright's builds),
-and a visiting browser's baseline legitimately differs. Serve it locally
-with `just wpt-web`.
+`losses-firefox.js`, `losses-chromium.js`, and `losses-webkit.js` from
+Playwright's builds), and a visiting browser's baseline legitimately
+differs. Serve it locally with `just wpt-web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
 repository layout: the transpiled runner imports `js/jco/webcrypto.js` by

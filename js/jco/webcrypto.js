@@ -300,28 +300,128 @@ function sha2Variant(variant) {
 }
 
 /**
+ * The reader for a resource class's module-private `WeakMap` state (the
+ * options classes' accumulated policies, read by the setters and at mint;
+ * the parameter-position resources' platform keys): the map lookup doubles
+ * as the same-provider check the WIT requires (a foreign object is not a
+ * key).
+ * @template {object} K
+ * @template V
+ * @param {WeakMap<K, V>} store
+ * @param {string} what
+ * @returns {(resource: K) => V}
+ */
+function stateReader(store, what) {
+  return (resource) => {
+    const state = store.get(resource);
+    if (state === undefined) {
+      throw errOther(`${what} minted by another provider`);
+    }
+    return state;
+  };
+}
+
+/**
+ * The platform `CryptoKey` behind every key resource built on
+ * `keyResourceTail`. It lives in a module-private `WeakMap` rather than a
+ * base-class private field because a `#`-private field is invisible to
+ * subclasses: the tail methods and the key classes' own operations read
+ * the same key through `platformKeyOf`.
+ */
+/** @type {WeakMap<object, CryptoKey>} */
+const platformKeys = new WeakMap();
+
+const platformKeyOf = stateReader(platformKeys, "key");
+
+/**
+ * One usage projection: whether the resource's platform key carries
+ * `usage`. The key was imported or generated with exactly the usages its
+ * mint options granted, so the `CryptoKey`'s own usage list is the
+ * authority.
+ * @param {KeyUsage} usage
+ */
+function usageProjection(usage) {
+  /** @this {object} */
+  function projection() {
+    return platformKeyOf(this).usages.includes(usage);
+  }
+  return projection;
+}
+
+/**
+ * The common tail of the key resource classes: a constructor storing the
+ * platform key in `platformKeys`, `extractable()` — the `CryptoKey`'s own
+ * flag, the gate `export-key-*` checks — and one usage projection per
+ * `projections` entry, mapping the WIT getter name onto the WebCrypto
+ * usage it reports (`canSeal` → `"encrypt"`, …).
+ * @template {Record<string, KeyUsage>} P
+ * @param {P} projections
+ * @returns {new (key: CryptoKey) => { extractable(): boolean } & Record<keyof P, () => boolean>}
+ */
+function keyResourceTail(projections) {
+  class Tail {
+    /** @param {CryptoKey} key */
+    constructor(key) {
+      platformKeys.set(this, key);
+    }
+
+    extractable() {
+      return platformKeyOf(this).extractable;
+    }
+  }
+  for (const [method, usage] of Object.entries(projections)) {
+    Object.defineProperty(Tail.prototype, method, {
+      value: usageProjection(usage),
+      writable: true,
+      configurable: true,
+    });
+  }
+  return /** @type {new (key: CryptoKey) => { extractable(): boolean } & Record<keyof P, () => boolean>} */ (
+    /** @type {unknown} */ (Tail)
+  );
+}
+
+/**
+ * `keyResourceTail` plus the symmetric key classes' export pair:
+ * `exportKeyRaw` and `exportKeyJwk` behind the shared extractability gates
+ * (`exportRawGated`/`exportJwkGated`; the JWK is the WIT's `oct` form).
+ * @template {Record<string, KeyUsage>} P
+ * @param {P} projections
+ * @returns {new (key: CryptoKey) => { extractable(): boolean, exportKeyRaw(): Promise<Uint8Array>, exportKeyJwk(): Promise<string> } & Record<keyof P, () => boolean>}
+ */
+function symmetricKeyTail(projections) {
+  // The base is narrowed to its statically known members: a generic
+  // `Record<keyof P, …>` cannot appear in an `extends` clause. The
+  // projections re-enter through the return type.
+  /** @type {new (key: CryptoKey) => { extractable(): boolean }} */
+  const Base = keyResourceTail(projections);
+  class Tail extends Base {
+    async exportKeyRaw() {
+      return exportRawGated(platformKeyOf(this));
+    }
+
+    async exportKeyJwk() {
+      return exportJwkGated(platformKeyOf(this));
+    }
+  }
+  return /** @type {new (key: CryptoKey) => { extractable(): boolean, exportKeyRaw(): Promise<Uint8Array>, exportKeyJwk(): Promise<string> } & Record<keyof P, () => boolean>} */ (
+    /** @type {unknown} */ (Tail)
+  );
+}
+
+/**
  * The `mac-key-options` resource: mint-time policy under construction. Per
  * the package-wide options contract the constructor grants nothing; the
  * setters are opt-in, and a mint consumes the accumulated policy through
  * `macPolicy`. The state lives in a module-private `WeakMap` rather than
  * private fields, so the class stays structurally compatible with the
- * generated interface types; the map lookup doubles as the same-provider
- * check the WIT requires (a foreign object is not a key).
+ * generated interface types; its `stateReader` supplies the same-provider
+ * check.
  */
 /** @type {WeakMap<MacKeyOptions, { sign: boolean, verify: boolean, extractable: boolean }>} */
 const macPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {MacKeyOptions} options
- */
-function macPolicy(options) {
-  const policy = macPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("mac-key-options minted by another provider");
-  }
-  return policy;
-}
+const macPolicy = stateReader(macPolicies, "mac-key-options");
 
 export class MacKeyOptions {
   constructor() {
@@ -354,8 +454,7 @@ export class MacKeyOptions {
  * `subtle.sign`/`verify` exactly (WebCrypto has no incremental HMAC): each
  * call collects its entire input stream, then signs or verifies it whole.
  */
-export class MacKey {
-  #key;
+export class MacKey extends symmetricKeyTail({ canSign: "sign", canVerify: "verify" }) {
   /**
    * The algorithm parameters, fixed at mint. The getters are declared
    * *total* in the WIT — they have no error case — so they must not depend
@@ -373,7 +472,7 @@ export class MacKey {
    * @param {string} hashName
    */
   constructor(key, lengthBits, hashName) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
     this.#hashName = hashName;
   }
@@ -388,7 +487,7 @@ export class MacKey {
     return withCollectedInput(data, async (message) => {
       if (!this.canSign()) throw notPermitted("sign");
       return new Uint8Array(
-        await platformCall("HMAC sign", () => subtle.sign("HMAC", this.#key, message)),
+        await platformCall("HMAC sign", () => subtle.sign("HMAC", platformKeyOf(this), message)),
       );
     });
   }
@@ -405,7 +504,7 @@ export class MacKey {
     await withCollectedInput(data, async (message) => {
       if (!this.canVerify()) throw notPermitted("verify");
       const ok = await platformCall("HMAC verify", () =>
-        subtle.verify("HMAC", this.#key, asBufferSource(tag), message),
+        subtle.verify("HMAC", platformKeyOf(this), asBufferSource(tag), message),
       );
       if (!ok) {
         throw errAuthenticationFailed();
@@ -418,7 +517,7 @@ export class MacKey {
    * `length` come from the mint instead (see `#lengthBits`).
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmHash() {
@@ -429,49 +528,20 @@ export class MacKey {
     return this.#lengthBits;
   }
 
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
-  }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canSign() {
-    return this.#key.usages.includes("sign");
-  }
-
-  canVerify() {
-    return this.#key.usages.includes("verify");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (JSON text; the `mac-key.export-key-jwk`
-   * contract), behind the same extractability gate as `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
-  }
-
   /**
    * This key's raw material as a `wrap-input` (see the `wrapping`
    * interface), behind the same extractability gate as `exportKeyRaw`.
    */
   async toWrapInputRaw() {
-    return new WrapInput(MINT, "raw", await exportRawGated(this.#key));
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
   }
 
   /**
    * The JWK serialization as a `wrap-input`, behind the same gate.
    */
   async toWrapInputJwk() {
-    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await exportJwkGated(this.#key)));
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
   }
 }
 
@@ -483,17 +553,7 @@ export class MacKey {
 /** @type {WeakMap<AeadKeyOptions, { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const aeadPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {AeadKeyOptions} options
- */
-function aeadPolicy(options) {
-  const policy = aeadPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("aead-key-options minted by another provider");
-  }
-  return policy;
-}
+const aeadPolicy = stateReader(aeadPolicies, "aead-key-options");
 
 export class AeadKeyOptions {
   constructor() {
@@ -544,14 +604,7 @@ export class AeadKeyOptions {
  */
 const aeadKeyGrants = new WeakMap();
 
-/** @param {AeadKey} key */
-function aeadGrantsOf(key) {
-  const grants = aeadKeyGrants.get(key);
-  if (grants === undefined) {
-    throw errOther("aead-key minted by another provider");
-  }
-  return grants;
-}
+const aeadGrantsOf = stateReader(aeadKeyGrants, "aead-key");
 
 /**
  * The `aead-key` resource: an AES-GCM or ChaCha20-Poly1305 key. Holds a
@@ -560,8 +613,7 @@ function aeadGrantsOf(key) {
  * instances are minted only by the `aes-gcm` and `chacha20-poly1305`
  * interface functions below.
  */
-export class AeadKey {
-  #key;
+export class AeadKey extends symmetricKeyTail({}) {
   /**
    * The key length in bits, fixed at mint. `aead-key.algorithm-length` is
    * declared *total* in the WIT, so it must not depend on
@@ -576,14 +628,9 @@ export class AeadKey {
    * @param {{ seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }} grants
    */
   constructor(key, lengthBits, grants) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
     aeadKeyGrants.set(this, grants);
-  }
-
-  /** Whether this key drives the ChaCha20-Poly1305 construction. */
-  #isChacha() {
-    return this.#key.algorithm.name === "ChaCha20-Poly1305";
   }
 
   /**
@@ -605,45 +652,7 @@ export class AeadKey {
   async seal(nonce, aad, tagSize, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
       if (!this.canSeal()) throw notPermitted("seal");
-      if (this.#isChacha()) {
-        requireChachaNonce(nonce);
-        requireChachaTagSize(tagSize);
-        const sealed = await platformCall("ChaCha20-Poly1305 seal", () =>
-          subtle.encrypt(
-            {
-              name: "ChaCha20-Poly1305",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-            },
-            this.#key,
-            message,
-          ),
-        );
-        return new Uint8Array(sealed);
-      }
-      requireGcmNonce(nonce);
-      const tagLength = gcmTagLengthBits(tagSize);
-      let sealed;
-      try {
-        sealed = await platformCall("AES-GCM seal", () =>
-          subtle.encrypt(
-            {
-              name: "AES-GCM",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-              tagLength,
-            },
-            this.#key,
-            message,
-          ),
-        );
-      } catch (err) {
-        if (gcmNonceUnservable(nonce)) {
-          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-        }
-        throw err;
-      }
-      return new Uint8Array(sealed);
+      return aeadSealOpen("seal", platformKeyOf(this), nonce, aad, tagSize, message);
     });
   }
 
@@ -662,46 +671,7 @@ export class AeadKey {
   async open(nonce, aad, tagSize, ciphertext) {
     return withCollectedInputToStream(ciphertext, async (message) => {
       if (!this.canOpen()) throw notPermitted("open");
-      if (this.#isChacha()) {
-        requireChachaNonce(nonce);
-        requireChachaTagSize(tagSize);
-        let opened;
-        try {
-          opened = await subtle.decrypt(
-            {
-              name: "ChaCha20-Poly1305",
-              iv: asBufferSource(nonce),
-              additionalData: asBufferSource(aad),
-            },
-            this.#key,
-            message,
-          );
-        } catch (err) {
-          throw decryptFailure(err);
-        }
-        return new Uint8Array(opened);
-      }
-      requireGcmNonce(nonce);
-      const tagLength = gcmTagLengthBits(tagSize);
-      let opened;
-      try {
-        opened = await subtle.decrypt(
-          {
-            name: "AES-GCM",
-            iv: asBufferSource(nonce),
-            additionalData: asBufferSource(aad),
-            tagLength,
-          },
-          this.#key,
-          message,
-        );
-      } catch (err) {
-        if (gcmNonceUnservable(nonce)) {
-          throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-        }
-        throw decryptFailure(err);
-      }
-      return new Uint8Array(opened);
+      return aeadSealOpen("open", platformKeyOf(this), nonce, aad, tagSize, message);
     });
   }
 
@@ -721,45 +691,15 @@ export class AeadKey {
   async wrap(nonce, aad, tagSize, input) {
     const { bytes } = consumeWrapInput(input);
     if (!this.canWrap()) throw notPermitted("wrap");
-    if (this.#isChacha()) {
-      requireChachaNonce(nonce);
-      requireChachaTagSize(tagSize);
-      const sealed = await platformCall("ChaCha20-Poly1305 wrap", () =>
-        subtle.encrypt(
-          {
-            name: "ChaCha20-Poly1305",
-            iv: asBufferSource(nonce),
-            additionalData: asBufferSource(aad),
-          },
-          this.#key,
-          asBufferSource(bytes),
-        ),
-      );
-      return new Uint8Array(sealed);
-    }
-    requireGcmNonce(nonce);
-    const tagLength = gcmTagLengthBits(tagSize);
-    let sealed;
-    try {
-      sealed = await platformCall("AES-GCM wrap", () =>
-        subtle.encrypt(
-          {
-            name: "AES-GCM",
-            iv: asBufferSource(nonce),
-            additionalData: asBufferSource(aad),
-            tagLength,
-          },
-          this.#key,
-          asBufferSource(bytes),
-        ),
-      );
-    } catch (err) {
-      if (gcmNonceUnservable(nonce)) {
-        throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-      }
-      throw err;
-    }
-    return new Uint8Array(sealed);
+    return aeadSealOpen(
+      "seal",
+      platformKeyOf(this),
+      nonce,
+      aad,
+      tagSize,
+      asBufferSource(bytes),
+      "wrap",
+    );
   }
 
   /**
@@ -778,46 +718,18 @@ export class AeadKey {
    */
   async unwrap(nonce, aad, tagSize, wrapped) {
     if (!this.canUnwrap()) throw notPermitted("unwrap");
-    if (this.#isChacha()) {
-      requireChachaNonce(nonce);
-      requireChachaTagSize(tagSize);
-      let opened;
-      try {
-        opened = await subtle.decrypt(
-          {
-            name: "ChaCha20-Poly1305",
-            iv: asBufferSource(nonce),
-            additionalData: asBufferSource(aad),
-          },
-          this.#key,
-          asBufferSource(wrapped),
-        );
-      } catch (err) {
-        throw decryptFailure(err, "unwrap");
-      }
-      return new UnwrapInput(MINT, new Uint8Array(opened));
-    }
-    requireGcmNonce(nonce);
-    const tagLength = gcmTagLengthBits(tagSize);
-    let opened;
-    try {
-      opened = await subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: asBufferSource(nonce),
-          additionalData: asBufferSource(aad),
-          tagLength,
-        },
-        this.#key,
+    return new UnwrapInput(
+      MINT,
+      await aeadSealOpen(
+        "open",
+        platformKeyOf(this),
+        nonce,
+        aad,
+        tagSize,
         asBufferSource(wrapped),
-      );
-    } catch (err) {
-      if (gcmNonceUnservable(nonce)) {
-        throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-      }
-      throw decryptFailure(err, "unwrap");
-    }
-    return new UnwrapInput(MINT, new Uint8Array(opened));
+        "unwrap",
+      ),
+    );
   }
 
   /**
@@ -828,7 +740,7 @@ export class AeadKey {
    * with other GCM sizes accepted per call.
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmLength() {
@@ -841,11 +753,6 @@ export class AeadKey {
 
   tagSize() {
     return 16;
-  }
-
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
   }
 
   /** The usage grants: the mint policy recorded in `aeadKeyGrants`. */
@@ -866,37 +773,78 @@ export class AeadKey {
   }
 
   /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the key
-   * was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
-   * the package-wide contract), behind the same extractability gate as
-   * `exportKeyRaw`. ChaCha20-Poly1305 keys carry the Modern Algorithms
-   * proposal's registered `alg`, `"C20P"`, which the platform emits.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
-  }
-
-  /**
    * This key's raw material as a `wrap-input` (see the `wrapping`
    * interface), behind the same extractability gate as `exportKeyRaw`.
    */
   async toWrapInputRaw() {
-    return new WrapInput(MINT, "raw", await exportRawGated(this.#key));
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
   }
 
   /**
    * The JWK serialization as a `wrap-input`, behind the same gate.
    */
   async toWrapInputJwk() {
-    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await exportJwkGated(this.#key)));
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
   }
+}
+
+/**
+ * The shared `seal`/`open` body of `aead-key`, over the collected message:
+ * validate the per-call nonce and tag size for the key's construction
+ * (RFC 8439 fixes ChaCha20-Poly1305's; AES-GCM takes any non-empty nonce
+ * and the registry tag-size set), run the platform call, and lift its
+ * failure by direction — a `seal` failure through `platformCall`'s
+ * taxonomy, an `open` failure through `decryptFailure` (a failed tag check
+ * is `open`'s expected outcome). An AES-GCM failure under a nonce outside
+ * the platform's window is reinterpreted as `{ tag: 'unsupported', val }`
+ * in either direction (see `gcmNonceUnservable`). `wrap`/`unwrap` share
+ * the body too, naming themselves through `operation` so their failure
+ * details carry the operation the caller invoked.
+ * @param {"seal" | "open"} direction
+ * @param {CryptoKey} key
+ * @param {Uint8Array} nonce
+ * @param {Uint8Array} aad
+ * @param {number | undefined} tagSize
+ * @param {Uint8Array<ArrayBuffer>} message
+ * @param {string} [operation]
+ */
+async function aeadSealOpen(direction, key, nonce, aad, tagSize, message, operation = direction) {
+  const chacha = key.algorithm.name === "ChaCha20-Poly1305";
+  /** @type {AesGcmParams} */
+  let params;
+  if (chacha) {
+    requireChachaNonce(nonce);
+    requireChachaTagSize(tagSize);
+    params = {
+      name: "ChaCha20-Poly1305",
+      iv: asBufferSource(nonce),
+      additionalData: asBufferSource(aad),
+    };
+  } else {
+    requireGcmNonce(nonce);
+    params = {
+      name: "AES-GCM",
+      iv: asBufferSource(nonce),
+      additionalData: asBufferSource(aad),
+      tagLength: gcmTagLengthBits(tagSize),
+    };
+  }
+  let result;
+  try {
+    result =
+      direction === "seal"
+        ? await platformCall(`${params.name} ${operation}`, () =>
+            subtle.encrypt(params, key, message),
+          )
+        : await subtle.decrypt(params, key, message);
+  } catch (err) {
+    if (!chacha && gcmNonceUnservable(nonce)) {
+      throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
+    }
+    throw direction === "seal" ? err : decryptFailure(err, operation);
+  }
+  return new Uint8Array(result);
 }
 
 /**
@@ -924,18 +872,14 @@ async function importHmacKey(resolved, raw, options) {
   const usages = macUsages(policy);
   const { hash } = resolved;
   if (raw.length === 0) throw errInvalidKey("empty key");
-  let key;
-  try {
-    key = await subtle.importKey(
-      "raw",
-      asBufferSource(raw),
-      { name: "HMAC", hash },
-      policy.extractable,
-      usages,
-    );
-  } catch (err) {
-    invalidKey(err, "HMAC key");
-  }
+  const key = await importPlatformKey(
+    "HMAC key",
+    "raw",
+    raw,
+    { name: "HMAC", hash },
+    policy.extractable,
+    usages,
+  );
   return new MacKey(key, raw.length * 8, hash);
 }
 
@@ -982,18 +926,13 @@ async function importHmacKeyJwk(resolved, jwk, options) {
   const { hash } = resolved;
   const material = jwkMaterial(jwk);
   requireStrictBase64url(material.k);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      material,
-      { name: "HMAC", hash },
-      policy.extractable,
-      usages,
-    );
-  } catch (err) {
-    invalidKey(err, "HMAC JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "HMAC JWK",
+    material,
+    { name: "HMAC", hash },
+    policy.extractable,
+    usages,
+  );
   // Length comes from `k`, not `key.algorithm.length`, which an engine may
   // omit for an imported key (see `MacKey`'s field doc).
   return new MacKey(key, jwkKeyBytes(material.k) * 8, hash);
@@ -1158,17 +1097,7 @@ export const hmacSha2 = {
 /** @type {WeakMap<DeriveOptions, { deriveBits: boolean, deriveKey: boolean }>} */
 const derivePolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {DeriveOptions} options
- */
-function derivePolicy(options) {
-  const policy = derivePolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("derive-options minted by another provider");
-  }
-  return policy;
-}
+const derivePolicy = stateReader(derivePolicies, "derive-options");
 
 export class DeriveOptions {
   constructor() {
@@ -1215,14 +1144,7 @@ function deriveUsages(policy) {
  */
 const ikmState = new WeakMap();
 
-/** @param {Ikm} ikm */
-function ikmOf(ikm) {
-  const state = ikmState.get(ikm);
-  if (state === undefined) {
-    throw errOther("ikm minted by another provider");
-  }
-  return state;
-}
+const ikmOf = stateReader(ikmState, "ikm");
 
 /** A mint token so the resource classes have no public constructor path. */
 const MINT = Symbol("webcrypto mint");
@@ -1499,14 +1421,7 @@ async function deriveKeyFrom(input, derived, extractable, usages) {
  */
 const inputState = new WeakMap();
 
-/** @param {DeriveInput} input */
-function inputOf(input) {
-  const state = inputState.get(input);
-  if (state === undefined) {
-    throw errOther("derive-input minted by another provider");
-  }
-  return state;
-}
+const inputOf = stateReader(inputState, "derive-input");
 
 /**
  * Whether a derive-input's params are an agreement's (a `{ name, public }`
@@ -1532,12 +1447,14 @@ function isAgreementParams(params) {
 async function importIkm(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "HKDF", false, usages);
-  } catch (err) {
-    invalidKey(err, "HKDF input keying material");
-  }
+  const key = await importPlatformKey(
+    "HKDF input keying material",
+    "raw",
+    raw,
+    "HKDF",
+    false,
+    usages,
+  );
   return new Ikm(MINT, key, { ...policy });
 }
 
@@ -1661,14 +1578,7 @@ export const hkdfSha1 = {
  */
 const passwordState = new WeakMap();
 
-/** @param {Password} password */
-function passwordOf(password) {
-  const state = passwordState.get(password);
-  if (state === undefined) {
-    throw errOther("password minted by another provider");
-  }
-  return state;
-}
+const passwordOf = stateReader(passwordState, "password");
 
 /**
  * The `pbkdf2.password` resource: a password as a platform `CryptoKey`
@@ -1708,12 +1618,7 @@ export class Password {
 async function importPassword(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "PBKDF2", false, usages);
-  } catch (err) {
-    invalidKey(err, "PBKDF2 password");
-  }
+  const key = await importPlatformKey("PBKDF2 password", "raw", raw, "PBKDF2", false, usages);
   return new Password(MINT, key, { ...policy });
 }
 
@@ -1782,17 +1687,7 @@ export const pbkdf2Sha1 = {
 /** @type {WeakMap<AgreementKeyOptions, { deriveBits: boolean, deriveKey: boolean, extractable: boolean }>} */
 const agreementPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {AgreementKeyOptions} options
- */
-function agreementPolicy(options) {
-  const policy = agreementPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("agreement-key-options minted by another provider");
-  }
-  return policy;
-}
+const agreementPolicy = stateReader(agreementPolicies, "agreement-key-options");
 
 export class AgreementKeyOptions {
   constructor() {
@@ -1818,14 +1713,7 @@ export class AgreementKeyOptions {
 /** @type {WeakMap<AgreementPublicKey, { key: CryptoKey }>} */
 const agreementPublicState = new WeakMap();
 
-/** @param {AgreementPublicKey} publicKey */
-function agreementPublicOf(publicKey) {
-  const state = agreementPublicState.get(publicKey);
-  if (state === undefined) {
-    throw errOther("public-key minted by another provider");
-  }
-  return state;
-}
+const agreementPublicOf = stateReader(agreementPublicState, "public-key");
 
 /**
  * The `key-agreement.public-key` resource: public material behind a
@@ -1884,14 +1772,7 @@ export class AgreementPublicKey {
 /** @type {WeakMap<AgreementSecretKey, { key: CryptoKey, policy: { deriveBits: boolean, deriveKey: boolean, extractable: boolean } }>} */
 const agreementSecretState = new WeakMap();
 
-/** @param {AgreementSecretKey} secretKey */
-function agreementSecretOf(secretKey) {
-  const state = agreementSecretState.get(secretKey);
-  if (state === undefined) {
-    throw errOther("secret-key minted by another provider");
-  }
-  return state;
-}
+const agreementSecretOf = stateReader(agreementSecretState, "secret-key");
 
 /**
  * The usages every platform agreement secret key is minted with. Unlike
@@ -2028,12 +1909,7 @@ function requireAgreementGrant(policy) {
  * @param {Uint8Array} raw
  */
 async function importX25519PublicKey(raw) {
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 public key");
-  }
+  const key = await importPlatformKey("X25519 public key", "raw", raw, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -2055,18 +1931,13 @@ async function importX25519SecretKeyJwk(jwkText, options) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      "X25519",
-      policy.extractable,
-      AGREEMENT_PLATFORM_USAGES,
-    );
-  } catch (err) {
-    invalidKey(err, "X25519 private JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "X25519 private JWK",
+    jwk,
+    "X25519",
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
   if (key.type !== "private") {
     throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
   }
@@ -2102,12 +1973,7 @@ export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey
  * @param {Uint8Array} spki
  */
 async function importX25519PublicKeySpki(spki) {
-  let key;
-  try {
-    key = await subtle.importKey("spki", asBufferSource(spki), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 spki");
-  }
+  const key = await importPlatformKey("X25519 spki", "spki", spki, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -2120,12 +1986,7 @@ async function importX25519PublicKeySpki(spki) {
 async function importX25519PublicKeyJwk(jwkText) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
-  let key;
-  try {
-    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "X25519", true, []);
-  } catch (err) {
-    invalidKey(err, "X25519 public JWK");
-  }
+  const key = await importPlatformKeyJwk("X25519 public JWK", jwk, "X25519", true, []);
   return new AgreementPublicKey(MINT, key);
 }
 
@@ -2138,18 +1999,14 @@ async function importX25519PublicKeyJwk(jwkText) {
 async function importX25519SecretKeyPkcs8(pkcs8, options) {
   const policy = agreementPolicy(options);
   requireAgreementGrant(policy);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "pkcs8",
-      asBufferSource(pkcs8),
-      "X25519",
-      policy.extractable,
-      AGREEMENT_PLATFORM_USAGES,
-    );
-  } catch (err) {
-    invalidKey(err, "X25519 pkcs8");
-  }
+  const key = await importPlatformKey(
+    "X25519 pkcs8",
+    "pkcs8",
+    pkcs8,
+    "X25519",
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
   return new AgreementSecretKey(MINT, key, { ...policy });
 }
 
@@ -2400,18 +2257,14 @@ function aesMinting(Ctor, readPolicy) {
       if (raw.length !== expected) {
         throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
       }
-      let key;
-      try {
-        key = await subtle.importKey(
-          "raw",
-          asBufferSource(raw),
-          { name: "AES-GCM" },
-          policy.extractable,
-          usages,
-        );
-      } catch (err) {
-        invalidKey(err, `${variant} key`);
-      }
+      const key = await importPlatformKey(
+        `${variant} key`,
+        "raw",
+        raw,
+        { name: "AES-GCM" },
+        policy.extractable,
+        usages,
+      );
       return new Ctor(key, expected * 8, aeadGrants(policy));
     },
 
@@ -2433,18 +2286,13 @@ function aesMinting(Ctor, readPolicy) {
       const lengthBits = aesVariantByteLength(variant) * 8;
       const material = jwkMaterial(jwk);
       requireStrictBase64url(material.k);
-      let key;
-      try {
-        key = await subtle.importKey(
-          "jwk",
-          material,
-          { name: "AES-GCM" },
-          policy.extractable,
-          usages,
-        );
-      } catch (err) {
-        invalidKey(err, `${variant} JWK`);
-      }
+      const key = await importPlatformKeyJwk(
+        `${variant} JWK`,
+        material,
+        { name: "AES-GCM" },
+        policy.extractable,
+        usages,
+      );
       // The variant check derives from `k` (exact once the platform
       // accepted the encoding), not `key.algorithm.length`, which an
       // engine may omit for an imported key (see `MacKey`'s field doc).
@@ -2542,14 +2390,7 @@ export const aesGcm = {
 /** @type {WeakMap<CipherKeyOptions, { encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const cipherPolicies = new WeakMap();
 
-/** @param {CipherKeyOptions} options */
-function cipherPolicy(options) {
-  const policy = cipherPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("cipher-key-options minted by another provider");
-  }
-  return policy;
-}
+const cipherPolicy = stateReader(cipherPolicies, "cipher-key-options");
 
 export class CipherKeyOptions {
   constructor() {
@@ -2674,14 +2515,7 @@ function cipherParams(name, iv, counterLength) {
  */
 const cipherKeyGrants = new WeakMap();
 
-/** @param {CipherKey} key */
-function cipherGrantsOf(key) {
-  const grants = cipherKeyGrants.get(key);
-  if (grants === undefined) {
-    throw errOther("cipher-key minted by another provider");
-  }
-  return grants;
-}
+const cipherGrantsOf = stateReader(cipherKeyGrants, "cipher-key");
 
 /**
  * The `cipher-key` resource: an unauthenticated AES-CBC or AES-CTR key
@@ -2691,8 +2525,7 @@ function cipherGrantsOf(key) {
  * are minted only by the `aes-cbc` and `aes-ctr` interface functions
  * below.
  */
-export class CipherKey {
-  #key;
+export class CipherKey extends symmetricKeyTail({}) {
   /** @type {"AES-CBC" | "AES-CTR"} */
   #name;
   /** The key length in bits, fixed at mint (see `AeadKey.#lengthBits`). */
@@ -2705,7 +2538,7 @@ export class CipherKey {
    * @param {{ encrypt: boolean, decrypt: boolean, wrap: boolean, unwrap: boolean }} grants
    */
   constructor(key, name, lengthBits, grants) {
-    this.#key = key;
+    super(key);
     this.#name = name;
     this.#lengthBits = lengthBits;
     cipherKeyGrants.set(this, grants);
@@ -2724,7 +2557,7 @@ export class CipherKey {
       if (!this.canEncrypt()) throw notPermitted("encrypt");
       const params = cipherParams(this.#name, iv, counterLength);
       const sealed = await platformCall(`${this.#name} encrypt`, () =>
-        subtle.encrypt(params, this.#key, message),
+        subtle.encrypt(params, platformKeyOf(this), message),
       );
       return new Uint8Array(sealed);
     });
@@ -2746,7 +2579,7 @@ export class CipherKey {
       const params = cipherParams(this.#name, iv, counterLength);
       let opened;
       try {
-        opened = await subtle.decrypt(params, this.#key, message);
+        opened = await subtle.decrypt(params, platformKeyOf(this), message);
       } catch {
         throw errOther(`${this.#name} decryption failed`);
       }
@@ -2770,7 +2603,7 @@ export class CipherKey {
     if (!this.canWrap()) throw notPermitted("wrap");
     const params = cipherParams(this.#name, iv, counterLength);
     const sealed = await platformCall(`${this.#name} wrap`, () =>
-      subtle.encrypt(params, this.#key, asBufferSource(bytes)),
+      subtle.encrypt(params, platformKeyOf(this), asBufferSource(bytes)),
     );
     return new Uint8Array(sealed);
   }
@@ -2791,7 +2624,7 @@ export class CipherKey {
     const params = cipherParams(this.#name, iv, counterLength);
     let opened;
     try {
-      opened = await subtle.decrypt(params, this.#key, asBufferSource(wrapped));
+      opened = await subtle.decrypt(params, platformKeyOf(this), asBufferSource(wrapped));
     } catch {
       throw errOther(`${this.#name} decryption failed`);
     }
@@ -2808,11 +2641,6 @@ export class CipherKey {
 
   ivSize() {
     return 16;
-  }
-
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
   }
 
   /** The usage grants: the mint policy recorded in `cipherKeyGrants`. */
@@ -2833,34 +2661,19 @@ export class CipherKey {
   }
 
   /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
-   * key was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK, behind the same extractability gate as
-   * `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
-  }
-
-  /**
    * This key's raw material as a `wrap-input` (see the `wrapping`
    * interface), behind the same extractability gate as `exportKeyRaw`.
    */
   async toWrapInputRaw() {
-    return new WrapInput(MINT, "raw", await exportRawGated(this.#key));
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
   }
 
   /**
    * The JWK serialization as a `wrap-input`, behind the same gate.
    */
   async toWrapInputJwk() {
-    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await exportJwkGated(this.#key)));
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
   }
 }
 
@@ -2886,12 +2699,14 @@ function cipherMinting(name) {
       if (raw.length !== expected) {
         throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
       }
-      let key;
-      try {
-        key = await subtle.importKey("raw", asBufferSource(raw), { name }, policy.extractable, usages);
-      } catch (err) {
-        invalidKey(err, `${variant} key`);
-      }
+      const key = await importPlatformKey(
+        `${variant} key`,
+        "raw",
+        raw,
+        { name },
+        policy.extractable,
+        usages,
+      );
       return new CipherKey(key, name, expected * 8, cipherGrants(policy));
     },
 
@@ -2908,12 +2723,13 @@ function cipherMinting(name) {
       const lengthBits = aesVariantByteLength(variant) * 8;
       const material = jwkMaterial(jwk);
       requireStrictBase64url(material.k);
-      let key;
-      try {
-        key = await subtle.importKey("jwk", material, { name }, policy.extractable, usages);
-      } catch (err) {
-        invalidKey(err, `${variant} JWK`);
-      }
+      const key = await importPlatformKeyJwk(
+        `${variant} JWK`,
+        material,
+        { name },
+        policy.extractable,
+        usages,
+      );
       const gotBits = jwkKeyBytes(material.k) * 8;
       if (gotBits !== lengthBits) {
         throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
@@ -3000,17 +2816,7 @@ export const aesCtr = cipherMinting("AES-CTR");
 /** @type {WeakMap<KwKeyOptions, { wrap: boolean, unwrap: boolean, extractable: boolean }>} */
 const kwPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {KwKeyOptions} options
- */
-function kwPolicy(options) {
-  const policy = kwPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("kw-key-options minted by another provider");
-  }
-  return policy;
-}
+const kwPolicy = stateReader(kwPolicies, "kw-key-options");
 
 export class KwKeyOptions {
   constructor() {
@@ -3067,14 +2873,7 @@ function kwGrantedOps(policy) {
  */
 const kwKeyGrants = new WeakMap();
 
-/** @param {KwKey} key */
-function kwGrantsOf(key) {
-  const grants = kwKeyGrants.get(key);
-  if (grants === undefined) {
-    throw errOther("kw-key minted by another provider");
-  }
-  return grants;
-}
+const kwGrantsOf = stateReader(kwKeyGrants, "kw-key");
 
 /**
  * The `key-wrap.kw-key` resource: an AES-KW key (RFC 3394; NIST SP
@@ -3253,18 +3052,14 @@ export const aesKw = {
     if (raw.length !== expected) {
       throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
     }
-    let key;
-    try {
-      key = await subtle.importKey(
-        "raw",
-        asBufferSource(raw),
-        { name: "AES-KW" },
-        policy.extractable,
-        usages,
-      );
-    } catch (err) {
-      invalidKey(err, `${variant} key`);
-    }
+    const key = await importPlatformKey(
+      `${variant} key`,
+      "raw",
+      raw,
+      { name: "AES-KW" },
+      policy.extractable,
+      usages,
+    );
     return new KwKey(key, expected * 8, { ...policy });
   },
 
@@ -3283,12 +3078,13 @@ export const aesKw = {
     const lengthBits = aesVariantByteLength(variant) * 8;
     const material = jwkMaterial(jwk);
     requireStrictBase64url(material.k);
-    let key;
-    try {
-      key = await subtle.importKey("jwk", material, { name: "AES-KW" }, policy.extractable, usages);
-    } catch (err) {
-      invalidKey(err, `${variant} JWK`);
-    }
+    const key = await importPlatformKeyJwk(
+      `${variant} JWK`,
+      material,
+      { name: "AES-KW" },
+      policy.extractable,
+      usages,
+    );
     const gotBits = jwkKeyBytes(material.k) * 8;
     if (gotBits !== lengthBits) {
       throw errInvalidKey(`JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`);
@@ -3552,17 +3348,7 @@ export const xchacha20Poly1305InternalNonce = {
 /** @type {WeakMap<InternalNonceKeyOptions, { seal: boolean, open: boolean, extractable: boolean }>} */
 const internalNoncePolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {InternalNonceKeyOptions} options
- */
-function internalNoncePolicy(options) {
-  const policy = internalNoncePolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("internal-nonce-key-options minted by another provider");
-  }
-  return policy;
-}
+const internalNoncePolicy = stateReader(internalNoncePolicies, "internal-nonce-key-options");
 
 export class InternalNonceKeyOptions {
   constructor() {
@@ -3596,8 +3382,7 @@ export class InternalNonceKeyOptions {
  * The key counts its `seal` invocations against the WIT nonce budget (2^32
  * for 12-byte nonces) and throws `{ tag: 'key-exhausted' }` beyond it.
  */
-export class InternalNonceKey {
-  #key;
+export class InternalNonceKey extends symmetricKeyTail({ canSeal: "encrypt", canOpen: "decrypt" }) {
   /** The key length in bits, fixed at mint. See `AeadKey`. */
   #lengthBits;
   #sealed = 0n;
@@ -3613,7 +3398,7 @@ export class InternalNonceKey {
    * @param {number} lengthBits
    */
   constructor(key, lengthBits) {
-    this.#key = key;
+    super(key);
     this.#lengthBits = lengthBits;
   }
 
@@ -3638,7 +3423,7 @@ export class InternalNonceKey {
         await platformCall("AES-GCM seal", () =>
           subtle.encrypt(
             { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-            this.#key,
+            platformKeyOf(this),
             message,
           ),
         ),
@@ -3671,7 +3456,7 @@ export class InternalNonceKey {
       try {
         opened = await subtle.decrypt(
           { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-          this.#key,
+          platformKeyOf(this),
           body,
         );
       } catch (err) {
@@ -3686,7 +3471,7 @@ export class InternalNonceKey {
    * from the mint (see `#lengthBits`).
    */
   algorithmName() {
-    return this.#key.algorithm.name;
+    return platformKeyOf(this).algorithm.name;
   }
 
   algorithmLength() {
@@ -3702,36 +3487,6 @@ export class InternalNonceKey {
     return remaining > 0n ? remaining : 0n;
   }
 
-  /** Whether `exportKeyRaw` may return the material: the `CryptoKey`'s own flag. */
-  extractable() {
-    return this.#key.extractable;
-  }
-
-  /** The usage grants: projections of the `CryptoKey`'s own usage list. */
-  canSeal() {
-    return this.#key.usages.includes("encrypt");
-  }
-
-  canOpen() {
-    return this.#key.usages.includes("decrypt");
-  }
-
-  /**
-   * The raw key material. Throws `{ tag: 'not-extractable' }` unless the
-   * key was created with `extractable` true (see `exportRawGated`).
-   */
-  async exportKeyRaw() {
-    return exportRawGated(this.#key);
-  }
-
-  /**
-   * The key as an `oct` JWK (the `internal-nonce-key.export-key-jwk`
-   * contract), behind the same extractability gate as `exportKeyRaw`.
-   */
-  async exportKeyJwk() {
-    return exportJwkGated(this.#key);
-  }
-
   /**
    * This key's raw material as a `wrap-input` (see the `wrapping`
    * interface), behind the same extractability gate as `exportKeyRaw`.
@@ -3739,14 +3494,15 @@ export class InternalNonceKey {
    * material.
    */
   async toWrapInputRaw() {
-    return new WrapInput(MINT, "raw", await exportRawGated(this.#key));
+    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
   }
 
   /**
    * The JWK serialization as a `wrap-input`, behind the same gate.
    */
   async toWrapInputJwk() {
-    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await exportJwkGated(this.#key)));
+    const jwk = await exportJwkGated(platformKeyOf(this));
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
   }
 }
 
@@ -4047,6 +3803,8 @@ async function exportRawGated(key) {
  * The key as an `oct` JWK, per the WIT contract: exactly the
  * material-bearing members (`kty`, `k`, `alg`) — the platform's `key_ops`/
  * `ext` are the consumer's to stamp, so they are dropped here.
+ * ChaCha20-Poly1305 keys carry the Modern Algorithms proposal's registered
+ * `alg`, `"C20P"`, which the platform emits.
  * @param {CryptoKey} key
  */
 async function exportJwkGated(key) {
@@ -4484,17 +4242,7 @@ export class VerifyingKey {
 /** @type {WeakMap<SigningKeyOptions, { sign: boolean, extractable: boolean }>} */
 const signingPolicies = new WeakMap();
 
-/**
- * The policy accumulated by `options`, read by the setters and at mint.
- * @param {SigningKeyOptions} options
- */
-function signingPolicy(options) {
-  const policy = signingPolicies.get(options);
-  if (policy === undefined) {
-    throw errOther("signing-key-options minted by another provider");
-  }
-  return policy;
-}
+const signingPolicy = stateReader(signingPolicies, "signing-key-options");
 
 export class SigningKeyOptions {
   constructor() {
@@ -4530,8 +4278,7 @@ function requireSigningGrant(policy) {
  * derive — `generate-key` returns the pair, and importers mint the
  * verifying key from the public bytes they hold.
  */
-export class SigningKey {
-  #privateKey;
+export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
   #algorithm;
 
   /**
@@ -4539,7 +4286,7 @@ export class SigningKey {
    * @param {typeof ED25519_ALGORITHM} algorithm the mint-bound algorithm record
    */
   constructor(privateKey, algorithm) {
-    this.#privateKey = privateKey;
+    super(privateKey);
     this.#algorithm = algorithm;
   }
 
@@ -4554,7 +4301,7 @@ export class SigningKey {
       const params = signParams(this.#algorithm);
       return new Uint8Array(
         await platformCall(`${this.#algorithm.name} sign`, () =>
-          subtle.sign(params, this.#privateKey, message),
+          subtle.sign(params, platformKeyOf(this), message),
         ),
       );
     });
@@ -4573,24 +4320,14 @@ export class SigningKey {
     return this.#algorithm.hash;
   }
 
-  extractable() {
-    return this.#privateKey.extractable;
-  }
-
-  /** The `sign` grant: a projection of the `CryptoKey`'s own usage list. */
-  canSign() {
-    return this.#privateKey.usages.includes("sign");
-  }
-
   /**
    * The private JWK, material members only, behind the extractability
    * gate (checked on the `CryptoKey` itself, like `exportRawGated`).
    */
   async exportKeyJwk() {
-    if (!this.#privateKey.extractable) throw errNotExtractable();
-    const jwk = await platformCall("jwk key export", () =>
-      subtle.exportKey("jwk", this.#privateKey),
-    );
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
+    const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", privateKey));
     return JSON.stringify(
       jwk.kty === "OKP"
         ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d }
@@ -4603,9 +4340,10 @@ export class SigningKey {
    * @returns {Promise<Uint8Array>}
    */
   async exportKeyPkcs8() {
-    if (!this.#privateKey.extractable) throw errNotExtractable();
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
     return new Uint8Array(
-      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", this.#privateKey)),
+      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", privateKey)),
     );
   }
 
@@ -4720,15 +4458,61 @@ function ed25519PointStrict(encoded) {
 /**
  * Rethrow a WebCrypto import failure as `{ tag: 'invalid-key', val }`.
  *
- * Annotated `never` deliberately: every call site relies on this throwing
- * and constructs a resource immediately afterwards, so a version that fell
- * through would mint a key over an `undefined` `CryptoKey`.
+ * Annotated `never` deliberately: the `importPlatformKey*` helpers rely on
+ * this throwing to make their catch arms non-completing, so a version that
+ * fell through would resolve them with an `undefined` `CryptoKey`.
  * @param {unknown} err
  * @param {string} what
  * @returns {never}
  */
 function invalidKey(err, what) {
   throw errInvalidKey(`invalid ${what}: ${asPlatformError(err).detail}`);
+}
+
+/**
+ * Import binary key material via the platform. An import failure throws
+ * `{ tag: 'invalid-key', val }` naming `what`; every other validation
+ * (length checks, strict-point predicates, post-import shape checks)
+ * stays at the call site.
+ * @param {string} what
+ * @param {Exclude<KeyFormat, "jwk">} format
+ * @param {Uint8Array} bytes
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usages
+ * @returns {Promise<CryptoKey>}
+ */
+async function importPlatformKey(what, format, bytes, algorithm, extractable, usages) {
+  try {
+    return await subtle.importKey(format, asBufferSource(bytes), algorithm, extractable, usages);
+  } catch (err) {
+    invalidKey(err, what);
+  }
+}
+
+/**
+ * Import a parsed JWK (a `jwkMaterial` result) via the platform. An import
+ * failure throws `{ tag: 'invalid-key', val }` naming `what`; member
+ * strictness and post-import shape checks stay at the call site.
+ * @param {string} what
+ * @param {Record<string, unknown>} jwk
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usages
+ * @returns {Promise<CryptoKey>}
+ */
+async function importPlatformKeyJwk(what, jwk, algorithm, extractable, usages) {
+  try {
+    return await subtle.importKey(
+      "jwk",
+      /** @type {JsonWebKey} */ (jwk),
+      algorithm,
+      extractable,
+      usages,
+    );
+  } catch (err) {
+    invalidKey(err, what);
+  }
 }
 
 /**
@@ -4746,12 +4530,9 @@ async function importEd25519VerifyingKey(raw) {
   if (!ed25519PointStrict(raw)) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("raw", asBufferSource(raw), "Ed25519", true, ["verify"]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 public key");
-  }
+  const key = await importPlatformKey("Ed25519 public key", "raw", raw, "Ed25519", true, [
+    "verify",
+  ]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -4769,12 +4550,7 @@ async function importEd25519VerifyingKeySpki(spki) {
   if (!ed25519PointStrict(point)) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("spki", asBufferSource(spki), "Ed25519", true, ["verify"]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 spki");
-  }
+  const key = await importPlatformKey("Ed25519 spki", "spki", spki, "Ed25519", true, ["verify"]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -4790,14 +4566,7 @@ async function importEd25519VerifyingKeyJwk(jwkText) {
   if (typeof jwk.x !== "string" || !ed25519PointStrict(b64urlDecode(jwk.x))) {
     throw errInvalidKey("non-canonical or small-order Ed25519 public key");
   }
-  let key;
-  try {
-    key = await subtle.importKey("jwk", /** @type {JsonWebKey} */ (jwk), "Ed25519", true, [
-      "verify",
-    ]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 public JWK");
-  }
+  const key = await importPlatformKeyJwk("Ed25519 public JWK", jwk, "Ed25519", true, ["verify"]);
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
@@ -4836,14 +4605,14 @@ async function generateEd25519Key(options) {
 async function importEd25519SigningKeyPkcs8(pkcs8, options) {
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
-  let key;
-  try {
-    key = await subtle.importKey("pkcs8", asBufferSource(pkcs8), "Ed25519", policy.extractable, [
-      "sign",
-    ]);
-  } catch (err) {
-    invalidKey(err, "Ed25519 pkcs8");
-  }
+  const key = await importPlatformKey(
+    "Ed25519 pkcs8",
+    "pkcs8",
+    pkcs8,
+    "Ed25519",
+    policy.extractable,
+    ["sign"],
+  );
   return new SigningKey(key, ED25519_ALGORITHM);
 }
 
@@ -4860,18 +4629,13 @@ async function importEd25519SigningKeyJwk(jwkText, options) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      "Ed25519",
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, "Ed25519 private JWK");
-  }
+  const key = await importPlatformKeyJwk(
+    "Ed25519 private JWK",
+    jwk,
+    "Ed25519",
+    policy.extractable,
+    ["sign"],
+  );
   if (key.type !== "private") {
     throw errInvalidKey("OKP private JWK must carry `d` (base64url private key)");
   }
@@ -4931,18 +4695,14 @@ async function importEcdsaVerifyingKey(variant, raw) {
       `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
     );
   }
-  let key;
-  try {
-    key = await subtle.importKey(
-      "raw",
-      asBufferSource(raw),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} public key`);
-  }
+  const key = await importPlatformKey(
+    `${variant} public key`,
+    "raw",
+    raw,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -4955,18 +4715,14 @@ async function importEcdsaVerifyingKey(variant, raw) {
  */
 async function importEcdsaVerifyingKeySpki(variant, spki) {
   const entry = ecdsaVariant(variant);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "spki",
-      asBufferSource(spki),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} spki`);
-  }
+  const key = await importPlatformKey(
+    `${variant} spki`,
+    "spki",
+    spki,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -4982,18 +4738,13 @@ async function importEcdsaVerifyingKeyJwk(variant, jwkText) {
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.y);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      true,
-      ["verify"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} public JWK`);
-  }
+  const key = await importPlatformKeyJwk(
+    `${variant} public JWK`,
+    jwk,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    true,
+    ["verify"],
+  );
   return new VerifyingKey(key, entry);
 }
 
@@ -5035,18 +4786,14 @@ async function importEcdsaSigningKeyPkcs8(variant, pkcs8, options) {
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
   const entry = ecdsaVariant(variant);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "pkcs8",
-      asBufferSource(pkcs8),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} pkcs8`);
-  }
+  const key = await importPlatformKey(
+    `${variant} pkcs8`,
+    "pkcs8",
+    pkcs8,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    policy.extractable,
+    ["sign"],
+  );
   return new SigningKey(key, entry);
 }
 
@@ -5066,18 +4813,13 @@ async function importEcdsaSigningKeyJwk(variant, jwkText, options) {
   requireStrictBase64url(jwk.x);
   requireStrictBase64url(jwk.y);
   requireStrictBase64url(jwk.d);
-  let key;
-  try {
-    key = await subtle.importKey(
-      "jwk",
-      /** @type {JsonWebKey} */ (jwk),
-      { name: "ECDSA", namedCurve: entry.namedCurve },
-      policy.extractable,
-      ["sign"],
-    );
-  } catch (err) {
-    invalidKey(err, `${variant} private JWK`);
-  }
+  const key = await importPlatformKeyJwk(
+    `${variant} private JWK`,
+    jwk,
+    { name: "ECDSA", namedCurve: entry.namedCurve },
+    policy.extractable,
+    ["sign"],
+  );
   if (key.type !== "private") {
     throw errInvalidKey("EC private JWK must carry `d` (base64url private scalar)");
   }

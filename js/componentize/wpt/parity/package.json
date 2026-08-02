@@ -11,6 +11,7 @@
     "roundtrip": "node --experimental-wasm-jspi roundtrip.mjs",
     "run:firefox": "node run-browser.mjs --engine firefox",
     "run:chromium": "node run-browser.mjs --engine chromium",
+    "run:webkit": "node run-browser.mjs --engine webkit",
     "compare": "node compare.mjs"
   },
   "devDependencies": {

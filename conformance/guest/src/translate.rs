@@ -45,6 +45,28 @@ fn schedules(max_input_len: usize, valid: bool, id: u64) -> Vec<Schedule> {
     vec![Schedule::Whole]
 }
 
+/// The surface `lib.rs` materializes for every translated vector case.
+pub trait VectorCase {
+    /// The case's stable id (see conformance/README.md: ids must not
+    /// change once locked).
+    fn case_id(&self) -> String;
+
+    /// The features this case exercises beyond the baseline surface.
+    fn features(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+/// The id shape shared by the vector-derived cases:
+/// `<alg>/<source>/tc<id>`, plus `/<schedule>` for cases that carry
+/// stream inputs.
+fn vector_case_id(alg: &str, source: &str, tc_id: u64, schedule: Option<Schedule>) -> String {
+    match schedule {
+        Some(schedule) => format!("{alg}/{source}/tc{tc_id}/{}", schedule.name()),
+        None => format!("{alg}/{source}/tc{tc_id}"),
+    }
+}
+
 /// A served HMAC digest parameterization, as named in test ids.
 #[derive(Clone, Copy)]
 pub enum HmacAlg {
@@ -90,21 +112,14 @@ pub struct HmacCase {
     pub valid: bool,
 }
 
-impl HmacCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "{}/wycheproof/tc{}/{}",
+impl VectorCase for HmacCase {
+    fn case_id(&self) -> String {
+        vector_case_id(
             self.alg.name(),
+            "wycheproof",
             self.tc_id,
-            self.schedule.name()
+            Some(self.schedule),
         )
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
     }
 }
 
@@ -173,15 +188,13 @@ pub struct AeadCase {
     pub expectation: AeadExpectation,
 }
 
-impl AeadCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "{}/wycheproof/tc{}/{}",
+impl VectorCase for AeadCase {
+    fn case_id(&self) -> String {
+        vector_case_id(
             self.alg.name(),
+            "wycheproof",
             self.tc_id,
-            self.schedule.name()
+            Some(self.schedule),
         )
     }
 
@@ -189,7 +202,7 @@ impl AeadCase {
     /// algorithm's, plus `aes-gcm-any-iv` for GCM nonces outside the
     /// 12–128-byte window every implementation serves (empty nonces are
     /// untagged — every target rejects them `invalid-nonce`).
-    pub fn features(&self) -> &'static [&'static str] {
+    fn features(&self) -> &'static [&'static str] {
         if matches!(self.alg, AeadAlg::AesGcm)
             && !self.iv.is_empty()
             && !(12..=128).contains(&self.iv.len())
@@ -247,20 +260,17 @@ pub struct InternalNonceCase {
     pub valid: bool,
 }
 
-impl InternalNonceCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "{}/wycheproof/tc{}/{}",
+impl VectorCase for InternalNonceCase {
+    fn case_id(&self) -> String {
+        vector_case_id(
             self.alg.name(),
+            "wycheproof",
             self.tc_id,
-            self.schedule.name()
+            Some(self.schedule),
         )
     }
 
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
+    fn features(&self) -> &'static [&'static str] {
         self.alg.features()
     }
 }
@@ -459,16 +469,9 @@ pub struct HkdfCase {
     pub valid: bool,
 }
 
-impl HkdfCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!("{}/wycheproof/tc{}", self.alg.name(), self.tc_id)
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
+impl VectorCase for HkdfCase {
+    fn case_id(&self) -> String {
+        vector_case_id(self.alg.name(), "wycheproof", self.tc_id, None)
     }
 }
 
@@ -554,16 +557,9 @@ pub struct Pbkdf2Case {
     pub valid: bool,
 }
 
-impl Pbkdf2Case {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!("{}/wycheproof/tc{}", self.alg.name(), self.tc_id)
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
+impl VectorCase for Pbkdf2Case {
+    fn case_id(&self) -> String {
+        vector_case_id(self.alg.name(), "wycheproof", self.tc_id, None)
     }
 }
 
@@ -643,21 +639,14 @@ pub struct Sha2Case {
     pub md: Vec<u8>,
 }
 
-impl Sha2Case {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
+impl VectorCase for Sha2Case {
+    fn case_id(&self) -> String {
         format!(
             "sha2/nist-cavp/{}-len{}/{}",
             self.alg.name(),
             self.len_bits,
             self.schedule.name()
         )
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
     }
 }
 
@@ -777,16 +766,9 @@ pub struct X25519Case {
     pub zero_shared: bool,
 }
 
-impl X25519Case {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!("x25519/wycheproof/tc{}", self.tc_id)
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
+impl VectorCase for X25519Case {
+    fn case_id(&self) -> String {
+        vector_case_id("x25519", "wycheproof", self.tc_id, None)
     }
 }
 
@@ -995,11 +977,9 @@ pub struct KwCase {
     pub valid: bool,
 }
 
-impl KwCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!("aes-kw/wycheproof/tc{}", self.tc_id)
+impl VectorCase for KwCase {
+    fn case_id(&self) -> String {
+        vector_case_id("aes-kw", "wycheproof", self.tc_id, None)
     }
 }
 
@@ -1046,15 +1026,9 @@ pub struct CbcCase {
     pub valid: bool,
 }
 
-impl CbcCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "aes-cbc/wycheproof/tc{}/{}",
-            self.tc_id,
-            self.schedule.name()
-        )
+impl VectorCase for CbcCase {
+    fn case_id(&self) -> String {
+        vector_case_id("aes-cbc", "wycheproof", self.tc_id, Some(self.schedule))
     }
 }
 
@@ -1171,21 +1145,14 @@ pub struct SigCase {
     pub valid: bool,
 }
 
-impl SigCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "{}/wycheproof/tc{}/{}",
+impl VectorCase for SigCase {
+    fn case_id(&self) -> String {
+        vector_case_id(
             self.alg.name(),
+            "wycheproof",
             self.tc_id,
-            self.schedule.name()
+            Some(self.schedule),
         )
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
     }
 }
 
@@ -1207,20 +1174,9 @@ pub struct SpeccheckCase {
     pub valid: bool,
 }
 
-impl SpeccheckCase {
-    /// The case's stable id (see conformance/README.md: ids must not
-    /// change once locked).
-    pub fn case_id(&self) -> String {
-        format!(
-            "ed25519/speccheck/tc{}/{}",
-            self.tc_id,
-            self.schedule.name()
-        )
-    }
-
-    /// The features this case exercises beyond the baseline surface.
-    pub fn features(&self) -> &'static [&'static str] {
-        &[]
+impl VectorCase for SpeccheckCase {
+    fn case_id(&self) -> String {
+        vector_case_id("ed25519", "speccheck", self.tc_id, Some(self.schedule))
     }
 }
 

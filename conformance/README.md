@@ -84,9 +84,9 @@ adapters/
   jco/             # Node + headless-Chromium adapters over webcrypto-jco's
                    #   webcrypto.js (jco-node gates everywhere; jco-browser
                    #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
-                   #   with Chrome/Chromium 137+ installed); the browser
-                   #   adapter drives the suites through web/'s harness
-                   #   (parallel workers), so gate and viewer cannot drift
+                   #   with Chrome/Chromium 137+ installed); both stripe the
+                   #   cases across parallel workers, the browser adapter
+                   #   through web/'s harness, so gate and viewer cannot drift
 report/            # the results-file and lockfile wire shapes the Rust
                    #   adapters serialize and the runner deserializes
 runner/            # aggregation: transport invariants + matrix.md rendering
@@ -226,7 +226,8 @@ new cases with a feature name if any target legitimately cannot serve them
 lockfile diff. An algorithm of a kind with a contract battery
 (`guest/src/contract.rs`) also adds its table row there, inheriting the
 kind's standard cases — getters, extractability, key-material rejection,
-usage policy, round trip — as `<interface>/contract/…` lockfile entries;
+usage policy, the oct-JWK contract, round trip — as
+`<interface>/contract/…` lockfile entries;
 only behavior specific to the algorithm needs a hand-written probe. An
 algorithm the in-guest provider deliberately does not
 export lives in the signing suite, which the composed target never runs —

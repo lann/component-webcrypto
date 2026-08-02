@@ -102,29 +102,25 @@ impl CipherKeyMaterial {
         policy: CipherPolicy,
     ) -> Result<Self, Error> {
         policy.check_useful()?;
-        type Make = fn(&[u8]) -> Block;
-        let (expected, make): (usize, Make) = match variant {
-            crate::AesVariant::Aes128 => (16, |raw| {
-                Block::Aes128(Aes128::new_from_slice(raw).expect("length checked"))
-            }),
-            crate::AesVariant::Aes192 => {
-                return Err(Error::Unsupported(
-                    "AES-192 is not served by this implementation".into(),
-                ))
-            }
-            crate::AesVariant::Aes256 => (32, |raw| {
-                Block::Aes256(Aes256::new_from_slice(raw).expect("length checked"))
-            }),
-        };
+        let expected = variant.served_key_len()?;
         if raw.len() != expected {
             return Err(Error::InvalidKey(format!(
                 "{variant:?} requires {expected} bytes of key material, got {} bytes",
                 raw.len()
             )));
         }
+        let block = match variant {
+            crate::AesVariant::Aes128 => {
+                Block::Aes128(Aes128::new_from_slice(&raw).expect("length checked"))
+            }
+            crate::AesVariant::Aes192 => unreachable!("declined by served_key_len"),
+            crate::AesVariant::Aes256 => {
+                Block::Aes256(Aes256::new_from_slice(&raw).expect("length checked"))
+            }
+        };
         Ok(Self {
             mode,
-            block: make(&raw),
+            block,
             raw: Zeroizing::new(raw),
             policy,
         })
@@ -142,11 +138,7 @@ impl CipherKeyMaterial {
     ) -> Result<Self, Error> {
         let alg = match variant {
             crate::AesVariant::Aes128 => mode.jwk_alg(128),
-            crate::AesVariant::Aes192 => {
-                return Err(Error::Unsupported(
-                    "AES-192 is not served by this implementation".into(),
-                ))
-            }
+            crate::AesVariant::Aes192 => return Err(crate::aes192_unsupported()),
             crate::AesVariant::Aes256 => mode.jwk_alg(256),
         };
         let raw = crate::jwk::parse_oct(jwk, alg, policy.extractable)?;
@@ -164,14 +156,9 @@ impl CipherKeyMaterial {
         if let Err(err) = policy.check_useful() {
             return Ok(Err(err));
         }
-        let len = match variant {
-            crate::AesVariant::Aes128 => 16,
-            crate::AesVariant::Aes192 => {
-                return Ok(Err(Error::Unsupported(
-                    "AES-192 is not served by this implementation".into(),
-                )))
-            }
-            crate::AesVariant::Aes256 => 32,
+        let len = match variant.served_key_len() {
+            Ok(len) => len,
+            Err(err) => return Ok(Err(err)),
         };
         Ok(Ok(Self::import(
             mode,

@@ -394,6 +394,32 @@ pub fn unhex(hex: &str) -> Vec<u8> {
     hex::decode(hex).expect("probe hex constants are valid")
 }
 
+/// Unpadded base64url, for building the members of the JWKs the imports
+/// take.
+pub fn b64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        for i in 0..=chunk.len() {
+            out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+/// RFC 6979 A.2.5: the P-256 example key's public x-coordinate
+/// (known-answer material both suites import verifying keys from).
+pub const P256_A25_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
+
+/// RFC 6979 A.2.5: the P-256 example key's public y-coordinate.
+pub const P256_A25_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+
 #[cfg(test)]
 mod tests {
     use super::*;

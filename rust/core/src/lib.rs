@@ -261,6 +261,33 @@ pub enum AesVariant {
     Aes256,
 }
 
+impl AesVariant {
+    /// The variant's key length in bits.
+    pub(crate) fn length_bits(self) -> u32 {
+        match self {
+            Self::Aes128 => 128,
+            Self::Aes192 => 192,
+            Self::Aes256 => 256,
+        }
+    }
+
+    /// The variant's key length in bytes, or the AES-192 decline for the
+    /// variant no Rust implementation serves (see the WIT `aes-variant`
+    /// doc). Shared by every AES minting path.
+    pub(crate) fn served_key_len(self) -> Result<usize, Error> {
+        match self {
+            Self::Aes192 => Err(aes192_unsupported()),
+            _ => Ok(self.length_bits() as usize / 8),
+        }
+    }
+}
+
+/// The AES-192 decline every AES minting path renders (see the WIT
+/// `aes-variant` doc).
+pub(crate) fn aes192_unsupported() -> Error {
+    Error::Unsupported("AES-192 is not served by this implementation".into())
+}
+
 /// The WIT `ecdsa-verify.ecdsa-variant` cases. Variant names match the
 /// generated bindings' so `{:?}` renders identically in error messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

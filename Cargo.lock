@@ -601,7 +601,9 @@ name = "crypto-demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "futures",
+ "futures-io",
  "lann-webcrypto-guest",
  "wit-bindgen 0.59.0",
 ]
