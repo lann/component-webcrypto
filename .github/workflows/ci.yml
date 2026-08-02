@@ -213,3 +213,17 @@ jobs:
 
       - name: Run the WebKit WPT parity gate
         run: just wpt-parity-webkit
+
+      - name: Upload the WebKit parity records
+        # The comparator's inputs, kept whether the gate passes or fails:
+        # losses-webkit.js is recorded from a macOS run, and this artifact
+        # is how a Linux-bound change re-records it (download, then
+        # `node js/componentize/wpt/parity/compare.mjs <baseline> <roundtrip>
+        # --losses losses-webkit.js --update`).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-parity-webkit-records
+          path: |
+            js/componentize/wpt/build/parity-baseline-webkit.json
+            js/componentize/wpt/build/parity-roundtrip-webkit.json
