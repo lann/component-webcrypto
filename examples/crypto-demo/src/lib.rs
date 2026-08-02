@@ -303,7 +303,7 @@ async fn hmac_key_export() -> Result<()> {
         verify: true,
         extractable: true,
     };
-    let key = hmac_sha2::import_key_raw(Sha2Variant::Sha256, HMAC_KEY.to_vec(), full_grant)
+    let key = hmac_sha2::import_key_raw(Sha2Variant::Sha256, HMAC_KEY, full_grant)
         .await
         .context("import-key-raw")?;
     let exported = key
