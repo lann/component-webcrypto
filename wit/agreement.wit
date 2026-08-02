@@ -24,6 +24,7 @@ package lann:webcrypto@0.1.0;
 interface key-agreement {
     use types.{error};
     use derivation.{derive-input};
+    use wrapping.{wrap-input};
 
     /// Mint-time policy for agreement secret keys, following the
     /// package-wide options contract (see `README.md`). The derive grants
@@ -116,5 +117,16 @@ interface key-agreement {
         /// The secret key as a PKCS#8 PrivateKeyInfo (DER), behind the
         /// same extractability gate as `export-key-jwk`.
         export-key-pkcs8: async func() -> result<list<u8>, error>;
+
+        /// The private-key JWK serialization as a `wrap-input`, for
+        /// wrapping under another key (see the `wrapping` interface).
+        /// Behind the same extractability gate as `export-key-jwk`, and
+        /// fallible beyond it like every export; the material itself
+        /// never reaches the caller.
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
+
+        /// The PKCS#8 serialization as a `wrap-input`, behind the same
+        /// gate.
+        to-wrap-input-pkcs8: async func() -> result<wrap-input, error>;
     }
 }

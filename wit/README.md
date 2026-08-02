@@ -10,12 +10,15 @@ item; everything shared lives here.
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
 - **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`, `key-agreement`) own the
+  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`) own the
   algorithm-agnostic resources.
   Operations hang off key resources. Adding an algorithm does not change
-  these interfaces.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
-  `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`) only mint keys, bound
+  these interfaces. The `wrapping` interface holds the provider-held
+  intermediates key wrapping trades in (`wrap-input`, `unwrap-input`), as
+  `derivation` holds `derive-input`.
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
+  `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`)
+  only mint keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -361,8 +364,28 @@ short:
   from one kind to the other. The uniform-failure rule is load-bearing —
   a CBC decryption error names no cause, because a distinguishable
   padding verdict is a padding-oracle amplifier. AES-KW is not part of
-  this ruling: it belongs to the wrap direction (`wrap-key`/`unwrap-key`
-  operations), not to a cipher kind.
+  this ruling: it is integrity-checked, and lives in the `key-wrap` kind.
+- **Key wrapping trades in provider-held intermediates.** Wrapping is
+  serialize-then-encrypt and unwrapping is decrypt-then-mint, split at
+  two opaque resources (`wrapping.wrap-input`, `wrapping.unwrap-input`)
+  so the key material transits neither half's caller: unwrap can mint a
+  *non-extractable* key from wrapped transport, which no composition of
+  `open` and `import-key-raw` can express. Consequences, all deliberate:
+  - Producing a `wrap-input` sits behind the source key's extractability
+    gate — the W3C Web Cryptography API's `wrapKey` rule. A profile that
+    serves *wrapped export only* (FIPS 140-3 key transport) mints keys
+    extractable, serves `to-wrap-input-*`, and declines the plaintext
+    exports under the package's policy-rejection allowance; the WIT does
+    not need a separate "wrappable" grant for it.
+  - The intermediates cannot cross providers (resource types are
+    per-instance), so both halves of a wrap or an unwrap run inside one
+    provider and only wrapped bytes travel between parties.
+  - The `key-wrap` kind's `wrap` accepts only a `wrap-input`, never
+    caller bytes, so a deterministic wrapping algorithm (AES-KW) cannot
+    be repurposed as a general deterministic cipher.
+  - Unwrapping under the `cipher` kind is served for WebCrypto parity
+    and is unauthenticated like everything in that kind: the typed
+    mint's parse is not authentication.
 - **FIPS 140-3 stays possible, not implemented.** The internal-nonce kind
   carries the approved-mode seal; interfaces deliberately permit
   policy-based rejection (short HMAC keys, imported internal-nonce
@@ -417,3 +440,12 @@ Brief definitions; follow the links for depth.
 - **usage** — a per-key grant recorded at mint that permits an operation
   (WebCrypto's
   [`KeyUsage`](https://www.w3.org/TR/WebCryptoAPI/#dfn-KeyUsage)).
+- **key material** — the secret (or, for public keys, encoded) bytes a
+  key resource stands for; what import consumes and export returns.
+  [Key (cryptography)](https://en.wikipedia.org/wiki/Key_(cryptography)).
+- **key wrapping** — encrypting one key's material under another key, for
+  transport or storage
+  ([NIST SP 800-38F](https://csrc.nist.gov/pubs/sp/800/38/f/final);
+  WebCrypto's
+  [`wrapKey`](https://www.w3.org/TR/WebCryptoAPI/#SubtleCrypto-method-wrapKey)/`unwrapKey`).
+  The wrapping key is often called a key-encryption key (KEK).

@@ -17,6 +17,7 @@ package lann:webcrypto@0.1.0;
 interface x25519 {
     use types.{error};
     use key-agreement.{public-key, secret-key, agreement-key-options};
+    use wrapping.{unwrap-input};
 
     /// Import a raw 32-byte RFC 7748 u-coordinate as a public key.
     ///
@@ -65,4 +66,19 @@ interface x25519 {
 
     /// Generate a fresh X25519 key pair.
     generate-key: async func(options: agreement-key-options) -> result<tuple<secret-key, public-key>, error>;
+
+    /// Mint a static secret key from unwrapped key material (see the
+    /// `wrapping` interface): `input`'s bytes are read as an OKP private
+    /// JWK, subject to `import-secret-key-jwk`'s contract. `input` is
+    /// consumed.
+    ///
+    /// The minted key's grants and extractability come from `options`
+    /// alone (the W3C Web Cryptography API's `unwrapKey` model).
+    unwrap-secret-key-jwk: async func(input: unwrap-input, options: agreement-key-options) -> result<secret-key, error>;
+
+    /// Mint a static secret key from unwrapped key material read as a
+    /// PKCS#8 PrivateKeyInfo, subject to `import-secret-key-pkcs8`'s
+    /// contract. `input` is consumed; see `unwrap-secret-key-jwk` for
+    /// the options model.
+    unwrap-secret-key-pkcs8: async func(input: unwrap-input, options: agreement-key-options) -> result<secret-key, error>;
 }

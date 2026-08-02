@@ -57,6 +57,7 @@ interface aes-gcm {
     use aead.{aead-key, aead-key-options};
     use aes.{aes-variant};
     use derivation.{derive-input};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as the declared AES variant.
     ///
@@ -92,6 +93,19 @@ interface aes-gcm {
     /// Requesting an *extractable* key requires `can-derive-bits` too: an
     /// exportable key is bits disclosure by other means.
     derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from unwrapped key material (see the `wrapping`
+    /// interface): `input`'s bytes are read as raw key material, subject
+    /// to `import-key-raw`'s contract. `input` is consumed.
+    ///
+    /// The minted key's usages and extractability come from `options`
+    /// alone (the W3C Web Cryptography API's `unwrapKey` model).
+    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
+
+    /// Mint a key from unwrapped key material read as an RFC 7517 JSON
+    /// Web Key, subject to `import-key-jwk`'s contract. `input` is
+    /// consumed; see `unwrap-key-raw` for the options model.
+    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 }
 
 /// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
@@ -114,6 +128,7 @@ interface aes-gcm-internal-nonce {
     use types.{error};
     use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
     use aes.{aes-variant};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as an internal-nonce AES-GCM key of the
     /// declared variant (see `aes-gcm.import-key-raw` for the
@@ -141,6 +156,16 @@ interface aes-gcm-internal-nonce {
     /// variant. Fails with `error.unsupported` if this implementation does
     /// not serve the variant.
     generate-key: async func(%variant: aes-variant, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes, subject
+    /// to `import-key-raw`'s contract — including the shared-material
+    /// caveat and policy-rejection allowance. `input` is consumed; see
+    /// `aes-gcm.unwrap-key-raw` for the options model.
+    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
+
+    /// Mint a key from unwrapped key material read as an `oct` JWK,
+    /// subject to `import-key-jwk`'s contract. `input` is consumed.
+    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }
 
 /// AES-CBC key minting (NIST SP 800-38A; PKCS#7 padding, the Web
@@ -166,6 +191,7 @@ interface aes-cbc {
     use cipher.{cipher-key, cipher-key-options};
     use aes.{aes-variant};
     use derivation.{derive-input};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as the declared AES variant (see
     /// `aes-gcm.import-key-raw` for the variant-redundancy contract).
@@ -185,6 +211,15 @@ interface aes-cbc {
     /// Mint a key from a parameterized derivation (the
     /// `aes-gcm.derive-key` contract, minting a `cipher-key`).
     derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes, subject
+    /// to `import-key-raw`'s contract. `input` is consumed; see
+    /// `aes-gcm.unwrap-key-raw` for the options model.
+    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from unwrapped key material read as an `oct` JWK,
+    /// subject to `import-key-jwk`'s contract. `input` is consumed.
+    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: cipher-key-options) -> result<cipher-key, error>;
 }
 
 /// AES-CTR key minting (NIST SP 800-38A counter mode, the Web
@@ -209,6 +244,7 @@ interface aes-ctr {
     use cipher.{cipher-key, cipher-key-options};
     use aes.{aes-variant};
     use derivation.{derive-input};
+    use wrapping.{unwrap-input};
 
     /// Import raw key material as the declared AES variant (see
     /// `aes-gcm.import-key-raw` for the variant-redundancy contract).
@@ -228,4 +264,69 @@ interface aes-ctr {
     /// Mint a key from a parameterized derivation (the
     /// `aes-gcm.derive-key` contract, minting a `cipher-key`).
     derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes, subject
+    /// to `import-key-raw`'s contract. `input` is consumed; see
+    /// `aes-gcm.unwrap-key-raw` for the options model.
+    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: cipher-key-options) -> result<cipher-key, error>;
+
+    /// Mint a key from unwrapped key material read as an `oct` JWK,
+    /// subject to `import-key-jwk`'s contract. `input` is consumed.
+    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: cipher-key-options) -> result<cipher-key, error>;
+}
+
+/// AES-KW key minting (RFC 3394; NIST SP 800-38F's KW): `key-wrap.kw-key`s
+/// for the deterministic key-wrapping mode, the Web Cryptography API's
+/// `AES-KW`. Read the `key-wrap` interface's Security notes first.
+///
+/// Keys minted here drive `kw-key.wrap`/`unwrap`. The wrapped form is RFC
+/// 3394's: the input's length plus 8 bytes, carrying the 64-bit ICV whose
+/// failure `unwrap` reports as `error.authentication-failed`.
+///
+/// Input domain (`kw-key.wrap`):
+/// - The serialized input must be a multiple of 8 bytes, at least 16
+///   (RFC 3394 §2; every AES, HMAC-multiple-of-8, and ChaCha raw key
+///   qualifies). Anything else fails `error.invalid-key`.
+/// - JWK-formatted input (a `to-wrap-input-jwk` serialization) is first
+///   padded with ASCII spaces (0x20) to a multiple of 8 — the Web
+///   Cryptography API's AES-KW rule. JSON parsers accept the trailing
+///   padding, so the mint-side `unwrap-key-jwk` needs no inverse step.
+///   No other format is padded.
+///
+/// A FIPS 140-3 approved-mode provider may serve this interface: KW is an
+/// SP 800-38F approved mode and draws no IV.
+interface aes-kw {
+    use types.{error};
+    use key-wrap.{kw-key, kw-key-options};
+    use aes.{aes-variant};
+    use derivation.{derive-input};
+    use wrapping.{unwrap-input};
+
+    /// Import raw key material as the declared AES variant (see
+    /// `aes-gcm.import-key-raw` for the variant-redundancy contract).
+    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: kw-key-options) -> result<kw-key, error>;
+
+    /// Import an RFC 7517 JSON Web Key as an AES-KW key of the declared
+    /// variant. The key must be an `oct` key whose `alg`, if present,
+    /// names the declared variant (`"A128KW"`/`"A192KW"`/`"A256KW"`);
+    /// otherwise as `aes-gcm.import-key-jwk`.
+    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: kw-key-options) -> result<kw-key, error>;
+
+    /// Generate a fresh random key of the given AES variant. Fails with
+    /// `error.unsupported` if this implementation does not serve the
+    /// variant.
+    generate-key: async func(%variant: aes-variant, options: kw-key-options) -> result<kw-key, error>;
+
+    /// Mint a key from a parameterized derivation (the
+    /// `aes-gcm.derive-key` contract, minting a `kw-key`).
+    derive-key: async func(%variant: aes-variant, input: borrow<derive-input>, options: kw-key-options) -> result<kw-key, error>;
+
+    /// Mint a key from unwrapped key material read as raw bytes, subject
+    /// to `import-key-raw`'s contract. `input` is consumed; see
+    /// `aes-gcm.unwrap-key-raw` for the options model.
+    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: kw-key-options) -> result<kw-key, error>;
+
+    /// Mint a key from unwrapped key material read as an `oct` JWK,
+    /// subject to `import-key-jwk`'s contract. `input` is consumed.
+    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: kw-key-options) -> result<kw-key, error>;
 }

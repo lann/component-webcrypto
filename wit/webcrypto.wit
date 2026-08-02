@@ -106,6 +106,7 @@ interface types {
 /// them (see `README.md`).
 interface mac {
     use types.{error};
+    use wrapping.{wrap-input};
 
     /// Mint-time policy for a `mac-key`, consumed by the minting
     /// interfaces' functions. Grants nothing by default; see `README.md`,
@@ -191,6 +192,16 @@ interface mac {
         /// extractability gate as `export-key-raw`. See `README.md`,
         /// "JWK contract".
         export-key-jwk: async func() -> result<string, error>;
+
+        /// This key's raw material as a `wrap-input`, for wrapping
+        /// under another key (see the `wrapping` interface). Behind the
+        /// same extractability gate as `export-key-raw`; the material
+        /// itself never reaches the caller.
+        to-wrap-input-raw: async func() -> result<wrap-input, error>;
+
+        /// The JWK serialization as a `wrap-input`, behind the same
+        /// gate. See `README.md`, "JWK contract".
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
     }
 }
 
@@ -209,23 +220,21 @@ interface mac {
 /// operations directly.
 interface aead {
     use types.{error};
+    use wrapping.{wrap-input, unwrap-input};
 
     /// Mint-time policy for an `aead-key`. Grants nothing by default; see
-    /// `README.md`, "Key-options contract". `wrap`/`unwrap` are vocabulary
-    /// ahead of operations: the usage bits must be mintable (and
-    /// platform-storable) before this package grows wrap operations.
+    /// `README.md`, "Key-options contract".
     resource aead-key-options {
         constructor();
         /// Whether the minted key may `seal`. Disabled by default.
         can-seal: func(allowed: bool);
         /// Whether the minted key may `open`. Disabled by default.
         can-open: func(allowed: bool);
-        /// Whether the minted key may wrap keys (no operation yet; the
-        /// usage is recorded and enforced by platform backends). Disabled
-        /// by default.
+        /// Whether the minted key may `wrap` key material. Disabled by
+        /// default.
         can-wrap: func(allowed: bool);
-        /// Whether the minted key may unwrap keys (see `can-wrap`).
-        /// Disabled by default.
+        /// Whether the minted key may `unwrap` key material (see
+        /// `can-wrap`). Disabled by default.
         can-unwrap: func(allowed: bool);
         /// Whether the minted key's material may be exported. Disabled by
         /// default.
@@ -282,6 +291,35 @@ interface aead {
         ///   fails.
         open: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
+        /// Encrypt and authenticate serialized key material under `nonce`
+        /// with the associated data `aad`, exactly as `seal` encrypts a
+        /// message: the result is ciphertext followed by tag,
+        /// byte-identical to sealing the same serialization (the W3C Web
+        /// Cryptography API's `wrapKey`). See `seal` for the `nonce` and
+        /// `tag-size` contracts; see the `wrapping` interface for the
+        /// model.
+        ///
+        /// Security:
+        /// - The caller owns nonce uniqueness across `seal` and `wrap`
+        ///   alike: both draw on the same key's nonce space.
+        ///
+        /// `input` is consumed. Requires `can-wrap`, else
+        /// `error.not-permitted`.
+        wrap: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, input: wrap-input) -> result<list<u8>, error>;
+
+        /// Decrypt and verify wrapped key material, as produced by `wrap`
+        /// (or by `seal` over the same serialization) under `nonce` and
+        /// `aad`. The result awaits a typed mint by an `unwrap-key`
+        /// function (see `unwrap-input`); the material never reaches the
+        /// caller.
+        ///
+        /// Security:
+        /// - A success resolves only after the tag verifies. Fails with
+        ///   `error.authentication-failed` if verification fails.
+        ///
+        /// Requires `can-unwrap`, else `error.not-permitted`.
+        unwrap: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, wrapped: list<u8>) -> result<unwrap-input, error>;
+
         /// The registry name of the algorithm family this key is bound to,
         /// e.g. `"AES-GCM"` (WebCrypto's `KeyAlgorithm.name`). Parameters
         /// are separate getters, as for `mac-key.algorithm-name`.
@@ -315,11 +353,11 @@ interface aead {
         /// Whether this key permits `open`. See `can-seal`.
         can-open: func() -> bool;
 
-        /// Whether this key permits wrapping keys — recorded usage; no
-        /// operation in this package yet. See `aead-key-options.can-wrap`.
+        /// Whether this key permits `wrap`. A refused operation fails
+        /// `error.not-permitted`.
         can-wrap: func() -> bool;
 
-        /// Whether this key permits unwrapping keys. See `can-wrap`.
+        /// Whether this key permits `unwrap`. See `can-wrap`.
         can-unwrap: func() -> bool;
 
         /// The raw key material. Fails with `error.not-extractable` unless
@@ -331,6 +369,17 @@ interface aead {
         /// "JWK contract". Algorithms with no registered JWK form
         /// (the XChaCha constructions) fail `error.unsupported`.
         export-key-jwk: async func() -> result<string, error>;
+
+        /// This key's raw material as a `wrap-input`, for wrapping
+        /// under another key (see the `wrapping` interface). Behind the
+        /// same extractability gate as `export-key-raw`; the material
+        /// itself never reaches the caller.
+        to-wrap-input-raw: async func() -> result<wrap-input, error>;
+
+        /// The JWK serialization as a `wrap-input`, behind the same
+        /// gate; algorithms with no registered JWK form fail
+        /// `error.unsupported`, as on `export-key-jwk`.
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
     }
 }
 
@@ -357,6 +406,7 @@ interface aead {
 /// extractability, and getter contracts in `README.md` apply.
 interface aead-internal-nonce {
     use types.{error};
+    use wrapping.{wrap-input};
 
     /// Mint-time policy for an `internal-nonce-key`. Grants nothing by
     /// default; see `README.md`, "Key-options contract". The vocabulary is
@@ -443,6 +493,18 @@ interface aead-internal-nonce {
         /// fail `error.unsupported`, as on `aead-key.export-key-jwk`. The
         /// nonce budget does not travel with the material.
         export-key-jwk: async func() -> result<string, error>;
+
+        /// This key's raw material as a `wrap-input`, for wrapping
+        /// under another key (see the `wrapping` interface). Behind the
+        /// same extractability gate as `export-key-raw`; the material
+        /// itself never reaches the caller. As with the exports, the
+        /// nonce budget does not travel with the material.
+        to-wrap-input-raw: async func() -> result<wrap-input, error>;
+
+        /// The JWK serialization as a `wrap-input`, behind the same
+        /// gate; algorithms with no registered JWK form fail
+        /// `error.unsupported`, as on `export-key-jwk`.
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
     }
 }
 
@@ -467,22 +529,21 @@ interface aead-internal-nonce {
 ///   documents it. The caller owns it, as with `aead` nonces.
 interface cipher {
     use types.{error};
+    use wrapping.{wrap-input, unwrap-input};
 
     /// Mint-time policy for a `cipher-key`. Grants nothing by default; see
-    /// `README.md`, "Key-options contract". `wrap`/`unwrap` are vocabulary
-    /// ahead of operations, as on `aead-key-options`.
+    /// `README.md`, "Key-options contract".
     resource cipher-key-options {
         constructor();
         /// Whether the minted key may `encrypt`. Disabled by default.
         can-encrypt: func(allowed: bool);
         /// Whether the minted key may `decrypt`. Disabled by default.
         can-decrypt: func(allowed: bool);
-        /// Whether the minted key may wrap keys (no operation yet; the
-        /// usage is recorded and enforced by platform backends). Disabled
-        /// by default.
+        /// Whether the minted key may `wrap` key material. Disabled by
+        /// default.
         can-wrap: func(allowed: bool);
-        /// Whether the minted key may unwrap keys (see `can-wrap`).
-        /// Disabled by default.
+        /// Whether the minted key may `unwrap` key material (see
+        /// `can-wrap`). Disabled by default.
         can-unwrap: func(allowed: bool);
         /// Whether the minted key's material may be exported. Disabled by
         /// default.
@@ -523,6 +584,38 @@ interface cipher {
         ///   across conditions (see the interface doc).
         decrypt: async func(iv: list<u8>, counter-length: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
+        /// Encrypt serialized key material under `iv`, exactly as
+        /// `encrypt` encrypts a message: the result is byte-identical to
+        /// encrypting the same serialization (the W3C Web Cryptography
+        /// API's `wrapKey` under an encryption algorithm). See `encrypt`
+        /// for the `iv` and `counter-length` contracts; see the
+        /// `wrapping` interface for the model.
+        ///
+        /// Security:
+        /// - Nothing here authenticates, and the caller owns the IV
+        ///   discipline, as on `encrypt`. Prefer an `aead` or `kw-key`
+        ///   wrapping key; use this one only where an existing format
+        ///   fixes the mode.
+        ///
+        /// `input` is consumed. Requires `can-wrap`, else
+        /// `error.not-permitted`.
+        wrap: async func(iv: list<u8>, counter-length: option<u8>, input: wrap-input) -> result<list<u8>, error>;
+
+        /// Decrypt wrapped key material, as produced by `wrap` (or by
+        /// `encrypt` over the same serialization) under `iv`. The result
+        /// awaits a typed mint by an `unwrap-key` function (see
+        /// `unwrap-input`); the material never reaches the caller.
+        ///
+        /// Security:
+        /// - The result is *unauthenticated*: a success is no evidence
+        ///   the wrapped material is untampered, and the typed mint's
+        ///   parse is not authentication. Malformed input fails
+        ///   `error.other`, deliberately uniform across conditions (see
+        ///   the interface doc).
+        ///
+        /// Requires `can-unwrap`, else `error.not-permitted`.
+        unwrap: async func(iv: list<u8>, counter-length: option<u8>, wrapped: list<u8>) -> result<unwrap-input, error>;
+
         /// The registry name of the algorithm family this key is bound
         /// to, e.g. `"AES-CBC"` (WebCrypto's `KeyAlgorithm.name`).
         /// Parameters are separate getters, as for
@@ -548,12 +641,11 @@ interface cipher {
         /// Whether this key permits `decrypt`. See `can-encrypt`.
         can-decrypt: func() -> bool;
 
-        /// Whether this key permits wrapping keys — recorded usage; no
-        /// operation in this package yet. See
-        /// `cipher-key-options.can-wrap`.
+        /// Whether this key permits `wrap`. A refused operation fails
+        /// `error.not-permitted`.
         can-wrap: func() -> bool;
 
-        /// Whether this key permits unwrapping keys. See `can-wrap`.
+        /// Whether this key permits `unwrap`. See `can-wrap`.
         can-unwrap: func() -> bool;
 
         /// The raw key material. Fails with `error.not-extractable` unless
@@ -564,6 +656,16 @@ interface cipher {
         /// extractability gate as `export-key-raw`. See `README.md`,
         /// "JWK contract".
         export-key-jwk: async func() -> result<string, error>;
+
+        /// This key's raw material as a `wrap-input`, for wrapping
+        /// under another key (see the `wrapping` interface). Behind the
+        /// same extractability gate as `export-key-raw`; the material
+        /// itself never reaches the caller.
+        to-wrap-input-raw: async func() -> result<wrap-input, error>;
+
+        /// The JWK serialization as a `wrap-input`, behind the same
+        /// gate. See `README.md`, "JWK contract".
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
     }
 }
 
@@ -636,6 +738,7 @@ interface bytes {
 /// The streaming contract in `README.md` applies to `sign` and `verify`.
 interface signature {
     use types.{error};
+    use wrapping.{wrap-input};
 
     /// Mint-time policy for a `signing-key`. Grants nothing by default;
     /// see `README.md`, "Key-options contract". `can-sign` is the sole
@@ -744,5 +847,16 @@ interface signature {
         /// The private key as a PKCS#8 PrivateKeyInfo (DER), behind the
         /// same extractability gate as `export-key-jwk`.
         export-key-pkcs8: async func() -> result<list<u8>, error>;
+
+        /// The private-key JWK serialization as a `wrap-input`, for
+        /// wrapping under another key (see the `wrapping` interface).
+        /// Behind the same extractability gate as `export-key-jwk`, and
+        /// fallible beyond it like every export; the material itself
+        /// never reaches the caller.
+        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
+
+        /// The PKCS#8 serialization as a `wrap-input`, behind the same
+        /// gate.
+        to-wrap-input-pkcs8: async func() -> result<wrap-input, error>;
     }
 }
