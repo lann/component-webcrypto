@@ -14,14 +14,13 @@ rust-checks:
     @just _step test-webcrypto-composed
     @just _step conformance
 
-# Everything the jco CI job runs.
+# Everything the jco CI job runs. The three WPT parity engines run in
+# parallel over one shared artifact build (_wpt-parity-gates).
 jco-checks:
     @just _step typecheck-jco
     @just _step test-jco-host
     @just _step test-node
-    @just _step wpt-parity
-    @just _step _wpt-parity-firefox-gate
-    @just _step _wpt-parity-chromium-gate
+    @just _step _wpt-parity-gates
 
 # Everything the componentize CI job runs: the webcrypto-componentize JS
 # guest library's behavioral checks (the composed demo) and the WPT
@@ -253,7 +252,11 @@ update-wpt-expectations: compose-wpt-runner
 # what the carrier stack (shim, WIT shape, component ABI, jco) loses.
 # Needs Node 24+ and the pinned componentize-js (downloaded — see
 # js/componentize/wpt/component.sh).
-wpt-parity: _wpt-parity-legs
+wpt-parity: _wpt-parity-artifacts _wpt-parity-node-run
+
+# The Node engine's legs + comparator; the artifacts are already built
+# (_wpt-parity-artifacts), so parallel engine runs share one build.
+_wpt-parity-node-run: _wpt-parity-node-legs
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline.json \
         js/componentize/wpt/build/parity-roundtrip.json
@@ -276,7 +279,11 @@ update-wpt-parity: _wpt-parity-legs
 # ratchets separately. The engine is Playwright's pinned Firefox build,
 # launched with Gecko's JSPI pref; install it once with
 # `cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`.
-wpt-parity-firefox: wpt-web-artifacts
+wpt-parity-firefox: wpt-web-artifacts _wpt-parity-firefox-run
+
+# The Firefox engine's run + comparator; the web artifacts are already
+# built (wpt-web-artifacts).
+_wpt-parity-firefox-run:
     cd js/componentize/wpt/parity && timeout 900 npm run -s run:firefox
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline-firefox.json \
@@ -292,25 +299,16 @@ update-wpt-parity-firefox: wpt-web-artifacts
         js/componentize/wpt/build/parity-roundtrip-firefox.json \
         --losses losses-firefox.js --update
 
-# Run the Firefox WPT parity gate when gating applies: always under GitHub
-# Actions, locally only with WPT_PARITY_FIREFOX=1 (skips with a notice
-# otherwise — the Playwright Firefox download is not a baseline local
-# dependency).
-_wpt-parity-firefox-gate:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${WPT_PARITY_FIREFOX:-}" != "1" ]; then
-        echo "skipping the Firefox WPT parity gate (opt in with WPT_PARITY_FIREFOX=1; needs Playwright Firefox: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox)"
-        exit 0
-    fi
-    just wpt-parity-firefox
-
 # Run the WPT parity gate in headless Chromium: like wpt-parity-firefox,
 # against Chromium's own pinned loss set in
 # js/componentize/wpt/parity/losses-chromium.js. The engine is Playwright's
 # pinned Chromium build (which ships JSPI); install it once with
 # `cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium`.
-wpt-parity-chromium: wpt-web-artifacts
+wpt-parity-chromium: wpt-web-artifacts _wpt-parity-chromium-run
+
+# The Chromium engine's run + comparator; the web artifacts are already
+# built (wpt-web-artifacts).
+_wpt-parity-chromium-run:
     cd js/componentize/wpt/parity && timeout 900 npm run -s run:chromium
     node js/componentize/wpt/parity/compare.mjs \
         js/componentize/wpt/build/parity-baseline-chromium.json \
@@ -326,17 +324,68 @@ update-wpt-parity-chromium: wpt-web-artifacts
         js/componentize/wpt/build/parity-roundtrip-chromium.json \
         --losses losses-chromium.js --update
 
-# Run the Chromium WPT parity gate when gating applies: always under
-# GitHub Actions, locally only with WPT_PARITY_CHROMIUM=1 (skips with a
-# notice otherwise).
-_wpt-parity-chromium-gate:
+# Run every applicable WPT parity gate, the engines in parallel over one
+# shared artifact build: Node always; Firefox and Chromium always under
+# GitHub Actions, locally only when opted in with WPT_PARITY_FIREFOX=1 /
+# WPT_PARITY_CHROMIUM=1 (each skips with a notice otherwise — the
+# Playwright browser downloads are not baseline local dependencies; see
+# wpt-parity-firefox / wpt-parity-chromium for the installs). The engines
+# are independent — each writes its own record files and pins its own loss
+# set — so they parallelize cleanly; each engine's output is buffered to
+# target/wpt-parity/<engine>.log and printed whole when it finishes, so
+# failures read per engine. (The WebKit leg is not driven from here: it
+# needs macOS — see wpt-parity-webkit.)
+_wpt-parity-gates:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${WPT_PARITY_CHROMIUM:-}" != "1" ]; then
-        echo "skipping the Chromium WPT parity gate (opt in with WPT_PARITY_CHROMIUM=1; needs Playwright Chromium: cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium)"
-        exit 0
+    firefox=""; chromium=""
+    if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${WPT_PARITY_FIREFOX:-}" = "1" ]; then firefox=1; fi
+    if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${WPT_PARITY_CHROMIUM:-}" = "1" ]; then chromium=1; fi
+    just _wpt-parity-artifacts
+    if [ -n "$firefox" ] || [ -n "$chromium" ]; then
+        just _wpt-web-transpile
     fi
-    just wpt-parity-chromium
+    engines=(node)
+    if [ -n "$firefox" ]; then engines+=(firefox); else
+        echo "skipping the Firefox WPT parity gate (opt in with WPT_PARITY_FIREFOX=1; needs Playwright Firefox: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox)"
+    fi
+    if [ -n "$chromium" ]; then engines+=(chromium); else
+        echo "skipping the Chromium WPT parity gate (opt in with WPT_PARITY_CHROMIUM=1; needs Playwright Chromium: cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium)"
+    fi
+    mkdir -p target/wpt-parity
+    echo "wpt parity: running engines in parallel: ${engines[*]} (logs in target/wpt-parity/)"
+    pids=()
+    for engine in "${engines[@]}"; do
+        just "_wpt-parity-${engine}-run" > "target/wpt-parity/${engine}.log" 2>&1 &
+        pids+=($!)
+    done
+    status=0
+    for i in "${!engines[@]}"; do
+        verdict=ok
+        wait "${pids[$i]}" || { verdict="FAILED (exit $?)"; status=1; }
+        echo "--- wpt parity (${engines[$i]}): ${verdict} ---"
+        cat "target/wpt-parity/${engines[$i]}.log"
+    done
+    exit $status
+
+# Produce both of the Node engine's parity legs' results under
+# js/componentize/wpt/build/ (artifacts + legs; the update recipe's hook).
+_wpt-parity-legs: _wpt-parity-artifacts _wpt-parity-node-legs
+
+# Build what the Node engine's legs consume: componentize the ungated
+# parity runner from the tree and transpile it with jco against the jco
+# host.
+_wpt-parity-artifacts:
+    js/componentize/wpt/component.sh build-parity
+    cd js/componentize/wpt/parity && npm run -s transpile
+
+# Run the Node engine's two legs on this Node, each writing its records
+# under js/componentize/wpt/build/.
+_wpt-parity-node-legs:
+    node js/componentize/wpt/parity/baseline.mjs \
+        > js/componentize/wpt/build/parity-baseline.json
+    cd js/componentize/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
+        > ../build/parity-roundtrip.json
 
 # Run the WPT parity gate in headless WebKit: like the other browser legs,
 # against WebKit's own pinned loss set in
@@ -366,31 +415,25 @@ update-wpt-parity-webkit:
         js/componentize/wpt/build/parity-roundtrip-webkit.json \
         --losses losses-webkit.js --update
 
-# Produce both parity legs' results under js/componentize/wpt/build/:
-# componentize the ungated parity runner from the tree, transpile it with
-# jco against the jco host, and run each leg on this Node.
-_wpt-parity-legs:
-    js/componentize/wpt/component.sh build-parity
-    cd js/componentize/wpt/parity && npm run -s transpile
-    node js/componentize/wpt/parity/baseline.mjs \
-        > js/componentize/wpt/build/parity-baseline.json
-    cd js/componentize/wpt/parity && node --experimental-wasm-jspi roundtrip.mjs \
-        > ../build/parity-roundtrip.json
-
 # Build everything the browser WPT parity page (js/componentize/wpt/web/)
 # loads: the suite modules under build/, the web transpile of the parity
-# runner under parity/generated-web/ (every import a relative path, so it
-# loads in the page's worker; the guard keeps that invariant honest), and
-# the preview2-shim browser build those imports resolve to (vendored from
-# the parity package's node_modules into web/preview2-shim/, with its
-# license).
+# runner under parity/generated-web/, and the preview2-shim browser build.
 wpt-web-artifacts:
+    js/componentize/wpt/component.sh build-parity
+    @just _wpt-web-transpile
+
+# The web-transpile half of wpt-web-artifacts (the parity runner component
+# is already built): the web transpile of the parity runner under
+# parity/generated-web/ (every import a relative path, so it loads in the
+# page's worker; the guard keeps that invariant honest), and the
+# preview2-shim browser build those imports resolve to (vendored from the
+# parity package's node_modules into web/preview2-shim/, with its license).
+_wpt-web-transpile:
     #!/usr/bin/env bash
     set -euo pipefail
-    js/componentize/wpt/component.sh build-parity
     (cd js/componentize/wpt/parity && npm run -s transpile:web)
     if grep -q "from '@" js/componentize/wpt/parity/generated-web/parity-runner.js; then
-        echo "wpt-web-artifacts: generated-web carries a bare module import (a wasi map in" >&2
+        echo "wpt web transpile: generated-web carries a bare module import (a wasi map in" >&2
         echo "parity/package.json's transpile:web no longer covers every wasi interface?):" >&2
         grep "from '@" js/componentize/wpt/parity/generated-web/parity-runner.js >&2
         exit 1
