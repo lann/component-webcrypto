@@ -54,6 +54,80 @@ fn variant_parts(variant: EcdsaVariant) -> Result<(EcdsaCurve, EcdsaHash), Error
     })
 }
 
+/// Stamp one body per served curve, dispatching on [`EcdsaCurve`]. Within
+/// the body, `$ec` aliases the curve's `ecdsa` crate module, `$mint` is
+/// the curve's `EcdsaP256`/`EcdsaP384` constructor of `$enum`, and `$name`
+/// binds the registry curve name.
+macro_rules! per_curve {
+    ($curve:expr, $enum:ident, |$ec:ident, $mint:ident, $name:ident| $body:expr) => {
+        match $curve {
+            EcdsaCurve::P256 => {
+                use p256::ecdsa as $ec;
+                let $mint = $enum::EcdsaP256;
+                let $name = "P-256";
+                $body
+            }
+            EcdsaCurve::P384 => {
+                use p384::ecdsa as $ec;
+                let $mint = $enum::EcdsaP384;
+                let $name = "P-384";
+                $body
+            }
+        }
+    };
+}
+
+/// Stamp a match over [`SigPublic`] whose two ECDSA arms come from one
+/// body, expanded once per served curve. The optional binders hand the
+/// body the per-curve pieces: `mod $ec` aliases the curve's `ecdsa` crate
+/// module, and `curve $name` binds the registry curve name.
+macro_rules! sig_public_match {
+    ($scrutinee:expr,
+     Ed25519($ed:pat) => $ed_body:expr,
+     Ecdsa($key:pat, $hash:pat $(, mod $ec:ident)? $(, curve $name:ident)?) => $ec_body:expr $(,)?
+    ) => {
+        match $scrutinee {
+            SigPublic::Ed25519($ed) => $ed_body,
+            SigPublic::EcdsaP256($key, $hash) => {
+                $(use p256::ecdsa as $ec;)?
+                $(let $name = "P-256";)?
+                $ec_body
+            }
+            SigPublic::EcdsaP384($key, $hash) => {
+                $(use p384::ecdsa as $ec;)?
+                $(let $name = "P-384";)?
+                $ec_body
+            }
+        }
+    };
+}
+
+/// [`sig_public_match!`]'s counterpart over [`SigPrivate`]: the stamped
+/// ECDSA arms carry the class-D cfg, so they are structurally absent from
+/// wasm builds (see [`SigPrivate`]).
+macro_rules! sig_private_match {
+    ($scrutinee:expr,
+     Ed25519($ed:pat) => $ed_body:expr,
+     Ecdsa($key:pat, $hash:pat $(, mod $ec:ident)? $(, curve $name:ident)?) => $ec_body:expr $(,)?
+    ) => {
+        match $scrutinee {
+            SigPrivate::Ed25519($ed) => $ed_body,
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP256($key, $hash) => {
+                $(use p256::ecdsa as $ec;)?
+                $(let $name = "P-256";)?
+                $ec_body
+            }
+            #[cfg(not(target_family = "wasm"))]
+            SigPrivate::EcdsaP384($key, $hash) => {
+                $(use p384::ecdsa as $ec;)?
+                $(let $name = "P-384";)?
+                $ec_body
+            }
+        }
+    };
+}
+
 /// The algorithm behind a signature key, shared by the public and private
 /// halves so the `algorithm-name`/`-curve`/`-hash` getters have one table.
 #[derive(Clone, Copy)]
@@ -130,14 +204,11 @@ impl SigPublic {
                 "{variant:?} public keys are uncompressed SEC1 points ({expected} bytes, leading 0x04)"
             )));
         }
-        match curve {
-            EcdsaCurve::P256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(raw)
-                .map(|key| Self::EcdsaP256(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-256 public key: {err}"))),
-            EcdsaCurve::P384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(raw)
-                .map(|key| Self::EcdsaP384(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-384 public key: {err}"))),
-        }
+        per_curve!(curve, SigPublic, |ec, mint, name| {
+            ec::VerifyingKey::from_sec1_bytes(raw)
+                .map(|key| mint(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid {name} public key: {err}")))
+        })
     }
 
     /// Import an Ed25519 public key from a SubjectPublicKeyInfo (the
@@ -161,14 +232,11 @@ impl SigPublic {
     pub fn import_ecdsa_spki(variant: EcdsaVariant, spki: &[u8]) -> Result<Self, Error> {
         use spki::DecodePublicKey as _;
         let (curve, hash) = variant_parts(variant)?;
-        match curve {
-            EcdsaCurve::P256 => p256::ecdsa::VerifyingKey::from_public_key_der(spki)
-                .map(|key| Self::EcdsaP256(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-256 spki: {err}"))),
-            EcdsaCurve::P384 => p384::ecdsa::VerifyingKey::from_public_key_der(spki)
-                .map(|key| Self::EcdsaP384(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-384 spki: {err}"))),
-        }
+        per_curve!(curve, SigPublic, |ec, mint, name| {
+            ec::VerifyingKey::from_public_key_der(spki)
+                .map(|key| mint(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid {name} spki: {err}")))
+        })
     }
 
     /// Import an ECDSA public key from an EC public JWK (the
@@ -213,45 +281,36 @@ impl SigPublic {
     /// The public key material in the minting interface's documented form:
     /// raw 32 bytes for Ed25519, an uncompressed SEC1 point for ECDSA.
     pub fn export(&self) -> Vec<u8> {
-        match self {
-            Self::Ed25519(key) => key.to_bytes().to_vec(),
-            Self::EcdsaP256(key, _) => key.to_encoded_point(false).as_bytes().to_vec(),
-            Self::EcdsaP384(key, _) => key.to_encoded_point(false).as_bytes().to_vec(),
-        }
+        sig_public_match!(self,
+            Ed25519(key) => key.to_bytes().to_vec(),
+            Ecdsa(key, _) => key.to_encoded_point(false).as_bytes().to_vec(),
+        )
     }
 
     /// The public key as a SubjectPublicKeyInfo
     /// (`verifying-key.export-key-spki`).
     pub fn export_spki(&self) -> Vec<u8> {
         use spki::EncodePublicKey as _;
-        match self {
-            Self::Ed25519(key) => {
+        sig_public_match!(self,
+            Ed25519(key) => {
                 crate::der8410::rfc8410_spki(crate::der8410::OID_ED25519, key.as_bytes())
-            }
-            Self::EcdsaP256(key, _) => key
+            },
+            Ecdsa(key, _) => key
                 .to_public_key_der()
                 .expect("valid key encodes")
                 .into_vec(),
-            Self::EcdsaP384(key, _) => key
-                .to_public_key_der()
-                .expect("valid key encodes")
-                .into_vec(),
-        }
+        )
     }
 
     /// The public key as a JWK (`verifying-key.export-key-jwk`).
     pub fn export_jwk(&self) -> String {
-        match self {
-            Self::Ed25519(key) => crate::jwk::build_okp_public("Ed25519", key.as_bytes()),
-            Self::EcdsaP256(key, _) => {
+        sig_public_match!(self,
+            Ed25519(key) => crate::jwk::build_okp_public("Ed25519", key.as_bytes()),
+            Ecdsa(key, _, curve name) => {
                 let point = key.to_encoded_point(false);
-                crate::jwk::build_ec_public("P-256", point.x().unwrap(), point.y().unwrap())
-            }
-            Self::EcdsaP384(key, _) => {
-                let point = key.to_encoded_point(false);
-                crate::jwk::build_ec_public("P-384", point.x().unwrap(), point.y().unwrap())
-            }
-        }
+                crate::jwk::build_ec_public(name, point.x().unwrap(), point.y().unwrap())
+            },
+        )
     }
 
     /// One-shot verification of `sig` over `data`, failing closed with
@@ -261,31 +320,21 @@ impl SigPublic {
     /// criterion.
     pub fn verify(&self, data: &[u8], sig: &[u8]) -> Result<(), Error> {
         use p256::ecdsa::signature::hazmat::PrehashVerifier as _;
-        /// Verify under the mint-bound digest via the prehash path: its
-        /// bits2field conversion applies FIPS 186-5's leftmost-bits rule
-        /// for digests wider or narrower than the curve.
-        macro_rules! ecdsa_verify {
-            ($key:expr, $hash:expr, $sigty:ty, $sig:expr, $data:expr) => {
-                <$sigty>::from_slice($sig)
-                    .map_err(|_| ())
-                    .and_then(|sig| {
-                        $key.verify_prehash(&ecdsa_digest(*$hash, $data), &sig)
-                            .map_err(|_| ())
-                    })
-                    .is_ok()
-            };
-        }
-        let ok = match self {
-            Self::Ed25519(key) => ed25519_dalek::Signature::from_slice(sig)
+        let ok = sig_public_match!(self,
+            Ed25519(key) => ed25519_dalek::Signature::from_slice(sig)
                 .and_then(|sig| key.verify_strict(data, &sig))
                 .is_ok(),
-            Self::EcdsaP256(key, hash) => {
-                ecdsa_verify!(key, hash, p256::ecdsa::Signature, sig, data)
-            }
-            Self::EcdsaP384(key, hash) => {
-                ecdsa_verify!(key, hash, p384::ecdsa::Signature, sig, data)
-            }
-        };
+            // Verify under the mint-bound digest via the prehash path: its
+            // bits2field conversion applies FIPS 186-5's leftmost-bits rule
+            // for digests wider or narrower than the curve.
+            Ecdsa(key, hash, mod ec) => ec::Signature::from_slice(sig)
+                .map_err(|_| ())
+                .and_then(|sig| {
+                    key.verify_prehash(&ecdsa_digest(*hash, data), &sig)
+                        .map_err(|_| ())
+                })
+                .is_ok(),
+        );
         if ok {
             Ok(())
         } else {
@@ -430,14 +479,11 @@ impl SigningKeyMaterial {
         policy: SigningPolicy,
     ) -> Result<Self, Error> {
         let (curve, hash) = variant_parts(variant)?;
-        let private = match curve {
-            EcdsaCurve::P256 => p256::ecdsa::SigningKey::from_slice(raw)
-                .map(|key| SigPrivate::EcdsaP256(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-256 private key: {err}")))?,
-            EcdsaCurve::P384 => p384::ecdsa::SigningKey::from_slice(raw)
-                .map(|key| SigPrivate::EcdsaP384(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-384 private key: {err}")))?,
-        };
+        let private = per_curve!(curve, SigPrivate, |ec, mint, name| {
+            ec::SigningKey::from_slice(raw)
+                .map(|key| mint(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid {name} private key: {err}")))
+        })?;
         Ok(Self { private, policy })
     }
 
@@ -454,14 +500,11 @@ impl SigningKeyMaterial {
         use pkcs8::DecodePrivateKey as _;
         policy.check_useful()?;
         let (curve, hash) = variant_parts(variant)?;
-        let private = match curve {
-            EcdsaCurve::P256 => p256::ecdsa::SigningKey::from_pkcs8_der(pkcs8_der)
-                .map(|key| SigPrivate::EcdsaP256(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-256 pkcs8: {err}")))?,
-            EcdsaCurve::P384 => p384::ecdsa::SigningKey::from_pkcs8_der(pkcs8_der)
-                .map(|key| SigPrivate::EcdsaP384(key, hash))
-                .map_err(|err| Error::InvalidKey(format!("invalid P-384 pkcs8: {err}")))?,
-        };
+        let private = per_curve!(curve, SigPrivate, |ec, mint, name| {
+            ec::SigningKey::from_pkcs8_der(pkcs8_der)
+                .map(|key| mint(key, hash))
+                .map_err(|err| Error::InvalidKey(format!("invalid {name} pkcs8: {err}")))
+        })?;
         Ok(Self { private, policy })
     }
 
@@ -572,9 +615,12 @@ impl SigningKeyMaterial {
         if !self.policy.sign {
             return Err(not_permitted("sign"));
         }
-        #[cfg(not(target_family = "wasm"))]
-        macro_rules! ecdsa_sign {
-            ($key:expr, $hash:expr, $sigty:ty, $data:expr) => {{
+        Ok(sig_private_match!(&self.private,
+            Ed25519(key) => {
+                use ed25519_dalek::Signer as _;
+                key.sign(data).to_bytes().to_vec()
+            },
+            Ecdsa(key, hash, mod ec) => {
                 use p256::ecdsa::signature::hazmat::PrehashSigner as _;
                 // Deterministic (RFC 6979-style HMAC-DRBG over the curve's
                 // digest) and verify-compatible with any conforming
@@ -583,26 +629,12 @@ impl SigningKeyMaterial {
                 // randomized-k implementations both verify while differing
                 // in bytes, and cross-hash variants differ from the RFC's
                 // published vectors in their nonce-derivation hash.
-                let sig: $sigty = $key
-                    .sign_prehash(&ecdsa_digest(*$hash, $data))
+                let sig: ec::Signature = key
+                    .sign_prehash(&ecdsa_digest(*hash, data))
                     .expect("prehash length is a digest's; signing cannot fail");
                 sig.to_bytes().to_vec()
-            }};
-        }
-        Ok(match &self.private {
-            SigPrivate::Ed25519(key) => {
-                use ed25519_dalek::Signer as _;
-                key.sign(data).to_bytes().to_vec()
-            }
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key, hash) => {
-                ecdsa_sign!(key, hash, p256::ecdsa::Signature, data)
-            }
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key, hash) => {
-                ecdsa_sign!(key, hash, p384::ecdsa::Signature, data)
-            }
-        })
+            },
+        ))
     }
 
     /// The corresponding [`SigPublic`]. There is no WIT derive contract —
@@ -656,13 +688,10 @@ impl SigningKeyMaterial {
         if !self.policy.extractable {
             return Err(Error::NotExtractable);
         }
-        Ok(match &self.private {
-            SigPrivate::Ed25519(key) => key.to_bytes().to_vec(),
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key, _) => key.to_bytes().to_vec(),
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key, _) => key.to_bytes().to_vec(),
-        })
+        Ok(sig_private_match!(&self.private,
+            Ed25519(key) => key.to_bytes().to_vec(),
+            Ecdsa(key, _) => key.to_bytes().to_vec(),
+        ))
     }
 
     /// The private key as a JWK (the `signing-key.export-key-jwk`
@@ -674,33 +703,22 @@ impl SigningKeyMaterial {
         if !self.policy.extractable {
             return Err(Error::NotExtractable);
         }
-        Ok(match &self.private {
-            SigPrivate::Ed25519(key) => crate::jwk::build_okp_private(
+        Ok(sig_private_match!(&self.private,
+            Ed25519(key) => crate::jwk::build_okp_private(
                 "Ed25519",
                 key.verifying_key().as_bytes(),
                 &key.to_bytes(),
             ),
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key, _) => {
+            Ecdsa(key, _, curve name) => {
                 let point = key.verifying_key().to_encoded_point(false);
                 crate::jwk::build_ec_private(
-                    "P-256",
+                    name,
                     point.x().unwrap(),
                     point.y().unwrap(),
                     &key.to_bytes(),
                 )
-            }
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key, _) => {
-                let point = key.verifying_key().to_encoded_point(false);
-                crate::jwk::build_ec_private(
-                    "P-384",
-                    point.x().unwrap(),
-                    point.y().unwrap(),
-                    &key.to_bytes(),
-                )
-            }
-        })
+            },
+        ))
     }
 
     /// The private key as a PKCS#8 PrivateKeyInfo (the
@@ -710,27 +728,18 @@ impl SigningKeyMaterial {
         if !self.policy.extractable {
             return Err(Error::NotExtractable);
         }
-        Ok(match &self.private {
-            SigPrivate::Ed25519(key) => {
+        Ok(sig_private_match!(&self.private,
+            Ed25519(key) => {
                 crate::der8410::rfc8410_pkcs8(crate::der8410::OID_ED25519, &key.to_bytes()).to_vec()
-            }
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP256(key, _) => {
+            },
+            Ecdsa(key, _) => {
                 use pkcs8::EncodePrivateKey as _;
                 key.to_pkcs8_der()
                     .expect("valid key encodes")
                     .to_bytes()
                     .to_vec()
-            }
-            #[cfg(not(target_family = "wasm"))]
-            SigPrivate::EcdsaP384(key, _) => {
-                use pkcs8::EncodePrivateKey as _;
-                key.to_pkcs8_der()
-                    .expect("valid key encodes")
-                    .to_bytes()
-                    .to_vec()
-            }
-        })
+            },
+        ))
     }
 }
 
