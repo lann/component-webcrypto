@@ -233,6 +233,34 @@ function rethrow(e) {
 }
 
 /**
+ * The WIT `types.error` payload a mapped `DOMException` carries in its
+ * `cause` (`mapWitError`'s transport), or `undefined` for any other error.
+ * @param {unknown} e
+ * @returns {WitError | undefined}
+ */
+function witCause(e) {
+  return e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
+}
+
+/**
+ * Map a WIT verify call onto WebCrypto's boolean verdict. The WIT surface
+ * is fail-closed (`result` rather than `bool`); WebCrypto's `verify` is the
+ * one place a failed verification maps back to `false`. Only
+ * `authentication-failed` is a verdict — operational failures stay thrown.
+ * @param {Promise<unknown>} operation
+ * @returns {Promise<boolean>}
+ */
+async function verdict(operation) {
+  try {
+    await operation;
+    return true;
+  } catch (e) {
+    if (witCause(e)?.tag === "authentication-failed") return false;
+    throw e;
+  }
+}
+
+/**
  * Await an async `lann:webcrypto` import and normalize its settlement.
  *
  * componentize-js (as of the revision pinned in componentize-js.rev)
@@ -953,7 +981,7 @@ async function prepareInput(alg, baseKey) {
     try {
       return await callImport(handleOf(baseKey).agree(handleOf(peer)));
     } catch (e) {
-      const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
+      const cause = witCause(e);
       if (cause?.tag === "invalid-key") {
         throw dom(
           "OperationError",
@@ -1689,16 +1717,7 @@ async function verify(algorithm, key, signature, data) {
     const handle =
       alg.name === "ECDSA" ? await ecdsaHandleFor(key, hashNameOf(alg.hash)) : handleOf(key);
     const sig = bytesOf(signature, "signature");
-    try {
-      await callFed((rx) => handle.verify(rx, sig), bytesOf(data, "data"));
-      return true;
-    } catch (e) {
-      const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
-      if (cause?.tag === "authentication-failed") {
-        return false;
-      }
-      throw e;
-    }
+    return verdict(callFed((rx) => handle.verify(rx, sig), bytesOf(data, "data")));
   }
   if (alg.name !== "HMAC") {
     throw dom("NotSupportedError", `unsupported verify algorithm ${alg.name}`);
@@ -1707,20 +1726,7 @@ async function verify(algorithm, key, signature, data) {
   requireUsage(key, "verify");
   const handle = handleOf(key);
   const tag = bytesOf(signature, "signature");
-  try {
-    await callFed((rx) => handle.verify(rx, tag), bytesOf(data, "data"));
-    return true;
-  } catch (e) {
-    // The WIT surface is fail-closed (`result` rather than `bool`);
-    // WebCrypto's `verify` is the one place a failed verification maps back
-    // to `false`. Only `authentication-failed` is a verdict — operational
-    // failures stay thrown.
-    const cause = e instanceof DOMException ? /** @type {WitError | undefined} */ (e.cause) : undefined;
-    if (cause?.tag === "authentication-failed") {
-      return false;
-    }
-    throw e;
-  }
+  return verdict(callFed((rx) => handle.verify(rx, tag), bytesOf(data, "data")));
 }
 
 // The tag lengths the AES-GCM registry entry permits, in bits. A value
@@ -1801,45 +1807,64 @@ function chachaParams(alg) {
 }
 
 /**
+ * The shared body of `encrypt` and `decrypt`: normalize the algorithm,
+ * gate the key's algorithm and usage against `direction`, and run the
+ * matching handle operation over the fed input. The three branches
+ * (unauthenticated cipher modes, ChaCha, GCM) differ in their parameter
+ * validation and in which handle method pair serves them.
+ * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} algorithm
+ * @param {globalThis.CryptoKey} key
+ * @param {BufferSource} data
+ * @param {"encrypt" | "decrypt"} direction
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function cryptOperation(algorithm, key, data, direction) {
+  const alg = normalizeAlgorithm(algorithm);
+  const sealing = direction === "encrypt";
+  if (CIPHER_MODES[alg.name] !== undefined) {
+    const { iv, counterLength } = cipherOpParams(alg);
+    requireKeyAlgorithm(key, alg.name);
+    requireUsage(key, direction);
+    const handle = handleOf(key);
+    const out = await callFedCollect(
+      (rx) =>
+        sealing ? handle.encrypt(iv, counterLength, rx) : handle.decrypt(iv, counterLength, rx),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(out);
+  }
+  if (alg.name === "ChaCha20-Poly1305") {
+    const { iv, aad } = chachaParams(alg);
+    requireKeyAlgorithm(key, "ChaCha20-Poly1305");
+    requireUsage(key, direction);
+    const handle = handleOf(key);
+    const out = await callFedCollect(
+      (rx) => (sealing ? handle.seal(iv, aad, undefined, rx) : handle.open(iv, aad, undefined, rx)),
+      bytesOf(data, "data"),
+    );
+    return toArrayBuffer(out);
+  }
+  const { iv, aad, tagSize } = gcmParams(alg);
+  requireKeyAlgorithm(key, "AES-GCM");
+  requireUsage(key, direction);
+  const handle = handleOf(key);
+  // `seal` output is ciphertext ‖ tag — exactly `subtle.encrypt`'s format,
+  // and the format `open` (like `subtle.decrypt`) expects back.
+  const out = await callFedCollect(
+    (rx) => (sealing ? handle.seal(iv, aad, tagSize, rx) : handle.open(iv, aad, tagSize, rx)),
+    bytesOf(data, "data"),
+  );
+  return toArrayBuffer(out);
+}
+
+/**
  * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} algorithm
  * @param {globalThis.CryptoKey} key
  * @param {BufferSource} data
  * @returns {Promise<ArrayBuffer>}
  */
 async function encrypt(algorithm, key, data) {
-  const alg = normalizeAlgorithm(algorithm);
-  if (CIPHER_MODES[alg.name] !== undefined) {
-    const { iv, counterLength } = cipherOpParams(alg);
-    requireKeyAlgorithm(key, alg.name);
-    requireUsage(key, "encrypt");
-    const handle = handleOf(key);
-    const sealed = await callFedCollect(
-      (rx) => handle.encrypt(iv, counterLength, rx),
-      bytesOf(data, "data"),
-    );
-    return toArrayBuffer(sealed);
-  }
-  if (alg.name === "ChaCha20-Poly1305") {
-    const { iv, aad } = chachaParams(alg);
-    requireKeyAlgorithm(key, "ChaCha20-Poly1305");
-    requireUsage(key, "encrypt");
-    const handle = handleOf(key);
-    const sealed = await callFedCollect(
-      (rx) => handle.seal(iv, aad, undefined, rx),
-      bytesOf(data, "data"),
-    );
-    return toArrayBuffer(sealed);
-  }
-  const { iv, aad, tagSize } = gcmParams(alg);
-  requireKeyAlgorithm(key, "AES-GCM");
-  requireUsage(key, "encrypt");
-  const handle = handleOf(key);
-  // `seal` output is ciphertext ‖ tag: exactly `subtle.encrypt`'s format.
-  const sealed = await callFedCollect(
-    (rx) => handle.seal(iv, aad, tagSize, rx),
-    bytesOf(data, "data"),
-  );
-  return toArrayBuffer(sealed);
+  return cryptOperation(algorithm, key, data, "encrypt");
 }
 
 /**
@@ -1849,38 +1874,7 @@ async function encrypt(algorithm, key, data) {
  * @returns {Promise<ArrayBuffer>}
  */
 async function decrypt(algorithm, key, data) {
-  const alg = normalizeAlgorithm(algorithm);
-  if (CIPHER_MODES[alg.name] !== undefined) {
-    const { iv, counterLength } = cipherOpParams(alg);
-    requireKeyAlgorithm(key, alg.name);
-    requireUsage(key, "decrypt");
-    const handle = handleOf(key);
-    const plaintext = await callFedCollect(
-      (rx) => handle.decrypt(iv, counterLength, rx),
-      bytesOf(data, "data"),
-    );
-    return toArrayBuffer(plaintext);
-  }
-  if (alg.name === "ChaCha20-Poly1305") {
-    const { iv, aad } = chachaParams(alg);
-    requireKeyAlgorithm(key, "ChaCha20-Poly1305");
-    requireUsage(key, "decrypt");
-    const handle = handleOf(key);
-    const plaintext = await callFedCollect(
-      (rx) => handle.open(iv, aad, undefined, rx),
-      bytesOf(data, "data"),
-    );
-    return toArrayBuffer(plaintext);
-  }
-  const { iv, aad, tagSize } = gcmParams(alg);
-  requireKeyAlgorithm(key, "AES-GCM");
-  requireUsage(key, "decrypt");
-  const handle = handleOf(key);
-  const plaintext = await callFedCollect(
-    (rx) => handle.open(iv, aad, tagSize, rx),
-    bytesOf(data, "data"),
-  );
-  return toArrayBuffer(plaintext);
+  return cryptOperation(algorithm, key, data, "decrypt");
 }
 
 /**
