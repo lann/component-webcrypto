@@ -7926,6 +7926,7 @@ cases = [
     { name = "probe/jwk-rejections" },
     { name = "probe/jwk-semantics" },
     { name = "probe/chacha-jwk-contract", features = ["chacha20-poly1305"] },
+    { name = "probe/xchacha-jwk-unsupported", features = ["xchacha20-poly1305"] },
     { name = "probe/mac-usage-policy" },
     { name = "probe/aead-wrap-grants" },
     { name = "probe/internal-nonce-usage-policy" },

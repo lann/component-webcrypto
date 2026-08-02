@@ -25,32 +25,22 @@ use crate::Error;
 /// requested extractability, and return the raw key material (the
 /// `import-key-jwk` contract; every failure is `invalid-key`).
 ///
-/// `expected_alg` is the algorithm's registered JOSE `alg`, or `None` for
-/// the alg-less form (ChaCha20-Poly1305, whose proposal registers no
-/// `alg`): a present member must match a `Some` value, and must be absent
-/// for `None`. An absent member is accepted either way.
-pub fn parse_oct(
-    jwk: &str,
-    expected_alg: Option<&str>,
-    extractable: bool,
-) -> Result<Vec<u8>, Error> {
+/// `expected_alg` is the algorithm's registered JOSE `alg`: a present
+/// member must match it, and an absent member is accepted (JWK `alg` is
+/// optional on import).
+pub fn parse_oct(jwk: &str, expected_alg: &str, extractable: bool) -> Result<Vec<u8>, Error> {
     let jwk = parse_object(jwk)?;
     require_kty(&jwk, "oct")?;
 
-    match (jwk.get("alg"), expected_alg) {
-        (None, _) => {}
-        (Some(Value::String(alg)), Some(expected)) if alg == expected => {}
-        (Some(Value::String(alg)), Some(expected)) => {
+    match jwk.get("alg") {
+        None => {}
+        Some(Value::String(alg)) if alg == expected_alg => {}
+        Some(Value::String(alg)) => {
             return Err(Error::InvalidKey(format!(
-                "JWK alg is {alg:?}, not {expected:?}"
+                "JWK alg is {alg:?}, not {expected_alg:?}"
             )))
         }
-        (Some(Value::String(alg)), None) => {
-            return Err(Error::InvalidKey(format!(
-                "JWK alg is {alg:?}, but this algorithm's JWK form carries no `alg`"
-            )))
-        }
-        (Some(_), _) => return Err(Error::InvalidKey("JWK `alg` must be a string".into())),
+        Some(_) => return Err(Error::InvalidKey("JWK `alg` must be a string".into())),
     }
 
     check_ext(&jwk, extractable)?;
@@ -297,17 +287,14 @@ fn decode_member(name: &str, value: &str) -> Result<Vec<u8>, Error> {
 }
 
 /// Build the `oct` JWK for an export: exactly the material-bearing members
-/// (`kty`, `k`, and `alg` where the algorithm registers one), per the
-/// `export-key-jwk` contract.
-pub fn build_oct(raw: &[u8], alg: Option<&str>) -> String {
-    let mut jwk = serde_json::json!({
+/// (`kty`, `k`, `alg`), per the `export-key-jwk` contract.
+pub fn build_oct(raw: &[u8], alg: &str) -> String {
+    serde_json::json!({
         "kty": "oct",
         "k": URL_SAFE_NO_PAD.encode(raw),
-    });
-    if let Some(alg) = alg {
-        jwk["alg"] = Value::String(alg.into());
-    }
-    jwk.to_string()
+        "alg": alg,
+    })
+    .to_string()
 }
 
 /// Build the OKP public JWK for an export (RFC 8037 §2): exactly the
@@ -338,23 +325,24 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let jwk = build_oct(&[1, 2, 3, 4, 5], Some("HS256"));
-        assert_eq!(
-            parse_oct(&jwk, Some("HS256"), true).unwrap(),
-            vec![1, 2, 3, 4, 5]
-        );
+        let jwk = build_oct(&[1, 2, 3, 4, 5], "HS256");
+        assert_eq!(parse_oct(&jwk, "HS256", true).unwrap(), vec![1, 2, 3, 4, 5]);
     }
 
     #[test]
-    fn alg_less_form_round_trips_and_rejects_a_present_alg() {
-        // The ChaCha20-Poly1305 form: no `alg` member on export…
-        let jwk = build_oct(&[7; 32], None);
-        assert!(!jwk.contains("alg"));
-        assert_eq!(parse_oct(&jwk, None, true).unwrap(), vec![7; 32]);
-        // …and a present one is rejected on import.
+    fn absent_alg_is_accepted_and_a_wrong_one_rejected() {
+        // JWK `alg` is optional on import (the WPT fixtures for
+        // ChaCha20-Poly1305 omit it)…
+        let jwk = r#"{"kty":"oct","k":"AQID"}"#;
+        assert_eq!(parse_oct(jwk, "C20P", false).unwrap(), vec![1, 2, 3]);
+        // …a matching one is accepted…
+        let jwk = build_oct(&[7; 32], "C20P");
+        assert!(jwk.contains(r#""alg":"C20P""#));
+        assert_eq!(parse_oct(&jwk, "C20P", true).unwrap(), vec![7; 32]);
+        // …and another algorithm's is rejected.
         let tagged = r#"{"kty":"oct","k":"AQID","alg":"A256GCM"}"#;
         assert!(matches!(
-            parse_oct(tagged, None, false),
+            parse_oct(tagged, "C20P", false),
             Err(Error::InvalidKey(_))
         ));
     }
@@ -365,32 +353,32 @@ mod tests {
         let raw: Vec<u8> = (1..=32).collect();
         let jwk =
             r#"{"kty":"oct","k":"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA","alg":"HS256"}"#;
-        assert_eq!(parse_oct(jwk, Some("HS256"), false).unwrap(), raw);
+        assert_eq!(parse_oct(jwk, "HS256", false).unwrap(), raw);
     }
 
     #[test]
     fn duplicate_members_resolve_last_wins() {
         // The JSON.parse semantics the contract pins: the second `k` wins.
         let jwk = r#"{"kty":"oct","k":"AAAA","k":"AQID"}"#;
-        assert_eq!(parse_oct(jwk, Some("HS256"), false).unwrap(), vec![1, 2, 3]);
+        assert_eq!(parse_oct(jwk, "HS256", false).unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
     fn alg_mismatch_and_wrong_kty_are_invalid() {
-        let jwk = build_oct(&[1; 16], Some("A128GCM"));
+        let jwk = build_oct(&[1; 16], "A128GCM");
         assert!(matches!(
-            parse_oct(&jwk, Some("A256GCM"), false),
+            parse_oct(&jwk, "A256GCM", false),
             Err(Error::InvalidKey(_))
         ));
         // A present-but-wrong kty names the expected value; only a missing
         // or non-string kty falls to the carry-a-string diagnostic.
-        match parse_oct(r#"{"kty":"EC","k":"AQID"}"#, Some("HS256"), false) {
+        match parse_oct(r#"{"kty":"EC","k":"AQID"}"#, "HS256", false) {
             Err(Error::InvalidKey(msg)) => {
                 assert_eq!(msg, r#"JWK kty must be "oct", got "EC""#)
             }
             _ => panic!("expected invalid-key"),
         }
-        match parse_oct(r#"{"k":"AQID"}"#, Some("HS256"), false) {
+        match parse_oct(r#"{"k":"AQID"}"#, "HS256", false) {
             Err(Error::InvalidKey(msg)) => {
                 assert_eq!(msg, "JWK must carry a string `kty`")
             }
@@ -405,10 +393,7 @@ mod tests {
         for k in ["AQI=", "+w", "AQ7"] {
             let jwk = format!(r#"{{"kty":"oct","k":"{k}"}}"#);
             assert!(
-                matches!(
-                    parse_oct(&jwk, Some("HS256"), false),
-                    Err(Error::InvalidKey(_))
-                ),
+                matches!(parse_oct(&jwk, "HS256", false), Err(Error::InvalidKey(_))),
                 "{k} accepted"
             );
         }
@@ -418,24 +403,24 @@ mod tests {
     fn ext_false_conflicts_with_extractable_import() {
         let jwk = r#"{"kty":"oct","k":"AQID","ext":false}"#;
         assert!(matches!(
-            parse_oct(jwk, Some("HS256"), true),
+            parse_oct(jwk, "HS256", true),
             Err(Error::InvalidKey(_))
         ));
         // Non-extractable import of the same JWK is fine.
-        assert_eq!(parse_oct(jwk, Some("HS256"), false).unwrap(), vec![1, 2, 3]);
+        assert_eq!(parse_oct(jwk, "HS256", false).unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
     fn use_and_key_ops_are_ignored() {
         let jwk = r#"{"kty":"oct","k":"AQID","use":"enc","key_ops":["encrypt"]}"#;
-        assert_eq!(parse_oct(jwk, Some("HS256"), false).unwrap(), vec![1, 2, 3]);
+        assert_eq!(parse_oct(jwk, "HS256", false).unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
     fn garbage_is_invalid_not_a_panic() {
         for jwk in ["", "[]", "42", "{", r#"{"kty":"oct","k":7}"#] {
             assert!(matches!(
-                parse_oct(jwk, Some("HS256"), false),
+                parse_oct(jwk, "HS256", false),
                 Err(Error::InvalidKey(_))
             ));
             assert!(matches!(

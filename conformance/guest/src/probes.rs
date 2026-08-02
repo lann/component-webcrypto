@@ -1625,9 +1625,10 @@ async fn jwk_semantics() -> Result<(), String> {
 }
 
 /// The ChaCha JWK contract: ChaCha20-Poly1305 keys travel as the W3C
-/// Modern Algorithms proposal's *alg-less* `oct` JWK — export omits the
-/// `alg` member, import accepts the alg-less form and rejects a present
-/// `alg` with `invalid-key`. (XChaCha's preserved decline is
+/// Modern Algorithms proposal's `oct` JWK with its registered `alg`,
+/// `"C20P"` — export carries the member, import accepts it or the
+/// alg-less form (the WPT fixtures' shape) and rejects any other `alg`
+/// with `invalid-key`. (XChaCha's preserved decline is
 /// `xchacha_jwk_unsupported`, under its own feature.)
 async fn chacha_jwk_contract() -> Result<(), String> {
     let key = import_chacha_key((1..=32).collect(), true)
@@ -1642,15 +1643,15 @@ async fn chacha_jwk_contract() -> Result<(), String> {
             "exported ChaCha JWK missing material members: {jwk}"
         ));
     }
-    if jwk.contains("alg") {
+    if !jwk.contains("C20P") {
         return Err(format!(
-            "exported ChaCha JWK carries an `alg` member: {jwk}"
+            "exported ChaCha JWK does not carry alg \"C20P\": {jwk}"
         ));
     }
 
     let reimported = import_chacha_key_jwk(jwk, true)
         .await
-        .map_err(|e| describe("chacha import-key-jwk (alg-less)", &e))?;
+        .map_err(|e| describe("chacha import-key-jwk (exported form)", &e))?;
     let raw = reimported
         .export_key_raw()
         .await
@@ -1658,6 +1659,11 @@ async fn chacha_jwk_contract() -> Result<(), String> {
     if raw != (1..=32).collect::<Vec<u8>>() {
         return Err("JWK round trip changed the key material".into());
     }
+
+    // The alg-less form (the WPT fixtures' shape) is accepted too.
+    import_chacha_key_jwk(format!(r#"{{"kty":"oct","k":"{JWK_K_32}"}}"#), false)
+        .await
+        .map_err(|e| describe("chacha import-key-jwk (alg-less)", &e))?;
 
     match import_chacha_key_jwk(
         format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A256GCM"}}"#),
@@ -1667,10 +1673,10 @@ async fn chacha_jwk_contract() -> Result<(), String> {
     {
         Err(Error::InvalidKey(_)) => Ok(()),
         Err(other) => Err(describe(
-            "import-key-jwk with a present alg: expected invalid-key, got",
+            "import-key-jwk with another algorithm's alg: expected invalid-key, got",
             &other,
         )),
-        Ok(_) => Err("a present `alg` minted a ChaCha key".into()),
+        Ok(_) => Err("another algorithm's `alg` minted a ChaCha key".into()),
     }
 }
 

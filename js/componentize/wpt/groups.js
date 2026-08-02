@@ -75,7 +75,7 @@ function chachaEncryptDecryptInSubset() {
 
 /**
  * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
- * and "jwk" rows (the proposal's alg-less oct form, which the package's
+ * and "jwk" rows (the proposal's oct form, which the package's
  * `chacha20-poly1305.import-key-jwk` serves) are in whole, as are the
  * empty-usages rows for every format (usages are validated before the
  * format is considered).
@@ -90,7 +90,7 @@ function chachaImportKeyInSubset(name) {
 
 /**
  * generateKey/successes (ChaCha20-Poly1305): the whole group — the
- * extractable rows export raw-secret and the alg-less oct JWK, both
+ * extractable rows export raw-secret and the oct JWK, both
  * served.
  */
 function chachaGenerateKeyInSubset() {

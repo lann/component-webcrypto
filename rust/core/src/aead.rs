@@ -162,19 +162,20 @@ impl AeadKeyMaterial {
             AesVariant::Aes192 => return Err(aes192_unsupported()),
             AesVariant::Aes256 => "A256GCM",
         };
-        let raw = crate::jwk::parse_oct(jwk, Some(alg), policy.extractable)?;
+        let raw = crate::jwk::parse_oct(jwk, alg, policy.extractable)?;
         Self::import_aes_gcm(variant, raw, policy)
     }
 
     /// The key as an `oct` JWK (the `aead-key.export-key-jwk` contract):
     /// the same extractability gate as [`export`](Self::export).
-    /// ChaCha20-Poly1305 exports the proposal's alg-less form; XChaCha,
-    /// with no registered JWK form, is `unsupported`.
+    /// ChaCha20-Poly1305 exports the W3C Modern Algorithms proposal's
+    /// registered `alg`, `"C20P"`; XChaCha, with no registered JWK form,
+    /// is `unsupported`.
     pub fn export_jwk(&self) -> Result<String, Error> {
         let alg = match &self.cipher {
-            AeadCipher::Aes128Gcm(_) => Some("A128GCM"),
-            AeadCipher::Aes256Gcm(_) => Some("A256GCM"),
-            AeadCipher::ChaCha20Poly1305(_) => None,
+            AeadCipher::Aes128Gcm(_) => "A128GCM",
+            AeadCipher::Aes256Gcm(_) => "A256GCM",
+            AeadCipher::ChaCha20Poly1305(_) => "C20P",
             AeadCipher::XChaCha20Poly1305(_) => {
                 return Err(Error::Unsupported(format!(
                     "{} has no registered JWK form",
@@ -220,13 +221,13 @@ impl AeadKeyMaterial {
     }
 
     /// Import an RFC 7517 `oct` JWK as an IETF ChaCha20-Poly1305 key, per
-    /// the `chacha20-poly1305.import-key-jwk` contract: the alg-less form
-    /// (a present `alg` is `invalid-key` — no JOSE `alg` is registered),
-    /// then the decoded material is subject to
+    /// the `chacha20-poly1305.import-key-jwk` contract: `alg`, when
+    /// present, must be the proposal's registered `"C20P"` (any other is
+    /// `invalid-key`), then the decoded material is subject to
     /// [`import_chacha20_poly1305`](Self::import_chacha20_poly1305)'s
     /// contract.
     pub fn import_chacha20_poly1305_jwk(jwk: &str, policy: AeadPolicy) -> Result<Self, Error> {
-        let raw = crate::jwk::parse_oct(jwk, None, policy.extractable)?;
+        let raw = crate::jwk::parse_oct(jwk, "C20P", policy.extractable)?;
         Self::import_chacha20_poly1305(raw, policy)
     }
 

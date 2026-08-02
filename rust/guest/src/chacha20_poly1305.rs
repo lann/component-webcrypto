@@ -10,9 +10,9 @@ pub async fn import_key_raw(raw_material: Vec<u8>, options: AeadKeyOptions) -> R
     ))
 }
 
-/// Import an RFC 7517 `oct` JSON Web Key (as JSON text): the alg-less
-/// form — no JOSE `alg` is registered for this algorithm, so a present
-/// `alg` member fails [`Error::InvalidKey`]. See the WIT
+/// Import an RFC 7517 `oct` JSON Web Key (as JSON text). `alg`, when
+/// present, must be the W3C Modern Algorithms proposal's registered
+/// `"C20P"`; any other value fails [`Error::InvalidKey`]. See the WIT
 /// `mac-key.export-key-jwk` doc for the package-wide JWK contract.
 pub async fn import_key_jwk(
     jwk: impl Into<String>,

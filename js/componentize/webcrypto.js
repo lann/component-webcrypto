@@ -1182,8 +1182,8 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     const usages = normalizeUsages(keyUsages, alg.name);
     requireNonEmptyUsages(usages);
     if (format === "jwk") {
-      // The proposal's alg-less oct JWK; the WIT rejects a present `alg`
-      // (no JOSE `alg` is registered for the algorithm).
+      // The proposal's oct JWK; the WIT accepts an absent `alg` or the
+      // registered "C20P" and rejects anything else.
       return await mintChaChaKey(
         () =>
           chachaIface.importKeyJwk(

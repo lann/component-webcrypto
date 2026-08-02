@@ -34,10 +34,10 @@ interface chacha20-poly1305 {
     /// Import a key from an RFC 7517 JSON Web Key. See `README.md`,
     /// "JWK contract".
     ///
-    /// The accepted form is the alg-less `oct` JWK of the W3C Modern
-    /// Algorithms proposal: `kty` must be `"oct"` and `k` must decode to
-    /// exactly 32 bytes. No JOSE `alg` is registered for this algorithm,
-    /// so a present `alg` member fails with `error.invalid-key`.
+    /// The accepted form is the `oct` JWK of the W3C Modern Algorithms
+    /// proposal: `kty` must be `"oct"` and `k` must decode to exactly 32
+    /// bytes. `alg`, when present, must be the proposal's registered
+    /// `"C20P"`; any other value fails with `error.invalid-key`.
     import-key-jwk: async func(jwk: string, options: aead-key-options) -> result<aead-key, error>;
 
     /// Generate a fresh random 256-bit key.
@@ -57,7 +57,7 @@ interface chacha20-poly1305 {
 ///
 /// There is no JWK minting or export for this construction: no
 /// specification registers a JWK form for it (`chacha20-poly1305`'s
-/// alg-less form is the W3C Modern Algorithms proposal's), so
+/// `"C20P"` form is the W3C Modern Algorithms proposal's), so
 /// `aead-key.export-key-jwk` fails `error.unsupported` for keys minted
 /// here.
 interface xchacha20-poly1305 {

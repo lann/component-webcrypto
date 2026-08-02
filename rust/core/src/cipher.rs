@@ -149,7 +149,7 @@ impl CipherKeyMaterial {
             }
             crate::AesVariant::Aes256 => mode.jwk_alg(256),
         };
-        let raw = crate::jwk::parse_oct(jwk, Some(alg), policy.extractable)?;
+        let raw = crate::jwk::parse_oct(jwk, alg, policy.extractable)?;
         Self::import(mode, variant, raw, policy)
     }
 
@@ -219,7 +219,7 @@ impl CipherKeyMaterial {
     /// [`export`](Self::export).
     pub fn export_jwk(&self) -> Result<String, Error> {
         let alg = self.mode.jwk_alg(self.length_bits());
-        Ok(crate::jwk::build_oct(&self.export()?, Some(alg)))
+        Ok(crate::jwk::build_oct(&self.export()?, alg))
     }
 
     /// Encrypt `plaintext` (the `cipher-key.encrypt` contract): PKCS#7-pad

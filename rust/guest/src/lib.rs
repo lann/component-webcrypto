@@ -943,8 +943,7 @@ impl Aead {
 
     /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
     /// same extractability gate as [`export_key_raw`](Self::export_key_raw).
-    /// ChaCha20-Poly1305 keys export as the alg-less `oct` form;
-    /// algorithms with no registered JWK form at all (the XChaCha
+    /// Algorithms with no registered JWK form (the XChaCha
     /// constructions) fail [`Error::Unsupported`].
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
         self.0.export_key_jwk().await.map_err(Error::from)

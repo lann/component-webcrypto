@@ -723,9 +723,8 @@ export class AeadKey {
   /**
    * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
    * the package-wide contract), behind the same extractability gate as
-   * `exportKeyRaw`. ChaCha20-Poly1305 keys export the Modern Algorithms
-   * proposal's alg-less form — the platform emits no `alg` for them, and
-   * `exportJwkGated`'s JSON drops the absent member.
+   * `exportKeyRaw`. ChaCha20-Poly1305 keys carry the Modern Algorithms
+   * proposal's registered `alg`, `"C20P"`, which the platform emits.
    */
   async exportKeyJwk() {
     return exportJwkGated(this.#key);
@@ -2396,13 +2395,13 @@ export const chacha20Poly1305 = {
     return new AeadKey(/** @type {CryptoKey} */ (key), 256);
   },
   /**
-   * Import an alg-less `oct` JWK as a ChaCha20-Poly1305 key (the
+   * Import an `oct` JWK as a ChaCha20-Poly1305 key (the
    * `chacha20-poly1305.import-key-jwk` contract): `kty` must be `"oct"`,
-   * `k` must decode to exactly 32 bytes, and a present `alg` fails
-   * `{ tag: 'invalid-key' }` — no JOSE alg is registered for the
-   * construction. The checks are this host's, made before the platform is
-   * asked, so the contract's answers do not vary with platform ChaCha
-   * support.
+   * `k` must decode to exactly 32 bytes, and `alg`, when present, must be
+   * the Modern Algorithms proposal's registered `"C20P"` — any other
+   * value fails `{ tag: 'invalid-key' }`. The checks are this host's,
+   * made before the platform is asked, so the contract's answers do not
+   * vary with platform ChaCha support.
    * @param {string} jwk
    * @param {AeadKeyOptions} options
    */
@@ -2413,8 +2412,10 @@ export const chacha20Poly1305 = {
     if (material.kty !== "oct") {
       throw errInvalidKey(`JWK kty must be "oct" for ChaCha20-Poly1305`);
     }
-    if (material.alg !== undefined) {
-      throw errInvalidKey("ChaCha20-Poly1305 JWKs carry no alg member");
+    if (material.alg !== undefined && material.alg !== "C20P") {
+      throw errInvalidKey(
+        `JWK alg is ${JSON.stringify(material.alg)}, not "C20P"`,
+      );
     }
     requireStrictBase64url(material.k);
     const gotBytes = jwkKeyBytes(material.k);

@@ -332,8 +332,7 @@ interface aead {
 
         /// The key as an RFC 7517 JSON Web Key, behind the same
         /// extractability gate as `export-key-raw`. See `README.md`,
-        /// "JWK contract". ChaCha20-Poly1305 keys export as the alg-less
-        /// `oct` form; algorithms with no registered JWK form at all
+        /// "JWK contract". Algorithms with no registered JWK form
         /// (the XChaCha constructions) fail `error.unsupported`.
         export-key-jwk: async func() -> result<string, error>;
     }
