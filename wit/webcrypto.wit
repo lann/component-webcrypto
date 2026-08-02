@@ -293,11 +293,11 @@ interface aead {
 
         /// Encrypt and authenticate serialized key material under `nonce`
         /// with the associated data `aad`, exactly as `seal` encrypts a
-        /// message: the result is ciphertext followed by tag,
-        /// byte-identical to sealing the same serialization (the W3C Web
-        /// Cryptography API's `wrapKey`). See `seal` for the `nonce` and
-        /// `tag-size` contracts; see the `wrapping` interface for the
-        /// model.
+        /// message: the result is ciphertext followed by tag — for
+        /// raw-format material, byte-identical to sealing the exported
+        /// bytes (the W3C Web Cryptography API's `wrapKey`). See `seal`
+        /// for the `nonce` and `tag-size` contracts; see the `wrapping`
+        /// interface for the model.
         ///
         /// Security:
         /// - The caller owns nonce uniqueness across `seal` and `wrap`
@@ -309,13 +309,15 @@ interface aead {
 
         /// Decrypt and verify wrapped key material, as produced by `wrap`
         /// (or by `seal` over the same serialization) under `nonce` and
-        /// `aad`. The result awaits a typed mint by an `unwrap-key`
-        /// function (see `unwrap-input`); the material never reaches the
-        /// caller.
+        /// `aad`. See `seal` for the `nonce` and `tag-size` contracts.
+        /// The result awaits an unwrap mint (see `unwrap-input`,
+        /// including the verification-timing latitude); the material
+        /// never reaches the caller.
         ///
         /// Security:
-        /// - A success resolves only after the tag verifies. Fails with
-        ///   `error.authentication-failed` if verification fails.
+        /// - Verification fails with `error.authentication-failed` —
+        ///   here, or at the consuming mint when deferred; no mint
+        ///   succeeds on an unverified input.
         ///
         /// Requires `can-unwrap`, else `error.not-permitted`.
         unwrap: async func(nonce: list<u8>, aad: list<u8>, tag-size: option<u8>, wrapped: list<u8>) -> result<unwrap-input, error>;
@@ -585,33 +587,39 @@ interface cipher {
         decrypt: async func(iv: list<u8>, counter-length: option<u8>, ciphertext: stream<u8>) -> result<stream<u8>, error>;
 
         /// Encrypt serialized key material under `iv`, exactly as
-        /// `encrypt` encrypts a message: the result is byte-identical to
-        /// encrypting the same serialization (the W3C Web Cryptography
-        /// API's `wrapKey` under an encryption algorithm). See `encrypt`
-        /// for the `iv` and `counter-length` contracts; see the
-        /// `wrapping` interface for the model.
+        /// `encrypt` encrypts a message: for raw-format material the
+        /// result is byte-identical to encrypting the exported bytes
+        /// (the W3C Web Cryptography API's `wrapKey` under an
+        /// encryption algorithm). See `encrypt` for the `iv` and
+        /// `counter-length` contracts; see the `wrapping` interface for
+        /// the model.
         ///
         /// Security:
         /// - Nothing here authenticates, and the caller owns the IV
         ///   discipline, as on `encrypt`. Prefer an `aead` or `kw-key`
         ///   wrapping key; use this one only where an existing format
         ///   fixes the mode.
+        /// - `wrap` and `encrypt` draw on the same key's IV space: the
+        ///   algorithm's uniqueness obligations (per-key uniqueness of
+        ///   CTR counter blocks above all) span both operations.
         ///
         /// `input` is consumed. Requires `can-wrap`, else
         /// `error.not-permitted`.
         wrap: async func(iv: list<u8>, counter-length: option<u8>, input: wrap-input) -> result<list<u8>, error>;
 
         /// Decrypt wrapped key material, as produced by `wrap` (or by
-        /// `encrypt` over the same serialization) under `iv`. The result
-        /// awaits a typed mint by an `unwrap-key` function (see
-        /// `unwrap-input`); the material never reaches the caller.
+        /// `encrypt` over the same serialization) under `iv`. See
+        /// `encrypt` for the `iv` and `counter-length` contracts. The
+        /// result awaits an unwrap mint (see `unwrap-input`); the
+        /// material never reaches the caller.
         ///
         /// Security:
         /// - The result is *unauthenticated*: a success is no evidence
         ///   the wrapped material is untampered, and the typed mint's
         ///   parse is not authentication. Malformed input fails
         ///   `error.other`, deliberately uniform across conditions (see
-        ///   the interface doc).
+        ///   the interface doc) — here, or at the consuming mint when
+        ///   decryption is deferred (see `unwrap-input`).
         ///
         /// Requires `can-unwrap`, else `error.not-permitted`.
         unwrap: async func(iv: list<u8>, counter-length: option<u8>, wrapped: list<u8>) -> result<unwrap-input, error>;
@@ -752,9 +760,9 @@ interface signature {
         /// succeed (an untouched options resource fails
         /// `error.not-permitted`).
         can-sign: func(allowed: bool);
-        /// Whether the minted key's material may be exported (by future
-        /// format-specific exports; there is no export operation today).
-        /// Disabled by default.
+        /// Whether the minted key's material may be exported
+        /// (`signing-key.export-key-jwk`/`-pkcs8` and the
+        /// `to-wrap-input-*` functions). Disabled by default.
         extractable: func(allowed: bool);
     }
 

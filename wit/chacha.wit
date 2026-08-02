@@ -114,8 +114,7 @@ interface xchacha20-poly1305 {
 
     /// Mint a key from unwrapped key material read as raw bytes, subject
     /// to `import-key-raw`'s contract. `input` is consumed; see
-    /// `chacha20-poly1305.unwrap-key-raw` for the options model. There is
-    /// no JWK counterpart, as there is no JWK minting here.
+    /// `chacha20-poly1305.unwrap-key-raw` for the options model.
     @unstable(feature = xchacha20-poly1305)
     unwrap-key-raw: async func(input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 }

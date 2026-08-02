@@ -103,8 +103,10 @@ interface aes-gcm {
     unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 
     /// Mint a key from unwrapped key material read as an RFC 7517 JSON
-    /// Web Key, subject to `import-key-jwk`'s contract. `input` is
-    /// consumed; see `unwrap-key-raw` for the options model.
+    /// Web Key, subject to `import-key-jwk`'s contract plus the
+    /// unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed; see `unwrap-key-raw` for the
+    /// options model.
     unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
 }
 
@@ -283,15 +285,20 @@ interface aes-ctr {
 /// 3394's: the input's length plus 8 bytes, carrying the 64-bit ICV whose
 /// failure `unwrap` reports as `error.authentication-failed`.
 ///
-/// Input domain (`kw-key.wrap`):
-/// - The serialized input must be a multiple of 8 bytes, at least 16
-///   (RFC 3394 §2; every AES, HMAC-multiple-of-8, and ChaCha raw key
-///   qualifies). Anything else fails `error.invalid-key`.
-/// - JWK-formatted input (a `to-wrap-input-jwk` serialization) is first
-///   padded with ASCII spaces (0x20) to a multiple of 8 — the Web
-///   Cryptography API's AES-KW rule. JSON parsers accept the trailing
-///   padding, so the mint-side `unwrap-key-jwk` needs no inverse step.
-///   No other format is padded.
+/// Input domains:
+/// - `kw-key.wrap`: the serialized input must be a multiple of 8 bytes,
+///   at least 16 (RFC 3394 §2; every AES, HMAC-multiple-of-8, and ChaCha
+///   raw key qualifies). Anything else fails `error.invalid-key`.
+/// - JWK-formatted wrap input (a `to-wrap-input-jwk` serialization) is
+///   first padded with ASCII spaces (0x20) to a multiple of 8 — the
+///   behavior Web Cryptography API engines interoperate on. The JWK
+///   contract's trailing-space tolerance carries the round trip (see
+///   `README.md`, "JWK contract"). No other format is padded.
+/// - `kw-key.unwrap`: a wrapped input is a multiple of 8 bytes, at
+///   least 24 (the wrapped form of the smallest wrap input). Input
+///   outside that domain cannot carry the wire format and fails
+///   `error.authentication-failed`, indistinguishable from an ICV
+///   failure.
 ///
 /// A FIPS 140-3 approved-mode provider may serve this interface: KW is an
 /// SP 800-38F approved mode and draws no IV.

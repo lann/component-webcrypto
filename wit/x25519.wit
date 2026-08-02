@@ -69,8 +69,9 @@ interface x25519 {
 
     /// Mint a static secret key from unwrapped key material (see the
     /// `wrapping` interface): `input`'s bytes are read as an OKP private
-    /// JWK, subject to `import-secret-key-jwk`'s contract. `input` is
-    /// consumed.
+    /// JWK, subject to `import-secret-key-jwk`'s contract plus the
+    /// unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed.
     ///
     /// The minted key's grants and extractability come from `options`
     /// alone (the W3C Web Cryptography API's `unwrapKey` model).

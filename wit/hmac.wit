@@ -74,8 +74,10 @@ interface hmac-sha2 {
     unwrap-key-raw: async func(%variant: sha2-variant, input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
 
     /// Mint a key from unwrapped key material read as an RFC 7517 JSON
-    /// Web Key, subject to `import-key-jwk`'s contract. `input` is
-    /// consumed; see `unwrap-key-raw` for the options model.
+    /// Web Key, subject to `import-key-jwk`'s contract plus the
+    /// unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed; see `unwrap-key-raw` for the
+    /// options model.
     unwrap-key-jwk: async func(%variant: sha2-variant, input: unwrap-input, options: mac-key-options) -> result<mac-key, error>;
 }
 

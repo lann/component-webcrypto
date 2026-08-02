@@ -17,18 +17,18 @@ package lann:webcrypto@0.1.0;
 ///   (`aes-gcm.unwrap-key-raw`, `hmac-sha2.unwrap-key-jwk`, …) or a KDF
 ///   base secret (`hkdf.unwrap-ikm`, `pbkdf2.unwrap-password`).
 ///
-/// Each intermediate is named for the operation it feeds, as
-/// `derivation.derive-input` is: a `wrap-input` is the input to `wrap`,
-/// and an `unwrap-input` is the input to the unwrap mints — the
-/// *output* of `unwrap`, never its argument (the wrapped bytes are).
+/// A `wrap-input` is the input to `wrap`; an `unwrap-input` is the input
+/// to the unwrap mints — the *output* of `unwrap`, never its argument
+/// (the wrapped bytes are).
 ///
 /// Security:
 /// - The decrypted material never transits the consumer: unwrapping can
 ///   mint a *non-extractable* key from wrapped transport, which no
 ///   composition of `open` and `import-key-raw` can do.
-/// - Neither resource exposes the material it holds. Both are single-use:
-///   the operation that takes one consumes it, so retained plaintext key
-///   material is bounded by the resources that denote it.
+/// - Neither resource exposes the material it holds, and neither is
+///   reusable: the operation that takes one consumes it, on failure as
+///   on success. Implementations SHOULD NOT retain the material longer
+///   than the resource that denotes it.
 ///
 /// Resource types are per-instance, so an intermediate cannot cross
 /// providers: both halves of a wrap or unwrap run inside one provider,
@@ -42,24 +42,30 @@ interface wrapping {
     /// Constructed by the key resources' `to-wrap-input-*` functions;
     /// the serialization format chosen there travels with the resource,
     /// and format-specific wrapping rules (such as `aes-kw`'s JWK
-    /// padding) key on it. Consumed by a wrapping key's `wrap`; construct
-    /// one per wrap.
+    /// padding) key on it. Consumed by a wrapping key's `wrap`, on
+    /// failure as on success; construct one per wrap attempt.
     resource wrap-input;
 
-    /// Decrypted key material awaiting a typed mint.
+    /// Key material from a wrapped input, awaiting a typed mint.
     ///
-    /// Produced by a wrapping key's `unwrap` — for the authenticated
-    /// wrapping kinds, only after the input's integrity verifies.
-    /// Consumed by one unwrap mint, which declares how the bytes are
-    /// read (raw, JWK, PKCS#8) the way the per-format imports do;
-    /// unwrap again to mint again. The mint need not produce a key: the
+    /// Produced by a wrapping key's `unwrap`; consumed by one unwrap
+    /// mint (on failure as on success — unwrap again to mint again),
+    /// which declares how the bytes are read (raw, JWK, PKCS#8) the way
+    /// the per-format imports do. The mint need not produce a key: the
     /// KDF interfaces mint base secrets from it (`hkdf.unwrap-ikm`,
     /// `pbkdf2.unwrap-password`), a strictly one-way door — no KDF
     /// secret can produce a `wrap-input`.
     ///
-    /// No grants ride this resource: the minted resource's usages and
-    /// extractability come from the mint's options alone (the W3C Web
-    /// Cryptography API's `unwrapKey` model).
+    /// Security:
+    /// - An implementation decrypts — and, for the authenticated
+    ///   wrapping kinds, verifies — at `unwrap`, or defers both to the
+    ///   consuming mint, which then reports the unwrap operation's
+    ///   error cases too. Either way, no mint succeeds on input whose
+    ///   verification fails, and unverified material is never
+    ///   observable.
+    /// - No grants ride this resource: the minted resource's usages and
+    ///   extractability come from the mint's options alone (the W3C Web
+    ///   Cryptography API's `unwrapKey` model).
     resource unwrap-input;
 }
 
@@ -77,8 +83,9 @@ interface wrapping {
 ///   material yield the same wrapped bytes, so an observer can tell when
 ///   two wrapped payloads are equal. That is sound for high-entropy key
 ///   material and unsound for general data — which is why `wrap` accepts
-///   only `wrap-input`, making use as a general deterministic cipher
-///   unrepresentable.
+///   only `wrap-input`: there is no direct bytes path. The restriction
+///   is friction, not a guarantee: arbitrary bytes can still arrive
+///   through an extractable import, as on the platform.
 /// - The integrity check is the algorithm's (AES-KW's 64-bit ICV), with
 ///   a correspondingly weaker forgery bound than an AEAD tag. Prefer an
 ///   `aead` key for wrapping when no fixed format requires KW.
@@ -117,12 +124,13 @@ interface key-wrap {
 
         /// Decrypt and integrity-check wrapped key material, as produced
         /// by `wrap` under the same algorithm. The result awaits a typed
-        /// mint (see `unwrap-input`); the material never reaches the
-        /// caller.
+        /// mint (see `unwrap-input`, including the verification-timing
+        /// latitude); the material never reaches the caller.
         ///
         /// Security:
-        /// - A success resolves only after the integrity check passes.
-        ///   Any failure of that check reports
+        /// - Any failure of the integrity check — including input that
+        ///   cannot carry the algorithm's wrapped form (the minting
+        ///   interface documents the domain) — reports
         ///   `error.authentication-failed` with no detail.
         ///
         /// Requires `can-unwrap`, else `error.not-permitted`.
@@ -148,6 +156,15 @@ interface key-wrap {
         /// Whether this key permits `unwrap`. See `can-wrap`.
         can-unwrap: func() -> bool;
 
+        /// The raw key material. Fails with `error.not-extractable`
+        /// unless the key was created with `extractable` true.
+        export-key-raw: async func() -> result<list<u8>, error>;
+
+        /// The key as an RFC 7517 JSON Web Key, behind the same
+        /// extractability gate as `export-key-raw`. See `README.md`,
+        /// "JWK contract".
+        export-key-jwk: async func() -> result<string, error>;
+
         /// This key's raw material as a `wrap-input`, for wrapping
         /// under another key. Behind the same extractability gate as
         /// `export-key-raw`; the material itself never reaches the
@@ -157,14 +174,5 @@ interface key-wrap {
         /// The JWK serialization as a `wrap-input`, behind the same
         /// gate. See `README.md`, "JWK contract".
         to-wrap-input-jwk: async func() -> result<wrap-input, error>;
-
-        /// The raw key material. Fails with `error.not-extractable`
-        /// unless the key was created with `extractable` true.
-        export-key-raw: async func() -> result<list<u8>, error>;
-
-        /// The key as an RFC 7517 JSON Web Key, behind the same
-        /// extractability gate as `export-key-raw`. See `README.md`,
-        /// "JWK contract".
-        export-key-jwk: async func() -> result<string, error>;
     }
 }

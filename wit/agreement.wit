@@ -30,9 +30,9 @@ interface key-agreement {
     /// package-wide options contract (see `README.md`). The derive grants
     /// are the W3C Web Cryptography API's usage pair for agreement keys,
     /// and flow to every `derive-input` the key's `agree` mints.
-    /// `extractable` is mint-time recorded policy: the package defines no
-    /// secret-key export today, and future format-specific exports and
-    /// platform key storage honor it (the `signing-key` precedent).
+    /// `extractable` gates the secret-key exports (`export-key-jwk`/
+    /// `-pkcs8` and the `to-wrap-input-*` functions); platform key
+    /// storage honors it too (the `signing-key` precedent).
     resource agreement-key-options {
         constructor();
         /// Whether inputs agreed by the minted key may yield raw bits.

@@ -127,8 +127,9 @@ interface ecdsa-sign {
     unwrap-signing-key-pkcs8: async func(%variant: ecdsa-variant, input: unwrap-input, options: signing-key-options) -> result<signing-key, error>;
 
     /// Mint a signing key from unwrapped key material read as an EC
-    /// private JWK, subject to `import-signing-key-jwk`'s contract.
-    /// `input` is consumed; see `unwrap-signing-key-pkcs8` for the
-    /// options model.
+    /// private JWK, subject to `import-signing-key-jwk`'s contract plus
+    /// the unwrap-path `use`/`key_ops` checks (see `README.md`, "JWK
+    /// contract"). `input` is consumed; see `unwrap-signing-key-pkcs8`
+    /// for the options model.
     unwrap-signing-key-jwk: async func(%variant: ecdsa-variant, input: unwrap-input, options: signing-key-options) -> result<signing-key, error>;
 }
