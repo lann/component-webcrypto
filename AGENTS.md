@@ -478,9 +478,9 @@ closed numbers remain stable references.
   (`just wpt-parity` — see js/componentize/wpt/README.md, "The parity
   gate") and pins the loss set; what remains is driving that set down.
   Growing toward parity is tiered — first behaviors the WIT already
-  carries but the shim does not serve (more hashes, Ed25519/ECDSA,
-  symmetric JWK, the usages model, `getRandomValues`), then additive WIT
-  surface (the RSA family, SPKI/PKCS#8 key formats, wrap — see the
+  carries but the shim does not serve (more hashes, the usages model),
+  then additive WIT
+  surface (the RSA family and public-key wrapping — see the
   bullets below), and only
   then any future WIT-forced deviations, each of which needs an explicit
   ruling (the historical example, the GCM IV/tag contract, was resolved

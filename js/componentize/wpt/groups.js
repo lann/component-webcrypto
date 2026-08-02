@@ -217,7 +217,7 @@ function kdfDeriveInSubset(name) {
   }
   if (name.startsWith("Derived key of type")) {
     const served =
-      /^Derived key of type name: AES-(GCM|CBC|CTR) length: (128|256)/.test(name) ||
+      /^Derived key of type name: AES-(GCM|CBC|CTR|KW) length: (128|256)/.test(name) ||
       /^Derived key of type name: HMAC hash: SHA-(1|256|384|512)\b/.test(name);
     if (!served) {
       return false;
@@ -330,6 +330,26 @@ function okpImportFailuresInSubset() {
   return true;
 }
 
+/**
+ * wrapKey_unwrapKey: every combination whose wrapping algorithm and
+ * wrapped-key family the library serves — the symmetric families (HMAC,
+ * AES-GCM/CBC/CTR/KW, ChaCha20-Poly1305) plus Ed25519 and X25519
+ * *private* keys, under the AES and ChaCha wrappers. Out of the subset:
+ * the RSA-OAEP wrapper (unserved algorithm) and every public-key wrap
+ * (the WIT's public-key resources mint no wrap-input; see the library
+ * header's deviations list).
+ * @param {string} name
+ */
+function wrapKeyInSubset(name) {
+  if (name === "setup") {
+    return true;
+  }
+  if (/RSA|ECDSA|ECDH/.test(name)) {
+    return false;
+  }
+  return !/public key/.test(name);
+}
+
 // --- the group table --------------------------------------------------------------
 
 export const GROUPS = [
@@ -368,6 +388,12 @@ export const GROUPS = [
     module: "group-chacha20-poly1305.js",
     start: (ns) => ns.run_chacha20_poly1305_tests(),
     inSubset: chachaEncryptDecryptInSubset,
+  },
+  {
+    name: "wrapKey_unwrapKey/wrapKey_unwrapKey",
+    module: "group-wrap-key.js",
+    start: (ns) => ns.run_wrap_tests(),
+    inSubset: wrapKeyInSubset,
   },
   {
     name: "import_export/symmetric_importKey (HMAC, AES-GCM)",

@@ -17,7 +17,13 @@
 //     128- and 256-bit AES keys)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-1 and
 //     SHA-256/384/512; X25519 key agreement; derived-key targets HMAC
-//     over the same hashes and AES-GCM/CBC/CTR)
+//     over the same hashes and AES-GCM/CBC/CTR/KW)
+//   - `wrapKey` / `unwrapKey`     (wrapping algorithms AES-KW (RFC 3394),
+//     AES-GCM, AES-CBC, AES-CTR, and ChaCha20-Poly1305; wrapped-key
+//     formats "raw"/"raw-secret"/"jwk" for the symmetric families and
+//     "pkcs8"/"jwk" for Ed25519 and X25519 private keys; unwrap targets
+//     additionally HKDF and PBKDF2, whose secrets can arrive wrapped and
+//     never surface)
 //   - `digest`                  (SHA-256/384/512; SHA-1 through the
 //     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
@@ -26,8 +32,9 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`,
-// `derivation`, `hkdf`,
+// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `aes-kw`,
+// `chacha20-poly1305`,
+// `wrapping`, `key-wrap`, `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
 // `key-agreement`, `x25519`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
@@ -51,8 +58,20 @@
 //
 //   - Unserved: beyond the algorithms above, everything throws
 //     `NotSupportedError` — including AES-192 (which every implementation
-//     of the package declines) and AES-KW (parked with the package's wrap
-//     direction).
+//     of the package declines).
+//   - Unserved: public-key wrapping. `wrapKey` on a public key (and the
+//     "spki" wrapped-key format) throws `NotSupportedError`: the WIT's
+//     public-key resources mint no `wrap-input` (the package's recorded
+//     both-directions-or-neither ruling).
+//   - Unserved: metadata members in wrapped JWKs. A `wrapKey("jwk", …)`
+//     payload carries exactly the material-bearing members the WIT's
+//     `to-wrap-input-jwk` serializes; `key_ops`/`ext`/`use` are the
+//     consumer's to stamp, as on `exportKey` (JWK member order is not
+//     canonical, so wrapped-JWK bytes never compare across
+//     implementations anyway). Unwrapping validates the members when a
+//     foreign wrap carries them — a `key_ops` set missing a requested
+//     usage, or `ext: false` against an extractable unwrap, is the
+//     platform's own `DataError`.
 //   - Unserved: the Modern Algorithms proposal's "raw-secret" /
 //     "raw-public" / "raw-seed" format aliases for the pre-proposal
 //     algorithms ("raw" remains). "raw-secret" is served where it is an
@@ -66,7 +85,8 @@
 //     class D and the in-guest provider this library composes with
 //     withholds it, so the world cannot import it without failing every
 //     composition at `wac plug` time. `NotSupportedError`, with the
-//     reason in the message.
+//     reason in the message. `unwrapKey` to an ECDSA private key is the
+//     same case.
 //   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
 //     served through the package's `sha1-checked` interface (sha1dc
 //     collision detection; the package never serves plain SHA-1), in the
@@ -100,6 +120,7 @@ import * as hmacSha1Iface from "lann:webcrypto/hmac-sha1@0.1.0";
 import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
 import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
 import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
+import * as aesKwIface from "lann:webcrypto/aes-kw@0.1.0";
 import * as chachaIface from "lann:webcrypto/chacha20-poly1305@0.1.0";
 import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
 import * as hkdfSha2Iface from "lann:webcrypto/hkdf-sha2@0.1.0";
@@ -116,6 +137,9 @@ import * as ecdsaVerify from "lann:webcrypto/ecdsa-verify@0.1.0";
 // Imported for evaluation only: `make-digest` returns `digest` resources,
 // whose generated class lives in this module (see the note below).
 import "lann:webcrypto/digest@0.1.0";
+// Likewise: the wrap operations return `wrap-input`/`unwrap-input`
+// resources, whose generated classes live in the `wrapping` module.
+import "lann:webcrypto/wrapping@0.1.0";
 import * as wasiRandom from "wasi:random/random@0.2.0";
 import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
@@ -126,6 +150,7 @@ import * as witWorld from "wit-world";
 import { MacKeyOptions } from "lann:webcrypto/mac@0.1.0";
 import { AeadKeyOptions } from "lann:webcrypto/aead@0.1.0";
 import { CipherKeyOptions } from "lann:webcrypto/cipher@0.1.0";
+import { KwKeyOptions } from "lann:webcrypto/key-wrap@0.1.0";
 import { DeriveOptions } from "lann:webcrypto/derivation@0.1.0";
 import { AgreementKeyOptions } from "lann:webcrypto/key-agreement@0.1.0";
 import { SigningKeyOptions } from "lann:webcrypto/signature@0.1.0";
@@ -554,6 +579,7 @@ const SERVED_ALGORITHMS = [
   "AES-GCM",
   "AES-CBC",
   "AES-CTR",
+  "AES-KW",
   "ChaCha20-Poly1305",
   "HKDF",
   "PBKDF2",
@@ -561,6 +587,25 @@ const SERVED_ALGORITHMS = [
   "Ed25519",
   "ECDSA",
 ];
+
+/**
+ * The recognized algorithm-dictionary members beyond `name`: what the
+ * served algorithms' parameter dictionaries carry, read once each during
+ * normalization.
+ */
+const ALGORITHM_MEMBERS = /** @type {const} */ ([
+  "hash",
+  "length",
+  "iv",
+  "counter",
+  "additionalData",
+  "tagLength",
+  "salt",
+  "info",
+  "iterations",
+  "public",
+  "namedCurve",
+]);
 
 /**
  * @param {unknown} algorithm
@@ -573,12 +618,22 @@ function normalizeAlgorithm(algorithm) {
   if (typeof algorithm !== "object" || algorithm === null) {
     throw new TypeError("algorithm must be a string or an object with a string `name`");
   }
-  // Snapshot own enumerable properties in one pass: normalization reads each
-  // property (author getters included) exactly once, like the spec's
-  // conversion to an IDL dictionary.
-  const alg = /** @type {NormalizedAlgorithm & { name?: unknown }} */ ({ ...algorithm });
-  if (typeof alg.name !== "string") {
+  // Convert like the spec's to-an-IDL-dictionary step: each recognized
+  // member is read by property access exactly once (author getters and
+  // prototype-chain members included — WPT's wrap helpers build parameter
+  // objects with `Object.create`, which an own-property snapshot would
+  // read as empty).
+  const source = /** @type {Record<string, unknown>} */ (algorithm);
+  const suppliedName = source.name;
+  if (typeof suppliedName !== "string") {
     throw new TypeError("algorithm must be a string or an object with a string `name`");
+  }
+  const alg = /** @type {NormalizedAlgorithm} */ ({ name: suppliedName });
+  for (const member of ALGORITHM_MEMBERS) {
+    const value = source[member];
+    if (value !== undefined) {
+      /** @type {Record<string, unknown>} */ (alg)[member] = value;
+    }
   }
   const upper = alg.name.toUpperCase();
   const name = SERVED_ALGORITHMS.find((served) => served.toUpperCase() === upper);
@@ -591,7 +646,7 @@ function normalizeAlgorithm(algorithm) {
   if (alg.hash !== undefined) {
     alg.hash = normalizeHashName(alg.hash);
   }
-  return /** @type {NormalizedAlgorithm} */ (alg);
+  return alg;
 }
 
 /**
@@ -675,14 +730,12 @@ function sha2VariantOf(hash) {
 /** @type {Readonly<Record<string, readonly KeyUsage[] | undefined>>} */
 const USAGES = {
   HMAC: ["sign", "verify"],
-  // `wrapKey`/`unwrapKey` are recognized AES-GCM usages a key may carry
-  // even though this library exposes no wrap operations yet: usages are
-  // key metadata, validated at use.
   "AES-GCM": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
-  // The unauthenticated modes share AES-GCM's usage vocabulary (the WIT
-  // `cipher` kind records wrap/unwrap as vocabulary ahead of operations).
+  // The unauthenticated modes share AES-GCM's usage vocabulary.
   "AES-CBC": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
   "AES-CTR": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
+  // AES-KW serves the wrap pair alone (the registry's vocabulary for it).
+  "AES-KW": ["wrapKey", "unwrapKey"],
   // The proposal gives ChaCha20-Poly1305 the AEAD vocabulary AES-GCM has.
   "ChaCha20-Poly1305": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
   // The derive sources share WebCrypto's usage pair. X25519's entry is the
@@ -903,6 +956,19 @@ function cipherMintOptions(usages, extractable) {
   const options = new CipherKeyOptions();
   options.canEncrypt(usages.includes("encrypt"));
   options.canDecrypt(usages.includes("decrypt"));
+  options.canWrap(usages.includes("wrapKey"));
+  options.canUnwrap(usages.includes("unwrapKey"));
+  options.extractable(extractable);
+  return options;
+}
+
+/**
+ * The `kw-key-options` resource for an AES-KW mint. See `hmacMintOptions`.
+ * @param {readonly KeyUsage[]} usages
+ * @param {boolean} extractable
+ */
+function kwMintOptions(usages, extractable) {
+  const options = new KwKeyOptions();
   options.canWrap(usages.includes("wrapKey"));
   options.canUnwrap(usages.includes("unwrapKey"));
   options.extractable(extractable);
@@ -1182,6 +1248,18 @@ async function mintCipherKey(start, name, extractable, usages) {
   return mintKey(handle, "secret", projected, extractable, usages);
 }
 
+/**
+ * @param {() => unknown} start
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} usages
+ */
+async function mintKwKey(start, extractable, usages) {
+  const handle = await callImport(start());
+  /** @type {AesKeyAlgorithm} */
+  const projected = { name: "AES-KW", length: /** @type {number} */ (handle.algorithmLength()) };
+  return mintKey(handle, "secret", projected, extractable, usages);
+}
+
 // --- subtle --------------------------------------------------------------------------
 
 /**
@@ -1422,14 +1500,15 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     );
   } else {
     // The AES family (GCM through the aead kind; CBC/CTR through the
-    // cipher kind). The WIT binds the AES variant at mint, so the shim
+    // cipher kind; KW through the key-wrap kind). The WIT binds the AES
+    // variant at mint, so the shim
     // picks it from what the caller supplied: the raw material's length,
     // or the JWK's `alg` (falling back to `k`'s decoded length when `alg`
     // is absent — metadata arithmetic; the material itself parses behind
     // the WIT, which re-validates the pairing either way). A length with
     // no variant maps to `DataError`, the platform's own import error.
     const mode = CIPHER_MODES[alg.name];
-    const jwkTag = mode === undefined ? "GCM" : mode.jwkTag;
+    const jwkTag = alg.name === "AES-KW" ? "KW" : mode === undefined ? "GCM" : mode.jwkTag;
     /** @type {string | Uint8Array} */
     let material;
     let variant;
@@ -1468,6 +1547,16 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
             ? mode.iface.importKeyJwk(variant, material, options())
             : mode.iface.importKeyRaw(variant, material, options()),
         alg.name,
+        !!extractable,
+        usages,
+      );
+    }
+    if (alg.name === "AES-KW") {
+      return await mintKwKey(
+        () =>
+          format === "jwk"
+            ? aesKwIface.importKeyJwk(variant, material, kwMintOptions(usages, !!extractable))
+            : aesKwIface.importKeyRaw(variant, material, kwMintOptions(usages, !!extractable)),
         !!extractable,
         usages,
       );
@@ -1575,6 +1664,13 @@ async function generateKey(algorithm, extractable, keyUsages) {
       return await mintCipherKey(
         () => mode.iface.generateKey(variant, cipherMintOptions(usages, !!extractable)),
         alg.name,
+        !!extractable,
+        usages,
+      );
+    }
+    if (alg.name === "AES-KW") {
+      return await mintKwKey(
+        () => aesKwIface.generateKey(variant, kwMintOptions(usages, !!extractable)),
         !!extractable,
         usages,
       );
@@ -1820,6 +1916,11 @@ function chachaParams(alg) {
  */
 async function cryptOperation(algorithm, key, data, direction) {
   const alg = normalizeAlgorithm(algorithm);
+  if (alg.name === "AES-KW") {
+    // The registry defines no encrypt/decrypt operation for AES-KW: its
+    // only operations are wrapKey/unwrapKey.
+    throw dom("NotSupportedError", `AES-KW supports no ${direction} operation`);
+  }
   const sealing = direction === "encrypt";
   if (CIPHER_MODES[alg.name] !== undefined) {
     const { iv, counterLength } = cipherOpParams(alg);
@@ -1875,6 +1976,422 @@ async function encrypt(algorithm, key, data) {
  */
 async function decrypt(algorithm, key, data) {
   return cryptOperation(algorithm, key, data, "decrypt");
+}
+
+/**
+ * Whether `name` serves the wrap operations: the registry's wrap-capable
+ * set among the served algorithms — AES-KW (a dedicated wrap-key
+ * operation) and the encrypt-capable ciphers (the spec's fallback).
+ * @param {string} name
+ */
+function wrapCapable(name) {
+  return name === "AES-KW" || name === "ChaCha20-Poly1305" || CIPHER_MODES[name] !== undefined || name === "AES-GCM";
+}
+
+/**
+ * Run one wrap-direction operation on `wrappingKey` under the normalized
+ * wrap algorithm: `input` is the WIT `wrap-input` to encrypt. The
+ * algorithm's parameter validation (`iv`, `counter`, `tagLength`) runs
+ * here, exactly as on `encrypt`.
+ * @param {NormalizedAlgorithm} alg
+ * @param {CryptoKey} wrappingKey
+ * @param {any} input
+ * @returns {Promise<Uint8Array>}
+ */
+async function runWrap(alg, wrappingKey, input) {
+  const handle = handleOf(wrappingKey);
+  if (alg.name === "AES-KW") {
+    try {
+      return /** @type {Uint8Array} */ (await callImport(handle.wrap(input)));
+    } catch (e) {
+      if (/** @type {{ cause?: { tag?: string } }} */ (e)?.cause?.tag === "invalid-key") {
+        // The WIT's wrap-domain rejection; the spec's error for a payload
+        // AES-KW cannot wrap (not a multiple of 8 bytes) is
+        // `OperationError`, remapped from `mapWitError`'s generic
+        // `DataError` because this call site knows which check it is.
+        throw dom("OperationError", "AES-KW wraps payloads of a multiple of 8 bytes, at least 16");
+      }
+      throw e;
+    }
+  }
+  if (CIPHER_MODES[alg.name] !== undefined) {
+    const { iv, counterLength } = cipherOpParams(alg);
+    return /** @type {Uint8Array} */ (await callImport(handle.wrap(iv, counterLength, input)));
+  }
+  if (alg.name === "ChaCha20-Poly1305") {
+    const { iv, aad } = chachaParams(alg);
+    return /** @type {Uint8Array} */ (await callImport(handle.wrap(iv, aad, undefined, input)));
+  }
+  const { iv, aad, tagSize } = gcmParams(alg);
+  return /** @type {Uint8Array} */ (await callImport(handle.wrap(iv, aad, tagSize, input)));
+}
+
+/**
+ * Run one unwrap-direction operation on `unwrappingKey`, yielding the WIT
+ * `unwrap-input` a typed mint consumes. Verification failures (and the
+ * cipher kind's uniform decryption failure) map to the spec's
+ * `OperationError` through `mapWitError`.
+ * @param {NormalizedAlgorithm} alg
+ * @param {CryptoKey} unwrappingKey
+ * @param {Uint8Array} wrapped
+ * @returns {Promise<any>}
+ */
+async function runUnwrap(alg, unwrappingKey, wrapped) {
+  const handle = handleOf(unwrappingKey);
+  if (alg.name === "AES-KW") {
+    return await callImport(handle.unwrap(wrapped));
+  }
+  if (CIPHER_MODES[alg.name] !== undefined) {
+    const { iv, counterLength } = cipherOpParams(alg);
+    return await callImport(handle.unwrap(iv, counterLength, wrapped));
+  }
+  if (alg.name === "ChaCha20-Poly1305") {
+    const { iv, aad } = chachaParams(alg);
+    return await callImport(handle.unwrap(iv, aad, undefined, wrapped));
+  }
+  const { iv, aad, tagSize } = gcmParams(alg);
+  return await callImport(handle.unwrap(iv, aad, tagSize, wrapped));
+}
+
+/**
+ * @param {KeyFormat | "raw-secret"} format
+ * @param {globalThis.CryptoKey} key
+ * @param {globalThis.CryptoKey} wrappingKey
+ * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} wrapAlgorithm
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function wrapKey(format, key, wrappingKey, wrapAlgorithm) {
+  const alg = normalizeAlgorithm(wrapAlgorithm);
+  if (
+    format !== "raw" &&
+    format !== "jwk" &&
+    format !== "spki" &&
+    format !== "pkcs8" &&
+    format !== "raw-secret"
+  ) {
+    throw new TypeError(`${format} is not a KeyFormat`);
+  }
+  if (!wrapCapable(alg.name)) {
+    // Neither a wrap-key nor an encrypt operation: the spec's
+    // normalization failure.
+    throw dom("NotSupportedError", `${alg.name} supports no wrapKey operation`);
+  }
+  if (!(key instanceof CryptoKey)) {
+    throw new TypeError("key must be a CryptoKey");
+  }
+  requireKeyAlgorithm(wrappingKey, alg.name);
+  requireUsage(wrappingKey, "wrapKey");
+  if (key.algorithm.name === "HKDF" || key.algorithm.name === "PBKDF2") {
+    // The spec's export-op existence check, which precedes the
+    // extractability check: neither KDF defines an export operation.
+    throw dom("NotSupportedError", `${key.algorithm.name} keys cannot be wrapped`);
+  }
+  if (key.type === "public" || format === "spki") {
+    // Unserved: the WIT's public-key resources mint no wrap-input (see
+    // the header's deviations list).
+    throw dom("NotSupportedError", "public-key wrapping is not served");
+  }
+  if (!key.extractable) {
+    throw dom("InvalidAccessError", "key is not extractable");
+  }
+
+  // Serialize the key into the WIT's provider-held wrap intermediate,
+  // mirroring `exportKey`'s format-versus-type rules (the spec's export
+  // runs inside its wrapKey).
+  const keyHandle = handleOf(key);
+  let input;
+  if (format === "raw-secret") {
+    if (key.algorithm.name !== "ChaCha20-Poly1305") {
+      throw dom("NotSupportedError", `the raw-secret format is not served for ${key.algorithm.name}`);
+    }
+    input = await callImport(keyHandle.toWrapInputRaw());
+  } else if (format === "raw") {
+    if (key.algorithm.name === "ChaCha20-Poly1305") {
+      throw dom("NotSupportedError", `ChaCha20-Poly1305 keys support the "raw-secret" and "jwk" formats`);
+    }
+    if (key.type !== "secret") {
+      throw dom("InvalidAccessError", "raw wrapping serves secret keys only");
+    }
+    input = await callImport(keyHandle.toWrapInputRaw());
+  } else if (format === "pkcs8") {
+    if (key.type !== "private") {
+      throw dom(
+        key.type === "secret" ? "NotSupportedError" : "InvalidAccessError",
+        "pkcs8 wrapping serves private keys only",
+      );
+    }
+    input = await callImport(keyHandle.toWrapInputPkcs8());
+  } else {
+    input = await callImport(keyHandle.toWrapInputJwk());
+  }
+
+  return toArrayBuffer(await runWrap(alg, wrappingKey, input));
+}
+
+/**
+ * @param {KeyFormat | "raw-secret"} format
+ * @param {BufferSource} wrappedKey
+ * @param {globalThis.CryptoKey} unwrappingKey
+ * @param {AlgorithmIdentifier | RsaOaepParams | AesCtrParams | AesCbcParams | AesGcmParams} unwrapAlgorithm
+ * @param {AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams | HmacImportParams | AesKeyAlgorithm} unwrappedKeyAlgorithm
+ * @param {boolean} extractable
+ * @param {readonly KeyUsage[]} keyUsages
+ * @returns {Promise<CryptoKey>}
+ */
+async function unwrapKey(
+  format,
+  wrappedKey,
+  unwrappingKey,
+  unwrapAlgorithm,
+  unwrappedKeyAlgorithm,
+  extractable,
+  keyUsages,
+) {
+  const alg = normalizeAlgorithm(unwrapAlgorithm);
+  const target = normalizeAlgorithm(unwrappedKeyAlgorithm);
+  if (
+    format !== "raw" &&
+    format !== "jwk" &&
+    format !== "spki" &&
+    format !== "pkcs8" &&
+    format !== "raw-secret"
+  ) {
+    throw new TypeError(`${format} is not a KeyFormat`);
+  }
+  if (!wrapCapable(alg.name)) {
+    throw dom("NotSupportedError", `${alg.name} supports no unwrapKey operation`);
+  }
+  // The usage *sequence* converts at call time (a TypeError); membership
+  // and emptiness are the target import's to judge, after decryption —
+  // the spec's order, in which a bad wrap outranks a bad usage list.
+  const usageSequence = normalizeUsageSequence(keyUsages);
+  requireKeyAlgorithm(unwrappingKey, alg.name);
+  requireUsage(unwrappingKey, "unwrapKey");
+  const wrapped = bytesOf(wrappedKey, "wrappedKey");
+  // Each intermediate is consumed by exactly one mint, on failure as on
+  // success; re-deriving one re-runs the unwrap (deterministic for every
+  // served algorithm).
+  const unwrapOnce = () => runUnwrap(alg, unwrappingKey, wrapped);
+  return await mintUnwrapped(target, format, unwrapOnce, !!extractable, usageSequence);
+}
+
+/**
+ * Whether an unwrap-mint failure is the WIT's `not-permitted` — for a
+ * mint whose options carry no grant, i.e. the spec's empty-usages
+ * condition, reported as its `SyntaxError`.
+ * @param {unknown} e
+ */
+function unwrapMintNotPermitted(e) {
+  return /** @type {{ cause?: { tag?: string } }} */ (e)?.cause?.tag === "not-permitted";
+}
+
+/**
+ * Whether an unwrap-mint failure is the WIT's `invalid-key` — the parse
+ * verdict a wrong AES variant declaration also renders, driving the
+ * variant retry below.
+ * @param {unknown} e
+ */
+function unwrapMintInvalidKey(e) {
+  return /** @type {{ cause?: { tag?: string } }} */ (e)?.cause?.tag === "invalid-key";
+}
+
+/**
+ * Route a decrypted wrap to the target algorithm's typed unwrap mint (the
+ * spec's import-key step of unwrapKey, run provider-side so the material
+ * never surfaces).
+ *
+ * The AES targets need the WIT's mint-time variant, which the spec
+ * derives from the decrypted material this module never sees — so the
+ * served variants are tried in turn, re-running the (deterministic)
+ * unwrap per attempt; exactly one can succeed, since the material's
+ * length (or the JWK's `alg`) pins the variant.
+ * @param {NormalizedAlgorithm} target
+ * @param {KeyFormat | "raw-secret"} format
+ * @param {() => Promise<any>} unwrapOnce
+ * @param {boolean} extractable
+ * @param {KeyUsage[]} usageSequence
+ * @returns {Promise<CryptoKey>}
+ */
+async function mintUnwrapped(target, format, unwrapOnce, extractable, usageSequence) {
+  if (target.name === "HKDF" || target.name === "PBKDF2") {
+    // The KDF import steps: "raw" only, forced non-extractable, and the
+    // derive usage pair — with the decrypt preceding every one of them.
+    const input = await unwrapOnce();
+    if (format !== "raw") {
+      throw dom("NotSupportedError", `${target.name} keys support the "raw" format only`);
+    }
+    const usages = normalizeUsages(usageSequence, target.name);
+    requireNonEmptyUsages(usages);
+    if (extractable) {
+      throw dom("SyntaxError", `${target.name} keys cannot be extractable`);
+    }
+    const handle = await callImport(
+      target.name === "HKDF"
+        ? hkdfIface.unwrapIkm(input, deriveMintOptions())
+        : pbkdf2Iface.unwrapPassword(input, deriveMintOptions()),
+    );
+    return mintKey(handle, "secret", { name: target.name }, false, usages);
+  }
+
+  if (target.name === "X25519") {
+    if (format !== "pkcs8" && format !== "jwk") {
+      // The public formats mint public keys, which is public-key
+      // unwrapping — unserved with public-key wrapping.
+      throw dom("NotSupportedError", "unwrapping public keys is not served");
+    }
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, "X25519");
+    requireNonEmptyUsages(usages);
+    if (format === "pkcs8") {
+      const handle = await callImport(
+        x25519Iface.unwrapSecretKeyPkcs8(input, agreementMintOptions(extractable)),
+      );
+      return mintKey(handle, "private", { name: "X25519" }, extractable, usages);
+    }
+    // The JWK mint's grants mirror the requested usages exactly, unlike
+    // the import path's both-grants pattern: the WIT's unwrap-path
+    // `key_ops` check validates the wrapped JWK against what the options
+    // grant, so an over-grant would reject a `key_ops` set that lists
+    // only the usages the caller asked for.
+    const options = new AgreementKeyOptions();
+    options.canDeriveBits(usages.includes("deriveBits"));
+    options.canDeriveKey(usages.includes("deriveKey"));
+    options.extractable(extractable);
+    const handle = await callImport(x25519Iface.unwrapSecretKeyJwk(input, options));
+    return mintKey(handle, "private", { name: "X25519" }, extractable, usages);
+  }
+
+  if (target.name === "Ed25519" || target.name === "ECDSA") {
+    if (target.name === "ECDSA") {
+      // Unserved by composition, like the import (see the header).
+      throw dom(
+        "NotSupportedError",
+        "ECDSA private-key unwrapping is not served: ecdsa-sign is class D",
+      );
+    }
+    if (format !== "pkcs8" && format !== "jwk") {
+      throw dom("NotSupportedError", "unwrapping public keys is not served");
+    }
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, "Ed25519");
+    requireNonEmptyUsages(usages);
+    if (usages.includes("verify")) {
+      throw dom("SyntaxError", "verify is not valid for private signature keys");
+    }
+    const options = new SigningKeyOptions();
+    options.canSign(true);
+    options.extractable(extractable);
+    const handle = await callImport(
+      format === "pkcs8"
+        ? ed25519Sign.unwrapSigningKeyPkcs8(input, options)
+        : ed25519Sign.unwrapSigningKeyJwk(input, options),
+    );
+    return mintKey(handle, "private", { name: "Ed25519" }, extractable, usages);
+  }
+
+  if (target.name === "ChaCha20-Poly1305") {
+    if (format !== "raw-secret" && format !== "jwk") {
+      throw dom(
+        "NotSupportedError",
+        `ChaCha20-Poly1305 keys support the "raw-secret" and "jwk" formats`,
+      );
+    }
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, "ChaCha20-Poly1305");
+    return await mintChaChaKey(
+      () =>
+        format === "jwk"
+          ? chachaIface.unwrapKeyJwk(input, aeadMintOptions(usages, extractable))
+          : chachaIface.unwrapKeyRaw(input, aeadMintOptions(usages, extractable)),
+      extractable,
+      usages,
+    );
+  }
+
+  if (format !== "raw" && format !== "jwk") {
+    throw dom("NotSupportedError", `${target.name} keys do not use the ${format} format`);
+  }
+
+  if (target.name === "HMAC") {
+    const route = hmacHashOf(target.hash);
+    if (target.length === 0) {
+      throw dom("OperationError", "HMAC length cannot be 0");
+    }
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, "HMAC");
+    const start =
+      format === "jwk"
+        ? "sha1" in route
+          ? () => hmacSha1Iface.unwrapKeyJwk(input, hmacMintOptions(usages, extractable))
+          : () => hmacSha2.unwrapKeyJwk(route.variant, input, hmacMintOptions(usages, extractable))
+        : "sha1" in route
+          ? () => hmacSha1Iface.unwrapKeyRaw(input, hmacMintOptions(usages, extractable))
+          : () => hmacSha2.unwrapKeyRaw(route.variant, input, hmacMintOptions(usages, extractable));
+    try {
+      return await mintHmacKey(
+        start,
+        "sha1" in route ? "SHA-1" : SHA2_REGISTRY_NAMES[route.variant],
+        target.length === undefined ? undefined : Number(target.length),
+        extractable,
+        usages,
+      );
+    } catch (e) {
+      if (unwrapMintNotPermitted(e)) {
+        throw dom("SyntaxError", "usages cannot be empty for secret or private keys");
+      }
+      throw e;
+    }
+  }
+
+  // The AES family: try the served variants against fresh unwraps.
+  for (const variant of /** @type {const} */ (["aes128", "aes256"])) {
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, target.name);
+    const mode = CIPHER_MODES[target.name];
+    try {
+      if (mode !== undefined) {
+        return await mintCipherKey(
+          () =>
+            format === "jwk"
+              ? mode.iface.unwrapKeyJwk(variant, input, cipherMintOptions(usages, extractable))
+              : mode.iface.unwrapKeyRaw(variant, input, cipherMintOptions(usages, extractable)),
+          target.name,
+          extractable,
+          usages,
+        );
+      }
+      if (target.name === "AES-KW") {
+        return await mintKwKey(
+          () =>
+            format === "jwk"
+              ? aesKwIface.unwrapKeyJwk(variant, input, kwMintOptions(usages, extractable))
+              : aesKwIface.unwrapKeyRaw(variant, input, kwMintOptions(usages, extractable)),
+          extractable,
+          usages,
+        );
+      }
+      return await mintAesGcmKey(
+        () =>
+          format === "jwk"
+            ? aesGcm.unwrapKeyJwk(variant, input, aeadMintOptions(usages, extractable))
+            : aesGcm.unwrapKeyRaw(variant, input, aeadMintOptions(usages, extractable)),
+        extractable,
+        usages,
+      );
+    } catch (e) {
+      if (unwrapMintNotPermitted(e)) {
+        throw dom("SyntaxError", "usages cannot be empty for secret or private keys");
+      }
+      if (variant === "aes128" && unwrapMintInvalidKey(e)) {
+        continue;
+      }
+      // `invalid-key` on the last variant is the platform's own
+      // `DataError` for material that is no AES key of a served length,
+      // already mapped by `mapWitError`.
+      throw e;
+    }
+  }
+  throw dom("DataError", `the unwrapped material is no ${target.name} key of a served length`);
 }
 
 /**
@@ -1980,6 +2497,13 @@ async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsa
       usages,
     );
   }
+  if (target.name === "AES-KW") {
+    return await mintKwKey(
+      () => aesKwIface.deriveKey(variant, input, kwMintOptions(usages, !!extractable)),
+      !!extractable,
+      usages,
+    );
+  }
   return await mintAesGcmKey(
     () => aesGcm.deriveKey(variant, input, aeadMintOptions(usages, !!extractable)),
     !!extractable,
@@ -2074,6 +2598,8 @@ export const subtle = Object.freeze({
   verify,
   encrypt,
   decrypt,
+  wrapKey,
+  unwrapKey,
   deriveBits,
   deriveKey,
   digest,

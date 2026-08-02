@@ -55,6 +55,11 @@ const SHATTERED_PREFIX =
 const SHATTERED_SAFE_HASH = "7117b3cb9225aaf0d8ef1a40e493957b0bf8693d";
 const ABC_SHA1 = "a9993e364706816aba3e25717850c26c9cd0d89d";
 
+// RFC 3394 §4.1 (AES-KW: a 128-bit KEK wrapping 128 bits of key data).
+const KW_KEK = "000102030405060708090a0b0c0d0e0f";
+const KW_DATA = "00112233445566778899aabbccddeeff";
+const KW_WRAPPED = "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5";
+
 // --- small helpers ------------------------------------------------------------
 
 function hex(bytes) {
@@ -238,8 +243,11 @@ async function gcmRejectsMalformed() {
   await expectDomException("OperationError", "empty iv", () =>
     subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(0) }, key, HMAC_DATA),
   );
-  await expectDomException("NotSupportedError", "AES-KW", () =>
-    subtle.importKey("raw", unhex(GCM_KEY), "AES-KW", false, ["wrapKey"]),
+  // AES-KW keys serve the wrap pair alone: the registry defines no
+  // encrypt operation for them.
+  const kw = await subtle.importKey("raw", unhex(GCM_KEY), "AES-KW", false, ["wrapKey"]);
+  await expectDomException("NotSupportedError", "AES-KW encrypt", () =>
+    subtle.encrypt({ name: "AES-KW" }, kw, HMAC_DATA),
   );
   // The unauthenticated modes are served through the cipher kind: a CBC
   // round trip, and its uniform decrypt failure on a corrupted padding
@@ -478,6 +486,147 @@ async function bindingsTransport() {
   );
 }
 
+/**
+ * RFC 3394 §4.1 known answer: `wrapKey("raw")` under an AES-KW KEK
+ * reproduces the vector's wrapped bytes, a tampered wrap fails closed,
+ * and `unwrapKey` mints the key data back out as a working key.
+ */
+async function aesKwKnownAnswer() {
+  const kek = await subtle.importKey("raw", unhex(KW_KEK), { name: "AES-KW" }, false, [
+    "wrapKey",
+    "unwrapKey",
+  ]);
+  expectEq(kek.algorithm.name, "AES-KW", "KEK algorithm name");
+  expectEq(kek.algorithm.length, 128, "KEK algorithm length");
+  const payload = await subtle.importKey("raw", unhex(KW_DATA), { name: "AES-GCM" }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
+
+  const wrapped = await subtle.wrapKey("raw", payload, kek, { name: "AES-KW" });
+  expectEq(hex(wrapped), KW_WRAPPED, "RFC 3394 wrapped bytes");
+
+  const tampered = new Uint8Array(wrapped.slice(0));
+  tampered[0] ^= 1;
+  await expectDomException("OperationError", "tampered unwrap", () =>
+    subtle.unwrapKey("raw", tampered, kek, { name: "AES-KW" }, { name: "AES-GCM" }, false, [
+      "encrypt",
+      "decrypt",
+    ]),
+  );
+
+  const minted = await subtle.unwrapKey(
+    "raw",
+    wrapped,
+    kek,
+    { name: "AES-KW" },
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"],
+  );
+  expectEq(minted.extractable, false, "unwrapped key extractability");
+  expectEq(minted.algorithm.length, 128, "unwrapped key length");
+  // The minted key is the wrapped material: what it seals, the original
+  // material opens.
+  const iv = unhex(GCM_IV);
+  const sealed = await subtle.encrypt({ name: "AES-GCM", iv }, minted, HMAC_DATA);
+  const opened = await subtle.decrypt({ name: "AES-GCM", iv }, payload, sealed);
+  expectEq(hex(opened), hex(HMAC_DATA), "cross-key round trip");
+}
+
+/**
+ * The AEAD wrap path: a `wrapKey("jwk")` under AES-GCM round-trips
+ * through `unwrapKey` (minting non-extractable), the wrap gate refuses
+ * non-extractable keys, and the format sweep matches the export rules.
+ */
+async function wrapUnwrapRoundtrip() {
+  const kek = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+    "wrapKey",
+    "unwrapKey",
+  ]);
+  const iv = unhex(GCM_IV);
+  const wrapParams = { name: "AES-GCM", iv };
+  const hmacAlg = { name: "HMAC", hash: "SHA-256" };
+  const payload = await subtle.importKey("raw", unhex(KW_KEK), hmacAlg, true, ["sign"]);
+
+  const wrapped = await subtle.unwrapKey(
+    "jwk",
+    await subtle.wrapKey("jwk", payload, kek, wrapParams),
+    kek,
+    wrapParams,
+    hmacAlg,
+    false,
+    ["sign"],
+  );
+  expectEq(wrapped.extractable, false, "unwrapped key extractability");
+  const viaWrap = await subtle.sign("HMAC", wrapped, HMAC_DATA);
+  const direct = await subtle.sign("HMAC", payload, HMAC_DATA);
+  expectEq(hex(viaWrap), hex(direct), "wrapped and direct keys agree");
+
+  // The wrap gate: a non-extractable key cannot enter the wrap path.
+  const sealed = await subtle.importKey("raw", unhex(KW_DATA), hmacAlg, false, ["sign"]);
+  await expectDomException("InvalidAccessError", "wrapping a non-extractable key", () =>
+    subtle.wrapKey("raw", sealed, kek, wrapParams),
+  );
+  // A wrapping key without the grant refuses.
+  const sealOnly = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  await expectDomException("InvalidAccessError", "wrapping under an ungranted key", () =>
+    subtle.wrapKey("raw", payload, sealOnly, wrapParams),
+  );
+}
+
+/**
+ * The unwrap path enforces a foreign wrap's JWK metadata: `ext: false`
+ * against an extractable unwrap, and a `key_ops` set missing a requested
+ * usage, are both the platform's `DataError`. (Built by encrypting
+ * hand-written JWK text — the WPT census cannot observe the WIT's
+ * unwrap-path member checks any other way.)
+ */
+async function unwrapEnforcesJwkMetadata() {
+  const kekRaw = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+    "encrypt",
+    "wrapKey",
+    "unwrapKey",
+  ]);
+  const iv = unhex(GCM_IV);
+  const params = { name: "AES-GCM", iv };
+  const hmacAlg = { name: "HMAC", hash: "SHA-256" };
+  const k = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+
+  const wrapOf = async (members) =>
+    subtle.encrypt(params, kekRaw, encoder.encode(JSON.stringify({ kty: "oct", k, ...members })));
+
+  // ext: false cannot unwrap extractable…
+  await expectDomException("DataError", "ext:false unwrapped extractable", async () =>
+    subtle.unwrapKey("jwk", await wrapOf({ ext: false }), kekRaw, params, hmacAlg, true, ["sign"]),
+  );
+  // …but unwraps non-extractable.
+  await subtle.unwrapKey("jwk", await wrapOf({ ext: false }), kekRaw, params, hmacAlg, false, [
+    "sign",
+  ]);
+  // key_ops must cover every requested usage.
+  await expectDomException("DataError", "key_ops missing a requested usage", async () =>
+    subtle.unwrapKey(
+      "jwk",
+      await wrapOf({ key_ops: ["sign"] }),
+      kekRaw,
+      params,
+      hmacAlg,
+      false,
+      ["sign", "verify"],
+    ),
+  );
+  await subtle.unwrapKey(
+    "jwk",
+    await wrapOf({ key_ops: ["sign", "verify"] }),
+    kekRaw,
+    params,
+    hmacAlg,
+    false,
+    ["sign", "verify"],
+  );
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -488,6 +637,9 @@ const CHECKS = [
   ["gcm-known-answer-decrypt", gcmKnownAnswerDecrypt],
   ["gcm-generate-roundtrip", gcmGenerateRoundtrip],
   ["gcm-rejects-malformed", gcmRejectsMalformed],
+  ["aes-kw-known-answer", aesKwKnownAnswer],
+  ["wrap-unwrap-roundtrip", wrapUnwrapRoundtrip],
+  ["unwrap-enforces-jwk-metadata", unwrapEnforcesJwkMetadata],
   ["jwk-roundtrip", jwkRoundtrip],
   ["jwk-rejects-malformed", jwkRejectsMalformed],
   ["ed25519-sign-verify", ed25519SignVerify],
