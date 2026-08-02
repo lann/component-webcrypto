@@ -3,8 +3,8 @@
 // throwing on use. The preview2-shim browser build's sockets module
 // predates the resource-class shape jco 0.5.x expects, and the parity
 // runner never opens a socket, so these exist to satisfy instantiation
-// only; the page's import map resolves
-// `@bytecodealliance/preview2-shim/sockets` here.
+// only; the web transpile maps `wasi:sockets/*` here (see the
+// `transpile:web` script in ../parity/package.json).
 
 const unavailable = (what) => {
   throw new Error(`wasi:sockets is not available in the browser (${what})`);

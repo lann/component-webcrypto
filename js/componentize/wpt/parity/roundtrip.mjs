@@ -5,9 +5,13 @@
 // loss introduced by that stack.
 //
 // Imports the jco transpile of parity-runner.component.wasm (see
-// `npm run transpile`), invokes its async `run` export, and re-emits the
-// guest's records as JSON on stdout, matching baseline.mjs.
+// `npm run transpile`), collects the records the runner streams through
+// its `wpt:parity/reporter` import (../reporter.js — the same module
+// instance the generated code maps the import to), cross-checks the count
+// `run` resolves to, and emits the records as JSON on stdout, matching
+// baseline.mjs.
 
+import { setSink } from "../reporter.js";
 import { demo } from "./generated/parity-runner.js";
 
 /**
@@ -33,9 +37,15 @@ async function unwrapResult(call) {
   return value;
 }
 
+const records = [];
+setSink((record) => records.push(JSON.parse(record)));
 const output = await unwrapResult(() => demo.run());
-const marker = "WPT-PARITY-RESULTS\n";
+const marker = "WPT-PARITY-STREAMED ";
 if (typeof output !== "string" || !output.startsWith(marker)) {
   throw new Error(`parity runner returned an unexpected shape: ${String(output).slice(0, 200)}`);
 }
-process.stdout.write(output.slice(marker.length));
+const count = Number(output.slice(marker.length));
+if (count !== records.length) {
+  throw new Error(`parity runner reported ${count} records; received ${records.length}`);
+}
+process.stdout.write(JSON.stringify(records));
