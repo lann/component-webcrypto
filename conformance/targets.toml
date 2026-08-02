@@ -53,19 +53,24 @@ missing-features = []
 missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]
-# Browser WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
-# unimplemented), Node's WebCrypto serves AES-GCM nonces only in the
+# ChaCha20-Poly1305 is feature-detected: the host serves it through the
+# platform, and Node's WebCrypto implements it (experimental in Node
+# 24.18+), so the target's floor is a Node whose `crypto.subtle` serves
+# it. XChaCha is absent from every platform WebCrypto (and from the Modern
+# Algorithms proposal), Node's WebCrypto serves AES-GCM nonces only in the
 # 12–128-byte window, and platform SHA-1 carries no sha1dc collision
 # detection (the `sha1-checked` interface). Policy and platform facts, not
 # bugs: a composition needing more must supply another provider.
-missing-features = ["chacha20-poly1305", "aes-gcm-any-iv", "sha1-checked"]
+missing-features = ["xchacha20-poly1305", "aes-gcm-any-iv", "sha1-checked"]
 
 [targets.jco-browser]
 # The same host module as jco-node, in headless Chromium — whose WebCrypto,
-# unlike Node's, serves the full GCM nonce contract (the host adapts: it
-# reinterprets platform failures as `unsupported` only when they happen,
-# so no declaration lives in the module).
-missing-features = ["chacha20-poly1305", "sha1-checked"]
+# unlike Node's, serves the full GCM nonce contract but no
+# ChaCha20-Poly1305 yet (the host adapts either way: it reinterprets
+# platform failures as `unsupported` only when they happen, so no
+# declaration lives in the module and this line follows the browser's
+# capability).
+missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.

@@ -17,7 +17,7 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
-    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED,
+    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
@@ -36,6 +36,9 @@ macro_rules! feature_tags {
     };
     (chacha) => {
         &[FEATURE_CHACHA]
+    };
+    (xchacha) => {
+        &[FEATURE_XCHACHA]
     };
     (gcm_any_iv) => {
         &[FEATURE_GCM_ANY_IV]
@@ -63,12 +66,13 @@ probes! {
     digest_reuse,
     constant_time_equal,
     chacha_nonce_lengths(chacha),
+    xchacha_nonce_lengths(xchacha),
     ed25519_sign_roundtrip,
     sig_key_metadata,
     sig_import_invalid,
     verifying_key_export_roundtrip,
     internal_nonce_shape,
-    chacha_internal_nonce_roundtrip(chacha),
+    chacha_internal_nonce_roundtrip(xchacha),
     aes128_internal_nonce,
     open_short_input,
     stream_empty_writes,
@@ -114,6 +118,8 @@ probes! {
 pub async fn run_declined(features: &[&str]) -> Result<String, String> {
     if features == [FEATURE_CHACHA] {
         chacha_minting_declined().await
+    } else if features == [FEATURE_XCHACHA] {
+        xchacha_minting_declined().await
     } else if features == [FEATURE_SHA1_CHECKED] {
         sha1_checked_minting_declined().await
     } else if features == [FEATURE_GCM_ANY_IV] {
@@ -155,7 +161,37 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
 
 /// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
 async fn chacha_minting_declined() -> Result<String, String> {
-    for family in chacha_families() {
+    minting_declined_for(FEATURE_CHACHA).await?;
+    Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
+}
+
+/// Assert that every XChaCha20-Poly1305 minting path declines
+/// `unsupported`: the caller-nonce construction's two entry points, and
+/// the internal-nonce interface's two.
+async fn xchacha_minting_declined() -> Result<String, String> {
+    minting_declined_for(FEATURE_XCHACHA).await?;
+    expect_err(
+        "xchacha internal-nonce generate-key",
+        ErrKind::Unsupported,
+        generate_xchacha_internal_nonce_key(false).await,
+        "minted a key for a feature declared missing",
+    )?;
+    // The internal-nonce *import* is a minting path too. Omitting it left a
+    // target free to decline five of the six entry points and still serve
+    // this one, which is the hole this assertion exists to close.
+    expect_err(
+        "xchacha internal-nonce import-key-raw",
+        ErrKind::Unsupported,
+        import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
+        "minted a key for a feature declared missing",
+    )?;
+    Ok("every XChaCha20-Poly1305 minting path declined unsupported".into())
+}
+
+/// Both caller-nonce minting entry points of every family tagged with
+/// `feature` decline `unsupported`.
+async fn minting_declined_for(feature: &'static str) -> Result<(), String> {
+    for family in aead_families_with(feature) {
         expect_err(
             &format!("{} import-key-raw", family.name),
             ErrKind::Unsupported,
@@ -173,22 +209,7 @@ async fn chacha_minting_declined() -> Result<String, String> {
             "minted a key: the target serves a feature it declares missing",
         )?;
     }
-    expect_err(
-        "xchacha internal-nonce generate-key",
-        ErrKind::Unsupported,
-        generate_xchacha_internal_nonce_key(false).await,
-        "minted a key for a feature declared missing",
-    )?;
-    // The internal-nonce *import* is a minting path too. Omitting it left a
-    // target free to decline five of the six entry points and still serve
-    // this one, which is the hole this assertion exists to close.
-    expect_err(
-        "xchacha internal-nonce import-key-raw",
-        ErrKind::Unsupported,
-        import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
-        "minted a key for a feature declared missing",
-    )?;
-    Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
+    Ok(())
 }
 
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
@@ -641,22 +662,24 @@ async fn constant_time_equal() -> Result<(), String> {
     Ok(())
 }
 
-/// The contract battery's ChaCha rows (`contract::AEAD_FAMILIES` tagged
-/// with the feature): the minting entry points the decline and
+/// The contract battery's rows tagged with `feature`
+/// (`contract::AEAD_FAMILIES`): the minting entry points the decline and
 /// nonce-length probes iterate.
-fn chacha_families() -> impl Iterator<Item = &'static crate::contract::AeadFamily> {
+fn aead_families_with(
+    feature: &'static str,
+) -> impl Iterator<Item = &'static crate::contract::AeadFamily> {
     crate::contract::AEAD_FAMILIES
         .iter()
-        .filter(|family| family.features.contains(&FEATURE_CHACHA))
+        .filter(move |family| family.features.contains(&feature))
 }
 
 /// Each construction's key accepts exactly its own nonce length: the other
 /// construction's length is `invalid-nonce` (nonce-length confusion between
 /// the constructions cannot pass silently), and the correct length
 /// round-trips.
-async fn chacha_nonce_lengths() -> Result<(), String> {
+async fn nonce_lengths_for(feature: &'static str) -> Result<(), String> {
     let msg = b"chacha-nonce-lengths";
-    for family in chacha_families() {
+    for family in aead_families_with(feature) {
         let (name, good_len) = (family.name, family.nonce_len);
         let bad_len = if good_len == 12 { 24 } else { 12 };
         let key = (family.import)(
@@ -690,6 +713,17 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
+}
+
+/// The IETF construction's nonce-length contract (see [`nonce_lengths_for`]).
+async fn chacha_nonce_lengths() -> Result<(), String> {
+    nonce_lengths_for(FEATURE_CHACHA).await
+}
+
+/// The XChaCha construction's nonce-length contract (see
+/// [`nonce_lengths_for`]).
+async fn xchacha_nonce_lengths() -> Result<(), String> {
+    nonce_lengths_for(FEATURE_XCHACHA).await
 }
 
 /// A generated Ed25519 key signs, the public half returned with it

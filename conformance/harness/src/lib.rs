@@ -27,10 +27,18 @@ use std::collections::BTreeSet;
 
 use lann_webcrypto_guest::bindings::types::Error;
 
-/// The `chacha20-poly1305` feature: both ChaCha20-Poly1305 constructions
-/// and the XChaCha internal-nonce minting interface. Browser WebCrypto
-/// implements none of them, so the jco targets declare it missing.
+/// The `chacha20-poly1305` feature: the IETF ChaCha20-Poly1305 (RFC 8439)
+/// minting interface. Platform-backed hosts serve it where their platform
+/// does (the Modern Algorithms proposal; Node's WebCrypto serves it,
+/// browser WebCrypto does not yet).
 pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
+
+/// The `xchacha20-poly1305` feature: the XChaCha construction — the
+/// `xchacha20-poly1305` minting interface and the XChaCha internal-nonce
+/// minting interface. No platform WebCrypto implements XChaCha (it is
+/// absent from the Modern Algorithms proposal), so the jco targets declare
+/// it missing.
+pub const FEATURE_XCHACHA: &str = "xchacha20-poly1305";
 
 /// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
 /// No case in the shared suite is tagged with it — the signing suite's
@@ -63,6 +71,7 @@ pub const FEATURE_SHA1_CHECKED: &str = "sha1-checked";
 /// inert one.
 pub const KNOWN_FEATURES: &[&str] = &[
     FEATURE_CHACHA,
+    FEATURE_XCHACHA,
     FEATURE_ECDSA_SIGN,
     FEATURE_GCM_ANY_IV,
     FEATURE_SHA1_CHECKED,

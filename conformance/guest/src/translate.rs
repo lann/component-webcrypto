@@ -11,7 +11,7 @@
 //! degenerate duplicates).
 
 use conformance_harness::stream::Schedule;
-use conformance_harness::{FEATURE_CHACHA, FEATURE_GCM_ANY_IV};
+use conformance_harness::{FEATURE_CHACHA, FEATURE_GCM_ANY_IV, FEATURE_XCHACHA};
 use serde::Deserialize;
 
 /// The deterministic 1-in-N sample of rejection vectors that also run
@@ -150,7 +150,8 @@ impl AeadAlg {
     fn features(self) -> &'static [&'static str] {
         match self {
             AeadAlg::AesGcm => &[],
-            AeadAlg::ChaCha20Poly1305 | AeadAlg::XChaCha20Poly1305 => &[FEATURE_CHACHA],
+            AeadAlg::ChaCha20Poly1305 => &[FEATURE_CHACHA],
+            AeadAlg::XChaCha20Poly1305 => &[FEATURE_XCHACHA],
         }
     }
 }
@@ -220,7 +221,7 @@ impl InternalNonceAlg {
     fn features(self) -> &'static [&'static str] {
         match self {
             InternalNonceAlg::AesGcm => &[],
-            InternalNonceAlg::XChaCha20Poly1305 => &[FEATURE_CHACHA],
+            InternalNonceAlg::XChaCha20Poly1305 => &[FEATURE_XCHACHA],
         }
     }
 }

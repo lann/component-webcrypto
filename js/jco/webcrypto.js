@@ -518,11 +518,11 @@ export class AeadKeyOptions {
 }
 
 /**
- * The `aead-key` resource: an AES-GCM key. Holds a `CryptoKey` imported
- * with exactly the usages its mint options granted and the options'
- * `extractable` flag, so the platform enforces the policy the resource
- * reports; instances are minted only by the `aes-gcm` interface functions
- * below.
+ * The `aead-key` resource: an AES-GCM or ChaCha20-Poly1305 key. Holds a
+ * `CryptoKey` imported with exactly the usages its mint options granted and
+ * the options' `extractable` flag, so the platform enforces the policy the
+ * resource reports; instances are minted only by the `aes-gcm` and
+ * `chacha20-poly1305` interface functions below.
  */
 export class AeadKey {
   #key;
@@ -543,16 +543,22 @@ export class AeadKey {
     this.#lengthBits = lengthBits;
   }
 
+  /** Whether this key drives the ChaCha20-Poly1305 construction. */
+  #isChacha() {
+    return this.#key.algorithm.name === "ChaCha20-Poly1305";
+  }
+
   /**
    * Encrypt and authenticate the plaintext stream under `nonce` and `aad`,
    * with a `tagSize`-byte authentication tag (`undefined` = the 16-byte
    * default). Returns a `ReadableStream` carrying ciphertext followed by
    * the tag (the `crypto.subtle.encrypt` wire format). Throws
-   * `{ tag: 'invalid-nonce', val }` for an empty nonce and
-   * `{ tag: 'unsupported', val }` for a tag size outside the GCM set, per
-   * the WIT contract. The plaintext stream is drained before any failure
-   * is raised, so the guest's writer always completes rather than blocking
-   * on an unread stream.
+   * `{ tag: 'invalid-nonce', val }` for an empty nonce (AES-GCM) or a
+   * non-12-byte nonce (ChaCha20-Poly1305), and `{ tag: 'unsupported', val }`
+   * for a tag size outside the GCM set or a non-default ChaCha tag size,
+   * per the WIT contracts. The plaintext stream is drained before any
+   * failure is raised, so the guest's writer always completes rather than
+   * blocking on an unread stream.
    * @param {Uint8Array} nonce
    * @param {Uint8Array} aad
    * @param {number | undefined} tagSize
@@ -561,6 +567,22 @@ export class AeadKey {
   async seal(nonce, aad, tagSize, plaintext) {
     return withCollectedInputToStream(plaintext, async (message) => {
       if (!this.canSeal()) throw notPermitted("seal");
+      if (this.#isChacha()) {
+        requireChachaNonce(nonce);
+        requireChachaTagSize(tagSize);
+        const sealed = await platformCall("ChaCha20-Poly1305 seal", () =>
+          subtle.encrypt(
+            {
+              name: "ChaCha20-Poly1305",
+              iv: asBufferSource(nonce),
+              additionalData: asBufferSource(aad),
+            },
+            this.#key,
+            message,
+          ),
+        );
+        return new Uint8Array(sealed);
+      }
       requireGcmNonce(nonce);
       const tagLength = gcmTagLengthBits(tagSize);
       let sealed;
@@ -602,6 +624,25 @@ export class AeadKey {
   async open(nonce, aad, tagSize, ciphertext) {
     return withCollectedInputToStream(ciphertext, async (message) => {
       if (!this.canOpen()) throw notPermitted("open");
+      if (this.#isChacha()) {
+        requireChachaNonce(nonce);
+        requireChachaTagSize(tagSize);
+        let opened;
+        try {
+          opened = await subtle.decrypt(
+            {
+              name: "ChaCha20-Poly1305",
+              iv: asBufferSource(nonce),
+              additionalData: asBufferSource(aad),
+            },
+            this.#key,
+            message,
+          );
+        } catch (err) {
+          throw decryptFailure(err);
+        }
+        return new Uint8Array(opened);
+      }
       requireGcmNonce(nonce);
       const tagLength = gcmTagLengthBits(tagSize);
       let opened;
@@ -629,9 +670,9 @@ export class AeadKey {
   /**
    * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
    * from the mint (see `#lengthBits`), and the size getters report the
-   * standard/default parameters — every AEAD this host serves is AES-GCM:
-   * 12-byte nonces and 16-byte tags by default, with other sizes accepted
-   * per call.
+   * standard/default parameters — both AEADs this host serves (AES-GCM and
+   * ChaCha20-Poly1305) use 12-byte nonces and 16-byte tags by default,
+   * with other GCM sizes accepted per call.
    */
   algorithmName() {
     return this.#key.algorithm.name;
@@ -682,9 +723,15 @@ export class AeadKey {
   /**
    * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
    * the package-wide contract), behind the same extractability gate as
-   * `exportKeyRaw`.
+   * `exportKeyRaw`. The ChaCha constructions have no registered JWK `alg`,
+   * so their export declines `{ tag: 'unsupported' }` (the package-wide
+   * JWK contract) — after the extractability gate, which applies first.
    */
   async exportKeyJwk() {
+    if (this.#isChacha()) {
+      if (!this.#key.extractable) throw errNotExtractable();
+      throw errUnsupported("ChaCha20-Poly1305 has no registered JWK alg");
+    }
     return exportJwkGated(this.#key);
   }
 }
@@ -2269,11 +2316,11 @@ export const aesCbc = cipherMinting("AES-CBC");
 export const aesCtr = cipherMinting("AES-CTR");
 
 /**
- * Throw `{ tag: 'unsupported', val }` for a ChaCha construction: browser
- * WebCrypto implements no ChaCha20-Poly1305 (the WICG proposal is
- * unimplemented), so this host declines these interfaces whole and a
- * composition needing them must supply another provider (the in-guest
- * provider serves both constructions).
+ * Throw `{ tag: 'unsupported', val }` for an XChaCha construction: no
+ * platform WebCrypto implements XChaCha20-Poly1305 (it is absent from the
+ * Modern Algorithms proposal), so this host declines these interfaces
+ * whole and a composition needing them must supply another provider (the
+ * in-guest provider serves both).
  *
  * Annotated `never` for the same reason as `invalidKey`: the minting stubs
  * below delegate to it in place of returning a key, so a version that fell
@@ -2285,10 +2332,73 @@ function unsupportedChacha(name) {
   throw errUnsupported(`${name} is not served by this implementation`);
 }
 
+/**
+ * Await a ChaCha20-Poly1305 platform *minting* call, reinterpreting any
+ * platform failure as `{ tag: 'unsupported', val }`. The request is
+ * well-formed by the time the platform is called (key length and usage
+ * grants are validated above it), so a failure means the platform does not
+ * implement the algorithm — browser WebCrypto today; Node 24.18+ and the
+ * Modern Algorithms proposal's implementations serve it. Detection is
+ * per-call: the same module serves the interface exactly where its
+ * platform does, the pattern the jco-browser target's GCM nonce window
+ * already uses.
+ * @template T
+ * @param {string} what
+ * @param {() => Promise<T>} run
+ * @returns {Promise<T>}
+ */
+async function chachaMint(what, run) {
+  try {
+    return await run();
+  } catch (err) {
+    if (isWitError(err)) throw err;
+    const failure = asPlatformError(err);
+    throw errUnsupported(
+      `ChaCha20-Poly1305 is not served by this platform (${what}: ${failure.detail})`,
+    );
+  }
+}
+
 /** The `lann:webcrypto/chacha20-poly1305` interface. */
 export const chacha20Poly1305 = {
-  importKeyRaw: async () => unsupportedChacha("ChaCha20-Poly1305"),
-  generateKey: async () => unsupportedChacha("ChaCha20-Poly1305"),
+  /**
+   * Import exactly 32 bytes of raw ChaCha20-Poly1305 key material
+   * (`{ tag: 'invalid-key' }` otherwise, before the platform is asked),
+   * through the proposal's `"raw-secret"` format.
+   * @param {Uint8Array} raw
+   * @param {AeadKeyOptions} options
+   */
+  async importKeyRaw(raw, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    if (raw.length !== 32) {
+      throw errInvalidKey(`ChaCha20-Poly1305 keys are 32 bytes, got ${raw.length}`);
+    }
+    const key = await chachaMint("import-key-raw", () =>
+      subtle.importKey(
+        // lib.dom's KeyFormat predates the proposal's "raw-secret"; the
+        // non-jwk overload is the one this call means.
+        /** @type {Exclude<KeyFormat, "jwk">} */ ("raw-secret"),
+        asBufferSource(raw),
+        { name: "ChaCha20-Poly1305" },
+        policy.extractable,
+        usages,
+      ),
+    );
+    return new AeadKey(key, 256);
+  },
+  /**
+   * Generate a fresh random 256-bit ChaCha20-Poly1305 key.
+   * @param {AeadKeyOptions} options
+   */
+  async generateKey(options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const key = await chachaMint("generate-key", () =>
+      subtle.generateKey({ name: "ChaCha20-Poly1305" }, policy.extractable, usages),
+    );
+    return new AeadKey(/** @type {CryptoKey} */ (key), 256);
+  },
 };
 
 /** The `lann:webcrypto/xchacha20-poly1305` interface. */
@@ -2506,6 +2616,31 @@ export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePol
 function requireGcmNonce(nonce) {
   if (nonce.length === 0) {
     throw errInvalidNonce("AES-GCM requires a non-empty nonce");
+  }
+}
+
+/**
+ * Throw `{ tag: 'invalid-nonce', val }` unless the nonce is exactly 12
+ * bytes — the RFC 8439 construction fixes it (the `chacha20-poly1305`
+ * minting contract), so the check is this host's, not the platform's.
+ * @param {Uint8Array} nonce
+ */
+function requireChachaNonce(nonce) {
+  if (nonce.length !== 12) {
+    throw errInvalidNonce(`ChaCha20-Poly1305 nonces are exactly 12 bytes, got ${nonce.length}`);
+  }
+}
+
+/**
+ * ChaCha20-Poly1305 fixes 16-byte tags: `undefined` selects the default,
+ * an explicit 16 is accepted, and anything else throws
+ * `{ tag: 'unsupported', val }` per the minting contract (the parameter
+ * exists for GCM's tag-size set).
+ * @param {number | undefined} tagSize
+ */
+function requireChachaTagSize(tagSize) {
+  if (tagSize !== undefined && tagSize !== 16) {
+    throw errUnsupported(`ChaCha20-Poly1305 tags are 16 bytes; got ${tagSize}`);
   }
 }
 
@@ -2740,13 +2875,20 @@ async function withCollectedInputToStream(stream, op) {
  * The shared raw `export-key-raw` gate: throw `{ tag: 'not-extractable' }`
  * unless `key` was minted extractable (checked on the `CryptoKey` itself
  * rather than relying on the `DOMException` from `exportKeyRaw`), then export
- * the raw material.
+ * the raw material. ChaCha20-Poly1305 keys export through the Modern
+ * Algorithms proposal's `"raw-secret"` format name — the platform serves no
+ * `"raw"` spelling for them.
  * @param {CryptoKey} key
  */
 async function exportRawGated(key) {
   if (!key.extractable) throw errNotExtractable();
+  // lib.dom's KeyFormat predates the proposal's "raw-secret"; both formats
+  // take the non-jwk overload.
+  const format = /** @type {Exclude<KeyFormat, "jwk">} */ (
+    key.algorithm.name === "ChaCha20-Poly1305" ? "raw-secret" : "raw"
+  );
   return new Uint8Array(
-    await platformCall("raw key export", () => subtle.exportKey("raw", key)),
+    await platformCall("raw key export", () => subtle.exportKey(format, key)),
   );
 }
 
