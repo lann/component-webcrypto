@@ -8,11 +8,11 @@ pub use crate::bindings::aes_ctr::AesVariant;
 /// Import raw key material as the declared AES variant.
 pub async fn import_key_raw(
     variant: AesVariant,
-    raw_material: Vec<u8>,
+    raw: impl Into<Vec<u8>>,
     options: CipherKeyOptions,
 ) -> Result<CipherKey, Error> {
     Ok(CipherKey::from_raw(
-        bindings::aes_ctr::import_key_raw(variant, raw_material, options.lower()).await?,
+        bindings::aes_ctr::import_key_raw(variant, raw.into(), options.lower()).await?,
     ))
 }
 

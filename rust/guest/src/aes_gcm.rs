@@ -9,11 +9,11 @@ pub use crate::bindings::aes_gcm::AesVariant;
 /// Import raw key material as the declared AES variant.
 pub async fn import_key_raw(
     variant: AesVariant,
-    raw_material: Vec<u8>,
+    raw: impl Into<Vec<u8>>,
     options: AeadKeyOptions,
 ) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
-        bindings::aes_gcm::import_key_raw(variant, raw_material, options.lower()).await?,
+        bindings::aes_gcm::import_key_raw(variant, raw.into(), options.lower()).await?,
     ))
 }
 

@@ -4,9 +4,12 @@
 use crate::{bindings, Aead, AeadKeyOptions, Error};
 
 /// Import 32 bytes of raw key material.
-pub async fn import_key_raw(raw_material: Vec<u8>, options: AeadKeyOptions) -> Result<Aead, Error> {
+pub async fn import_key_raw(
+    raw: impl Into<Vec<u8>>,
+    options: AeadKeyOptions,
+) -> Result<Aead, Error> {
     Ok(Aead::from_raw(
-        bindings::xchacha20_poly1305::import_key_raw(raw_material, options.lower()).await?,
+        bindings::xchacha20_poly1305::import_key_raw(raw.into(), options.lower()).await?,
     ))
 }
 

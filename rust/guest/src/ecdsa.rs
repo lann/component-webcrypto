@@ -7,10 +7,10 @@ pub use crate::bindings::ecdsa_verify::EcdsaVariant;
 /// Import a public key as an uncompressed SEC1 point.
 pub async fn import_verifying_key_raw(
     variant: EcdsaVariant,
-    raw_material: Vec<u8>,
+    raw: impl Into<Vec<u8>>,
 ) -> Result<VerifyingKey, Error> {
     Ok(VerifyingKey::from_raw(
-        bindings::ecdsa_verify::import_verifying_key_raw(variant, raw_material).await?,
+        bindings::ecdsa_verify::import_verifying_key_raw(variant, raw.into()).await?,
     ))
 }
 
