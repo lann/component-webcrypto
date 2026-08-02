@@ -216,6 +216,24 @@ impl Guest for Component {
         check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
         check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
         check("x25519-agreement", x25519_agreement().await).await?;
+        check("digest-wrapper", digest_wrapper().await).await?;
+        check(
+            "ed25519-wrapper-roundtrip",
+            ed25519_wrapper_roundtrip().await,
+        )
+        .await?;
+        check("internal-nonce-wrapper", internal_nonce_wrapper().await).await?;
+        check(
+            "aes-ctr-wrapper-roundtrip",
+            aes_ctr_wrapper_roundtrip().await,
+        )
+        .await?;
+        check(
+            "mac-datasource-equivalence",
+            mac_datasource_equivalence().await,
+        )
+        .await?;
+        check("read-error-precedence", read_error_precedence().await).await?;
 
         Ok(format!(
             "{} checks passed: {}",
@@ -1110,4 +1128,236 @@ async fn x25519_agreement() -> Result<()> {
         "chained derivations disagree by direction"
     );
     Ok(())
+}
+
+// --- wrapper-layer checks ----------------------------------------------------------
+//
+// The SDK's newtype wrappers execute nowhere else in the repository: these
+// checks are their harness, run under all three implementations. Algorithm
+// correctness is the vectors' job (here and in conformance); these assert
+// the wrapper plumbing — every `DataSource` variant, the feature-gated
+// source adaptors, and the `Error::Read` precedence rule.
+
+/// The `Digest` wrapper against the same vector as the bindings-level
+/// check, including resource reuse.
+async fn digest_wrapper() -> Result<()> {
+    let digest = lann_webcrypto_guest::sha2::make_digest(Sha2Variant::Sha256)?;
+    ensure!(
+        digest.algorithm_name() == "SHA-256",
+        "algorithm-name: got {}",
+        digest.algorithm_name()
+    );
+    let got = hex(&digest.compute(b"abc").await?);
+    ensure!(got == SHA256_ABC, "computed digest: got {got}");
+    let again = hex(&digest.compute(b"abc").await?);
+    ensure!(again == SHA256_ABC, "recomputed digest: got {again}");
+    Ok(())
+}
+
+/// The signature wrappers end to end: generate through `ed25519`, sign
+/// through `SigningKey`, verify through `VerifyingKey`, and fail closed on
+/// a tampered signature.
+async fn ed25519_wrapper_roundtrip() -> Result<()> {
+    use lann_webcrypto_guest::{ed25519, SigningKeyOptions};
+    let (signing, verifying) = ed25519::generate_key(SigningKeyOptions {
+        sign: true,
+        extractable: false,
+    })
+    .await?;
+    let payload = &b"wrapper-signed payload"[..];
+    let mut sig = signing.sign(payload).await?;
+    verifying
+        .verify(payload, sig.clone())
+        .await
+        .context("fresh signature did not verify")?;
+    sig[0] ^= 0x01;
+    ensure!(
+        matches!(
+            verifying.verify(payload, sig).await,
+            Err(lann_webcrypto_guest::Error::AuthenticationFailed)
+        ),
+        "tampered signature verified"
+    );
+    Ok(())
+}
+
+/// The `AeadInternalNonce` wrapper end to end: generate, seal (a lazy
+/// [`Seal`](lann_webcrypto_guest::Seal)), open, and the budget getter.
+async fn internal_nonce_wrapper() -> Result<()> {
+    use lann_webcrypto_guest::{aes_gcm_internal_nonce, InternalNonceKeyOptions};
+    let key = aes_gcm_internal_nonce::generate_key(
+        aes_gcm_internal_nonce::AesVariant::Aes256,
+        InternalNonceKeyOptions {
+            seal: true,
+            open: true,
+            extractable: false,
+        },
+    )
+    .await?;
+    let plaintext = &b"internal-nonce wrapper payload"[..];
+    let sealed = key.seal(&b"aad"[..], plaintext).await?;
+    let opened = key.open(&b"aad"[..], sealed).await?.collect().await;
+    ensure!(opened == plaintext, "round trip disagreed");
+    ensure!(
+        key.seals_remaining().is_none_or(|left| left > 0),
+        "budget exhausted after one seal"
+    );
+    Ok(())
+}
+
+/// The `CipherKey` wrapper end to end: generate through `aes_ctr`,
+/// encrypt (a lazy [`Seal`](lann_webcrypto_guest::Seal)), decrypt, and
+/// compare.
+async fn aes_ctr_wrapper_roundtrip() -> Result<()> {
+    use lann_webcrypto_guest::{aes_ctr, CipherKeyOptions};
+    let key = aes_ctr::generate_key(
+        aes_ctr::AesVariant::Aes256,
+        CipherKeyOptions {
+            encrypt: true,
+            decrypt: true,
+            wrap: false,
+            unwrap: false,
+            extractable: false,
+        },
+    )
+    .await?;
+    let plaintext = &b"counter-mode wrapper payload"[..];
+    let iv = [0u8; 16];
+    let ciphertext = key.encrypt(&iv[..], Some(64), plaintext).await?;
+    ensure!(ciphertext != plaintext, "ciphertext equals plaintext");
+    let decrypted = key
+        .decrypt(&iv[..], Some(64), ciphertext)
+        .await?
+        .collect()
+        .await;
+    ensure!(decrypted == plaintext, "round trip disagreed");
+    Ok(())
+}
+
+/// Every `DataSource` variant produces the RFC 4231 tag: borrowed and
+/// owned buffers, a multi-chunk `Buf` (feature `bytes`), an incremental
+/// reader (feature `futures-io`), and a passed-through stream. The
+/// feature-gated feed loops execute only here.
+async fn mac_datasource_equivalence() -> Result<()> {
+    use lann_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
+    let key = hmac_sha2::import_key_raw(
+        Sha2Variant::Sha256,
+        HMAC_KEY,
+        MacKeyOptions {
+            sign: true,
+            verify: true,
+            extractable: false,
+        },
+    )
+    .await?;
+    let expected = unhex(HMAC_TAG);
+
+    let borrowed = key.sign(HMAC_DATA).await?;
+    ensure!(
+        borrowed == expected,
+        "borrowed source: got {}",
+        hex(&borrowed)
+    );
+
+    let owned = key.sign(HMAC_DATA.to_vec()).await?;
+    ensure!(owned == expected, "owned source: got {}", hex(&owned));
+
+    let (head, tail) = HMAC_DATA.split_at(9);
+    let buf = bytes::Buf::chain(head, tail);
+    let bufed = key.sign(DataSource::from_buf(buf)).await?;
+    ensure!(bufed == expected, "buf source: got {}", hex(&bufed));
+
+    let read = key
+        .sign(DataSource::from_reader(ChunkReader::new(HMAC_DATA, 7)))
+        .await?;
+    ensure!(read == expected, "reader source: got {}", hex(&read));
+
+    let (tx, rx) = wit_stream::new();
+    let feed = async move {
+        let mut tx = tx;
+        // Dropping the writer ends the stream; the sign resolves only then.
+        tx.write_all(HMAC_DATA.to_vec()).await
+    };
+    let (streamed, leftover) = futures::join!(key.sign(rx), feed);
+    ensure!(leftover.is_empty(), "the operation left input unread");
+    let streamed = streamed?;
+    ensure!(
+        streamed == expected,
+        "stream source: got {}",
+        hex(&streamed)
+    );
+    Ok(())
+}
+
+/// A failing `from_reader` source surfaces as `Error::Read`, taking
+/// precedence over the operation's own outcome: the operation only saw a
+/// truncated input.
+async fn read_error_precedence() -> Result<()> {
+    use lann_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
+    let key = hmac_sha2::import_key_raw(
+        Sha2Variant::Sha256,
+        HMAC_KEY,
+        MacKeyOptions {
+            sign: true,
+            verify: true,
+            extractable: false,
+        },
+    )
+    .await?;
+    let result = key
+        .sign(DataSource::from_reader(FailingReader { fed: false }))
+        .await;
+    ensure!(
+        matches!(result, Err(lann_webcrypto_guest::Error::Read(_))),
+        "expected Error::Read, got {result:?}"
+    );
+    Ok(())
+}
+
+/// Yields `data` in `chunk`-byte reads — a well-behaved incremental
+/// reader.
+struct ChunkReader {
+    data: &'static [u8],
+    chunk: usize,
+}
+
+impl ChunkReader {
+    fn new(data: &'static [u8], chunk: usize) -> Self {
+        Self { data, chunk }
+    }
+}
+
+impl futures_io::AsyncRead for ChunkReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let n = self.chunk.min(self.data.len()).min(buf.len());
+        buf[..n].copy_from_slice(&self.data[..n]);
+        self.data = &self.data[n..];
+        std::task::Poll::Ready(Ok(n))
+    }
+}
+
+/// Yields one chunk, then fails — the truncating producer whose failure
+/// `Error::Read` must report over the operation's outcome.
+struct FailingReader {
+    fed: bool,
+}
+
+impl futures_io::AsyncRead for FailingReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        if self.fed {
+            return std::task::Poll::Ready(Err(std::io::Error::other("reader failed midway")));
+        }
+        self.fed = true;
+        let n = buf.len().min(4);
+        buf[..n].copy_from_slice(&[0xAB; 4][..n]);
+        std::task::Poll::Ready(Ok(n))
+    }
 }

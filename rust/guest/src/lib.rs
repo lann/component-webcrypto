@@ -421,14 +421,26 @@ impl Inner<'_> {
     }
 }
 
-/// Run the operation built by `op` over `source`: pass a stream source
-/// through directly, or mint a stream pair and feed the source concurrently
-/// with the operation (per the closure rule, the feed settles no later than
-/// the operation). Precedence over the joined outcomes: a [`Error::Read`]
+/// Attribute a joined operation-and-feed outcome, per the stream-closure
+/// rule (see `wit/README.md`, "Streaming contract"): a [`Error::Read`]
 /// from the feeder wins over everything — the operation only saw a
 /// truncated input; then the operation's own error — a failing operation
 /// may close its input early, so a rejected write is not the verdict; a
-/// rejected write under a *successful* result is [`Error::ShortWrite`].
+/// rejected write under a *successful* result surfaces as the feed's
+/// error ([`Error::ShortWrite`]).
+fn combine<T, E: Into<Error>>(result: Result<T, E>, fed: Result<(), Error>) -> Result<T, Error> {
+    match (result, fed) {
+        (_, Err(read @ Error::Read(_))) => Err(read),
+        (Err(error), _) => Err(error.into()),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+/// Run the operation built by `op` over `source`: pass a stream source
+/// through directly, or mint a stream pair and feed the source concurrently
+/// with the operation (per the closure rule, the feed settles no later than
+/// the operation), attributing the joined outcome with [`combine`].
 async fn run_sourced<T, F>(
     source: DataSource<'_>,
     op: impl FnOnce(StreamReader<u8>) -> F,
@@ -441,12 +453,7 @@ where
         inner => {
             let (tx, rx) = wit_stream::new();
             let (result, fed) = futures::join!(op(rx), inner.feed(tx));
-            match (result, fed) {
-                (_, Err(read @ Error::Read(_))) => Err(read),
-                (Err(error), _) => Err(error.into()),
-                (Ok(_), Err(error)) => Err(error),
-                (Ok(value), Ok(())) => Ok(value),
-            }
+            combine(result, fed)
         }
     }
 }
@@ -543,12 +550,7 @@ fn seal_and_collect<'a>(
                     Ok::<_, Error>(stream.collect().await)
                 };
                 let (result, fed) = futures::join!(sealed, inner.feed(tx));
-                match (result, fed) {
-                    (_, Err(read @ Error::Read(_))) => Err(read),
-                    (Err(error), _) => Err(error),
-                    (Ok(_), Err(error)) => Err(error),
-                    (Ok(value), Ok(())) => Ok(value),
-                }
+                combine(result, fed)
             }
         }
     })
@@ -1593,4 +1595,128 @@ pub mod xchacha20_poly1305_internal_nonce;
 /// through the engine's own compilation.
 pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
     bindings::bytes::constant_time_equal(a, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{combine, Error};
+
+    fn read_error() -> Error {
+        Error::Read(std::io::Error::other("reader failed"))
+    }
+
+    /// A feeder's read failure wins over everything — including a
+    /// *successful* operation, whose result was computed over a truncated
+    /// input.
+    #[test]
+    fn combine_read_wins_over_both_outcomes() {
+        assert!(matches!(
+            combine::<(), Error>(Ok(()), Err(read_error())),
+            Err(Error::Read(_))
+        ));
+        assert!(matches!(
+            combine::<(), Error>(Err(Error::Other("op".into())), Err(read_error())),
+            Err(Error::Read(_))
+        ));
+    }
+
+    /// The operation's own error wins over a rejected feed: a failing
+    /// operation may close its input early (the closure rule), so the
+    /// rejected write is not the verdict.
+    #[test]
+    fn combine_operation_error_wins_over_rejected_feed() {
+        assert!(matches!(
+            combine::<(), Error>(
+                Err(Error::InvalidNonce("nonce".into())),
+                Err(Error::ShortWrite)
+            ),
+            Err(Error::InvalidNonce(_))
+        ));
+    }
+
+    /// A rejected feed under a successful result is the defect
+    /// [`Error::ShortWrite`] names: only a failing operation may end its
+    /// input early.
+    #[test]
+    fn combine_success_with_rejected_feed_is_short_write() {
+        assert!(matches!(
+            combine::<u8, Error>(Ok(7), Err(Error::ShortWrite)),
+            Err(Error::ShortWrite)
+        ));
+    }
+
+    /// The clean path passes the value through.
+    #[test]
+    fn combine_clean_success_passes_through() {
+        assert!(matches!(combine::<u8, Error>(Ok(7), Ok(())), Ok(7)));
+    }
+
+    /// Every WIT error case maps onto its own variant — and the match in
+    /// `From` is exhaustive, so a case added to the WIT is a compile error
+    /// here rather than a silent fallthrough.
+    #[test]
+    fn wit_errors_map_onto_their_variants() {
+        use super::bindings::types::{Error as Raw, ExtensionError};
+        assert!(matches!(
+            Error::from(Raw::InvalidKey("k".into())),
+            Error::InvalidKey(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::InvalidNonce("n".into())),
+            Error::InvalidNonce(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::AuthenticationFailed),
+            Error::AuthenticationFailed
+        ));
+        assert!(matches!(
+            Error::from(Raw::NotExtractable),
+            Error::NotExtractable
+        ));
+        assert!(matches!(
+            Error::from(Raw::Unsupported("u".into())),
+            Error::Unsupported(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::NotPermitted("p".into())),
+            Error::NotPermitted(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::KeyExhausted),
+            Error::KeyExhausted
+        ));
+        assert!(matches!(
+            Error::from(Raw::Other("o".into())),
+            Error::Other(_)
+        ));
+        assert!(matches!(
+            Error::from(Raw::Extension(ExtensionError {
+                origin: "lann:webcrypto".into(),
+                name: "collision-detected".into(),
+                message: "m".into(),
+            })),
+            Error::Extension(_)
+        ));
+    }
+
+    /// Every `Display` rendering identifies its condition: the WIT-mirrored
+    /// variants by case name, the SDK-local ones by prose.
+    #[test]
+    fn display_identifies_every_condition() {
+        let renders = [
+            (Error::InvalidKey("k".into()), "invalid-key: k"),
+            (Error::InvalidNonce("n".into()), "invalid-nonce: n"),
+            (Error::AuthenticationFailed, "authentication-failed"),
+            (Error::NotExtractable, "not-extractable"),
+            (Error::Unsupported("u".into()), "unsupported: u"),
+            (Error::NotPermitted("p".into()), "not-permitted: p"),
+            (Error::KeyExhausted, "key-exhausted"),
+            (Error::Other("o".into()), "other: o"),
+        ];
+        for (error, expected) in renders {
+            assert_eq!(error.to_string(), expected);
+        }
+        assert!(read_error().to_string().contains("reader failed"));
+        assert!(Error::ShortWrite.to_string().starts_with("short write"));
+    }
 }

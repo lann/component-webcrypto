@@ -15,8 +15,14 @@ anyhow = "1"
 # the `wit_stream` helpers used to feed byte streams to the imports.
 wit-bindgen = { version = "0.59", features = ["async"] }
 # The lann:webcrypto bindings and byte-buffer helpers; carries the imports,
-# so this component's own world declares only its export.
-lann-webcrypto-guest = { path = "../../rust/guest" }
+# so this component's own world declares only its export. Both optional
+# source adaptors are enabled: the demo is the wrapper layer's execution
+# harness, and these features' feed loops run nowhere else.
+lann-webcrypto-guest = { path = "../../rust/guest", features = ["bytes", "futures-io"] }
 # `join!` lets the component feed a stream and await the consuming import
 # concurrently within a single cooperative task (no OS threads).
 futures = { version = "0.3", default-features = false, features = ["async-await"] }
+# Buf inputs for the `DataSource::from_buf` checks.
+bytes = "1"
+# The `AsyncRead` trait for the `DataSource::from_reader` checks.
+futures-io = "0.3"
