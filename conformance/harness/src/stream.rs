@@ -3,10 +3,10 @@
 //! concurrently.
 //!
 //! Every helper returns the operation's outcome and the feeder's outcome
-//! *separately*, so drain-rule violations (a callee closing its input
-//! stream early) are distinguishable from the call's own error. The
-//! lann-webcrypto-guest wrappers deliberately merge the two; the drain-rule probes are
-//! why these helpers do not.
+//! *separately*, so the feeder's fate (fully written, or rejected by an
+//! early close the closure rule permits on error) is distinguishable from
+//! the call's own error. The lann-webcrypto-guest wrappers deliberately
+//! merge the two; the stream-closure probes are why these helpers do not.
 
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;

@@ -262,11 +262,12 @@ and the difference is the signal:
 - **WIT-forced**: no shim could express the behavior through the interface
   shape. Keeping the set small is the goal, and every member must be a
   recorded ruling, never a silent consequence of whatever shape was
-  convenient. The historical example — the fixed AES-GCM IV/tag
-  contract — was resolved by carrying both as per-call
-  `aead-key.seal`/`open` parameters; the current member is one
-  deliberate ruling from `wit/README.md`'s design notes: empty HKDF IKM
-  is rejected.
+  convenient. The set is currently empty; the historical members were
+  each resolved rather than kept — the fixed AES-GCM IV/tag contract by
+  carrying both as per-call `aead-key.seal`/`open` parameters, the
+  ChaCha JWK decline by serving the proposal's alg-less `oct` form, and
+  the empty-HKDF-IKM rejection by accepting empty KDF secrets
+  package-wide (its recorded rationale did not survive scrutiny).
 
 The shim header's deviations list is the registry: every deviation appears
 there with its classification, so the WIT-forced set — the true cost of the

@@ -1,15 +1,17 @@
 //! Hand-written API-contract probes: the parts of the `lann:webcrypto`
 //! contract the Wycheproof vectors cannot express — key import/export and
-//! extractability, error variants for misuse, the seal/open drain rule,
+//! extractability, error variants for misuse, the seal/open
+//! stream-closure rule,
 //! generated-key shape, and algorithm naming.
 
 use crate::mint::{
     agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_x25519_key,
     generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
-    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
-    import_internal_nonce_key, import_key_raw, import_password, import_x25519_public_key,
-    import_x25519_secret_key, import_xchacha_internal_nonce_key, x25519_secret_jwk,
+    import_chacha_key_jwk, import_ctr_key, import_hmac_key, import_hmac_key_jwk,
+    import_hmac_sha1_key, import_ikm, import_internal_nonce_key, import_key_raw, import_password,
+    import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
+    import_xchacha_key, x25519_secret_jwk,
 };
 use conformance_harness::stream::{
     ci_decrypt, ci_encrypt, compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify,
@@ -17,7 +19,7 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{
     describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
-    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED,
+    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
@@ -37,6 +39,9 @@ macro_rules! feature_tags {
     (chacha) => {
         &[FEATURE_CHACHA]
     };
+    (xchacha) => {
+        &[FEATURE_XCHACHA]
+    };
     (gcm_any_iv) => {
         &[FEATURE_GCM_ANY_IV]
     };
@@ -51,8 +56,8 @@ probes! {
     sha2_truncated_unsupported,
     aes_import_wrong_length,
     aes192_unsupported,
-    seal_drains_on_invalid_nonce,
-    open_drains_on_invalid_nonce,
+    seal_input_ends_on_invalid_nonce,
+    open_input_ends_on_invalid_nonce,
     sealed_length,
     key_export_roundtrip,
     not_extractable,
@@ -63,12 +68,13 @@ probes! {
     digest_reuse,
     constant_time_equal,
     chacha_nonce_lengths(chacha),
+    xchacha_nonce_lengths(xchacha),
     ed25519_sign_roundtrip,
     sig_key_metadata,
     sig_import_invalid,
     verifying_key_export_roundtrip,
     internal_nonce_shape,
-    chacha_internal_nonce_roundtrip(chacha),
+    chacha_internal_nonce_roundtrip(xchacha),
     aes128_internal_nonce,
     open_short_input,
     stream_empty_writes,
@@ -81,7 +87,8 @@ probes! {
     jwk_roundtrip,
     jwk_rejections,
     jwk_semantics,
-    chacha_jwk_unsupported(chacha),
+    chacha_jwk_contract(chacha),
+    xchacha_jwk_unsupported(xchacha),
     mac_usage_policy,
     aead_wrap_grants,
     internal_nonce_usage_policy,
@@ -114,6 +121,8 @@ probes! {
 pub async fn run_declined(features: &[&str]) -> Result<String, String> {
     if features == [FEATURE_CHACHA] {
         chacha_minting_declined().await
+    } else if features == [FEATURE_XCHACHA] {
+        xchacha_minting_declined().await
     } else if features == [FEATURE_SHA1_CHECKED] {
         sha1_checked_minting_declined().await
     } else if features == [FEATURE_GCM_ANY_IV] {
@@ -153,9 +162,47 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
     Ok("AES-GCM nonces outside 12–128 bytes declined unsupported".into())
 }
 
-/// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
+/// Assert that every ChaCha20-Poly1305 minting path declines
+/// `unsupported`: raw import, generation, and the JWK import.
 async fn chacha_minting_declined() -> Result<String, String> {
-    for family in chacha_families() {
+    minting_declined_for(FEATURE_CHACHA).await?;
+    expect_err(
+        "chacha20-poly1305 import-key-jwk",
+        ErrKind::Unsupported,
+        crate::mint::import_chacha_key_jwk(format!(r#"{{"kty":"oct","k":"{JWK_K_32}"}}"#), false)
+            .await,
+        "minted a key: the target serves a feature it declares missing",
+    )?;
+    Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
+}
+
+/// Assert that every XChaCha20-Poly1305 minting path declines
+/// `unsupported`: the caller-nonce construction's two entry points, and
+/// the internal-nonce interface's two.
+async fn xchacha_minting_declined() -> Result<String, String> {
+    minting_declined_for(FEATURE_XCHACHA).await?;
+    expect_err(
+        "xchacha internal-nonce generate-key",
+        ErrKind::Unsupported,
+        generate_xchacha_internal_nonce_key(false).await,
+        "minted a key for a feature declared missing",
+    )?;
+    // The internal-nonce *import* is a minting path too. Omitting it left a
+    // target free to decline five of the six entry points and still serve
+    // this one, which is the hole this assertion exists to close.
+    expect_err(
+        "xchacha internal-nonce import-key-raw",
+        ErrKind::Unsupported,
+        import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
+        "minted a key for a feature declared missing",
+    )?;
+    Ok("every XChaCha20-Poly1305 minting path declined unsupported".into())
+}
+
+/// Both caller-nonce minting entry points of every family tagged with
+/// `feature` decline `unsupported`.
+async fn minting_declined_for(feature: &'static str) -> Result<(), String> {
+    for family in aead_families_with(feature) {
         expect_err(
             &format!("{} import-key-raw", family.name),
             ErrKind::Unsupported,
@@ -173,22 +220,7 @@ async fn chacha_minting_declined() -> Result<String, String> {
             "minted a key: the target serves a feature it declares missing",
         )?;
     }
-    expect_err(
-        "xchacha internal-nonce generate-key",
-        ErrKind::Unsupported,
-        generate_xchacha_internal_nonce_key(false).await,
-        "minted a key for a feature declared missing",
-    )?;
-    // The internal-nonce *import* is a minting path too. Omitting it left a
-    // target free to decline five of the six entry points and still serve
-    // this one, which is the hole this assertion exists to close.
-    expect_err(
-        "xchacha internal-nonce import-key-raw",
-        ErrKind::Unsupported,
-        import_xchacha_internal_nonce_key(vec![0x42u8; 32], false).await,
-        "minted a key for a feature declared missing",
-    )?;
-    Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
+    Ok(())
 }
 
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
@@ -302,9 +334,12 @@ async fn aes192_unsupported() -> Result<(), String> {
     )
 }
 
-/// `seal` with a bad nonce still drains the plaintext stream: the concurrent
-/// feeder must complete, and the error must be `invalid-nonce`.
-async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
+/// `seal` with a bad nonce fails `invalid-nonce`, and the concurrent
+/// feeder settles: the closure rule lets the implementation drain in full
+/// (the feeder completes) or drop the reader early on the error (the
+/// feeder reports leftover) — either way the call must not leave the
+/// feeder wedged, which reaching the assertions at all demonstrates.
+async fn seal_input_ends_on_invalid_nonce() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     let plaintext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (sealed, fed) = seal(
@@ -316,7 +351,9 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
         Schedule::Straddle,
     )
     .await;
-    fed.map_err(|e| format!("plaintext feeder did not complete: {e}"))?;
+    // Either feed outcome conforms on an error result; only the verdict
+    // is contract.
+    drop(fed);
     expect_err(
         "seal",
         ErrKind::InvalidNonce,
@@ -325,9 +362,9 @@ async fn seal_drains_on_invalid_nonce() -> Result<(), String> {
     )
 }
 
-/// `open` with a bad nonce still drains the ciphertext stream: the concurrent
-/// feeder must complete, and the error must be `invalid-nonce`.
-async fn open_drains_on_invalid_nonce() -> Result<(), String> {
+/// `open` with a bad nonce fails `invalid-nonce`, and the concurrent
+/// feeder settles; see `seal_input_ends_on_invalid_nonce`.
+async fn open_input_ends_on_invalid_nonce() -> Result<(), String> {
     let key = generate_key_256(false).await?;
     let ciphertext: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
     let (opened, fed) = open(
@@ -339,7 +376,9 @@ async fn open_drains_on_invalid_nonce() -> Result<(), String> {
         Schedule::Straddle,
     )
     .await;
-    fed.map_err(|e| format!("ciphertext feeder did not complete: {e}"))?;
+    // Either feed outcome conforms on an error result; only the verdict
+    // is contract.
+    drop(fed);
     expect_err(
         "open",
         ErrKind::InvalidNonce,
@@ -641,22 +680,24 @@ async fn constant_time_equal() -> Result<(), String> {
     Ok(())
 }
 
-/// The contract battery's ChaCha rows (`contract::AEAD_FAMILIES` tagged
-/// with the feature): the minting entry points the decline and
+/// The contract battery's rows tagged with `feature`
+/// (`contract::AEAD_FAMILIES`): the minting entry points the decline and
 /// nonce-length probes iterate.
-fn chacha_families() -> impl Iterator<Item = &'static crate::contract::AeadFamily> {
+fn aead_families_with(
+    feature: &'static str,
+) -> impl Iterator<Item = &'static crate::contract::AeadFamily> {
     crate::contract::AEAD_FAMILIES
         .iter()
-        .filter(|family| family.features.contains(&FEATURE_CHACHA))
+        .filter(move |family| family.features.contains(&feature))
 }
 
 /// Each construction's key accepts exactly its own nonce length: the other
 /// construction's length is `invalid-nonce` (nonce-length confusion between
 /// the constructions cannot pass silently), and the correct length
 /// round-trips.
-async fn chacha_nonce_lengths() -> Result<(), String> {
+async fn nonce_lengths_for(feature: &'static str) -> Result<(), String> {
     let msg = b"chacha-nonce-lengths";
-    for family in chacha_families() {
+    for family in aead_families_with(feature) {
         let (name, good_len) = (family.name, family.nonce_len);
         let bad_len = if good_len == 12 { 24 } else { 12 };
         let key = (family.import)(
@@ -690,6 +731,17 @@ async fn chacha_nonce_lengths() -> Result<(), String> {
         expect_bytes(&opened, msg, "opened bytes")?;
     }
     Ok(())
+}
+
+/// The IETF construction's nonce-length contract (see [`nonce_lengths_for`]).
+async fn chacha_nonce_lengths() -> Result<(), String> {
+    nonce_lengths_for(FEATURE_CHACHA).await
+}
+
+/// The XChaCha construction's nonce-length contract (see
+/// [`nonce_lengths_for`]).
+async fn xchacha_nonce_lengths() -> Result<(), String> {
+    nonce_lengths_for(FEATURE_XCHACHA).await
 }
 
 /// A generated Ed25519 key signs, the public half returned with it
@@ -1580,20 +1632,78 @@ async fn jwk_semantics() -> Result<(), String> {
     Ok(())
 }
 
-/// ChaCha keys have no registered JWK `alg`: `export-key-jwk` declines
-/// `unsupported` (and the extractability gate still applies first on
-/// non-extractable keys).
-async fn chacha_jwk_unsupported() -> Result<(), String> {
-    let key = import_chacha_key(vec![0x42u8; 32], true)
+/// The ChaCha JWK contract: ChaCha20-Poly1305 keys travel as the W3C
+/// Modern Algorithms proposal's `oct` JWK with its registered `alg`,
+/// `"C20P"` — export carries the member, import accepts it or the
+/// alg-less form (the WPT fixtures' shape) and rejects any other `alg`
+/// with `invalid-key`. (XChaCha's preserved decline is
+/// `xchacha_jwk_unsupported`, under its own feature.)
+async fn chacha_jwk_contract() -> Result<(), String> {
+    let key = import_chacha_key((1..=32).collect(), true)
         .await
         .map_err(|e| describe("chacha import-key-raw", &e))?;
-    match key.export_key_jwk().await {
-        Err(Error::Unsupported(_)) => Ok(()),
+    let jwk = key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("chacha export-key-jwk", &e))?;
+    if !jwk.contains(JWK_K_32) || !jwk.contains("\"oct\"") {
+        return Err(format!(
+            "exported ChaCha JWK missing material members: {jwk}"
+        ));
+    }
+    if !jwk.contains("C20P") {
+        return Err(format!(
+            "exported ChaCha JWK does not carry alg \"C20P\": {jwk}"
+        ));
+    }
+
+    let reimported = import_chacha_key_jwk(jwk, true)
+        .await
+        .map_err(|e| describe("chacha import-key-jwk (exported form)", &e))?;
+    let raw = reimported
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("export-key-raw after JWK reimport", &e))?;
+    if raw != (1..=32).collect::<Vec<u8>>() {
+        return Err("JWK round trip changed the key material".into());
+    }
+
+    // The alg-less form (the WPT fixtures' shape) is accepted too.
+    import_chacha_key_jwk(format!(r#"{{"kty":"oct","k":"{JWK_K_32}"}}"#), false)
+        .await
+        .map_err(|e| describe("chacha import-key-jwk (alg-less)", &e))?;
+
+    match import_chacha_key_jwk(
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A256GCM"}}"#),
+        false,
+    )
+    .await
+    {
+        Err(Error::InvalidKey(_)) => Ok(()),
         Err(other) => Err(describe(
-            "export-key-jwk: expected unsupported, got",
+            "import-key-jwk with another algorithm's alg: expected invalid-key, got",
             &other,
         )),
-        Ok(_) => Err("ChaCha20-Poly1305 exported a JWK".into()),
+        Ok(_) => Err("another algorithm's `alg` minted a ChaCha key".into()),
+    }
+}
+
+/// XChaCha20-Poly1305 keeps declining the JWK path: no specification
+/// registers any JWK form for the construction (the ruling recorded in
+/// `chacha.wit`), so `export-key-jwk` fails `unsupported`. Tagged with
+/// the XChaCha feature — the assertion needs a minted XChaCha key, which
+/// a target missing the feature cannot produce.
+async fn xchacha_jwk_unsupported() -> Result<(), String> {
+    let xchacha = import_xchacha_key(vec![0x42u8; 32], true)
+        .await
+        .map_err(|e| describe("xchacha import-key-raw", &e))?;
+    match xchacha.export_key_jwk().await {
+        Err(Error::Unsupported(_)) => Ok(()),
+        Err(other) => Err(describe(
+            "xchacha export-key-jwk: expected unsupported, got",
+            &other,
+        )),
+        Ok(_) => Err("XChaCha20-Poly1305 exported a JWK".into()),
     }
 }
 
@@ -1882,12 +1992,19 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
         import_ikm(vec![1; 32], false, false).await,
         "minted material with no enabled grant",
     )?;
-    expect_err(
-        "empty ikm",
-        ErrKind::InvalidKey,
-        import_ikm(Vec::new(), true, true).await,
-        "minted empty input keying material",
-    )?;
+    // Empty IKM mints and derives, like the empty PBKDF2 password (RFC
+    // 5869 admits it and the platform serves it — see `wit/README.md`,
+    // "Empty KDF secrets are accepted").
+    let empty = import_ikm(Vec::new(), true, true)
+        .await
+        .map_err(|e| describe("empty import-ikm", &e))?;
+    let empty_input = hkdf_sha2::prepare(Sha2Variant::Sha256, &empty, b"salt".to_vec(), Vec::new())
+        .await
+        .map_err(|e| describe("prepare (empty ikm)", &e))?;
+    empty_input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (empty ikm)", &e))?;
 
     let bits_only = import_ikm(vec![2; 32], true, false)
         .await
@@ -2062,7 +2179,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
         "prepared over an unserved variant",
     )?;
 
-    // Empty passwords mint and derive (unlike empty IKM).
+    // Empty passwords mint and derive, like empty IKM.
     let empty = import_password(Vec::new(), true, true)
         .await
         .map_err(|e| describe("empty import-password", &e))?;

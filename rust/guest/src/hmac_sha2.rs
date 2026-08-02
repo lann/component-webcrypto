@@ -7,11 +7,11 @@ pub use crate::bindings::sha2::Sha2Variant;
 /// Import raw key material as an HMAC key over `variant`.
 pub async fn import_key_raw(
     variant: Sha2Variant,
-    raw_material: Vec<u8>,
+    raw: impl Into<Vec<u8>>,
     options: MacKeyOptions,
 ) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha2::import_key_raw(variant, raw_material, options.lower()).await?,
+        bindings::hmac_sha2::import_key_raw(variant, raw.into(), options.lower()).await?,
     ))
 }
 

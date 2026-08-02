@@ -178,12 +178,15 @@ crypto conformance tests *functions against mathematics*.
   network topology: Wycheproof's negative vectors replace hostile networks,
   chunking schedules replace routing scenarios.
 - **Divergence is declared as missing features, not expected failures**:
-  e.g. the jco targets are missing `chacha20-poly1305` (browser WebCrypto
-  implements none of it; minting declines `unsupported` — a platform gap a
-  caller routes around with another provider) and `sha1-checked` (platform
-  SHA-1 carries no sha1dc collision detection — the first feature the
-  in-guest provider serves that the platform hosts do not), and jco-node
-  additionally `aes-gcm-any-iv`; `targets.toml` is the registry. The anticipated future declarations
+  e.g. the jco targets are missing `xchacha20-poly1305` (no platform
+  WebCrypto implements XChaCha; minting declines `unsupported` — a
+  platform gap a caller routes around with another provider) and
+  `sha1-checked` (platform SHA-1 carries no sha1dc collision detection —
+  the first feature the in-guest provider serves that the platform hosts
+  do not); jco-node additionally `aes-gcm-any-iv`, and jco-browser
+  additionally `chacha20-poly1305` (the host feature-detects it, and
+  Node's WebCrypto serves it where browsers do not yet); `targets.toml` is
+  the registry. The anticipated future declarations
   are profile divergence (e.g. a FIPS-profile target missing a
   permissive-key-policy feature). Bugs get fixed, not declared.
 - **The tests avoid platform-unspecified ground**: the signing probes

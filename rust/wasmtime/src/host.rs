@@ -1434,6 +1434,16 @@ impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
         mint(accessor, material).await
     }
 
+    async fn import_key_jwk(
+        accessor: &Accessor<T, Self>,
+        jwk: String,
+        options: Resource<crate::AeadKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = AeadKeyMaterial::import_chacha20_poly1305_jwk(&jwk, policy);
+        mint(accessor, material).await
+    }
+
     async fn generate_key(
         accessor: &Accessor<T, Self>,
         options: Resource<crate::AeadKeyOptions>,

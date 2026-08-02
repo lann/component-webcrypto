@@ -287,7 +287,7 @@ wpt-web-artifacts:
     #!/usr/bin/env bash
     set -euo pipefail
     js/componentize/wpt/component.sh build-parity
-    cd js/componentize/wpt/parity && npm run -s transpile:web npm run -s transpile:web && cd -npm run -s transpile:web && cd - cd - >/dev/null
+    (cd js/componentize/wpt/parity && npm run -s transpile:web)
     if grep -q "from '@" js/componentize/wpt/parity/generated-web/parity-runner.js; then
         echo "wpt-web-artifacts: generated-web carries a bare module import (a wasi map in" >&2
         echo "parity/package.json's transpile:web no longer covers every wasi interface?):" >&2

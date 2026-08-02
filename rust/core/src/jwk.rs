@@ -24,6 +24,10 @@ use crate::Error;
 /// Parse an `oct` JWK, validate it against the declared algorithm and the
 /// requested extractability, and return the raw key material (the
 /// `import-key-jwk` contract; every failure is `invalid-key`).
+///
+/// `expected_alg` is the algorithm's registered JOSE `alg`: a present
+/// member must match it, and an absent member is accepted (JWK `alg` is
+/// optional on import).
 pub fn parse_oct(jwk: &str, expected_alg: &str, extractable: bool) -> Result<Vec<u8>, Error> {
     let jwk = parse_object(jwk)?;
     require_kty(&jwk, "oct")?;
@@ -323,6 +327,24 @@ mod tests {
     fn round_trip() {
         let jwk = build_oct(&[1, 2, 3, 4, 5], "HS256");
         assert_eq!(parse_oct(&jwk, "HS256", true).unwrap(), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn absent_alg_is_accepted_and_a_wrong_one_rejected() {
+        // JWK `alg` is optional on import (the WPT fixtures for
+        // ChaCha20-Poly1305 omit it)…
+        let jwk = r#"{"kty":"oct","k":"AQID"}"#;
+        assert_eq!(parse_oct(jwk, "C20P", false).unwrap(), vec![1, 2, 3]);
+        // …a matching one is accepted…
+        let jwk = build_oct(&[7; 32], "C20P");
+        assert!(jwk.contains(r#""alg":"C20P""#));
+        assert_eq!(parse_oct(&jwk, "C20P", true).unwrap(), vec![7; 32]);
+        // …and another algorithm's is rejected.
+        let tagged = r#"{"kty":"oct","k":"AQID","alg":"A256GCM"}"#;
+        assert!(matches!(
+            parse_oct(tagged, "C20P", false),
+            Err(Error::InvalidKey(_))
+        ));
     }
 
     #[test]

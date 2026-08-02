@@ -75,29 +75,26 @@ function chachaEncryptDecryptInSubset() {
 
 /**
  * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
- * rows are served whole, and so are the empty-usages rows for every
- * format (usages are validated before the format is considered). The
- * "Good parameters" jwk rows stay out: the package serves no ChaCha JWK
- * path (WIT-forced — see the shim header's deviations list).
+ * and "jwk" rows (the proposal's oct form, which the package's
+ * `chacha20-poly1305.import-key-jwk` serves) are in whole, as are the
+ * empty-usages rows for every format (usages are validated before the
+ * format is considered).
  * @param {string} name
  */
 function chachaImportKeyInSubset(name) {
   if (name.startsWith("Empty Usages:")) {
     return true;
   }
-  return name.includes("(raw-secret, ");
+  return name.includes("(raw-secret, ") || name.includes("(jwk, ");
 }
 
 /**
- * generateKey/successes (ChaCha20-Poly1305): the non-extractable rows are
- * served whole. The extractable rows also export the generated key as a
- * JWK, which the package declines for the ChaCha constructions
- * (WIT-forced — see the shim header's deviations list), so they stay
- * out-of-subset until a ChaCha JWK path exists.
- * @param {string} name
+ * generateKey/successes (ChaCha20-Poly1305): the whole group — the
+ * extractable rows export raw-secret and the oct JWK, both
+ * served.
  */
-function chachaGenerateKeyInSubset(name) {
-  return name.includes(", false, [");
+function chachaGenerateKeyInSubset() {
+  return true;
 }
 
 /**
@@ -196,12 +193,11 @@ function okpEd25519FailuresInSubset() {
  * WIT's `derive-key` mints span (AES-GCM 256, HMAC-SHA-256).
  *
  * Excluded, in match order: subtests needing an ECDH key (`generateKey`
- * does not serve ECDH, so the fixture is null); the empty HKDF base key
- * (WIT-forced — `import-ikm` rejects empty material by ruling), except
- * its bad-hash rows, which are served: algorithm normalization rejects
- * the hash before the base key is looked at, the spec's own order, so
- * the refused import never matters; and unserved derived-key targets.
- * The SHA-1 rows are served (the `hkdf-sha1`/`pbkdf2-sha1` interfaces).
+ * does not serve ECDH, so the fixture is null), and unserved derived-key
+ * targets. The SHA-1 rows are served (the `hkdf-sha1`/`pbkdf2-sha1`
+ * interfaces), and so is the empty HKDF base key (empty KDF secrets are
+ * accepted package-wide — see `wit/README.md`, "Empty KDF secrets are
+ * accepted").
  *
  * The exclusions are whole-row, so the census pins a large `outPassed`
  * for these groups: an unserved-target row's bad-hash and missing-usage
@@ -216,9 +212,6 @@ function kdfDeriveInSubset(name) {
     return true;
   }
   if (name.includes("wrong (ECDH) key")) {
-    return false;
-  }
-  if (name.includes("empty derivedKey") && !name.includes("with bad hash name")) {
     return false;
   }
   if (name.startsWith("Derived key of type")) {
@@ -297,13 +290,10 @@ function randomUuidInSubset() {
 
 /**
  * normalize-algorithm-name: ASCII-case-insensitive name matching, probed
- * with Kelvin-sign lookalikes. The HKDF row is out: its setup imports
- * empty input keying material, which `hkdf.import-ikm` rejects by ruling
- * (WIT-forced — see the shim header), so the name is never reached.
- * @param {string} name
+ * with Kelvin-sign lookalikes; the whole group is served.
  */
-function normalizeAlgorithmNameInSubset(name) {
-  return !name.includes('does not match "HKDF"');
+function normalizeAlgorithmNameInSubset() {
+  return true;
 }
 
 /** crypto_key_cached_slots: the whole group is served. */

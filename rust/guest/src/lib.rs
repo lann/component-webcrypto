@@ -27,10 +27,12 @@
 //!
 //! # Contract notes carried over from the WIT
 //!
-//! - **The wrappers hide streams, not the drain rule.** The wrapped
-//!   operations fully drain their input even when they fail; these helpers
-//!   feed the source and await the result concurrently, so that contract is
-//!   invisible here. Callers with needs beyond [`DataSource`] use the
+//! - **The wrappers hide streams, not the closure rule.** An operation's
+//!   input stream ends no later than the operation completes, and only a
+//!   failing operation may end it early; these helpers feed the source and
+//!   await the result concurrently, reporting the operation's error over
+//!   the feed's fate, so that contract is invisible here. Callers with
+//!   needs beyond [`DataSource`] use the
 //!   [`bindings`] resources directly with wit-bindgen's own stream
 //!   primitives ([`wit_stream::new`], `StreamWriter::write_all`,
 //!   [`StreamReader::collect`]).
@@ -167,6 +169,13 @@ pub enum Error {
     /// the operation (see `DataSource::from_reader`). The operation's own
     /// result is discarded: it was computed over a truncated input.
     Read(std::io::Error),
+    /// The operation succeeded without accepting the whole source: the
+    /// provider closed the stream's read end early and then reported
+    /// success. The stream-closure rule permits ending the input early
+    /// only when the operation fails (a failing operation's own error is
+    /// what these wrappers report), so this indicates a defective
+    /// provider, not a condition to retry.
+    ShortWrite,
 }
 
 /// The known extension-error conditions, as (`origin`, `name`) constants
@@ -217,6 +226,11 @@ impl fmt::Display for Error {
                 message = ext.message,
             ),
             Error::Read(error) => write!(f, "data source read failed: {error}"),
+            Error::ShortWrite => write!(
+                f,
+                "short write: the operation stopped accepting input before the \
+                 source was fully written"
+            ),
         }
     }
 }
@@ -330,15 +344,6 @@ impl<'a> DataSource<'a> {
 
 // --- operation plumbing ---------------------------------------------------------
 
-/// The error every wrapper reports when its stream writer was closed before
-/// the whole source was written — a callee violating the drain rule, which
-/// conforming implementations never do.
-fn writer_closed(leftover: usize) -> Error {
-    Error::Other(format!(
-        "stream writer closed early with {leftover} bytes unwritten"
-    ))
-}
-
 /// The chunk size the incremental feeders copy through their reusable
 /// scratch buffer, bounding a feed's extra memory to one chunk.
 const FEED_CHUNK: usize = 8192;
@@ -351,9 +356,10 @@ impl Inner<'_> {
             Inner::Stream(_) => unreachable!("stream sources are passed through"),
             Inner::Bytes(Cow::Owned(data)) => {
                 let leftover = tx.write_all(data).await;
-                match leftover.len() {
-                    0 => Ok(()),
-                    n => Err(writer_closed(n)),
+                if leftover.is_empty() {
+                    Ok(())
+                } else {
+                    Err(Error::ShortWrite)
                 }
             }
             // A borrowed buffer is never duplicated whole: it is fed in
@@ -367,7 +373,7 @@ impl Inner<'_> {
                     scratch.extend_from_slice(chunk);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(writer_closed(scratch.len()));
+                        return Err(Error::ShortWrite);
                     }
                 }
                 Ok(())
@@ -385,7 +391,7 @@ impl Inner<'_> {
                     buf.advance(n);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(writer_closed(scratch.len()));
+                        return Err(Error::ShortWrite);
                     }
                 }
                 Ok(())
@@ -407,7 +413,7 @@ impl Inner<'_> {
                     scratch.extend_from_slice(&chunk[..n]);
                     scratch = tx.write_all(scratch).await;
                     if !scratch.is_empty() {
-                        return Err(writer_closed(scratch.len()));
+                        return Err(Error::ShortWrite);
                     }
                 }
             }
@@ -417,10 +423,12 @@ impl Inner<'_> {
 
 /// Run the operation built by `op` over `source`: pass a stream source
 /// through directly, or mint a stream pair and feed the source concurrently
-/// with the operation (per the drain rule, the feeder finishing is part of
-/// the operation's contract even on error). A [`Error::Read`] from the
-/// feeder wins over the operation's result: the operation only saw a
-/// truncated input.
+/// with the operation (per the closure rule, the feed settles no later than
+/// the operation). Precedence over the joined outcomes: a [`Error::Read`]
+/// from the feeder wins over everything — the operation only saw a
+/// truncated input; then the operation's own error — a failing operation
+/// may close its input early, so a rejected write is not the verdict; a
+/// rejected write under a *successful* result is [`Error::ShortWrite`].
 async fn run_sourced<T, F>(
     source: DataSource<'_>,
     op: impl FnOnce(StreamReader<u8>) -> F,
@@ -958,8 +966,8 @@ impl Aead {
     }
 
     /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
-    /// same extractability gate as [`export_key_raw`](Self::export_key_raw);
-    /// algorithms without a registered JWK `alg` (the ChaCha
+    /// same extractability gate as [`export_key_raw`](Self::export_key_raw).
+    /// Algorithms with no registered JWK form (the XChaCha
     /// constructions) fail [`Error::Unsupported`].
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
         self.0.export_key_jwk().await.map_err(Error::from)

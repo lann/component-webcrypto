@@ -6,9 +6,9 @@
 use crate::{bindings, Error, Mac, MacKeyOptions};
 
 /// Import raw key material as an HMAC-SHA-1 key.
-pub async fn import_key_raw(raw_material: Vec<u8>, options: MacKeyOptions) -> Result<Mac, Error> {
+pub async fn import_key_raw(raw: impl Into<Vec<u8>>, options: MacKeyOptions) -> Result<Mac, Error> {
     Ok(Mac::from_raw(
-        bindings::hmac_sha1::import_key_raw(raw_material, options.lower()).await?,
+        bindings::hmac_sha1::import_key_raw(raw.into(), options.lower()).await?,
     ))
 }
 

@@ -32,9 +32,18 @@ variant carries no misuse cases.
 
 Every stream-taking operation in the package follows these rules.
 
-**Drain rule.** An input stream is fully drained before the operation's
-result resolves, even when the result is an error. A caller that feeds the
-stream concurrently never observes its writer failing instead of the error.
+**Stream-closure rule.** An operation's input stream ends before the
+operation completes. Completion is the result resolving — except a success
+carrying an output stream, which completes when that stream ends (its `ok`
+may resolve while the input is still being consumed; see the `seal` docs).
+Either side may end the input: the caller by dropping the writer (end of
+input), or the implementation by dropping the reader — the latter only
+when the operation fails, with the error resolving only after the drop.
+Consequences: an operation that completes without error consumed the
+entire input; a concurrent feeder always completes its feed no later than
+the operation; and a write returning unwritten bytes is never itself the
+verdict — await the result and report its error. A completed operation
+alongside unwritten input indicates a defective implementation.
 
 **Truncating producers (security-critical).** Dropping the writer is a
 stream's only end-of-input signal, and it carries no verdict. A producer
@@ -140,12 +149,18 @@ Every `*-jwk` function follows this contract. The minting interfaces'
 - A *public-key* import has no extractability request — minted public
   keys are unconditionally exportable — so a public JWK carrying
   `"ext": false` is rejected with `error.invalid-key`.
-- Export returns exactly the material-bearing members — `kty`, `k`, and
+- Export returns exactly the material-bearing members — `kty`, `k`,
   `alg` for the `oct` form; `kty`, `crv`, `x` (and `y`, and `d` on
   private exports) for the OKP and EC forms, which carry no `alg` — and
   nothing else. Metadata this package does not model (`key_ops`, `ext`,
   `use`) is the consumer's to stamp. Member order is not contract.
-- `oct` algorithms without a registered JWK `alg` fail with
+- ChaCha20-Poly1305 uses the `oct` form of the [W3C Modern Algorithms
+  proposal](https://wicg.github.io/webcrypto-modern-algos/), whose
+  registered `alg` is `"C20P"` (the proposal carries the JOSE
+  registration): export emits it, and import accepts an absent `alg` or
+  `"C20P"`, rejecting anything else with `error.invalid-key`. `oct`
+  algorithms with no registered JWK form at all (the XChaCha
+  constructions) have no JWK minting, and export fails with
   `error.unsupported`.
 
 ## Error contract
@@ -222,26 +237,46 @@ repository's in-guest provider documents its classification and policy in
 Most of the package is ungated. The ChaCha interfaces are marked
 `@unstable`, so tooling hides them unless a consumer enables the feature
 (for example `wasm-tools ... --features`, wit-bindgen's `features` option,
-componentize-js's `--features`):
+componentize-js's `--features`).
 
-- `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305`. The
-  algorithm is IETF-standard (RFC 8439), but its browser WebCrypto
-  surface is a proposal (W3C ["Modern Algorithms in the Web Cryptography
-  API"]), and this package's JWK posture for it may follow how that
-  proposal settles (the proposal serves an alg-less `oct` JWK; this
-  package currently declines the JWK path — see the error contract's
-  `unsupported` and the design notes).
+A gate records one or both of two kinds of provisionality, and each
+gate's reasons and exit conditions are listed here:
+
+- **Shape**: the interface definition may still move to follow a named
+  external. Semver-minor changes may reshape gated interfaces in place.
+- **Linkage**: the interface is not servable by every implementation, and
+  the component model cannot yet express that at the layer where it
+  belongs. Today a guest imports such an interface unconditionally and
+  implementations decline minting at runtime with `error.unsupported` —
+  a stopgap for instantiation-time-optional imports. These gates lift
+  when the toolchains this package rides can express an optional import,
+  so consumers never stabilize onto the stopgap as if it were the final
+  consumption story.
+
+The gates:
+
+- `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305` —
+  both reasons. Shape: the algorithm is IETF-standard (RFC 8439), but
+  its browser WebCrypto surface is a proposal (W3C ["Modern Algorithms
+  in the Web Cryptography API"]) this package tracks; the JWK contract
+  has already moved once to follow the proposal's registered `"C20P"`.
+  Exits when the proposal settles *and* optional imports are
+  expressible.
 - `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
-  `xchacha20-poly1305-internal-nonce`. The construction is deployed
-  (libsodium lineage) but not IETF-standardized, and no platform
-  WebCrypto serves it.
+  `xchacha20-poly1305-internal-nonce` — both reasons. Shape: the
+  construction is deployed (libsodium lineage) but not
+  IETF-standardized, and no platform WebCrypto serves it. Exits on a
+  standardization-or-durability judgment once optional imports are
+  expressible.
 
-A gate marks the *interface shape* as provisional — semver-minor changes
-may still reshape gated interfaces. It says nothing about runtime
-availability: an implementation may decline any minting path with
-`error.unsupported` either way, and a gated interface a consumer enables
-still needs the same handling. Stabilization replaces the gate with
-`@since` once the referenced externals settle.
+Neither kind of gate speaks to per-call runtime availability: an
+implementation may decline any minting path with `error.unsupported`
+either way, and a gated interface a consumer enables still needs the
+same handling. Stabilization replaces a gate with `@since` once its
+listed exits arrive. Interfaces whose absence is already expressed
+structurally carry no gate — `ecdsa-sign` is withheld from
+timing-observable providers by *their worlds*, enforced at composition
+time, which is the designed end state rather than a stopgap.
 
 Within this repository, only test builds enable the features by default
 (the conformance and demo guests, the WPT runners, the timing lab, and
@@ -295,11 +330,14 @@ short:
   seeds or scalars, per the format-admission rule above. No import derives
   the public half (see the no-derive rule above); importers supply it
   separately through the public-key import.
-- **Empty PBKDF2 passwords are accepted; empty HKDF IKM is not.** RFC 8018
-  admits an empty `P`, the platform serves it, and the upstream test
-  vectors exercise it as valid, so rejecting it would break platform
-  fidelity without a safety win. A zero-entropy HKDF IKM, by contrast, is
-  never what a caller meant.
+- **Empty KDF secrets are accepted.** RFC 8018 admits an empty PBKDF2
+  `P` and RFC 5869 an empty HKDF IKM; the platform serves both, and the
+  upstream PBKDF2 vectors exercise the empty password as valid.
+  Rejecting either would break platform fidelity without a safety win: a
+  zero-length secret is not meaningfully weaker than a one-byte one, so
+  no security line falls at empty. An implementation under an explicit
+  security policy MAY still reject degenerate material (the same
+  allowance as the HMAC import's short-key bound).
 - **Per-algorithm interfaces instead of variant enums** where platform
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one

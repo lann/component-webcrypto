@@ -18,7 +18,9 @@
 
 use crate::mint;
 use conformance_harness::stream::{open, seal, Schedule};
-use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind, FEATURE_CHACHA};
+use conformance_harness::{
+    describe, expect, expect_bytes, expect_err, ErrKind, FEATURE_CHACHA, FEATURE_XCHACHA,
+};
 use lann_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::types::Error;
@@ -98,7 +100,7 @@ pub const AEAD_FAMILIES: &[AeadFamily] = &[
         interface: "xchacha20-poly1305",
         variant: None,
         name: "XChaCha20-Poly1305",
-        features: &[FEATURE_CHACHA],
+        features: &[FEATURE_XCHACHA],
         key_len: 32,
         bad_key_len: 16,
         nonce_len: 24,

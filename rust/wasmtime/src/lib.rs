@@ -36,8 +36,10 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// *delivery*; these bound what operations *accumulate*):
 ///
 /// - **Per call** ([`set_per_call_buffer_limit`]): the most one operation
-///   may buffer. Inputs beyond it are drained and discarded (the WIT drain
-///   rule holds) and the operation fails with a recoverable `error.other`.
+///   may buffer. Inputs beyond it are drained and discarded (this host
+///   drains to completion rather than exercising the streaming contract's
+///   early-close-on-error permission) and the operation fails with a
+///   recoverable `error.other`.
 ///   Defaults to ¼ of the store's hostcall fuel at admission time.
 /// - **Total** ([`set_total_buffer_limit`]): the admission pool. Each
 ///   operation reserves its per-call bound before draining and waits
