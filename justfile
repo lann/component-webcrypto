@@ -337,6 +337,32 @@ _wpt-parity-chromium-gate:
     fi
     just wpt-parity-chromium
 
+# Run the WPT parity gate in headless WebKit: like the other browser legs,
+# against WebKit's own pinned loss set in
+# js/componentize/wpt/parity/losses-webkit.js. That ratchet is recorded
+# from Playwright's WebKit on macOS, where it uses Apple's crypto backend
+# — the closest available proxy for mobile Safari; the Linux port's
+# libgcrypt backend serves less (no Ed25519/X25519) and does not match it.
+# Unlike the other legs this recipe does not build the page artifacts:
+# no componentize-js toolchain is published for darwin, so CI builds them
+# on ubuntu (`just wpt-web-artifacts`) and hands them to the macOS job.
+wpt-parity-webkit:
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:webkit
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-webkit.json \
+        js/componentize/wpt/build/parity-roundtrip-webkit.json \
+        --losses losses-webkit.js
+
+# Re-record js/componentize/wpt/parity/losses-webkit.js from an actual
+# run, like update-wpt-parity. Record from Playwright WebKit on macOS (the
+# CI job's engine); a Linux-port recording would pin the wrong backend.
+update-wpt-parity-webkit:
+    cd js/componentize/wpt/parity && timeout 900 npm run -s run:webkit
+    node js/componentize/wpt/parity/compare.mjs \
+        js/componentize/wpt/build/parity-baseline-webkit.json \
+        js/componentize/wpt/build/parity-roundtrip-webkit.json \
+        --losses losses-webkit.js --update
+
 # Produce both parity legs' results under js/componentize/wpt/build/:
 # componentize the ungated parity runner from the tree, transpile it with
 # jco against the jco host, and run each leg on this Node.
