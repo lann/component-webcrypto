@@ -422,25 +422,26 @@ impl Inner<'_> {
 }
 
 /// Attribute a joined operation-and-feed outcome, per the stream-closure
-/// rule (see `wit/README.md`, "Streaming contract"): a [`Error::Read`]
-/// from the feeder wins over everything — the operation only saw a
-/// truncated input; then the operation's own error — a failing operation
-/// may close its input early, so a rejected write is not the verdict; a
-/// rejected write under a *successful* result surfaces as the feed's
-/// error ([`Error::ShortWrite`]).
-fn combine<T, E: Into<Error>>(result: Result<T, E>, fed: Result<(), Error>) -> Result<T, Error> {
-    match (result, fed) {
-        (_, Err(read @ Error::Read(_))) => Err(read),
-        (Err(error), _) => Err(error.into()),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
+/// rule (see `wit/README.md`, "Streaming contract"). One condition
+/// outranks the ordinary chaining: a [`Error::Read`] from the feeder wins
+/// even over a successful operation, whose result was computed over a
+/// truncated input. Otherwise the operation's result is authoritative — a
+/// failing operation may close its input early, so a rejected write is
+/// not the verdict — and a rejected feed surfaces only under a successful
+/// result ([`Error::ShortWrite`]).
+fn attribute<T, E: Into<Error>>(result: Result<T, E>, fed: Result<(), Error>) -> Result<T, Error> {
+    match fed {
+        Err(read @ Error::Read(_)) => Err(read),
+        fed => result
+            .map_err(Into::into)
+            .and_then(|value| fed.map(|()| value)),
     }
 }
 
 /// Run the operation built by `op` over `source`: pass a stream source
 /// through directly, or mint a stream pair and feed the source concurrently
 /// with the operation (per the closure rule, the feed settles no later than
-/// the operation), attributing the joined outcome with [`combine`].
+/// the operation), attributing the joined outcome with [`attribute`].
 async fn run_sourced<T, F>(
     source: DataSource<'_>,
     op: impl FnOnce(StreamReader<u8>) -> F,
@@ -453,7 +454,7 @@ where
         inner => {
             let (tx, rx) = wit_stream::new();
             let (result, fed) = futures::join!(op(rx), inner.feed(tx));
-            combine(result, fed)
+            attribute(result, fed)
         }
     }
 }
@@ -550,7 +551,7 @@ fn seal_and_collect<'a>(
                     Ok::<_, Error>(stream.collect().await)
                 };
                 let (result, fed) = futures::join!(sealed, inner.feed(tx));
-                combine(result, fed)
+                attribute(result, fed)
             }
         }
     })
@@ -1599,7 +1600,7 @@ pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{combine, Error};
+    use super::{attribute, Error};
 
     fn read_error() -> Error {
         Error::Read(std::io::Error::other("reader failed"))
@@ -1609,13 +1610,13 @@ mod tests {
     /// *successful* operation, whose result was computed over a truncated
     /// input.
     #[test]
-    fn combine_read_wins_over_both_outcomes() {
+    fn attribution_read_wins_over_both_outcomes() {
         assert!(matches!(
-            combine::<(), Error>(Ok(()), Err(read_error())),
+            attribute::<(), Error>(Ok(()), Err(read_error())),
             Err(Error::Read(_))
         ));
         assert!(matches!(
-            combine::<(), Error>(Err(Error::Other("op".into())), Err(read_error())),
+            attribute::<(), Error>(Err(Error::Other("op".into())), Err(read_error())),
             Err(Error::Read(_))
         ));
     }
@@ -1624,9 +1625,9 @@ mod tests {
     /// operation may close its input early (the closure rule), so the
     /// rejected write is not the verdict.
     #[test]
-    fn combine_operation_error_wins_over_rejected_feed() {
+    fn attribution_operation_error_wins_over_rejected_feed() {
         assert!(matches!(
-            combine::<(), Error>(
+            attribute::<(), Error>(
                 Err(Error::InvalidNonce("nonce".into())),
                 Err(Error::ShortWrite)
             ),
@@ -1638,17 +1639,17 @@ mod tests {
     /// [`Error::ShortWrite`] names: only a failing operation may end its
     /// input early.
     #[test]
-    fn combine_success_with_rejected_feed_is_short_write() {
+    fn attribution_success_with_rejected_feed_is_short_write() {
         assert!(matches!(
-            combine::<u8, Error>(Ok(7), Err(Error::ShortWrite)),
+            attribute::<u8, Error>(Ok(7), Err(Error::ShortWrite)),
             Err(Error::ShortWrite)
         ));
     }
 
     /// The clean path passes the value through.
     #[test]
-    fn combine_clean_success_passes_through() {
-        assert!(matches!(combine::<u8, Error>(Ok(7), Ok(())), Ok(7)));
+    fn attribution_clean_success_passes_through() {
+        assert!(matches!(attribute::<u8, Error>(Ok(7), Ok(())), Ok(7)));
     }
 
     /// Every WIT error case maps onto its own variant — and the match in
