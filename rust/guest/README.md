@@ -63,5 +63,7 @@ implementations — the Wasmtime host, the composed in-guest provider, and
 the jco host. Algorithm correctness is the conformance suites' job
 ([conformance/](../../conformance)); the demo checks assert the wrapper
 plumbing, including every `DataSource` variant and the `Error::Read`
-precedence. The precedence logic itself is a pure function with host-side
-unit tests (`cargo test -p lann-webcrypto-guest --all-features`).
+precedence. The precedence itself is structural — a feed *fails* only by
+`Error::Read`, while the operation rejecting input is an outcome the
+success path requires to be `Complete` — with host-side unit tests over
+the `ShortWrite` mapping (`cargo test -p lann-webcrypto-guest --all-features`).
