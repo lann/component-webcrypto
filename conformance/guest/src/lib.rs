@@ -65,7 +65,14 @@ enum CaseKind {
     Sig(SigCase),
     Speccheck(SpeccheckCase),
     X25519(X25519Case),
-    Contract(&'static contract::AeadFamily, contract::AeadArea),
+    AeadContract(&'static contract::AeadFamily, contract::AeadArea),
+    MacContract(&'static contract::MacFamily, contract::MacArea),
+    CipherContract(&'static contract::CipherFamily, contract::CipherArea),
+    InternalNonceContract(
+        &'static contract::InternalNonceFamily,
+        contract::InternalNonceArea,
+    ),
+    DeriveContract(&'static contract::DeriveSourceFamily, contract::DeriveArea),
     Probe(usize),
 }
 
@@ -106,7 +113,13 @@ impl GuestTestCase for Case {
                 CaseKind::Sig(case) => vectors::run_sig_case(case).await,
                 CaseKind::Speccheck(case) => vectors::run_speccheck_case(case).await,
                 CaseKind::X25519(case) => vectors::run_x25519_case(case).await,
-                CaseKind::Contract(family, area) => contract::run(family, *area).await,
+                CaseKind::AeadContract(family, area) => contract::run(family, *area).await,
+                CaseKind::MacContract(family, area) => contract::run_mac(family, *area).await,
+                CaseKind::CipherContract(family, area) => contract::run_cipher(family, *area).await,
+                CaseKind::InternalNonceContract(family, area) => {
+                    contract::run_internal_nonce(family, *area).await
+                }
+                CaseKind::DeriveContract(family, area) => contract::run_derive(family, *area).await,
                 CaseKind::Probe(index) => {
                     conformance_harness::run_probe(probes::PROBES, *index).await
                 }
@@ -122,9 +135,12 @@ impl GuestTestCase for Case {
             // serve a feature it declares missing); vector cases skip
             // without re-asserting it thousands of times.
             let asserted = match &self.kind {
-                CaseKind::Contract(..) | CaseKind::Probe(_) => {
-                    probes::run_declined(self.features).await
-                }
+                CaseKind::AeadContract(..)
+                | CaseKind::MacContract(..)
+                | CaseKind::CipherContract(..)
+                | CaseKind::InternalNonceContract(..)
+                | CaseKind::DeriveContract(..)
+                | CaseKind::Probe(_) => probes::run_declined(self.features).await,
                 _ => Ok(format!(
                     "feature {} declared missing by the target",
                     self.features.join("+")
@@ -225,12 +241,52 @@ impl Guest for Component {
             ));
         }
         for family in contract::AEAD_FAMILIES {
-            for &area in contract::AeadArea::ALL {
+            for area in family.areas() {
                 cases.push(materialize(
-                    contract::case_id(family, area),
+                    family.case_id(area),
                     family.features,
                     &missing,
-                    CaseKind::Contract(family, area),
+                    CaseKind::AeadContract(family, area),
+                ));
+            }
+        }
+        for family in contract::MAC_FAMILIES {
+            for &area in contract::MacArea::ALL {
+                cases.push(materialize(
+                    family.case_id(area),
+                    family.features,
+                    &missing,
+                    CaseKind::MacContract(family, area),
+                ));
+            }
+        }
+        for family in contract::CIPHER_FAMILIES {
+            for &area in contract::CipherArea::ALL {
+                cases.push(materialize(
+                    family.case_id(area),
+                    family.features,
+                    &missing,
+                    CaseKind::CipherContract(family, area),
+                ));
+            }
+        }
+        for family in contract::INTERNAL_NONCE_FAMILIES {
+            for area in family.areas() {
+                cases.push(materialize(
+                    family.case_id(area),
+                    family.features,
+                    &missing,
+                    CaseKind::InternalNonceContract(family, area),
+                ));
+            }
+        }
+        for family in contract::DERIVE_SOURCE_FAMILIES {
+            for &area in contract::DeriveArea::ALL {
+                cases.push(materialize(
+                    family.case_id(area),
+                    family.features,
+                    &missing,
+                    CaseKind::DeriveContract(family, area),
                 ));
             }
         }
