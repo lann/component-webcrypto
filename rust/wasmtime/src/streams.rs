@@ -27,9 +27,10 @@ use crate::WasiWebcrypto;
 /// never be mistaken for the complete input.
 struct ByteCollector {
     buf: Vec<u8>,
-    /// The per-call buffering cap: bytes beyond it are drained (the WIT
-    /// drain rule holds) but discarded, and the operation reports the
-    /// overflow instead of a result.
+    /// The per-call buffering cap: bytes beyond it are drained but
+    /// discarded — this host drains to completion rather than exercising
+    /// the streaming contract's early-close-on-error permission — and the
+    /// operation reports the overflow instead of a result.
     cap: usize,
     overflowed: bool,
     failed: bool,

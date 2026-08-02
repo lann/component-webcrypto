@@ -59,8 +59,9 @@ itself as a file path relative to `componentize-js componentize`'s
 Bulk data crosses the interface as `stream<u8>`: operations resolve only
 once their input stream's writer is dropped, so the library feeds input and
 awaits each operation concurrently, and collects `seal`/`open` output
-streams concurrently with the feed (the package's drain rule guarantees the
-feed always completes, even when the operation fails).
+streams concurrently with the feed (the streaming contract's closure rule
+guarantees the feed settles no later than the operation, even when the
+operation fails).
 
 ## Toolchain
 
