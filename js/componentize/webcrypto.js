@@ -55,25 +55,15 @@
 //     algorithms ("raw" remains). "raw-secret" is served where it is an
 //     algorithm's only raw form (ChaCha20-Poly1305).
 //   - Unserved: ChaCha20-Poly1305 as a deriveKey target. The
-//     `chacha20-poly1305` interface mints from raw material and
+//     `chacha20-poly1305` interface mints from raw material, JWKs, and
 //     generation only; a derive mint (or a deriveBits-and-import path
 //     here) would be additive.
-//   - WIT-forced: ChaCha20-Poly1305 JWKs. The package serves no JWK path
-//     for algorithms without a registered JOSE `alg` (a recorded ruling —
-//     see `aead-key.export-key-jwk`), and `chacha20-poly1305` mints from
-//     raw material only, so the "jwk" format fails with
-//     `NotSupportedError` where the proposal serves an alg-less "oct"
-//     JWK.
 //   - Unserved by composition: ECDSA signing, key generation, and
 //     private-key import. The interface exists (`ecdsa-sign`), but it is
 //     class D and the in-guest provider this library composes with
 //     withholds it, so the world cannot import it without failing every
 //     composition at `wac plug` time. `NotSupportedError`, with the
 //     reason in the message.
-//   - WIT-forced: an empty HKDF key imports on the platform but not here —
-//     `hkdf.import-ikm` rejects empty input keying material by ruling
-//     (`wit/README.md`, "Design notes": a zero-entropy IKM is never what a
-//     caller meant), so it fails with `DataError` instead.
 //   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
 //     served through the package's `sha1-checked` interface (sha1dc
 //     collision detection; the package never serves plain SHA-1), in the
@@ -1187,12 +1177,27 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
   if (alg.name === "ChaCha20-Poly1305") {
     const usages = normalizeUsages(keyUsages, alg.name);
     requireNonEmptyUsages(usages);
+    if (format === "jwk") {
+      // The proposal's oct JWK; the WIT accepts an absent `alg` or the
+      // registered "C20P" and rejects anything else.
+      return await mintChaChaKey(
+        () =>
+          chachaIface.importKeyJwk(
+            jwkForImport(keyData, "enc", usages),
+            aeadMintOptions(usages, !!extractable),
+          ),
+        !!extractable,
+        usages,
+      );
+    }
     if (format !== "raw-secret") {
-      // "raw-secret" is the algorithm's only served form: no DER formats
-      // by spec, no "raw" spelling (the proposal aliases "raw" for the
-      // pre-proposal algorithms only), and no JWK path in the package
-      // (see the header's deviations list).
-      throw dom("NotSupportedError", `ChaCha20-Poly1305 keys support the "raw-secret" format only`);
+      // "raw-secret" and "jwk" are the served forms: no DER formats by
+      // spec, and no "raw" spelling (the proposal aliases "raw" for the
+      // pre-proposal algorithms only).
+      throw dom(
+        "NotSupportedError",
+        `ChaCha20-Poly1305 keys support the "raw-secret" and "jwk" formats`,
+      );
     }
     return await mintChaChaKey(
       () => chachaIface.importKeyRaw(bytesOf(keyData, "keyData"), aeadMintOptions(usages, !!extractable)),
@@ -1592,9 +1597,11 @@ async function exportKey(format, key) {
     return toArrayBuffer(/** @type {Uint8Array} */ (await callImport(handleOf(key).exportKeyRaw())));
   }
   if (key.algorithm.name === "ChaCha20-Poly1305" && format !== "jwk") {
-    // "raw-secret" is the only served non-JWK form; the JWK request flows
-    // through to the WIT's own decline (see the header's deviations list).
-    throw dom("NotSupportedError", `ChaCha20-Poly1305 keys support the "raw-secret" format only`);
+    // "raw-secret" (handled above) and "jwk" are the served forms.
+    throw dom(
+      "NotSupportedError",
+      `ChaCha20-Poly1305 keys support the "raw-secret" and "jwk" formats`,
+    );
   }
   if (format === "spki" || format === "pkcs8") {
     if (key.type === "secret") {

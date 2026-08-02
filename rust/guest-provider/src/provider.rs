@@ -1143,6 +1143,15 @@ impl ChaChaPoly1305Guest for Component {
         Ok(ExportedAeadKey::new(AeadKey { material }))
     }
 
+    async fn import_key_jwk(
+        jwk: String,
+        options: ExportedAeadKeyOptions,
+    ) -> Result<ExportedAeadKey, Error> {
+        let policy = options.get::<AeadKeyOptions>().policy.get();
+        let material = AeadKeyMaterial::import_chacha20_poly1305_jwk(&jwk, policy)?;
+        Ok(ExportedAeadKey::new(AeadKey { material }))
+    }
+
     async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
         let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(policy))?;

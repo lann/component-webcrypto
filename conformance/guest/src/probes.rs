@@ -7,9 +7,10 @@ use crate::mint::{
     agreement_options, derive_options, generate_ed25519_key, generate_hmac_key,
     generate_internal_nonce_key, generate_key, generate_x25519_key,
     generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
-    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
-    import_internal_nonce_key, import_key_raw, import_password, import_x25519_public_key,
-    import_x25519_secret_key, import_xchacha_internal_nonce_key, x25519_secret_jwk,
+    import_chacha_key_jwk, import_ctr_key, import_hmac_key, import_hmac_key_jwk,
+    import_hmac_sha1_key, import_ikm, import_internal_nonce_key, import_key_raw, import_password,
+    import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
+    import_xchacha_key, x25519_secret_jwk,
 };
 use conformance_harness::stream::{
     ci_decrypt, ci_encrypt, compute, feed, in_open, in_seal, open, seal, sig_sign, sig_verify,
@@ -85,7 +86,8 @@ probes! {
     jwk_roundtrip,
     jwk_rejections,
     jwk_semantics,
-    chacha_jwk_unsupported(chacha),
+    chacha_jwk_contract(chacha),
+    xchacha_jwk_unsupported(xchacha),
     mac_usage_policy,
     aead_wrap_grants,
     internal_nonce_usage_policy,
@@ -159,9 +161,17 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
     Ok("AES-GCM nonces outside 12–128 bytes declined unsupported".into())
 }
 
-/// Assert that every ChaCha20-Poly1305 minting path declines `unsupported`.
+/// Assert that every ChaCha20-Poly1305 minting path declines
+/// `unsupported`: raw import, generation, and the JWK import.
 async fn chacha_minting_declined() -> Result<String, String> {
     minting_declined_for(FEATURE_CHACHA).await?;
+    expect_err(
+        "chacha20-poly1305 import-key-jwk",
+        ErrKind::Unsupported,
+        crate::mint::import_chacha_key_jwk(format!(r#"{{"kty":"oct","k":"{JWK_K_32}"}}"#), false)
+            .await,
+        "minted a key: the target serves a feature it declares missing",
+    )?;
     Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
 }
 
@@ -1614,20 +1624,78 @@ async fn jwk_semantics() -> Result<(), String> {
     Ok(())
 }
 
-/// ChaCha keys have no registered JWK `alg`: `export-key-jwk` declines
-/// `unsupported` (and the extractability gate still applies first on
-/// non-extractable keys).
-async fn chacha_jwk_unsupported() -> Result<(), String> {
-    let key = import_chacha_key(vec![0x42u8; 32], true)
+/// The ChaCha JWK contract: ChaCha20-Poly1305 keys travel as the W3C
+/// Modern Algorithms proposal's `oct` JWK with its registered `alg`,
+/// `"C20P"` — export carries the member, import accepts it or the
+/// alg-less form (the WPT fixtures' shape) and rejects any other `alg`
+/// with `invalid-key`. (XChaCha's preserved decline is
+/// `xchacha_jwk_unsupported`, under its own feature.)
+async fn chacha_jwk_contract() -> Result<(), String> {
+    let key = import_chacha_key((1..=32).collect(), true)
         .await
         .map_err(|e| describe("chacha import-key-raw", &e))?;
-    match key.export_key_jwk().await {
-        Err(Error::Unsupported(_)) => Ok(()),
+    let jwk = key
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("chacha export-key-jwk", &e))?;
+    if !jwk.contains(JWK_K_32) || !jwk.contains("\"oct\"") {
+        return Err(format!(
+            "exported ChaCha JWK missing material members: {jwk}"
+        ));
+    }
+    if !jwk.contains("C20P") {
+        return Err(format!(
+            "exported ChaCha JWK does not carry alg \"C20P\": {jwk}"
+        ));
+    }
+
+    let reimported = import_chacha_key_jwk(jwk, true)
+        .await
+        .map_err(|e| describe("chacha import-key-jwk (exported form)", &e))?;
+    let raw = reimported
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("export-key-raw after JWK reimport", &e))?;
+    if raw != (1..=32).collect::<Vec<u8>>() {
+        return Err("JWK round trip changed the key material".into());
+    }
+
+    // The alg-less form (the WPT fixtures' shape) is accepted too.
+    import_chacha_key_jwk(format!(r#"{{"kty":"oct","k":"{JWK_K_32}"}}"#), false)
+        .await
+        .map_err(|e| describe("chacha import-key-jwk (alg-less)", &e))?;
+
+    match import_chacha_key_jwk(
+        format!(r#"{{"kty":"oct","k":"{JWK_K_32}","alg":"A256GCM"}}"#),
+        false,
+    )
+    .await
+    {
+        Err(Error::InvalidKey(_)) => Ok(()),
         Err(other) => Err(describe(
-            "export-key-jwk: expected unsupported, got",
+            "import-key-jwk with another algorithm's alg: expected invalid-key, got",
             &other,
         )),
-        Ok(_) => Err("ChaCha20-Poly1305 exported a JWK".into()),
+        Ok(_) => Err("another algorithm's `alg` minted a ChaCha key".into()),
+    }
+}
+
+/// XChaCha20-Poly1305 keeps declining the JWK path: no specification
+/// registers any JWK form for the construction (the ruling recorded in
+/// `chacha.wit`), so `export-key-jwk` fails `unsupported`. Tagged with
+/// the XChaCha feature — the assertion needs a minted XChaCha key, which
+/// a target missing the feature cannot produce.
+async fn xchacha_jwk_unsupported() -> Result<(), String> {
+    let xchacha = import_xchacha_key(vec![0x42u8; 32], true)
+        .await
+        .map_err(|e| describe("xchacha import-key-raw", &e))?;
+    match xchacha.export_key_jwk().await {
+        Err(Error::Unsupported(_)) => Ok(()),
+        Err(other) => Err(describe(
+            "xchacha export-key-jwk: expected unsupported, got",
+            &other,
+        )),
+        Ok(_) => Err("XChaCha20-Poly1305 exported a JWK".into()),
     }
 }
 
@@ -1916,12 +1984,19 @@ async fn hkdf_grants_and_chaining() -> Result<(), String> {
         import_ikm(vec![1; 32], false, false).await,
         "minted material with no enabled grant",
     )?;
-    expect_err(
-        "empty ikm",
-        ErrKind::InvalidKey,
-        import_ikm(Vec::new(), true, true).await,
-        "minted empty input keying material",
-    )?;
+    // Empty IKM mints and derives, like the empty PBKDF2 password (RFC
+    // 5869 admits it and the platform serves it — see `wit/README.md`,
+    // "Empty KDF secrets are accepted").
+    let empty = import_ikm(Vec::new(), true, true)
+        .await
+        .map_err(|e| describe("empty import-ikm", &e))?;
+    let empty_input = hkdf_sha2::prepare(Sha2Variant::Sha256, &empty, b"salt".to_vec(), Vec::new())
+        .await
+        .map_err(|e| describe("prepare (empty ikm)", &e))?;
+    empty_input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (empty ikm)", &e))?;
 
     let bits_only = import_ikm(vec![2; 32], true, false)
         .await
@@ -2096,7 +2171,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
         "prepared over an unserved variant",
     )?;
 
-    // Empty passwords mint and derive (unlike empty IKM).
+    // Empty passwords mint and derive, like empty IKM.
     let empty = import_password(Vec::new(), true, true)
         .await
         .map_err(|e| describe("empty import-password", &e))?;

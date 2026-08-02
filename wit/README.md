@@ -140,12 +140,18 @@ Every `*-jwk` function follows this contract. The minting interfaces'
 - A *public-key* import has no extractability request — minted public
   keys are unconditionally exportable — so a public JWK carrying
   `"ext": false` is rejected with `error.invalid-key`.
-- Export returns exactly the material-bearing members — `kty`, `k`, and
+- Export returns exactly the material-bearing members — `kty`, `k`,
   `alg` for the `oct` form; `kty`, `crv`, `x` (and `y`, and `d` on
   private exports) for the OKP and EC forms, which carry no `alg` — and
   nothing else. Metadata this package does not model (`key_ops`, `ext`,
   `use`) is the consumer's to stamp. Member order is not contract.
-- `oct` algorithms without a registered JWK `alg` fail with
+- ChaCha20-Poly1305 uses the `oct` form of the [W3C Modern Algorithms
+  proposal](https://wicg.github.io/webcrypto-modern-algos/), whose
+  registered `alg` is `"C20P"` (the proposal carries the JOSE
+  registration): export emits it, and import accepts an absent `alg` or
+  `"C20P"`, rejecting anything else with `error.invalid-key`. `oct`
+  algorithms with no registered JWK form at all (the XChaCha
+  constructions) have no JWK minting, and export fails with
   `error.unsupported`.
 
 ## Error contract
@@ -260,11 +266,14 @@ short:
   seeds or scalars, per the format-admission rule above. No import derives
   the public half (see the no-derive rule above); importers supply it
   separately through the public-key import.
-- **Empty PBKDF2 passwords are accepted; empty HKDF IKM is not.** RFC 8018
-  admits an empty `P`, the platform serves it, and the upstream test
-  vectors exercise it as valid, so rejecting it would break platform
-  fidelity without a safety win. A zero-entropy HKDF IKM, by contrast, is
-  never what a caller meant.
+- **Empty KDF secrets are accepted.** RFC 8018 admits an empty PBKDF2
+  `P` and RFC 5869 an empty HKDF IKM; the platform serves both, and the
+  upstream PBKDF2 vectors exercise the empty password as valid.
+  Rejecting either would break platform fidelity without a safety win: a
+  zero-length secret is not meaningfully weaker than a one-byte one, so
+  no security line falls at empty. An implementation under an explicit
+  security policy MAY still reject degenerate material (the same
+  allowance as the HMAC import's short-key bound).
 - **Per-algorithm interfaces instead of variant enums** where platform
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one

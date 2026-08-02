@@ -723,15 +723,10 @@ export class AeadKey {
   /**
    * The key as an `oct` JWK (JSON text; see `mac-key.export-key-jwk` for
    * the package-wide contract), behind the same extractability gate as
-   * `exportKeyRaw`. The ChaCha constructions have no registered JWK `alg`,
-   * so their export declines `{ tag: 'unsupported' }` (the package-wide
-   * JWK contract) — after the extractability gate, which applies first.
+   * `exportKeyRaw`. ChaCha20-Poly1305 keys carry the Modern Algorithms
+   * proposal's registered `alg`, `"C20P"`, which the platform emits.
    */
   async exportKeyJwk() {
-    if (this.#isChacha()) {
-      if (!this.#key.extractable) throw errNotExtractable();
-      throw errUnsupported("ChaCha20-Poly1305 has no registered JWK alg");
-    }
     return exportJwkGated(this.#key);
   }
 }
@@ -1151,7 +1146,7 @@ function isAgreementParams(params) {
 
 /**
  * Import input keying material (the `hkdf.import-ikm` contract): empty
- * material is `invalid-key`, a grantless policy `not-permitted`. The
+ * material is accepted, a grantless policy `not-permitted`. The
  * platform key is minted non-extractable — its own requirement, and the
  * WIT's.
  * @param {Uint8Array} raw
@@ -1160,7 +1155,6 @@ function isAgreementParams(params) {
 async function importIkm(raw, options) {
   const policy = derivePolicy(options);
   const usages = deriveUsages(policy);
-  if (raw.length === 0) throw errInvalidKey("HKDF input keying material must be non-empty");
   let key;
   try {
     key = await subtle.importKey("raw", asBufferSource(raw), "HKDF", false, usages);
@@ -2398,6 +2392,47 @@ export const chacha20Poly1305 = {
       subtle.generateKey({ name: "ChaCha20-Poly1305" }, policy.extractable, usages),
     );
     return new AeadKey(/** @type {CryptoKey} */ (key), 256);
+  },
+  /**
+   * Import an `oct` JWK as a ChaCha20-Poly1305 key (the
+   * `chacha20-poly1305.import-key-jwk` contract): `kty` must be `"oct"`,
+   * `k` must decode to exactly 32 bytes, and `alg`, when present, must be
+   * the Modern Algorithms proposal's registered `"C20P"` — any other
+   * value fails `{ tag: 'invalid-key' }`. The checks are this host's,
+   * made before the platform is asked, so the contract's answers do not
+   * vary with platform ChaCha support.
+   * @param {string} jwk
+   * @param {AeadKeyOptions} options
+   */
+  async importKeyJwk(jwk, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const material = jwkMaterial(jwk);
+    if (material.kty !== "oct") {
+      throw errInvalidKey(`JWK kty must be "oct" for ChaCha20-Poly1305`);
+    }
+    if (material.alg !== undefined && material.alg !== "C20P") {
+      throw errInvalidKey(
+        `JWK alg is ${JSON.stringify(material.alg)}, not "C20P"`,
+      );
+    }
+    requireStrictBase64url(material.k);
+    const gotBytes = jwkKeyBytes(material.k);
+    if (gotBytes !== 32) {
+      throw errInvalidKey(
+        `JWK carries ${gotBytes} bytes of key material; ChaCha20-Poly1305 requires 32`,
+      );
+    }
+    const key = await chachaMint("import-key-jwk", () =>
+      subtle.importKey(
+        "jwk",
+        material,
+        { name: "ChaCha20-Poly1305" },
+        policy.extractable,
+        usages,
+      ),
+    );
+    return new AeadKey(key, 256);
   },
 };
 
