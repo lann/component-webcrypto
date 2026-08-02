@@ -2,23 +2,17 @@
 // and signing) and the browser-first host module over localhost, runs both
 // suites in headless Chromium (137+, which ships JSPI), and writes
 // `conformance/results/jco-browser.json` + `jco-browser-signing.json`.
+// The serve/launch/watchdog machinery is the shared page driver
+// (scripts/browser-page-driver.mjs).
 //
 // Gates in CI (the Actions runner image ships Chrome); locally it needs a
 // Chrome/Chromium install — run it with CONFORMANCE_BROWSER=1 just
 // conformance, or directly with `just conformance-jco-browser`.
-import { createServer } from "node:http";
-import { readFile, access } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 
+import { runPageHarness } from "../../../../scripts/browser-page-driver.mjs";
 import { missingFeatures, REPO_ROOT, writeReport } from "./report.mjs";
-
-const MIME = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".wasm": "application/wasm",
-  ".map": "application/json",
-};
 
 // The in-page harness: drives both suites — the shared guest and the
 // host-only signing guest — through the results viewer's harness modules
@@ -81,33 +75,6 @@ const collect = (message) => {
 })();
 </script>`;
 
-/** Serve the repository root (so the guests' relative imports of
- *  js/jco/webcrypto.js resolve) plus the harness page. */
-function serve(page) {
-  const server = createServer(async (req, res) => {
-    const path = new URL(req.url, "http://localhost").pathname;
-    if (path === "/") {
-      res.writeHead(200, { "content-type": "text/html" });
-      res.end(page);
-      return;
-    }
-    try {
-      const file = join(REPO_ROOT, path);
-      const body = await readFile(file);
-      res.writeHead(200, {
-        "content-type": MIME[extname(file)] ?? "application/octet-stream",
-      });
-      res.end(body);
-    } catch {
-      res.writeHead(404);
-      res.end("not found");
-    }
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
-}
-
 /** Locate a Chromium/Chrome binary: CHROME_PATH, common system names, then
  *  the Playwright browser cache. */
 async function findChrome() {
@@ -146,13 +113,9 @@ async function findChrome() {
   );
 }
 
-// Watchdog bounds: browser launch and page load get hard timeouts; the run
-// itself is bounded by *inactivity* — the harness heartbeats as results
-// stream in, so a stall means the page hung (a wedged worker, a deadlocked
-// JSPI suspension, an uncaught error nothing was listening for), and the
-// watchdog fails fast with the last heartbeat naming where.
-const LAUNCH_TIMEOUT_MS = 120_000;
-const LOAD_TIMEOUT_MS = 60_000;
+// Stall bound for the driver's inactivity watchdog: the harness heartbeats
+// at least once per hundred results, so quiet time is bounded by a batch of
+// the slowest cases.
 const STALL_TIMEOUT_MS = 90_000;
 
 async function main() {
@@ -161,76 +124,18 @@ async function main() {
   // it never gates (targets.toml declares no such target).
   const engine = process.env.CONFORMANCE_ENGINE ?? "chromium";
   const missing = await missingFeatures("jco-browser");
-  const [playwright, server] = await Promise.all([
-    import("playwright-core"),
-    serve(harness(missing)),
-  ]);
-  const { port } = server.address();
-
-  const browser =
-    engine === "firefox"
-      ? await playwright.firefox.launch({
-          headless: true,
-          timeout: LAUNCH_TIMEOUT_MS,
-          firefoxUserPrefs: {
-            "javascript.options.wasm_js_promise_integration": true,
-          },
-        })
-      : await playwright.chromium.launch({
-          executablePath: await findChrome(),
-          headless: true,
-          timeout: LAUNCH_TIMEOUT_MS,
-        });
-  try {
-    const page = await browser.newPage();
-    page.on("console", (msg) => {
-      if (msg.type() === "error") console.error("[page]", msg.text());
-    });
-
-    let lastBeat = { at: Date.now(), note: "page created" };
-    await page.exposeFunction("__progress", (note) => {
-      lastBeat = { at: Date.now(), note: String(note) };
-    });
-    let settled = false;
-    const report = new Promise((resolve, reject) => {
-      page.exposeFunction("__report", resolve);
-      page.on("crash", () =>
-        reject(new Error(`page crashed (last heartbeat: ${lastBeat.note})`)),
-      );
-      page.on("pageerror", (err) =>
-        reject(new Error(`uncaught page error: ${err} (last heartbeat: ${lastBeat.note})`)),
-      );
-      const watchdog = setInterval(() => {
-        if (settled) {
-          clearInterval(watchdog);
-          return;
-        }
-        const stalled = Date.now() - lastBeat.at;
-        if (stalled > STALL_TIMEOUT_MS) {
-          clearInterval(watchdog);
-          reject(
-            new Error(
-              `harness stalled: no heartbeat for ${Math.round(stalled / 1000)}s ` +
-                `(last: ${lastBeat.note})`,
-            ),
-          );
-        }
-      }, 5_000);
-      watchdog.unref?.();
-    });
-
-    await page.goto(`http://127.0.0.1:${port}/`, { timeout: LOAD_TIMEOUT_MS });
-    const outcome = await report.finally(() => {
-      settled = true;
-    });
-    if (outcome.error) throw new Error(`in-page harness failed: ${outcome.error}`);
-    const target = engine === "firefox" ? "jco-firefox" : "jco-browser";
-    await writeReport(target, "shared", missing, outcome.shared);
-    await writeReport(target, "signing", missing, outcome.signing, `${target}-signing`);
-  } finally {
-    await browser.close();
-    server.close();
-  }
+  const playwright = await import("playwright-core");
+  const outcome = await runPageHarness({
+    playwright,
+    engine,
+    executablePath: engine === "chromium" ? await findChrome() : undefined,
+    repoRoot: REPO_ROOT,
+    html: harness(missing),
+    stallTimeoutMs: STALL_TIMEOUT_MS,
+  });
+  const target = engine === "firefox" ? "jco-firefox" : "jco-browser";
+  await writeReport(target, "shared", missing, outcome.shared);
+  await writeReport(target, "signing", missing, outcome.signing, `${target}-signing`);
 }
 
 main().then(
