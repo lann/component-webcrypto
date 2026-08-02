@@ -244,7 +244,7 @@ build)
     gen_suites
     ensure_toolchain
     "$TOOLCHAIN" -q -d examples/componentize-demo/wit -w componentize-demo \
-        --features chacha20-poly1305 \
+        --features chacha20-poly1305,sha1-checked \
         componentize js/componentize/wpt/runner.js -p . \
         -o "$B"/runner.component.wasm
     ;;
@@ -252,7 +252,7 @@ build-parity)
     gen_suites
     ensure_toolchain
     "$TOOLCHAIN" -q -d js/componentize/wpt/wit -w wpt-parity-runner \
-        --features chacha20-poly1305 \
+        --features chacha20-poly1305,sha1-checked \
         componentize js/componentize/wpt/parity-runner.js -p . \
         -o "$B"/parity-runner.component.wasm
     ;;

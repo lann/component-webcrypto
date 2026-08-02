@@ -26,9 +26,7 @@
 //     Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
-// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`
-// (gated `@unstable(feature = chacha20-poly1305)`: the world line carries
-// the gate and componentize-js needs `--features chacha20-poly1305`),
+// `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `chacha20-poly1305`,
 // `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
 // `key-agreement`, `x25519`,
@@ -37,7 +35,10 @@
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
 // and `randomUUID`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
-// elaboration). Module specifiers here name those imports directly, so this
+// elaboration). `chacha20-poly1305` and `sha1-checked` are gated
+// `@unstable`: those world lines carry `@unstable(feature = ...)` gates
+// and componentize-js needs `--features chacha20-poly1305,sha1-checked`.
+// Module specifiers here name those imports directly, so this
 // file needs no bundler: componentize-js resolves them against the world at
 // componentize time.
 //

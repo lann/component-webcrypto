@@ -67,10 +67,22 @@ pub use wit_bindgen::StreamReader;
 
 mod generated {
     #![allow(missing_docs)]
-    // Two mutually exclusive expansions rather than one parameterized by
-    // the cargo feature: `generate!`'s `features` list is static, and the
-    // arms must stay option-for-option identical apart from it.
-    #[cfg(feature = "chacha")]
+    // One mutually exclusive expansion per cargo-feature combination
+    // rather than one parameterized invocation: `generate!`'s `features`
+    // list is static, and the arms must stay option-for-option identical
+    // apart from it. This scales as 2^n in the gated cargo features — at
+    // n where this stops being tolerable, the bindings move to a build
+    // script that computes the flag list (tracked with the SDK's other
+    // cargo-feature debt in #85).
+    #[cfg(all(feature = "chacha", feature = "sha1-checked"))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(feature = "chacha", not(feature = "sha1-checked")))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["chacha20-poly1305", "xchacha20-poly1305"],
@@ -78,7 +90,15 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(not(feature = "chacha"))]
+    #[cfg(all(not(feature = "chacha"), feature = "sha1-checked"))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["sha1-checked"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(not(feature = "chacha"), not(feature = "sha1-checked")))]
     wit_bindgen::generate!({
         path: "wit",
         world: "imports",
@@ -97,11 +117,13 @@ pub mod bindings {
     // `aes-variant` and `sha2-variant`, which the minting interfaces only
     // alias, and rustdoc renders an alias into a private module as an empty
     // enum.
+    #[cfg(feature = "sha1-checked")]
+    pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, bytes,
         cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify, hkdf,
         hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, mac, pbkdf2, pbkdf2_sha1,
-        pbkdf2_sha2, sha1_checked, sha2, signature, types, x25519,
+        pbkdf2_sha2, sha2, signature, types, x25519,
     };
     #[cfg(feature = "chacha")]
     pub use super::generated::lann::webcrypto::{
@@ -1573,6 +1595,7 @@ pub mod hmac_sha2;
 pub mod pbkdf2;
 pub mod pbkdf2_sha1;
 pub mod pbkdf2_sha2;
+#[cfg(feature = "sha1-checked")]
 pub mod sha1_checked;
 pub mod sha2;
 pub mod x25519;
