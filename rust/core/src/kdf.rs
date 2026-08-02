@@ -33,15 +33,10 @@ pub struct IkmMaterial {
 
 impl IkmMaterial {
     /// Import input keying material, per the `hkdf.import-ikm` contract:
-    /// empty material is `invalid-key`, a grantless policy is
-    /// `not-permitted`.
+    /// empty material is accepted (RFC 5869 permits it), a grantless
+    /// policy is `not-permitted`.
     pub fn import(raw: Vec<u8>, policy: DerivePolicy) -> Result<Self, Error> {
         policy.check_useful()?;
-        if raw.is_empty() {
-            return Err(Error::InvalidKey(
-                "HKDF input keying material must be non-empty".into(),
-            ));
-        }
         Ok(Self {
             raw: Zeroizing::new(raw),
             policy,
@@ -728,15 +723,35 @@ mod tests {
         ));
     }
 
+    /// Empty IKM imports and derives (empty KDF secrets are accepted —
+    /// see `wit/README.md`, "Empty KDF secrets are accepted"). The
+    /// expected output is the WPT hkdf fixture for the empty key (salt
+    /// "Sodium Chloride compound", info "HKDF extra info", SHA-256),
+    /// cross-checked against an independent RFC 5869 computation.
+    #[test]
+    fn empty_ikm_derives_the_platform_answer() {
+        let ikm = IkmMaterial::import(Vec::new(), policy_both()).unwrap();
+        let input = DeriveInputMaterial::prepare(
+            Sha2Variant::Sha256,
+            &ikm,
+            b"Sodium Chloride compound",
+            b"HKDF extra info".to_vec(),
+        )
+        .unwrap();
+        let okm = input.derive_bits(Some(256)).unwrap();
+        let expected: [u8; 32] = [
+            0xdf, 0x92, 0xb9, 0xa9, 0xfa, 0x9c, 0x01, 0xb8, 0x98, 0xce, 0xea, 0xa1, 0x31, 0x34,
+            0x83, 0x2e, 0x31, 0xcb, 0x1c, 0x08, 0x1d, 0x16, 0xa5, 0x23, 0x5c, 0x69, 0xd8, 0x56,
+            0x51, 0xe3, 0x17, 0xac,
+        ];
+        assert_eq!(okm.as_slice(), expected);
+    }
+
     /// The contract's parameter errors: no length for a KDF input, sub-byte
-    /// and zero lengths, the RFC 5869 output bound, empty IKM, a grantless
-    /// policy, and KDF-from-KDF chaining.
+    /// and zero lengths, the RFC 5869 output bound, a grantless policy,
+    /// and KDF-from-KDF chaining.
     #[test]
     fn contract_errors() {
-        assert!(matches!(
-            IkmMaterial::import(Vec::new(), policy_both()),
-            Err(Error::InvalidKey(_))
-        ));
         assert!(matches!(
             IkmMaterial::import(vec![1], DerivePolicy::default()),
             Err(Error::NotPermitted(_))

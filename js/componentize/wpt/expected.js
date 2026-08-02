@@ -33,7 +33,7 @@ export const EXPECTED = {
   "import_export/okp_importKey (X25519)": { inPassed: 54, inFailed: 0, outPassed: 0, outFailed: 0 },
   "import_export/okp_importKey_failures (X25519)": { inPassed: 454, inFailed: 0, outPassed: 0, outFailed: 0 },
   "generateKey/successes (X25519)": { inPassed: 32, inFailed: 0, outPassed: 0, outFailed: 0 },
-  "derive_bits_keys/hkdf": { inPassed: 1449, inFailed: 0, outPassed: 532, outFailed: 1680 },
+  "derive_bits_keys/hkdf": { inPassed: 1909, inFailed: 0, outPassed: 504, outFailed: 1248 },
   "derive_bits_keys/pbkdf2": { inPassed: 4474, inFailed: 0, outPassed: 1242, outFailed: 2916 },
   "derive_bits_keys/derived_bits_length": { inPassed: 22, inFailed: 0, outPassed: 0, outFailed: 7 },
   "digest/digest": { inPassed: 116, inFailed: 0, outPassed: 0, outFailed: 0 },
@@ -47,6 +47,6 @@ export const EXPECTED = {
   "import_export/ec_importKey_failures (ECDSA)": { inPassed: 276, inFailed: 0, outPassed: 0, outFailed: 344 },
   "getRandomValues": { inPassed: 39, inFailed: 0, outPassed: 0, outFailed: 0 },
   "randomUUID": { inPassed: 3, inFailed: 0, outPassed: 0, outFailed: 0 },
-  "normalize-algorithm-name": { inPassed: 3, inFailed: 0, outPassed: 0, outFailed: 1 },
+  "normalize-algorithm-name": { inPassed: 4, inFailed: 0, outPassed: 0, outFailed: 0 },
   "crypto_key_cached_slots": { inPassed: 2, inFailed: 0, outPassed: 0, outFailed: 0 },
 };
