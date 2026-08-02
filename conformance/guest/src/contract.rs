@@ -24,7 +24,8 @@ use conformance_harness::stream::{
     Schedule,
 };
 use conformance_harness::{
-    describe, expect, expect_bytes, expect_err, unhex, ErrKind, FEATURE_CHACHA, FEATURE_XCHACHA,
+    b64url, describe, expect, expect_bytes, expect_err, unhex, ErrKind, FEATURE_CHACHA,
+    FEATURE_XCHACHA,
 };
 use lann_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
 use lann_webcrypto_guest::bindings::aead_internal_nonce::{
@@ -481,7 +482,7 @@ async fn jwk(family: &AeadFamily) -> Result<(), String> {
     let jwk_row = family.jwk.as_ref().expect("jwk area on a JWK-less family");
     let (alg, wrong_alg) = (jwk_row.algs.alg, jwk_row.algs.wrong_alg);
     let raw = oct_key(family.key_len);
-    let k = mint::b64url(&raw);
+    let k = b64url(&raw);
 
     let key = (jwk_row.import)(
         format!(r#"{{"kty":"oct","k":"{k}","alg":"{alg}"}}"#),
@@ -862,7 +863,7 @@ async fn mac_roundtrip(family: &MacFamily) -> Result<(), String> {
 async fn mac_jwk(family: &MacFamily) -> Result<(), String> {
     let (alg, wrong_alg) = (family.jwk.alg, family.jwk.wrong_alg);
     let raw = oct_key(32);
-    let k = mint::b64url(&raw);
+    let k = b64url(&raw);
 
     let key = (family.import_jwk)(
         format!(r#"{{"kty":"oct","k":"{k}","alg":"{alg}"}}"#),
@@ -1265,7 +1266,7 @@ async fn cipher_usage(family: &CipherFamily) -> Result<(), String> {
 async fn cipher_jwk(family: &CipherFamily) -> Result<(), String> {
     let (alg, wrong_alg) = (family.jwk.alg, family.jwk.wrong_alg);
     let raw = oct_key(family.key_len);
-    let k = mint::b64url(&raw);
+    let k = b64url(&raw);
 
     let key = (family.import_jwk)(
         format!(r#"{{"kty":"oct","k":"{k}","alg":"{alg}"}}"#),
@@ -1705,7 +1706,7 @@ async fn internal_nonce_jwk_area(family: &InternalNonceFamily) -> Result<(), Str
     let jwk_row = family.jwk.as_ref().expect("jwk area on a JWK-less family");
     let (alg, wrong_alg) = (jwk_row.algs.alg, jwk_row.algs.wrong_alg);
     let raw = oct_key(family.key_len);
-    let k = mint::b64url(&raw);
+    let k = b64url(&raw);
 
     let key = (jwk_row.import)(
         format!(r#"{{"kty":"oct","k":"{k}","alg":"{alg}"}}"#),

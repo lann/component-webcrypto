@@ -22,8 +22,8 @@ use conformance_harness::stream::{
     verify_op, Schedule,
 };
 use conformance_harness::{
-    describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
-    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA,
+    b64url, describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
+    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA, P256_A25_X, P256_A25_Y,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
@@ -1725,7 +1725,7 @@ async fn x25519_key_contract() -> Result<(), String> {
         .export_key_jwk()
         .await
         .map_err(|e| describe("public-key export-key-jwk", &e))?;
-    let x = crate::mint::b64url(&raw);
+    let x = b64url(&raw);
     if !jwk.contains("\"OKP\"") || !jwk.contains("\"X25519\"") || !jwk.contains(&x) {
         return Err(format!(
             "exported public JWK missing material members: {jwk}"
@@ -1758,7 +1758,7 @@ async fn x25519_key_contract() -> Result<(), String> {
         x25519::import_secret_key_jwk(
             format!(
                 r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
-                crate::mint::b64url(&alice_x)
+                b64url(&alice_x)
             ),
             agreement_options(true, true, false),
         )
@@ -1942,10 +1942,8 @@ const ED25519_TEST3_PUBLIC: &str =
 const ED25519_TEST3_MSG: &str = "af82";
 const ED25519_TEST3_SIG: &str = "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a";
 
-// The RFC 6979 A.2.5 P-256 public key: the uncompressed SEC1 point and its
-// SubjectPublicKeyInfo encoding.
-const P256_A25_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
-const P256_A25_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+// The RFC 6979 A.2.5 P-256 public key's SubjectPublicKeyInfo encoding
+// (its coordinates are the harness's `P256_A25_X`/`P256_A25_Y`).
 const P256_A25_SPKI: &str = "3059301306072a8648ce3d020106082a8648ce3d0301070342000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
 
 /// The RFC 8410 PKCS#8 encoding of a 32-byte private key (Ed25519 or
@@ -1994,7 +1992,7 @@ async fn sig_public_format_imports() -> Result<(), String> {
         .export_key_jwk()
         .await
         .map_err(|e| describe("export-key-jwk", &e))?;
-    let x = crate::mint::b64url(&public_raw);
+    let x = b64url(&public_raw);
     if !jwk.contains("\"OKP\"") || !jwk.contains("\"Ed25519\"") || !jwk.contains(&x) {
         return Err(format!(
             "exported Ed25519 JWK missing material members: {jwk}"
@@ -2049,10 +2047,7 @@ async fn sig_public_format_imports() -> Result<(), String> {
         .export_key_jwk()
         .await
         .map_err(|e| describe("export-key-jwk (ecdsa)", &e))?;
-    let (x, y) = (
-        crate::mint::b64url(&unhex(P256_A25_X)),
-        crate::mint::b64url(&unhex(P256_A25_Y)),
-    );
+    let (x, y) = (b64url(&unhex(P256_A25_X)), b64url(&unhex(P256_A25_Y)));
     if !jwk.contains("\"EC\"")
         || !jwk.contains("\"P-256\"")
         || !jwk.contains(&x)
@@ -2099,7 +2094,7 @@ async fn sig_public_format_imports() -> Result<(), String> {
         ErrKind::InvalidKey,
         ed25519_verify::import_verifying_key_jwk(format!(
             r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
-            crate::mint::b64url(&public_raw)
+            b64url(&public_raw)
         ))
         .await,
         "imported an X25519 JWK as Ed25519",
@@ -2127,7 +2122,7 @@ async fn sig_public_format_imports() -> Result<(), String> {
     // The JWK `alg` policy: Ed25519 accepts its two registered spellings
     // case-sensitively, and a public JWK restricting extractability
     // (`ext: false`) cannot mint an unconditionally exportable public key.
-    let x = crate::mint::b64url(&public_raw);
+    let x = b64url(&public_raw);
     for alg in ["Ed25519", "EdDSA"] {
         ed25519_verify::import_verifying_key_jwk(format!(
             r#"{{"kty":"OKP","crv":"Ed25519","x":"{x}","alg":"{alg}"}}"#
@@ -2180,8 +2175,8 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
 
     let jwk = format!(
         r#"{{"kty":"OKP","crv":"Ed25519","x":"{}","d":"{}"}}"#,
-        crate::mint::b64url(&unhex(ED25519_TEST3_PUBLIC)),
-        crate::mint::b64url(&seed),
+        b64url(&unhex(ED25519_TEST3_PUBLIC)),
+        b64url(&seed),
     );
     let from_jwk = ed25519_sign::import_signing_key_jwk(jwk, signing_options(false))
         .await
@@ -2253,7 +2248,7 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
         ed25519_sign::import_signing_key_jwk(
             format!(
                 r#"{{"kty":"OKP","crv":"Ed25519","x":"{}"}}"#,
-                crate::mint::b64url(&unhex(ED25519_TEST3_PUBLIC))
+                b64url(&unhex(ED25519_TEST3_PUBLIC))
             ),
             signing_options(false),
         )
@@ -2318,7 +2313,7 @@ async fn x25519_format_roundtrips() -> Result<(), String> {
         .map_err(|e| describe("import-public-key-spki", &e))?;
     let bob_jwk = x25519::import_public_key_jwk(format!(
         r#"{{"kty":"OKP","crv":"X25519","x":"{}"}}"#,
-        crate::mint::b64url(&bob_x)
+        b64url(&bob_x)
     ))
     .await
     .map_err(|e| describe("import-public-key-jwk", &e))?;
@@ -2364,7 +2359,7 @@ async fn x25519_format_roundtrips() -> Result<(), String> {
         .export_key_jwk()
         .await
         .map_err(|e| describe("secret-key export-key-jwk", &e))?;
-    let d = crate::mint::b64url(&alice_d);
+    let d = b64url(&alice_d);
     if !jwk.contains("\"OKP\"") || !jwk.contains("\"X25519\"") || !jwk.contains(&d) {
         return Err(format!(
             "exported secret JWK missing material members: {jwk}"
@@ -2376,7 +2371,7 @@ async fn x25519_format_roundtrips() -> Result<(), String> {
     // public key is unconditionally exportable).
     x25519::import_public_key_jwk(format!(
         r#"{{"kty":"OKP","crv":"X25519","x":"{}","alg":"anything"}}"#,
-        crate::mint::b64url(&bob_x)
+        b64url(&bob_x)
     ))
     .await
     .map_err(|e| describe("import-public-key-jwk (alg present)", &e))?;
@@ -2385,7 +2380,7 @@ async fn x25519_format_roundtrips() -> Result<(), String> {
         ErrKind::InvalidKey,
         x25519::import_public_key_jwk(format!(
             r#"{{"kty":"OKP","crv":"X25519","x":"{}","ext":false}}"#,
-            crate::mint::b64url(&bob_x)
+            b64url(&bob_x)
         ))
         .await,
         "minted an always-exportable key from an ext:false JWK",
