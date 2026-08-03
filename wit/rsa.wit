@@ -236,3 +236,95 @@ interface rsa-pss-sign {
     @unstable(feature = rsa-sign)
     unwrap-signing-key-jwk: async func(%variant: rsa-variant, input: unwrap-input, options: signing-key-options) -> result<signing-key, error>;
 }
+
+/// RSA-OAEP encryption-key minting (RFC 8017 §7.1), as the Web
+/// Cryptography API serves it: the public half of key transport.
+///
+/// The variant binds the digest at mint (WebCrypto's
+/// `RsaHashedImportParams`); the MGF1 digest is the same digest, as
+/// WebCrypto fixes it. Keys report `algorithm-name` `"RSA-OAEP"`, the
+/// variant's digest, and the modulus length.
+///
+/// Admission tightens the family window on both ends: the modulus must
+/// be 2048–8192 bits, `error.invalid-key` outside — encryption creates
+/// *future* artifacts, so unlike signature verification there is no
+/// legacy tier below 2048 (see `README.md`, "Design notes"). The
+/// plaintext bound follows from the mint: modulus bytes minus twice the
+/// digest length minus 2.
+interface rsa-oaep-encrypt {
+    use types.{error};
+    use public-encryption.{encryption-key};
+    use rsa.{rsa-variant};
+
+    /// Import a public key as an X.509 SubjectPublicKeyInfo (DER).
+    /// Admission follows the family contract (see `rsa`) plus the
+    /// window above.
+    import-encryption-key-spki: async func(%variant: rsa-variant, spki: list<u8>) -> result<encryption-key, error>;
+
+    /// Import a public key as an RSA public JWK (`kty: "RSA"`, with `n`
+    /// and `e`). An `alg` member, when present, must be the variant's
+    /// JOSE alg (`"RSA-OAEP-256"`, `"RSA-OAEP-384"`, or
+    /// `"RSA-OAEP-512"`). See `mac-key.export-key-jwk` for the
+    /// package-wide JWK contract.
+    import-encryption-key-jwk: async func(%variant: rsa-variant, jwk: string) -> result<encryption-key, error>;
+}
+
+/// RSA-OAEP decryption-key minting (RFC 8017 §7.1): the private half of
+/// key transport.
+///
+/// Gated `@unstable(feature = rsa-oaep-decrypt)`: RSA private-key
+/// operations are a per-deployment timing judgment the package cannot
+/// make or verify from inside — and decryption is the operation the
+/// attack lineage targets — so consumers opt in by naming the gate (see
+/// `README.md`, "Stability gates"; the same consent contract as
+/// `rsa-sign`).
+///
+/// Security:
+/// - Providers in attacker-observable timing domains do not export this
+///   interface, and compositions requiring it fail at composition time
+///   (see `README.md`, "Timing-channel policy"). Host-backed providers
+///   serve it subject to the gate.
+///
+/// Admission is `rsa-oaep-encrypt`'s (2048–8192 bits). Keys import as
+/// PKCS#8 or a full-CRT RSA private JWK, exactly as `rsassa-pkcs1-v15-sign`
+/// documents, and imports return only the decryption key (the no-derive
+/// rule).
+@unstable(feature = rsa-oaep-decrypt)
+interface rsa-oaep-decrypt {
+    @unstable(feature = rsa-oaep-decrypt)
+    use types.{error};
+    @unstable(feature = rsa-oaep-decrypt)
+    use public-encryption.{encryption-key, decryption-key, decryption-key-options};
+    @unstable(feature = rsa-oaep-decrypt)
+    use rsa.{rsa-variant, rsa-modulus};
+    @unstable(feature = rsa-oaep-decrypt)
+    use wrapping.{unwrap-input};
+
+    /// Generate a fresh key pair, returning both halves — the only
+    /// point at which every provider is guaranteed to have the public
+    /// key on hand. The public exponent is 65537; it is not a parameter.
+    @unstable(feature = rsa-oaep-decrypt)
+    generate-key: async func(%variant: rsa-variant, modulus: rsa-modulus, options: decryption-key-options) -> result<tuple<decryption-key, encryption-key>, error>;
+
+    /// Import a decryption key as a PKCS#8 PrivateKeyInfo (DER, with
+    /// CRT parameters).
+    @unstable(feature = rsa-oaep-decrypt)
+    import-decryption-key-pkcs8: async func(%variant: rsa-variant, pkcs8: list<u8>, options: decryption-key-options) -> result<decryption-key, error>;
+
+    /// Import a decryption key as a full-CRT RSA private JWK. `alg`,
+    /// when present, follows `import-encryption-key-jwk`'s values.
+    @unstable(feature = rsa-oaep-decrypt)
+    import-decryption-key-jwk: async func(%variant: rsa-variant, jwk: string, options: decryption-key-options) -> result<decryption-key, error>;
+
+    /// Mint a decryption key from unwrapped material read as a PKCS#8
+    /// PrivateKeyInfo. `input` is consumed; grants and extractability
+    /// come from `options` alone (the W3C `unwrapKey` model).
+    @unstable(feature = rsa-oaep-decrypt)
+    unwrap-decryption-key-pkcs8: async func(%variant: rsa-variant, input: unwrap-input, options: decryption-key-options) -> result<decryption-key, error>;
+
+    /// Mint a decryption key from unwrapped material read as an RSA
+    /// private JWK, subject to the unwrap-path `use`/`key_ops` checks
+    /// (see `README.md`, "JWK contract"). `input` is consumed.
+    @unstable(feature = rsa-oaep-decrypt)
+    unwrap-decryption-key-jwk: async func(%variant: rsa-variant, input: unwrap-input, options: decryption-key-options) -> result<decryption-key, error>;
+}
