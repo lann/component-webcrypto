@@ -432,6 +432,59 @@ const X25519_VECTORS: &str = include_str!("../../vectors/x25519_test.json");
 /// the OKP JWK, whose `x` is mandatory.
 const X25519_PUBLIC_KEYS: &str = include_str!("../../vectors/x25519_test_public_keys.json");
 
+/// The ECDH vector files, each with the derived companion mapping its
+/// `tcId`s to the private scalar's public coordinates (see
+/// `conformance/vectors/README.md`): the asn and ecpoint files carry raw
+/// scalars, but the package's EC private JWK import makes `x`/`y`
+/// mandatory (RFC 7518). The webcrypto files need no companion: their
+/// keys are already JWKs.
+const ECDH_VECTORS: [(EcdhCurve, EcdhFileEncoding, &str, Option<&str>); 6] = [
+    (
+        EcdhCurve::P256,
+        EcdhFileEncoding::Spki,
+        include_str!("../../vectors/ecdh_secp256r1_test.json"),
+        Some(include_str!(
+            "../../vectors/ecdh_secp256r1_test_public_keys.json"
+        )),
+    ),
+    (
+        EcdhCurve::P256,
+        EcdhFileEncoding::Ecpoint,
+        include_str!("../../vectors/ecdh_secp256r1_ecpoint_test.json"),
+        Some(include_str!(
+            "../../vectors/ecdh_secp256r1_ecpoint_test_public_keys.json"
+        )),
+    ),
+    (
+        EcdhCurve::P256,
+        EcdhFileEncoding::Webcrypto,
+        include_str!("../../vectors/ecdh_secp256r1_webcrypto_test.json"),
+        None,
+    ),
+    (
+        EcdhCurve::P384,
+        EcdhFileEncoding::Spki,
+        include_str!("../../vectors/ecdh_secp384r1_test.json"),
+        Some(include_str!(
+            "../../vectors/ecdh_secp384r1_test_public_keys.json"
+        )),
+    ),
+    (
+        EcdhCurve::P384,
+        EcdhFileEncoding::Ecpoint,
+        include_str!("../../vectors/ecdh_secp384r1_ecpoint_test.json"),
+        Some(include_str!(
+            "../../vectors/ecdh_secp384r1_ecpoint_test_public_keys.json"
+        )),
+    ),
+    (
+        EcdhCurve::P384,
+        EcdhFileEncoding::Webcrypto,
+        include_str!("../../vectors/ecdh_secp384r1_webcrypto_test.json"),
+        None,
+    ),
+];
+
 /// A served HKDF parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy)]
 pub enum HkdfAlg {
@@ -826,6 +879,277 @@ pub fn x25519_cases() -> Vec<X25519Case> {
                 shared,
                 zero_shared,
             });
+        }
+    }
+    cases
+}
+
+/// A served ECDH curve, as named in test ids.
+#[derive(Clone, Copy)]
+pub enum EcdhCurve {
+    P256,
+    P384,
+}
+
+impl EcdhCurve {
+    /// The algorithm name used in test ids.
+    pub fn name(self) -> &'static str {
+        match self {
+            EcdhCurve::P256 => "ecdh-p256",
+            EcdhCurve::P384 => "ecdh-p384",
+        }
+    }
+
+    /// The curve's name as a JWK `crv` member.
+    fn crv(self) -> &'static str {
+        match self {
+            EcdhCurve::P256 => "P-256",
+            EcdhCurve::P384 => "P-384",
+        }
+    }
+
+    /// The curve's field size in bytes: the width of a scalar and of each
+    /// point coordinate.
+    fn field_size(self) -> usize {
+        match self {
+            EcdhCurve::P256 => 32,
+            EcdhCurve::P384 => 48,
+        }
+    }
+}
+
+/// How an ECDH vector file encodes its keys (Wycheproof's `encoding`
+/// group member), which selects the public import under test.
+#[derive(Clone, Copy)]
+enum EcdhFileEncoding {
+    /// `asn`: SPKI public keys, raw private scalars.
+    Spki,
+    /// `ecpoint`: raw uncompressed SEC1 public points, raw private
+    /// scalars.
+    Ecpoint,
+    /// `webcrypto`: both keys as JWK objects.
+    Webcrypto,
+}
+
+/// A vector's peer public key in its file's encoding, carrying the
+/// dispatch to the matching import function.
+pub enum EcdhPublic {
+    /// `import-public-key-raw` (the ecpoint files).
+    Raw(Vec<u8>),
+    /// `import-public-key-spki` (the asn files).
+    Spki(Vec<u8>),
+    /// `import-public-key-jwk` (the webcrypto files; the JWK as JSON
+    /// text).
+    Jwk(String),
+}
+
+impl EcdhPublic {
+    /// The source segment in test ids, naming the vector file family.
+    fn source(&self) -> &'static str {
+        match self {
+            EcdhPublic::Raw(_) => "wycheproof-ecpoint",
+            EcdhPublic::Spki(_) => "wycheproof-spki",
+            EcdhPublic::Jwk(_) => "wycheproof-webcrypto",
+        }
+    }
+}
+
+/// One Wycheproof ECDH vector: agree the imported secret key (an EC
+/// private JWK — the webcrypto files' own, or one built from the raw
+/// scalar plus the derived companion's public coordinates) with the
+/// imported peer, then check the shared secret — or, for the rejection
+/// cases, expect the peer's import to fail `invalid-key`. No chunking
+/// schedules: agreement carries no streams.
+pub struct EcdhCase {
+    pub curve: EcdhCurve,
+    pub tc_id: u64,
+    /// The peer's public key, in the file's encoding.
+    pub public: EcdhPublic,
+    /// The secret key as an EC private JWK (JSON text).
+    pub secret_jwk: String,
+    /// The expected shared secret (`reject_public` cases never reach it).
+    pub shared: Vec<u8>,
+    /// `true`: the public import must fail `invalid-key`. `false`:
+    /// `agree` must succeed, `derive-bits(none)` must equal `shared`, and
+    /// a 128-bit truncation must equal its prefix.
+    pub reject_public: bool,
+}
+
+impl VectorCase for EcdhCase {
+    fn case_id(&self) -> String {
+        vector_case_id(self.curve.name(), self.public.source(), self.tc_id, None)
+    }
+}
+
+#[derive(Deserialize)]
+struct EcdhGroup {
+    tests: Vec<EcdhTest>,
+}
+
+#[derive(Deserialize)]
+struct EcdhTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    flags: Vec<String>,
+    public: String,
+    private: String,
+    shared: String,
+    result: String,
+}
+
+#[derive(Deserialize)]
+struct EcdhWebcryptoGroup {
+    tests: Vec<EcdhWebcryptoTest>,
+}
+
+#[derive(Deserialize)]
+struct EcdhWebcryptoTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    public: serde_json::Value,
+    private: serde_json::Value,
+    shared: String,
+    result: String,
+}
+
+/// The `x`/`y` coordinate pair one derived-companion entry carries.
+#[derive(Deserialize)]
+struct EcdhPublicCoordinates {
+    x: String,
+    y: String,
+}
+
+/// Normalize a Wycheproof big-endian integer scalar to exactly the
+/// curve's field size: strip leading zero bytes, then left-pad (the
+/// files' hex may carry a leading zero byte or be short). Panics if the
+/// value is wider than the field.
+fn normalize_scalar(field: &str, scalar: &[u8], size: usize) -> Vec<u8> {
+    let significant: &[u8] = match scalar.iter().position(|&b| b != 0) {
+        Some(first) => &scalar[first..],
+        None => &[],
+    };
+    assert!(
+        significant.len() <= size,
+        "vector {field}: {}-byte scalar is wider than the {size}-byte field",
+        significant.len()
+    );
+    let mut out = vec![0u8; size - significant.len()];
+    out.extend_from_slice(significant);
+    out
+}
+
+/// Translate the ECDH vector files (per curve: the SPKI-encoded `asn`
+/// file, the raw-point `ecpoint` file, and the JWK `webcrypto` file):
+///
+/// - `valid` vectors run: import both keys, `agree`, and check the
+///   shared secret at its natural length and a 128-bit truncation.
+/// - `invalid` vectors expect the peer's import to fail `invalid-key`.
+///   Every one is a public-key admission failure — off-curve points and
+///   invalid-curve attacks, wrong curves, malformed encodings — and the
+///   WIT pins strict public admission at import, so they all land there
+///   (unlike X25519, where degenerate peers surface at `agree`).
+/// - `acceptable` in the ecpoint files (a compressed encoding of a valid
+///   point) also expects `invalid-key`: upstream marks compressed
+///   admission policy-divergent, but the WIT pins the raw format to
+///   uncompressed-only.
+/// - In the asn files, `acceptable` vectors and every vector flagged
+///   `UnnamedCurve` (explicit-parameter encodings, whatever upstream's
+///   verdict) are **excluded**: their acceptance is legitimately
+///   policy-divergent across implementations. The WIT deliberately
+///   leaves compressed-SPKI admission implementation-defined, ASN.1/BER
+///   strictness differs across the platform engines the jco host
+///   delegates to, and explicit-parameter admission — including how
+///   strictly the parameters are validated — is per-engine policy:
+///   RustCrypto and BoringSSL reject the encoding outright, while
+///   OpenSSL accepts equivalent groups validated to its own notion (an
+///   absent or wrong cofactor passes, being mathematically redundant for
+///   these prime-order curves, while a modified prime or zero order
+///   fails). Upstream's invalid/acceptable split within the family
+///   encodes its reference notion of unambiguous group specification,
+///   not a boundary engines share, so no single expectation holds across
+///   targets. The invalid-curve attacks, off-curve points, and
+///   wrong-curve rejections stay pinned through the named-curve SPKI
+///   cases and the ecpoint/webcrypto files.
+pub fn ecdh_cases() -> Vec<EcdhCase> {
+    let mut cases = Vec::new();
+    for (curve, encoding, text, companion) in ECDH_VECTORS {
+        match encoding {
+            EcdhFileEncoding::Webcrypto => {
+                let file: VectorFile<EcdhWebcryptoGroup> = serde_json::from_str(text)
+                    .unwrap_or_else(|err| {
+                        panic!("parsing {} webcrypto vectors: {err}", curve.name())
+                    });
+                for group in &file.test_groups {
+                    for test in &group.tests {
+                        let field = format!("{} webcrypto tc{}", curve.name(), test.tc_id);
+                        let reject_public = match test.result.as_str() {
+                            "valid" => false,
+                            "invalid" => true,
+                            other => panic!("vector {field} has unknown result {other:?}"),
+                        };
+                        cases.push(EcdhCase {
+                            curve,
+                            tc_id: test.tc_id,
+                            public: EcdhPublic::Jwk(test.public.to_string()),
+                            secret_jwk: test.private.to_string(),
+                            shared: unhex(&field, &test.shared),
+                            reject_public,
+                        });
+                    }
+                }
+            }
+            EcdhFileEncoding::Spki | EcdhFileEncoding::Ecpoint => {
+                let file: VectorFile<EcdhGroup> = serde_json::from_str(text)
+                    .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", curve.name()));
+                let public_keys: std::collections::BTreeMap<String, EcdhPublicCoordinates> =
+                    serde_json::from_str(companion.expect("scalar-carrying files have companions"))
+                        .unwrap_or_else(|err| {
+                            panic!("parsing a {} public-key companion: {err}", curve.name())
+                        });
+                for group in &file.test_groups {
+                    for test in &group.tests {
+                        let field = format!("{} tc{}", curve.name(), test.tc_id);
+                        if matches!(encoding, EcdhFileEncoding::Spki)
+                            && test.flags.iter().any(|flag| flag == "UnnamedCurve")
+                        {
+                            continue;
+                        }
+                        let reject_public = match (test.result.as_str(), encoding) {
+                            ("valid", _) => false,
+                            ("invalid", _) => true,
+                            ("acceptable", EcdhFileEncoding::Ecpoint) => true,
+                            ("acceptable", _) => continue,
+                            (other, _) => panic!("vector {field} has unknown result {other:?}"),
+                        };
+                        let d = normalize_scalar(
+                            &field,
+                            &unhex(&field, &test.private),
+                            curve.field_size(),
+                        );
+                        let coordinates =
+                            public_keys.get(&test.tc_id.to_string()).unwrap_or_else(|| {
+                                panic!("vector {field} missing from the public-key companion")
+                            });
+                        let public = unhex(&field, &test.public);
+                        cases.push(EcdhCase {
+                            curve,
+                            tc_id: test.tc_id,
+                            public: match encoding {
+                                EcdhFileEncoding::Ecpoint => EcdhPublic::Raw(public),
+                                _ => EcdhPublic::Spki(public),
+                            },
+                            secret_jwk: crate::mint::ecdh_secret_jwk(
+                                curve.crv(),
+                                &unhex(&field, &coordinates.x),
+                                &unhex(&field, &coordinates.y),
+                                &d,
+                            ),
+                            shared: unhex(&field, &test.shared),
+                            reject_public,
+                        });
+                    }
+                }
+            }
         }
     }
     cases

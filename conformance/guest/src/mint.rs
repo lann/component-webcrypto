@@ -14,6 +14,7 @@ use lann_webcrypto_guest::bindings::aead_internal_nonce::{
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
 use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
+use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
 use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
 use lann_webcrypto_guest::bindings::key_agreement::{
     AgreementKeyOptions, PublicKey as AgreementPublicKey, SecretKey as AgreementSecretKey,
@@ -25,8 +26,9 @@ use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw, chacha20_poly1305, ed25519_sign,
-    hmac_sha1, hmac_sha2, x25519, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw, chacha20_poly1305, ecdh,
+    ed25519_sign, hmac_sha1, hmac_sha2, x25519, xchacha20_poly1305,
+    xchacha20_poly1305_internal_nonce,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -278,4 +280,63 @@ pub async fn generate_x25519_key(
     key: bool,
 ) -> Result<(AgreementSecretKey, AgreementPublicKey), Error> {
     x25519::generate_key(agreement_options(bits, key, false)).await
+}
+
+/// Wycheproof `ecdh_secp256r1_ecpoint_test.json` tcId 1 (normal case): the
+/// private scalar, its public coordinates (from the derived companion),
+/// the peer's uncompressed public point, and the published shared secret —
+/// the known answer the ECDH contract battery and probes agree against.
+pub const ECDH_P256_D: &str = "0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346";
+pub const ECDH_P256_X: &str = "b59cc7671dd6a6b836e2cd9396ef5618b2ff3e8192dd7c9d36c27cb56ff91661";
+pub const ECDH_P256_Y: &str = "4826d9dbd5ae64cdd8575068bbc9e63f231ea57ed03248844c09331b95392053";
+pub const ECDH_P256_PEER: &str = "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f26ac333a93a9e70a81cd5a95b5bf8d13990eb741c8c38872b4a07d275a014e30cf";
+pub const ECDH_P256_SHARED: &str =
+    "53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285";
+
+/// The RFC 7518 EC private JWK for a NIST-curve (`x`, `y`, `d`) triple.
+pub fn ecdh_secret_jwk(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
+    format!(
+        r#"{{"kty":"EC","crv":"{crv}","x":"{}","y":"{}","d":"{}"}}"#,
+        b64url(x),
+        b64url(y),
+        b64url(d),
+    )
+}
+
+pub async fn import_ecdh_public_key_raw(
+    variant: EcdhVariant,
+    raw: Vec<u8>,
+) -> Result<AgreementPublicKey, Error> {
+    ecdh::import_public_key_raw(variant, raw).await
+}
+
+pub async fn import_ecdh_public_key_spki(
+    variant: EcdhVariant,
+    spki: Vec<u8>,
+) -> Result<AgreementPublicKey, Error> {
+    ecdh::import_public_key_spki(variant, spki).await
+}
+
+pub async fn import_ecdh_public_key_jwk(
+    variant: EcdhVariant,
+    jwk: String,
+) -> Result<AgreementPublicKey, Error> {
+    ecdh::import_public_key_jwk(variant, jwk).await
+}
+
+pub async fn import_ecdh_secret_key(
+    variant: EcdhVariant,
+    jwk: String,
+    bits: bool,
+    key: bool,
+) -> Result<AgreementSecretKey, Error> {
+    ecdh::import_secret_key_jwk(variant, jwk, agreement_options(bits, key, false)).await
+}
+
+pub async fn generate_ecdh_key(
+    variant: EcdhVariant,
+    bits: bool,
+    key: bool,
+) -> Result<(AgreementSecretKey, AgreementPublicKey), Error> {
+    ecdh::generate_key(variant, agreement_options(bits, key, false)).await
 }

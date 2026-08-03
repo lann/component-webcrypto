@@ -89,11 +89,12 @@ pub use sig::{SigPublic, SigningKeyMaterial};
 pub use wrapping::{
     derive_kw_key, unwrap_aes_gcm_internal_key, unwrap_aes_gcm_internal_key_jwk,
     unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_chacha_key, unwrap_chacha_key_jwk,
-    unwrap_cipher_key, unwrap_cipher_key_jwk, unwrap_ed25519_signing_key_jwk,
-    unwrap_ed25519_signing_key_pkcs8, unwrap_ikm, unwrap_kw_key, unwrap_kw_key_jwk, unwrap_mac_key,
-    unwrap_mac_key_jwk, unwrap_mac_key_jwk_sha1, unwrap_mac_key_sha1, unwrap_password,
-    unwrap_x25519_secret_key_jwk, unwrap_x25519_secret_key_pkcs8, unwrap_xchacha_internal_key,
-    unwrap_xchacha_key, KwKeyMaterial, UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
+    unwrap_cipher_key, unwrap_cipher_key_jwk, unwrap_ecdh_secret_key_jwk,
+    unwrap_ecdh_secret_key_pkcs8, unwrap_ed25519_signing_key_jwk, unwrap_ed25519_signing_key_pkcs8,
+    unwrap_ikm, unwrap_kw_key, unwrap_kw_key_jwk, unwrap_mac_key, unwrap_mac_key_jwk,
+    unwrap_mac_key_jwk_sha1, unwrap_mac_key_sha1, unwrap_password, unwrap_x25519_secret_key_jwk,
+    unwrap_x25519_secret_key_pkcs8, unwrap_xchacha_internal_key, unwrap_xchacha_key, KwKeyMaterial,
+    UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use wrapping::{unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8};
@@ -176,7 +177,8 @@ macro_rules! impl_conversions {
         extension: $extension:path,
         sha2: $sha2:path,
         aes: $aes:path,
-        ecdsa: $ecdsa:path $(,)?
+        ecdsa: $ecdsa:path,
+        ecdh: $ecdh:path $(,)?
     ) => {
         impl From<$crate::Error> for $error {
             fn from(err: $crate::Error) -> Self {
@@ -234,6 +236,16 @@ macro_rules! impl_conversions {
                     <$ecdsa>::P384Sha384 => Self::P384Sha384,
                     <$ecdsa>::P384Sha512 => Self::P384Sha512,
                     <$ecdsa>::P521Sha512 => Self::P521Sha512,
+                }
+            }
+        }
+
+        impl From<$ecdh> for $crate::EcdhVariant {
+            fn from(variant: $ecdh) -> Self {
+                match variant {
+                    <$ecdh>::P256 => Self::P256,
+                    <$ecdh>::P384 => Self::P384,
+                    <$ecdh>::P521 => Self::P521,
                 }
             }
         }
@@ -302,6 +314,18 @@ pub enum EcdsaVariant {
     /// (see the `ecdsa-variant` doc): every minting path declines it
     /// `unsupported`.
     P521Sha512,
+}
+
+/// The WIT `ecdh.ecdh-variant` cases. Variant names match the generated
+/// bindings' so `{:?}` renders identically in error messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EcdhVariant {
+    P256,
+    P384,
+    /// Declared in the WIT, served by no implementation of this package
+    /// (see the `ecdh-variant` doc): every minting path declines it
+    /// `unsupported`.
+    P521,
 }
 
 /// The `algorithm-name` reported by HMAC keys (WebCrypto's

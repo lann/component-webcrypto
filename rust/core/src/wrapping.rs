@@ -712,7 +712,7 @@ pub fn unwrap_x25519_secret_key_jwk(
     )?;
     redact_invalid_key(
         "X25519 JWK",
-        AgreementSecretMaterial::import_jwk(&text, policy),
+        AgreementSecretMaterial::import_x25519_jwk(&text, policy),
     )
 }
 
@@ -723,7 +723,38 @@ pub fn unwrap_x25519_secret_key_pkcs8(
 ) -> Result<AgreementSecretMaterial, Error> {
     redact_invalid_key(
         "X25519 PKCS#8 key",
-        AgreementSecretMaterial::import_pkcs8(&input.into_bytes(), policy),
+        AgreementSecretMaterial::import_x25519_pkcs8(&input.into_bytes(), policy),
+    )
+}
+
+/// `ecdh.unwrap-secret-key-jwk`.
+pub fn unwrap_ecdh_secret_key_jwk(
+    variant: crate::EcdhVariant,
+    input: UnwrapInputMaterial,
+    policy: AgreementPolicy,
+) -> Result<AgreementSecretMaterial, Error> {
+    let text = unwrap_jwk_prelude(
+        "ECDH JWK",
+        policy.check_useful(),
+        input,
+        &policy.webcrypto_usages(),
+        UseFamily::Enc,
+    )?;
+    redact_invalid_key(
+        "ECDH JWK",
+        AgreementSecretMaterial::import_ecdh_jwk(variant, &text, policy),
+    )
+}
+
+/// `ecdh.unwrap-secret-key-pkcs8`.
+pub fn unwrap_ecdh_secret_key_pkcs8(
+    variant: crate::EcdhVariant,
+    input: UnwrapInputMaterial,
+    policy: AgreementPolicy,
+) -> Result<AgreementSecretMaterial, Error> {
+    redact_invalid_key(
+        "ECDH PKCS#8 key",
+        AgreementSecretMaterial::import_ecdh_pkcs8(variant, &input.into_bytes(), policy),
     )
 }
 

@@ -34,11 +34,12 @@ use lann_webcrypto_guest::bindings::aead_internal_nonce::{
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
 use lann_webcrypto_guest::bindings::derivation::DeriveInput;
+use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, hkdf, hkdf_sha2,
+    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, chacha20_poly1305, ecdh, hkdf, hkdf_sha2,
     hmac_sha1, hmac_sha2, pbkdf2, pbkdf2_sha2, x25519, xchacha20_poly1305,
     xchacha20_poly1305_internal_nonce,
 };
@@ -1859,6 +1860,35 @@ pub const DERIVE_SOURCE_FAMILIES: &[DeriveSourceFamily] = &[
                 .await?;
                 let (can_bits, can_key) = (secret.can_derive_bits(), secret.can_derive_key());
                 let peer = x25519::import_public_key_raw(unhex(mint::RFC7748_BOB_X)).await?;
+                let input = secret.agree(&peer).await?;
+                Ok(PreparedSource {
+                    can_derive_bits: can_bits,
+                    can_derive_key: can_key,
+                    input,
+                })
+            })
+        },
+    },
+    DeriveSourceFamily {
+        interface: "ecdh",
+        features: &[],
+        prepare: |bits, key| {
+            Box::pin(async move {
+                let secret = ecdh::import_secret_key_jwk(
+                    EcdhVariant::P256,
+                    mint::ecdh_secret_jwk(
+                        "P-256",
+                        &unhex(mint::ECDH_P256_X),
+                        &unhex(mint::ECDH_P256_Y),
+                        &unhex(mint::ECDH_P256_D),
+                    ),
+                    mint::agreement_options(bits, key, false),
+                )
+                .await?;
+                let (can_bits, can_key) = (secret.can_derive_bits(), secret.can_derive_key());
+                let peer =
+                    ecdh::import_public_key_raw(EcdhVariant::P256, unhex(mint::ECDH_P256_PEER))
+                        .await?;
                 let input = secret.agree(&peer).await?;
                 Ok(PreparedSource {
                     can_derive_bits: can_bits,

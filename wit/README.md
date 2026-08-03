@@ -17,8 +17,8 @@ item; everything shared lives here.
   intermediates key wrapping trades in (`wrap-input`, `unwrap-input`), as
   `derivation` holds `derive-input`.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
-  `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`)
-  only mint keys, bound
+  `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
+  `ecdh`) only mint keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -343,9 +343,9 @@ short:
   but yield nothing else). `generate-key` returns the pair; importers use
   the public-key import. This holds for `signature` (no `signing-key` →
   `verifying-key`) and for `key-agreement` (no `secret-key` →
-  `public-key`) alike; an agreement secret imported as an OKP JWK carries
-  its public coordinate in the JWK itself, where RFC 8037 makes it
-  mandatory.
+  `public-key`) alike; an agreement secret imported as an OKP or EC
+  private JWK carries its public coordinates in the JWK itself, where
+  RFC 8037 and RFC 7518 make them mandatory.
 - **Format admission: every key format is one a platform-backed host
   passes to the platform verbatim.** An import format the platform cannot
   ingest directly would force such a host to parse or transform key
@@ -471,6 +471,9 @@ Brief definitions; follow the links for depth.
   secret one party forced regardless of the other's key. For X25519 the
   degenerate case is the all-zero shared secret, produced exactly by
   small-order peer points ([RFC 7748 §7](https://www.rfc-editor.org/rfc/rfc7748#section-7)).
+  For ECDH over the NIST prime-order curves, strict point admission at
+  import makes the degenerate case unreachable: a valid point times a
+  valid scalar cannot be the point at infinity.
 - **IKM** — input keying material: the secret a KDF starts from
   ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)).
 - **JWK** — JSON Web Key ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)).

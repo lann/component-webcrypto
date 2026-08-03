@@ -382,19 +382,7 @@ fn ec_point(curve: EcdsaCurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>, Error> {
         EcdsaCurve::P256 => 32,
         EcdsaCurve::P384 => 48,
     };
-    if x.len() != len || y.len() != len {
-        return Err(Error::InvalidKey(format!(
-            "{} JWK coordinates are {len} bytes each, got {}/{}",
-            curve_name(curve),
-            x.len(),
-            y.len()
-        )));
-    }
-    let mut point = Vec::with_capacity(1 + 2 * len);
-    point.push(0x04);
-    point.extend_from_slice(x);
-    point.extend_from_slice(y);
-    Ok(point)
+    crate::jwk::ec_point(curve_name(curve), len, x, y)
 }
 
 // Public material is not secret, but printing it wholesale is rarely

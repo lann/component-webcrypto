@@ -120,6 +120,7 @@ impl Guest for Component {
         check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
         check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
         check("x25519-agreement", x25519_agreement().await).await?;
+        check("ecdh-agreement", ecdh_agreement().await).await?;
         check(
             "mac-datasource-equivalence",
             mac_datasource_equivalence().await,
@@ -640,6 +641,51 @@ async fn x25519_agreement() -> Result<()> {
         a_input.derive_bits(Some(256)).await? == b_input.derive_bits(Some(256)).await?,
         "chained derivations disagree by direction"
     );
+    Ok(())
+}
+
+/// ECDH agreement through the SDK wrappers, the same shape as
+/// `x25519-agreement` per curve: two generated keypairs agree in both
+/// directions on the same field-size secret (32 bytes for P-256, 48 for
+/// P-384), and on P-256 both agreed inputs chain into HKDF to the same
+/// bits.
+async fn ecdh_agreement() -> Result<()> {
+    use lann_webcrypto_guest::ecdh::{self, EcdhVariant};
+    use lann_webcrypto_guest::{hkdf_sha2, AgreementKeyOptions};
+    let options = AgreementKeyOptions {
+        derive_bits: true,
+        derive_key: true,
+        extractable: false,
+    };
+
+    for (variant, field_size) in [(EcdhVariant::P256, 32), (EcdhVariant::P384, 48)] {
+        let (a_secret, a_public) = ecdh::generate_key(variant, options).await?;
+        let (b_secret, b_public) = ecdh::generate_key(variant, options).await?;
+        let ab = a_secret.agree(&b_public).await?;
+        let ba = b_secret.agree(&a_public).await?;
+        let ab_bits = ab.derive_bits(None).await?;
+        let ba_bits = ba.derive_bits(None).await?;
+        ensure!(
+            ab_bits.len() == field_size,
+            "{variant:?} shared secret is {} bytes, want {field_size}",
+            ab_bits.len()
+        );
+        ensure!(
+            ab_bits == ba_bits,
+            "{variant:?} shared secrets disagree by direction"
+        );
+
+        if variant == EcdhVariant::P256 {
+            let a_input =
+                hkdf_sha2::prepare_from(Sha2Variant::Sha256, &ab, b"salt", b"info").await?;
+            let b_input =
+                hkdf_sha2::prepare_from(Sha2Variant::Sha256, &ba, b"salt", b"info").await?;
+            ensure!(
+                a_input.derive_bits(Some(256)).await? == b_input.derive_bits(Some(256)).await?,
+                "chained derivations disagree by direction"
+            );
+        }
+    }
     Ok(())
 }
 

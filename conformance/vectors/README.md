@@ -55,6 +55,30 @@ commit
   public coordinate. It is generated, not vendored: regenerate it with
   `derive_x25519_public_keys.py` (a plain RFC 7748 ladder, self-checked
   against the §6.1 key pairs) after refreshing the vector file.
+- `ecdh_secp256r1_test.json`, `ecdh_secp384r1_test.json` — ECDH
+  key-agreement vectors with SPKI-encoded peer public keys (upstream's
+  `asn` encoding) and raw private scalars, including the off-curve,
+  invalid-curve-attack, wrong-curve, and modified-ASN-parameter public
+  keys that discriminate admission policies.
+- `ecdh_secp256r1_ecpoint_test.json`, `ecdh_secp384r1_ecpoint_test.json` —
+  the same agreements with raw uncompressed SEC1 peer points (upstream's
+  `ecpoint` encoding), this package's `import-public-key-raw` format.
+- `ecdh_secp256r1_webcrypto_test.json`,
+  `ecdh_secp384r1_webcrypto_test.json` — the same agreements with both
+  keys as JWK objects (serialized to JSON text for the JWK imports; the
+  extra `kid` member is harmless, since unrecognized JWK members are
+  ignored).
+- `ecdh_secp256r1_test_public_keys.json`,
+  `ecdh_secp256r1_ecpoint_test_public_keys.json`,
+  `ecdh_secp384r1_test_public_keys.json`,
+  `ecdh_secp384r1_ecpoint_test_public_keys.json` — derived companions for
+  the scalar-carrying ECDH files: the package's EC private JWK import
+  makes the public coordinates `x`/`y` mandatory (RFC 7518), so each
+  companion maps its file's `tcId`s to the private scalar's coordinates.
+  Generated, not vendored: regenerate with `derive_ecdh_public_keys.py`
+  (plain affine curve arithmetic, self-checked against every valid
+  vector's published shared secret) after refreshing the vector files.
+  The webcrypto files need no companion: their keys are already JWKs.
 
 Vendored from
 [novifinancial/ed25519-speccheck](https://github.com/novifinancial/ed25519-speccheck)
@@ -128,6 +152,10 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
 | X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
 | X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
+| ECDH (any file), `valid` | the public import (per the file's encoding: raw / SPKI / JWK) and `import-secret-key-jwk` (the webcrypto files' own private JWK, or one built from the normalized scalar plus the derived `x`/`y` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. Scalars are normalized to the curve's field size (the files' big-endian hex may carry a leading zero byte or be short). No chunking schedules: agreement carries no streams. |
+| ECDH, `invalid` | the public import fails `invalid-key`. Every invalid case in these files is a public-key admission failure — off-curve points and invalid-curve attacks, wrong curves, malformed encodings — and the WIT pins strict public admission at import, so they all land there (unlike X25519, where degenerate peers surface at `agree`). |
+| ECDH ecpoint, `acceptable` (a compressed encoding of a valid point) | the raw import fails `invalid-key`: upstream marks compressed admission policy-divergent, but the WIT pins the raw format to uncompressed-only. |
+| ECDH asn, `acceptable` or flagged `UnnamedCurve` (either verdict) | **Excluded** — encodings whose acceptance is legitimately policy-divergent across implementations. The WIT deliberately leaves compressed-SPKI admission implementation-defined, ASN.1/BER strictness differs across the platform engines the jco host delegates to, and explicit-parameter (`UnnamedCurve`) admission — including how strictly the parameters are validated — is per-engine policy: RustCrypto and BoringSSL reject the encoding outright, while OpenSSL accepts equivalent groups validated to its own notion (an absent or wrong cofactor passes, being mathematically redundant for these prime-order curves, while a modified prime or zero order fails). Upstream's invalid/acceptable split within the family encodes its reference notion of unambiguous group specification, not a boundary engines share, so no single expectation holds across targets (the same reasoning that keeps the DER-signature ECDSA files unvendored). The invalid-curve attacks, off-curve points, and wrong-curve rejections stay pinned through the named-curve SPKI cases and the ecpoint/webcrypto files. |
 
 Every executed vector runs under multiple *chunking schedules* (whole,
 1-byte writes, and block-boundary-straddling writes): the streams-only WIT
