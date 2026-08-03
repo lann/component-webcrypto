@@ -1,0 +1,14 @@
+{
+  "name": "conformance-driver-ct-jco",
+  "private": true,
+  "type": "module",
+  "description": "jco-node driver for the ported conformance suite: transpiles conformance-guest-ct against the browser-first host (js/jco/webcrypto.js) plus a JS test-context provider, and runs it with mark scheduling.",
+  "scripts": {
+    "transpile": "node ../../../scripts/jco-transpile.mjs transpile ../../../target/wasm32-wasip2/release/conformance_guest_ct.wasm --name conformance-guest-ct --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../js/jco/webcrypto.js#*' --map 'lann:component-test/test-context@0.1.0=../../context.js' -o generated",
+    "run": "node --experimental-wasm-jspi runner.mjs"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco-transpile": "^0.5.2",
+    "@bytecodealliance/preview2-shim": "^0.17.4"
+  }
+}
