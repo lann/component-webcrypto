@@ -29,7 +29,7 @@ use lann_webcrypto_guest::{wit_stream, StreamReader};
 use crate::describe;
 
 /// How a case's byte inputs are delivered to the implementation.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Schedule {
     /// One write of the whole input.
     Whole,

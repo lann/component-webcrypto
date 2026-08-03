@@ -15,7 +15,7 @@ use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA}
 use futures::future::LocalBoxFuture;
 
 use crate::translate::VectorCase;
-use crate::{contract, translate, vectors};
+use crate::{contract, vectors};
 
 /// One planned case: its full census id, the features it exercises (the
 /// generator row's tags must equal them — asserted natively), and its
@@ -273,6 +273,53 @@ pub async fn declined(feature: &'static str) -> Verdict {
 
 // ------------------------------------------------------------- builders
 
+/// The vector corpora the builders draw from. By default these are the
+/// incumbent translate iterators (JSON parsed at registry-build time);
+/// under the `preparsed` measurement feature, each is a postcard decode
+/// of the same corpus serialized by build.rs — same values, same
+/// call-per-row structure, no JSON parsing.
+mod corpus {
+    #[cfg(not(feature = "preparsed"))]
+    pub use crate::translate::{
+        aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases,
+        kw_cases, pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
+    };
+
+    #[cfg(feature = "preparsed")]
+    macro_rules! preparsed {
+        ($(($fn_name:ident, $case:ty, $blob:literal),)*) => {
+            $(pub fn $fn_name() -> Vec<$case> {
+                postcard::from_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/", $blob)))
+                    .unwrap_or_else(|err| panic!("decoding {}: {err}", $blob))
+            })*
+        };
+    }
+
+    #[cfg(feature = "preparsed")]
+    preparsed![
+        (hkdf_cases, crate::translate::HkdfCase, "hkdf.bin"),
+        (pbkdf2_cases, crate::translate::Pbkdf2Case, "pbkdf2.bin"),
+        (hmac_cases, crate::translate::HmacCase, "hmac.bin"),
+        (aead_cases, crate::translate::AeadCase, "aead.bin"),
+        (cbc_cases, crate::translate::CbcCase, "cbc.bin"),
+        (kw_cases, crate::translate::KwCase, "kw.bin"),
+        (
+            internal_nonce_cases,
+            crate::translate::InternalNonceCase,
+            "internal_nonce.bin"
+        ),
+        (sha2_cases, crate::translate::Sha2Case, "sha2.bin"),
+        (sig_cases, crate::translate::SigCase, "sig.bin"),
+        (
+            speccheck_cases,
+            crate::translate::SpeccheckCase,
+            "speccheck.bin"
+        ),
+        (x25519_cases, crate::translate::X25519Case, "x25519.bin"),
+        (ecdh_cases, crate::translate::EcdhCase, "ecdh.bin"),
+    ];
+}
+
 /// The corpus slice a prefix draws from (the incumbent iterator + runner
 /// pairing, exactly the incumbent `suites!` table's rows). Several
 /// prefixes share a builder (e.g. the four HMAC parameterizations live in
@@ -280,51 +327,51 @@ pub async fn declined(feature: &'static str) -> Verdict {
 fn builder(prefix: &str) -> Vec<PlanCase> {
     match prefix {
         p if p.starts_with("hkdf-") && p.ends_with("/wycheproof") => {
-            vector_cases(translate::hkdf_cases(), |c| {
+            vector_cases(corpus::hkdf_cases(), |c| {
                 Box::pin(async move { vectors::run_hkdf_case(&c).await })
             })
         }
         p if p.starts_with("pbkdf2-") && p.ends_with("/wycheproof") => {
-            vector_cases(translate::pbkdf2_cases(), |c| {
+            vector_cases(corpus::pbkdf2_cases(), |c| {
                 Box::pin(async move { vectors::run_pbkdf2_case(&c).await })
             })
         }
         p if p.starts_with("hmac-") && p.ends_with("/wycheproof") => {
-            vector_cases(translate::hmac_cases(), |c| {
+            vector_cases(corpus::hmac_cases(), |c| {
                 Box::pin(async move { vectors::run_hmac_case(&c).await })
             })
         }
         "aes-gcm/wycheproof" | "chacha20-poly1305/wycheproof" | "xchacha20-poly1305/wycheproof" => {
-            vector_cases(translate::aead_cases(), |c| {
+            vector_cases(corpus::aead_cases(), |c| {
                 Box::pin(async move { vectors::run_aead_case(&c).await })
             })
         }
-        "aes-cbc/wycheproof" => vector_cases(translate::cbc_cases(), |c| {
+        "aes-cbc/wycheproof" => vector_cases(corpus::cbc_cases(), |c| {
             Box::pin(async move { vectors::run_cbc_case(&c).await })
         }),
-        "aes-kw/wycheproof" => vector_cases(translate::kw_cases(), |c| {
+        "aes-kw/wycheproof" => vector_cases(corpus::kw_cases(), |c| {
             Box::pin(async move { vectors::run_kw_case(&c).await })
         }),
         "aes-gcm-internal-nonce/wycheproof" | "xchacha20-poly1305-internal-nonce/wycheproof" => {
-            vector_cases(translate::internal_nonce_cases(), |c| {
+            vector_cases(corpus::internal_nonce_cases(), |c| {
                 Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
             })
         }
-        "sha2/nist-cavp" => vector_cases(translate::sha2_cases(), |c| {
+        "sha2/nist-cavp" => vector_cases(corpus::sha2_cases(), |c| {
             Box::pin(async move { vectors::run_sha2_case(&c).await })
         }),
         "ed25519/wycheproof" | "ecdsa-p256-sha256/wycheproof" | "ecdsa-p384-sha384/wycheproof" => {
-            vector_cases(translate::sig_cases(), |c| {
+            vector_cases(corpus::sig_cases(), |c| {
                 Box::pin(async move { vectors::run_sig_case(&c).await })
             })
         }
-        "ed25519/speccheck" => vector_cases(translate::speccheck_cases(), |c| {
+        "ed25519/speccheck" => vector_cases(corpus::speccheck_cases(), |c| {
             Box::pin(async move { vectors::run_speccheck_case(&c).await })
         }),
-        "x25519/wycheproof" => vector_cases(translate::x25519_cases(), |c| {
+        "x25519/wycheproof" => vector_cases(corpus::x25519_cases(), |c| {
             Box::pin(async move { vectors::run_x25519_case(&c).await })
         }),
-        p if p.starts_with("ecdh-p") => vector_cases(translate::ecdh_cases(), |c| {
+        p if p.starts_with("ecdh-p") => vector_cases(corpus::ecdh_cases(), |c| {
             Box::pin(async move { vectors::run_ecdh_case(&c).await })
         }),
         "aes-gcm/contract" | "chacha20-poly1305/contract" | "xchacha20-poly1305/contract" => {

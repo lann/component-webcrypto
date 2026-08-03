@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "The conformance suite ported onto the lann:component-test guest SDK (M1.5): same corpus and case ids as conformance-guest, exported through the frozen tests contract, with the decline branch restructured into explicit !feature decline cases."
+build = "build.rs"
+
+[features]
+# Measurement experiment: pre-parse the vector JSON at build time
+# (build.rs runs the translate iterators and serializes each corpus with
+# postcard); plan.rs then decodes the blobs instead of re-parsing JSON at
+# registry-build time. Off by default; behavior-identical corpus.
+preparsed = ["dep:postcard"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -26,3 +34,14 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 data-encoding = "2"
+postcard = { version = "1", features = ["alloc"], optional = true }
+
+# build.rs (under the `preparsed` feature) runs the same translate.rs the
+# crate itself #[path]-includes, so it needs the module's dependencies
+# natively.
+[build-dependencies]
+conformance-harness = { path = "../harness" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+data-encoding = "2"
+postcard = { version = "1", features = ["alloc"] }
