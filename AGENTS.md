@@ -279,6 +279,60 @@ observes, including the exact `DOMException` names the shim must reconstruct
 from `types.error` (`mapWitError`), which bounds how much an error-variant
 design may collapse.
 
+### Portability: divergence is resolved, not accumulated
+
+`wit/README.md`, "Portability contract" states the consumer promise: the
+ungated surface behaves identically on every implementation, qualified
+only by gated features, structural absence, and recorded latitude. On
+this side of that promise sits the process. When an implementation
+difference appears — a platform gap, an engine quirk, a policy
+constraint — resolve it with the first strategy that fits, and leave the
+strategy's artifact. A divergence with no artifact is a bug.
+
+1. **Design it out.** Reshape the surface so the divergent question is
+   unaskable — the no-derive rule, mint-bound ECDSA digests, per-call
+   GCM IV/tag parameters, ECDH's strict point admission. The first
+   resort whenever WIT is being designed or can still be fixed in
+   place.
+2. **Enhance the deficient implementation** transparently, where the
+   enhancement is logic and shape — never crypto, and never key-material
+   synthesis (the jco host's raw-import strictness checks and Ed25519
+   verification normalization are the precedents). Artifact: conformance
+   cases pinning the now-uniform behavior. Distinguish cost-infeasible
+   from principle-infeasible when declining this strategy: a maintenance
+   veto (sha1dc in JS) is revisable; secret material transiting an
+   attacker-observable timing domain (HChaCha20 in JS) is not.
+3. **Narrow uniformly** where the outlier capability is questionable on
+   its own merits (the AES-GCM IV window). The capable implementations
+   reject what the weakest cannot serve; the contract states the
+   narrowed domain. Artifact: uniform must-reject conformance cases.
+4. **Record latitude** when neither is feasible at acceptable cost:
+   shrink the *contract*, not the implementations. State the portable
+   core (guaranteed-import, guaranteed-reject) and mark the middle "do
+   not rely on either behavior" at the definition site. Artifact: the
+   WIT clause plus the conformance exclusion's recorded rationale.
+5. **Isolate behind a gate or a withheld export** when a whole
+   capability cannot be uniform: `@unstable` plus a
+   `conformance/targets.toml` declaration (the ChaCha family,
+   `sha1-checked`), or world-level absence failing at `wac plug` (class
+   D). Artifact: the gate and the targets.toml line. Every
+   `missing-features` entry must name a gated or structural feature —
+   an ungated runtime divergence is strategy 1–4's job, not a
+   declaration's.
+
+Format admission (`wit/README.md`, "Design notes") is a **default**, and
+strategies 2 and 3 may deviate from it on a risk ladder, provided the
+deviation only ever *narrows* admission — a host pre-check may reject
+what the platform would accept, and must never admit, transform, or
+manufacture material the platform would refuse. In ascending order of
+scrutiny: constant-shape checks (lengths, prefix bytes, fixed-offset
+compares against known encodings) are free and precedented; shallow
+fail-closed structural checks need a recorded risk note and vector
+coverage for the check itself; full-format re-validation is presumed too
+costly (the checker becomes a second implementation with its own
+divergence); transforming or synthesizing key material is prohibited
+absent an exceptional recorded ruling.
+
 ## Build & run
 
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in

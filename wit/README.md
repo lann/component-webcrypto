@@ -257,6 +257,40 @@ then fails at composition (`wac plug`) time rather than at run time. This
 repository's in-guest provider documents its classification and policy in
 `rust/guest-provider/README.md`.
 
+## Portability contract
+
+The ungated surface behaves identically on every implementation: a
+component that uses only ungated interfaces, with inputs inside the
+documented contracts, sees the same successes, the same failures, and the
+same `error` cases everywhere — moving a composition between
+implementations is not an observable event. The conformance suites are
+this promise's gate.
+
+Three categories, and only these three, qualify the promise:
+
+- **Gated features** are the opt-in for capability that cannot be uniform
+  (a platform withholds the algorithm, or a policy such as the
+  timing-channel classes forbids an implementation from serving it). The
+  gates and their exit conditions are listed under "Stability gates";
+  which implementation serves which gated feature is declared in
+  `conformance/targets.toml`. A consumer reaches non-uniform surface only
+  by naming the gate.
+- **Structural absence** fails at composition time: an implementation may
+  withhold an entire interface for cause (the timing-channel policy
+  above), and a composition that needs it fails at `wac plug` time,
+  before anything runs. Early, total failure is the portable behavior.
+- **Recorded latitude**: a few contracts deliberately leave an admission
+  middle implementation-defined, marked "do not rely on either behavior"
+  at the definition site — compressed-point SPKI encodings, the
+  private-JWK public-half consistency checks (MAY validate, MUST NOT
+  trust), ASN.1 strictness beyond the documented shape, and unwrap
+  verification timing. The portable core around each middle — what is
+  guaranteed to import and what is guaranteed to be rejected — is stated
+  at the same site and pinned by the conformance suites.
+
+A behavioral difference between implementations outside these three
+categories is a defect in an implementation, not latitude.
+
 ## Stability gates
 
 Most of the package is ungated. The ChaCha interfaces and
@@ -352,7 +386,13 @@ short:
   material itself — exactly the code a thin host should not carry — so
   formats without a platform door (bare X25519 secret scalars, for
   example) are not formats here. The admitted set per algorithm lives on
-  its minting interface.
+  its minting interface. The rule is a default, not an invariant: a host
+  may additionally run *narrowing* pre-checks — shape tests that reject
+  before the platform sees the bytes, never admitting or manufacturing
+  what the platform would refuse — where a uniform admission contract is
+  worth the check (the risk ladder is recorded in AGENTS.md,
+  "Portability"). Transforming or synthesizing key material in a host
+  remains out.
 - **ECDSA binds curve and hash at mint** (unlike WebCrypto's per-operation
   hash). A granted key cannot be used with a weaker digest than its minter
   chose.
