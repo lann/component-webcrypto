@@ -10,4 +10,5 @@ cases = [
     { name = "probe/ecdsa-private-format-imports" },
     { name = "probe/ecdsa-signing-key-exports" },
     { name = "probe/ecdsa-cross-hash-sign-roundtrip" },
+    { name = "probe/ecdsa-unwrap-signing-key" },
 ]

@@ -51,6 +51,7 @@ probes! {
     ecdsa_private_format_imports,
     ecdsa_signing_key_exports,
     ecdsa_cross_hash_sign_roundtrip,
+    ecdsa_unwrap_signing_key,
 }
 
 export_probe_suite!(PROBES);
@@ -436,4 +437,86 @@ async fn ecdsa_cross_hash_sign_roundtrip() -> Result<(), String> {
         verified,
         "a SHA-512-minted signature verified under a SHA-256 binding",
     )
+}
+
+/// The private-signature unwrap mints: a generated extractable P-256 key
+/// travels wrapped under an AES-GCM KEK in both formats, mints back out
+/// through `unwrap-signing-key-*`, and each minted key's signatures
+/// verify under the original public half; the minted key carries the
+/// mint's options, not the wrapped material's.
+async fn ecdsa_unwrap_signing_key() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use lann_webcrypto_guest::bindings::{aes_gcm, ecdsa_sign};
+
+    let (signing, public) = generate_key(EcdsaVariant::P256Sha256, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    let kek_options = AeadKeyOptions::new();
+    kek_options.can_wrap(true);
+    kek_options.can_unwrap(true);
+    let kek = aes_gcm::generate_key(aes_gcm::AesVariant::Aes256, kek_options)
+        .await
+        .map_err(|e| describe("kek generate-key", &e))?;
+    let nonce = [0x51u8; 12].to_vec();
+    let aad = b"ecdsa unwrap-mint probe".to_vec();
+
+    let payload = b"unwrap-minted signing payload";
+    for (what, input) in [
+        (
+            "pkcs8",
+            signing
+                .to_wrap_input_pkcs8()
+                .await
+                .map_err(|e| describe("to-wrap-input-pkcs8", &e))?,
+        ),
+        (
+            "jwk",
+            signing
+                .to_wrap_input_jwk()
+                .await
+                .map_err(|e| describe("to-wrap-input-jwk", &e))?,
+        ),
+    ] {
+        let wrapped = kek
+            .wrap(nonce.clone(), aad.clone(), None, input)
+            .await
+            .map_err(|e| describe("aead-key.wrap", &e))?;
+        let unwrapped = kek
+            .unwrap(nonce.clone(), aad.clone(), None, wrapped)
+            .await
+            .map_err(|e| describe("aead-key.unwrap", &e))?;
+        let options = SigningKeyOptions::new();
+        options.can_sign(true);
+        options.extractable(false);
+        let minted = match what {
+            "pkcs8" => {
+                ecdsa_sign::unwrap_signing_key_pkcs8(EcdsaVariant::P256Sha256, unwrapped, options)
+                    .await
+                    .map_err(|e| describe("unwrap-signing-key-pkcs8", &e))?
+            }
+            _ => ecdsa_sign::unwrap_signing_key_jwk(EcdsaVariant::P256Sha256, unwrapped, options)
+                .await
+                .map_err(|e| describe("unwrap-signing-key-jwk", &e))?,
+        };
+        expect(
+            minted.extractable(),
+            false,
+            &format!("{what}-minted key's extractable getter"),
+        )?;
+        expect(
+            minted.algorithm_curve(),
+            Some("P-256".to_string()),
+            &format!("{what}-minted key's algorithm-curve"),
+        )?;
+        let sig = sig_sign_ok(&minted, payload, Schedule::Whole).await?;
+        sig_verify_ok(
+            &public,
+            payload,
+            &sig,
+            Schedule::Whole,
+            &format!("{what}-minted key did not verify under the original public half"),
+        )
+        .await?;
+    }
+    Ok(())
 }
