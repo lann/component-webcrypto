@@ -60,6 +60,7 @@ fn run() -> Result<ExitCode> {
     let mut suite: Option<PathBuf> = None;
     let mut mode = OutputMode::Human;
     let mut missing: Vec<String> = Vec::new();
+    let mut cases_per_instance: usize = 0; // cheap pure-compute corpus: single instance
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -68,6 +69,12 @@ fn run() -> Result<ExitCode> {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--missing needs a list"))?;
                 missing.extend(list.split(',').filter(|s| !s.is_empty()).map(String::from));
+            }
+            "--cases-per-instance" => {
+                let v = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--cases-per-instance needs a number"))?;
+                cases_per_instance = v.parse()?;
             }
             "--jsonl" => mode = OutputMode::Jsonl,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
@@ -103,7 +110,7 @@ fn run() -> Result<ExitCode> {
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
-    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite(&suite_name, mode, &missing))
+    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_with(&suite_name, mode, &missing, cases_per_instance))
         .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
     Ok(if summary.failed == 0 {
