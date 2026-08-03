@@ -792,13 +792,11 @@ export class AeadKey extends symmetricKeyTail({}) {
 /**
  * The shared `seal`/`open` body of `aead-key`, over the collected message:
  * validate the per-call nonce and tag size for the key's construction
- * (RFC 8439 fixes ChaCha20-Poly1305's; AES-GCM takes any non-empty nonce
+ * (RFC 8439 fixes ChaCha20-Poly1305's; AES-GCM takes 12–128-byte nonces
  * and the registry tag-size set), run the platform call, and lift its
  * failure by direction — a `seal` failure through `platformCall`'s
  * taxonomy, an `open` failure through `decryptFailure` (a failed tag check
- * is `open`'s expected outcome). An AES-GCM failure under a nonce outside
- * the platform's window is reinterpreted as `{ tag: 'unsupported', val }`
- * in either direction (see `gcmNonceUnservable`). `wrap`/`unwrap` share
+ * is `open`'s expected outcome). `wrap`/`unwrap` share
  * the body too, naming themselves through `operation` so their failure
  * details carry the operation the caller invoked.
  * @param {"seal" | "open"} direction
@@ -830,19 +828,17 @@ async function aeadSealOpen(direction, key, nonce, aad, tagSize, message, operat
       tagLength: gcmTagLengthBits(tagSize),
     };
   }
+  if (direction === "seal") {
+    const result = await platformCall(`${params.name} ${operation}`, () =>
+      subtle.encrypt(params, key, message),
+    );
+    return new Uint8Array(result);
+  }
   let result;
   try {
-    result =
-      direction === "seal"
-        ? await platformCall(`${params.name} ${operation}`, () =>
-            subtle.encrypt(params, key, message),
-          )
-        : await subtle.decrypt(params, key, message);
+    result = await subtle.decrypt(params, key, message);
   } catch (err) {
-    if (!chacha && gcmNonceUnservable(nonce)) {
-      throw errUnsupported(`a ${nonce.length}-byte nonce is not served by this platform`);
-    }
-    throw direction === "seal" ? err : decryptFailure(err, operation);
+    throw decryptFailure(err, operation);
   }
   return new Uint8Array(result);
 }
@@ -3419,8 +3415,7 @@ function unsupportedChacha(name) {
  * implement the algorithm — browser WebCrypto today; Node 24.18+ and the
  * Modern Algorithms proposal's implementations serve it. Detection is
  * per-call: the same module serves the interface exactly where its
- * platform does, the pattern the jco-browser target's GCM nonce window
- * already uses.
+ * platform does, so no capability declaration lives in the module.
  * @template T
  * @param {string} what
  * @param {() => Promise<T>} run
@@ -3751,15 +3746,15 @@ export const aeadInternalNonce = { InternalNonceKey, InternalNonceKeyOptions };
 export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePolicy);
 
 /**
- * Throw `{ tag: 'invalid-nonce', val }` for an empty nonce. AES-GCM accepts
- * any non-empty length per the `aes-gcm` minting contract; how much of that
- * contract this host serves is the platform's window (see
- * `gcmNonceUnservable`).
+ * Throw `{ tag: 'invalid-nonce', val }` unless the nonce is 12 to 128
+ * bytes inclusive — the `aes-gcm` minting contract's portable window. The
+ * check is this host's, ahead of the platform: platforms differ on what
+ * they serve outside the window, and the contract rejects uniformly.
  * @param {Uint8Array} nonce
  */
 function requireGcmNonce(nonce) {
-  if (nonce.length === 0) {
-    throw errInvalidNonce("AES-GCM requires a non-empty nonce");
+  if (nonce.length < 12 || nonce.length > 128) {
+    throw errInvalidNonce(`AES-GCM nonces are 12 to 128 bytes inclusive, got ${nonce.length}`);
   }
 }
 
@@ -3786,20 +3781,6 @@ function requireChachaTagSize(tagSize) {
   if (tagSize !== undefined && tagSize !== 16) {
     throw errUnsupported(`ChaCha20-Poly1305 tags are 16 bytes; got ${tagSize}`);
   }
-}
-
-/**
- * Reinterpret a platform failure as `{ tag: 'unsupported' }` when the nonce
- * sits outside the 12–128-byte window every known platform serves — the
- * `aes-gcm-any-iv` conformance feature. The check runs only on *failures*:
- * a platform that serves the full contract (nothing reaches this), and one
- * with a window (Node's WebCrypto) declines rather than misreporting. A
- * platform failing an outside-window call for some unrelated operational
- * reason is folded in — the nonce is overwhelmingly the cause.
- * @param {Uint8Array} nonce
- */
-function gcmNonceUnservable(nonce) {
-  return nonce.length < 12 || nonce.length > 128;
 }
 
 /** The GCM tag sizes in bytes (the registry's 32–128-bit set). */

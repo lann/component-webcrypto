@@ -18,7 +18,7 @@ interface aes {
     }
 }
 
-/// AES-GCM key minting (NIST SP 800-38D, the full parameter space).
+/// AES-GCM key minting (NIST SP 800-38D).
 ///
 /// Keys minted here drive `aead.aead-key.seal`/`open` with the parameters
 /// as the Web Cryptography API's `AesGcmParams` defines them, per call.
@@ -36,10 +36,13 @@ interface aes {
 ///
 /// Parameter acceptance:
 ///
-/// - **Nonce**: any non-empty length; an empty nonce fails
-///   `error.invalid-nonce`. An implementation whose backend cannot serve a
-///   length MAY decline it with `error.unsupported` (platform-backed hosts
-///   inherit their platform's window; the standard size is always served).
+/// - **Nonce**: 12 to 128 bytes inclusive; a length outside that window
+///   fails `error.invalid-nonce` on every implementation (see
+///   `README.md`, "Portability contract"). The window is the range every
+///   implementation serves identically. Nonces shorter than the 96-bit
+///   standard size are cryptographically discouraged (SP 800-38D
+///   recommends the 96-bit construction), and lengths beyond 128 bytes
+///   serve no protocol in use.
 /// - **Tag size**: 16 bytes by default (`tag-size` of `none`); the
 ///   algorithm's set is 4, 8, 12, 13, 14, 15, or 16 bytes (the registry's
 ///   32–128-bit set). Implementations MAY decline sizes their security

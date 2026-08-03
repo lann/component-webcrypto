@@ -1053,8 +1053,8 @@ impl Aead {
     /// The algorithm's standard nonce size in bytes, e.g. `12` for AES-GCM
     /// — always accepted by [`seal`](Self::seal)/[`open`](Self::open).
     /// Whether other lengths are accepted is the algorithm's contract
-    /// (AES-GCM accepts any non-empty nonce; the ChaCha constructions
-    /// accept exactly this size).
+    /// (AES-GCM accepts 12 to 128 bytes inclusive; the ChaCha
+    /// constructions accept exactly this size).
     pub fn nonce_size(&self) -> u32 {
         self.0.nonce_size()
     }

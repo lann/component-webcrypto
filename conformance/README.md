@@ -183,7 +183,7 @@ crypto conformance tests *functions against mathematics*.
   platform gap a caller routes around with another provider) and
   `sha1-checked` (platform SHA-1 carries no sha1dc collision detection —
   the first feature the in-guest provider serves that the platform hosts
-  do not); jco-node additionally `aes-gcm-any-iv`, and jco-browser
+  do not); jco-browser
   additionally `chacha20-poly1305` (the host feature-detects it, and
   Node's WebCrypto serves it where browsers do not yet); `targets.toml` is
   the registry. The anticipated future declarations

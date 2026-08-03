@@ -52,11 +52,19 @@
 //
 // Documented deviations from the Web Cryptography API (all fail closed with
 // clear errors, never silently differ). Each is classified — *unserved*
-// (the WIT carries the semantics; this library does not serve them yet) or
+// (the WIT carries the semantics; this library does not serve them yet),
 // *WIT-forced* (no shim could express the behavior through the interface
-// shape; a recorded design ruling) — per AGENTS.md, "WPT fidelity is a
+// shape; a recorded design ruling), or *narrowed uniformly* (the WIT
+// contract deliberately rejects what some platforms accept, so every
+// implementation behaves identically — `wit/README.md`, "Portability
+// contract") — per AGENTS.md, "WPT fidelity is a
 // first-class design constraint":
 //
+//   - Narrowed uniformly, not an unserved gap: AES-GCM IVs are 12–128
+//     bytes inclusive (the `aes-gcm` contract's portable window).
+//     `encrypt`/`decrypt` and wrapping with an IV outside the window
+//     throw `OperationError` (the WIT's `invalid-nonce`) even where a
+//     platform's own `crypto.subtle` — Chrome's, for one — accepts it.
 //   - Unserved: beyond the algorithms above, everything throws
 //     `NotSupportedError` — including AES-192 and ECDH P-521 (both of
 //     which every implementation of the package declines).
@@ -104,7 +112,8 @@
 //     "DataError", "SyntaxError", "TypeMismatchError",
 //     "QuotaExceededError").
 //
-// AES-GCM's per-call IV lengths and `tagLength`s are carried by
+// AES-GCM's per-call IV lengths (within the contract's window above) and
+// `tagLength`s are carried by
 // `aead-key.seal`/`open`'s parameters, so they are not deviations. Neither
 // is ECDSA's per-operation `verify` hash: the WIT binds curve and hash at
 // mint, and the `ecdsa-variant` enum carries the SHA-2 cross pairings of

@@ -349,18 +349,19 @@ impl AeadKeyMaterial {
     }
 
     /// Validate a caller nonce's length for this key's algorithm, rendering
-    /// the WIT `invalid-nonce` error: GCM accepts any non-empty nonce (the
-    /// `aes-gcm` minting contract); the ChaCha constructions accept exactly
-    /// their standard length.
+    /// the WIT `invalid-nonce` error: GCM accepts 12 to 128 bytes inclusive
+    /// (the `aes-gcm` minting contract's portable window); the ChaCha
+    /// constructions accept exactly their standard length.
     fn check_nonce(&self, nonce: &[u8]) -> Result<(), Error> {
         match &self.cipher {
             AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => {
-                if nonce.is_empty() {
-                    Err(Error::InvalidNonce(
-                        "AES-GCM requires a non-empty nonce".into(),
-                    ))
-                } else {
+                if (12..=128).contains(&nonce.len()) {
                     Ok(())
+                } else {
+                    Err(Error::InvalidNonce(format!(
+                        "AES-GCM nonces are 12 to 128 bytes inclusive, got {} bytes",
+                        nonce.len()
+                    )))
                 }
             }
             AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => {
@@ -663,9 +664,22 @@ mod tests {
         );
         match key.seal(&[], b"", None, b"") {
             Err(Error::InvalidNonce(msg)) => {
-                assert_eq!(msg, "AES-GCM requires a non-empty nonce")
+                assert_eq!(
+                    msg,
+                    "AES-GCM nonces are 12 to 128 bytes inclusive, got 0 bytes"
+                )
             }
             _ => panic!("expected invalid-nonce"),
+        }
+        for len in [11usize, 129] {
+            assert!(matches!(
+                key.seal(&vec![0u8; len], b"", None, b""),
+                Err(Error::InvalidNonce(_))
+            ));
+            assert!(matches!(
+                key.open(&vec![0u8; len], b"", None, &sealed),
+                Err(Error::InvalidNonce(_))
+            ));
         }
         assert_eq!(key.export(), Err(Error::NotExtractable));
     }

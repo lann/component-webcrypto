@@ -26,7 +26,7 @@ use conformance_harness::stream::{
 };
 use conformance_harness::{
     b64url, describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind, FEATURE_CHACHA,
-    FEATURE_GCM_ANY_IV, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA, P256_A25_X, P256_A25_Y,
+    FEATURE_SHA1_CHECKED, FEATURE_XCHACHA, P256_A25_X, P256_A25_Y,
 };
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal as bytes_constant_time_equal;
@@ -48,9 +48,6 @@ macro_rules! feature_tags {
     };
     (xchacha) => {
         &[FEATURE_XCHACHA]
-    };
-    (gcm_any_iv) => {
-        &[FEATURE_GCM_ANY_IV]
     };
     (sha1_checked) => {
         &[FEATURE_SHA1_CHECKED]
@@ -82,7 +79,7 @@ probes! {
     large_stream,
     hmac_generate_length,
     gcm_full_parameters,
-    gcm_any_iv(gcm_any_iv),
+    gcm_nonce_window,
     chacha_tag_size_fixed(chacha),
     jwk_rejections,
     jwk_semantics,
@@ -136,39 +133,9 @@ pub async fn run_declined(features: &[&str]) -> Result<String, String> {
         xchacha_minting_declined().await
     } else if features == [FEATURE_SHA1_CHECKED] {
         sha1_checked_minting_declined().await
-    } else if features == [FEATURE_GCM_ANY_IV] {
-        gcm_any_iv_declined().await
     } else {
         Err("probe has no decline assertion for its features".into())
     }
-}
-
-/// Assert that AES-GCM nonces outside the 12–128-byte window decline
-/// `unsupported` in both directions — a target declaring `aes-gcm-any-iv`
-/// missing must genuinely refuse them, not serve them or misreport the
-/// refusal.
-async fn gcm_any_iv_declined() -> Result<String, String> {
-    let key = generate_key_256(false)
-        .await
-        .map_err(|detail| format!("minting an AES-256 key: {detail}"))?;
-    for len in [8usize, 257] {
-        let iv = vec![0x11u8; len];
-        let sealed = seal_op(&key, &iv, b"", None, b"msg", Schedule::Whole).await?;
-        expect_err(
-            &format!("seal ({len}-byte nonce)"),
-            ErrKind::Unsupported,
-            sealed,
-            "served a nonce length the target declares missing",
-        )?;
-        let opened = open_op(&key, &iv, b"", None, &[0u8; 32], Schedule::Whole).await?;
-        expect_err(
-            &format!("open ({len}-byte nonce)"),
-            ErrKind::Unsupported,
-            opened,
-            "served a nonce length the target declares missing",
-        )?;
-    }
-    Ok("AES-GCM nonces outside 12–128 bytes declined unsupported".into())
 }
 
 /// Assert that every ChaCha20-Poly1305 minting path declines
@@ -1242,13 +1209,14 @@ async fn chacha_tag_size_fixed() -> Result<(), String> {
     Ok(())
 }
 
-/// AES-GCM nonces outside the 12–128-byte window round-trip on targets
-/// serving the full contract (the short end and the long end both exercise
-/// the `J0` derivation).
-async fn gcm_any_iv() -> Result<(), String> {
+/// The AES-GCM nonce window is 12–128 bytes inclusive on every
+/// implementation: both edges round-trip (128 bytes exercises the `J0`
+/// derivation), and one byte outside either edge fails `invalid-nonce` on
+/// seal and open alike.
+async fn gcm_nonce_window() -> Result<(), String> {
     let key = generate_key_256(false).await?;
-    let msg = b"gcm-any-iv";
-    for len in [8usize, 257] {
+    let msg = b"gcm-nonce-window";
+    for len in [12usize, 128] {
         let iv = vec![0x11u8; len];
         let sealed = seal_ok(
             &key,
@@ -1271,6 +1239,23 @@ async fn gcm_any_iv() -> Result<(), String> {
         )
         .await?;
         expect_bytes(&opened, msg, "opened bytes")?;
+    }
+    for len in [11usize, 129] {
+        let iv = vec![0x11u8; len];
+        let sealed = seal_op(&key, &iv, b"", None, msg, Schedule::Whole).await?;
+        expect_err(
+            &format!("seal ({len}-byte nonce)"),
+            ErrKind::InvalidNonce,
+            sealed,
+            "served a nonce outside the 12–128-byte window",
+        )?;
+        let opened = open_op(&key, &iv, b"", None, &[0u8; 32], Schedule::Whole).await?;
+        expect_err(
+            &format!("open ({len}-byte nonce)"),
+            ErrKind::InvalidNonce,
+            opened,
+            "served a nonce outside the 12–128-byte window",
+        )?;
     }
     Ok(())
 }

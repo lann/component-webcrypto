@@ -1,7 +1,8 @@
-//! The general GCM path: AES-GCM with any non-empty nonce length and any
-//! tag size in the algorithm's set — the parameter space `aead-key.seal`/
-//! `open` accept and the `aes-gcm` minting interface documents, which the
-//! `aes-gcm` crate's type-level parameterization cannot express at runtime.
+//! The general GCM path: AES-GCM over the contract's 12–128-byte nonce
+//! window and any tag size in the algorithm's set — the parameter space
+//! `aead-key.seal`/`open` accept and the `aes-gcm` minting interface
+//! documents, which the `aes-gcm` crate's type-level parameterization
+//! cannot express at runtime.
 //!
 //! GCM is assembled per NIST SP 800-38D from the same primitives the
 //! `aes-gcm` crate composes: `ghash` (masked-multiply universal hash) and
@@ -101,8 +102,9 @@ impl GcmAes {
 }
 
 /// Encrypt and authenticate `msg`, returning `ciphertext ‖ tag` with a
-/// `tag_len`-byte tag. The nonce must be non-empty (callers validate) and
-/// `tag_len` in [`GCM_TAG_SIZES`].
+/// `tag_len`-byte tag. Callers validate the nonce (the contract's
+/// 12–128-byte window) and `tag_len` (in [`GCM_TAG_SIZES`]); the §7.1
+/// assembly itself is length-generic.
 pub fn seal<C: BlockEncrypt + BlockCipher<BlockSize = U16>>(
     cipher: &C,
     nonce: &[u8],

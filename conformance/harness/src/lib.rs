@@ -50,14 +50,6 @@ pub const FEATURE_XCHACHA: &str = "xchacha20-poly1305";
 /// the truth by `just class-d-composition` instead.
 pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 
-/// The `aes-gcm-any-iv` feature: AES-GCM nonces outside the 12–128-byte
-/// window every implementation serves. The `aes-gcm` contract accepts any
-/// non-empty nonce but lets an implementation decline lengths its backend
-/// cannot serve with `unsupported`; platform-backed hosts inherit their
-/// platform's window (Node's WebCrypto rejects nonces shorter than 12 or
-/// longer than 128 bytes).
-pub const FEATURE_GCM_ANY_IV: &str = "aes-gcm-any-iv";
-
 /// The `sha1-checked` feature: the checked-SHA-1 minting interface (both
 /// postures). Platform SHA-1 carries no sha1dc collision detection and
 /// the jco host is constrained to `crypto.subtle`, so the jco targets
@@ -73,7 +65,6 @@ pub const KNOWN_FEATURES: &[&str] = &[
     FEATURE_CHACHA,
     FEATURE_XCHACHA,
     FEATURE_ECDSA_SIGN,
-    FEATURE_GCM_ANY_IV,
     FEATURE_SHA1_CHECKED,
 ];
 
