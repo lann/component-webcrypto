@@ -10,7 +10,7 @@ package demo:componentize-webcrypto-demo@0.1.0;
 /// `js/componentize/`: it imports exactly the `lann:webcrypto` surface the
 /// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
 /// `aes-gcm`/`aead`, ChaCha20-Poly1305 via `chacha20-poly1305`/`aead`, and the derive model via `derivation`/`hkdf`/`pbkdf2`/
-/// `key-agreement`/`x25519`/`ecdh`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the
+/// `key-agreement`/`x25519`/`ecdh`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify`/`rsassa-pkcs1-v15-verify`/`rsa-pss-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the
 /// Rust `crypto-demo` guest, so the existing `crypto-demo-driver` can drive
 /// it.
 world componentize-demo {
@@ -46,6 +46,8 @@ world componentize-demo {
     import lann:webcrypto/ed25519-verify@0.1.0;
     import lann:webcrypto/ed25519-sign@0.1.0;
     import lann:webcrypto/ecdsa-verify@0.1.0;
+    import lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    import lann:webcrypto/rsa-pss-verify@0.1.0;
     import wasi:random/random@0.2.0;
 
     export demo:webcrypto-demo/demo@0.1.0;

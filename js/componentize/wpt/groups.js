@@ -163,6 +163,53 @@ function classDGatedInSubset() {
 }
 
 /**
+ * sign_verify/{rsa_pss,rsa_pkcs}: every subtest — the verification rows
+ * included — runs `rsa.js`'s importVectorKeys, which imports the vector's
+ * private pkcs8 fixture alongside its public one, and RSA private-key
+ * import is unserved (the package's RSA surface is verification-only —
+ * see the shim header). Every subtest therefore fails at its import step,
+ * registering under the synthetic "importVectorKeys step:" name, so the
+ * subset stays empty and the groups meter the unserved private side, like
+ * sign_verify/ecdsa above. The verify path's behavioral assertions
+ * (Wycheproof, wrong salt lengths, strict PKCS#1 v1.5 encoding) live in
+ * the conformance suites. The one passing test is the assertion-free
+ * "setup", pinned as `outPassed`.
+ */
+function rsaSignVerifyInSubset() {
+  return false;
+}
+
+/**
+ * import_export/rsa_importKey: the public forms of the served RSA
+ * signature algorithms are in — spki and public JWKs (`object(kty, n,
+ * e)`) for RSASSA-PKCS1-v1_5 and RSA-PSS over SHA-256/384/512, at every
+ * modulus size the file exercises (1024/2048/4096, all inside the `rsa`
+ * family contract's 1024–16384-bit window) and every public usage
+ * sweep (`[verify]`, `[]`, and the repeated form). Out: the SHA-1 rows
+ * (the `rsa-variant` pairing the package declines — the shim header's
+ * narrowed-uniformly entry), the RSA-OAEP rows (unserved algorithm), and
+ * the private forms — pkcs8 rows, JWKs carrying `d` (`object(kty, n, e,
+ * d, …)`), and the Empty Usages rows, which are registered for the
+ * private formats only (their spec SyntaxError follows a private-key
+ * parse this shim declines first; their names carry the whole fixture
+ * record, `object(spki, pkcs8, jwk)`, which is why the format checks
+ * below anchor on each public form's data shape).
+ * @param {string} name
+ */
+function rsaImportInSubset(name) {
+  if (!name.startsWith("Good parameters: ")) {
+    return false;
+  }
+  if (!/name: (RSA-PSS|RSASSA-PKCS1-v1_5)\}/.test(name)) {
+    return false;
+  }
+  if (name.includes("{hash: SHA-1,")) {
+    return false;
+  }
+  return name.includes("(spki, buffer(") || name.includes("(jwk, object(kty, n, e),");
+}
+
+/**
  * derive_bits_keys/cfrg_curves_bits (X25519): served in whole — the
  * "mismatched algorithms" fixture is an imported ECDH public key, which
  * the library serves.
@@ -549,6 +596,18 @@ export const GROUPS = [
     inSubset: classDGatedInSubset,
   },
   {
+    name: "sign_verify/rsa_pss",
+    module: "group-rsa-pss.js",
+    start: (ns) => ns.run_test(),
+    inSubset: rsaSignVerifyInSubset,
+  },
+  {
+    name: "sign_verify/rsa_pkcs",
+    module: "group-rsa-pkcs.js",
+    start: (ns) => ns.run_test(),
+    inSubset: rsaSignVerifyInSubset,
+  },
+  {
     name: "import_export/okp_importKey (Ed25519)",
     module: "group-okp-import-key.js",
     start: (ns) => ns.runTests("Ed25519"),
@@ -577,6 +636,12 @@ export const GROUPS = [
     module: "group-ec-import-key-failures.js",
     start: (ns) => ns.run_test(["ECDSA"]),
     inSubset: ecImportFailuresInSubset,
+  },
+  {
+    name: "import_export/rsa_importKey",
+    module: "group-rsa-import-key.js",
+    start: (ns) => ns.run_rsa_import_tests(),
+    inSubset: rsaImportInSubset,
   },
   {
     name: "getRandomValues",
