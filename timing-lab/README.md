@@ -48,6 +48,15 @@ calls fail authentication and recompute the same MAC, so any timing
 difference isolates the tag **comparison** — the classic early-exit-compare
 leak. For seal surfaces the classes are *fixed* vs *freshly random*
 plaintext, probing data-dependent cipher timing (e.g. table-based AES).
+For key-agreement surfaces (X25519, ECDH P-256/P-384) the classes are
+*fixed* vs *freshly random* secret **scalar** against a fixed peer: the
+peer — and with it every point-dependent operand — is identical across
+classes, and each trial assembles and imports a fresh PKCS#8 key whichever
+class it feeds, so only scalar-bit-dependent control flow in the scalar
+multiplication separates the classes. Each agreement surface's setup
+agrees its fixed key against a published known answer (RFC 7748 §6.1,
+Wycheproof) before sampling, so a wrong key template would fail the run
+rather than time something else.
 
 Three properties of the sampling loop keep class from correlating with
 anything but the input:
@@ -119,10 +128,11 @@ not how small a leak it would catch.
   scheduled job automates exactly that rerun (see Automation).
 
 ## Relation to the timing-channel classes
-
 `rust/guest-provider/README.md` classifies each algorithm's timing behavior (classes
 A–D) by *construction* — argument from the code's shape. The lab is the
 *empirical* companion: it can confirm the positive claims are not obviously
 wrong (ChaCha20-Poly1305's class A + B should be the boring, quiet row) and
 catch regressions in the countermeasures (the fixsliced AES backend, the
-masked-multiply GHASH, `subtle` comparisons). It cannot prove a negative.
+masked-multiply GHASH, `subtle` comparisons, and the class-B scalar
+multiplications behind the X25519 and ECDH agree surfaces). It cannot
+prove a negative.
