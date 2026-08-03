@@ -9,10 +9,13 @@ interface aes {
     /// closed set of parameterizations `<algorithm>-variant`.)
     enum aes-variant {
         aes128,
-        /// Not widely supported: browsers decline AES-192, and no current
-        /// implementation of this package serves it — expect
-        /// `error.unsupported` unless composed with a provider that
-        /// specifically offers it.
+        /// Declined by every implementation of this package: every
+        /// minting path fails `error.unsupported`. The decline is a
+        /// portability ruling, not a gap — uniform service is impossible
+        /// (a major browser engine omits AES-192 from WebCrypto
+        /// deliberately and permanently) and the variant earns no
+        /// exception; see `README.md`, "Design notes". Declared because
+        /// AES closes the set.
         aes192,
         aes256,
     }
@@ -68,8 +71,8 @@ interface aes-gcm {
     /// any other length fails with `error.invalid-key`, so malformed
     /// material (for example, key bytes accidentally left hex-encoded)
     /// cannot silently mint a key of an unintended size. An implementation
-    /// not serving the variant (for example, browsers decline AES-192)
-    /// fails with `error.unsupported`.
+    /// not serving the variant (AES-192 is declined everywhere — see the
+    /// `aes-variant` doc) fails with `error.unsupported`.
     import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: aead-key-options) -> result<aead-key, error>;
 
     /// Import an RFC 7517 JSON Web Key as an AES-GCM key of the declared
