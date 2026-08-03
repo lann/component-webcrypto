@@ -216,6 +216,9 @@ impl Sha2 {
 
 #[cfg(test)]
 mod tests {
+    use data_encoding::HEXLOWER;
+    use data_encoding_macro::hexlower;
+
     use super::*;
 
     #[test]
@@ -262,7 +265,7 @@ mod tests {
     #[test]
     fn sha1_checked_honest_input_is_standard_sha1() {
         // FIPS 180-1 "abc" known answer, identical in both postures.
-        let expected = hex_literal::hex!("a9993e364706816aba3e25717850c26c9cd0d89d");
+        let expected = hexlower!("a9993e364706816aba3e25717850c26c9cd0d89d");
         for posture in [Sha1Posture::Reject, Sha1Posture::Mitigate] {
             let kind = DigestKind::Sha1Checked(posture);
             assert_eq!(kind.digest(b"abc").unwrap(), expected);
@@ -288,22 +291,13 @@ mod tests {
         let mitigate = DigestKind::Sha1Checked(Sha1Posture::Mitigate);
         let d1 = mitigate.digest(&m1).unwrap();
         let d2 = mitigate.digest(&m2).unwrap();
-        assert_eq!(
-            d1,
-            hex_literal::hex!("7117b3cb9225aaf0d8ef1a40e493957b0bf8693d")
-        );
-        assert_eq!(
-            d2,
-            hex_literal::hex!("29f38ae9fd98e2931120fa0bf213e024250d3f6a")
-        );
+        assert_eq!(d1, hexlower!("7117b3cb9225aaf0d8ef1a40e493957b0bf8693d"));
+        assert_eq!(d2, hexlower!("29f38ae9fd98e2931120fa0bf213e024250d3f6a"));
         assert_ne!(d1, d2);
     }
 
     fn unhex(hex: &str) -> Vec<u8> {
-        (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect()
+        HEXLOWER.decode(hex.as_bytes()).unwrap()
     }
 
     #[test]

@@ -50,7 +50,7 @@ use bindings::lann::webcrypto::mac::MacKey;
 use bindings::lann::webcrypto::x25519;
 use bindings::wit_stream;
 
-use hex_literal::hex;
+use data_encoding_macro::hexlower;
 
 use std::time::Instant;
 
@@ -431,31 +431,33 @@ async fn measure_seal(
 /// public key); the ECDH pairs are Wycheproof
 /// `ecdh_secp{256,384}r1_ecpoint_test.json` tcId 1.
 const X25519_KAT_D: [u8; 32] =
-    hex!("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    hexlower!("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
 const X25519_PEER: [u8; 32] =
-    hex!("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+    hexlower!("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
 const X25519_SHARED: [u8; 32] =
-    hex!("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+    hexlower!("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
 const ECDH_P256_KAT_D: [u8; 32] =
-    hex!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
-const ECDH_P256_PEER: [u8; 65] = hex!(
-    "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f26"
-    "ac333a93a9e70a81cd5a95b5bf8d13990eb741c8c38872b4a07d275a014e30cf"
+    hexlower!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
+const ECDH_P256_PEER: [u8; 65] = hexlower!(
+    "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f\
+     26ac333a93a9e70a81cd5a95b5bf8d13990eb741c8c38872b4a07d275a014e30\
+     cf"
 );
 const ECDH_P256_SHARED: [u8; 32] =
-    hex!("53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285");
-const ECDH_P384_KAT_D: [u8; 48] = hex!(
-    "766e61425b2da9f846c09fc3564b93a6f8603b7392c785165bf20da948c49fd1"
-    "fb1dee4edd64356b9f21c588b75dfd81"
+    hexlower!("53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285");
+const ECDH_P384_KAT_D: [u8; 48] = hexlower!(
+    "766e61425b2da9f846c09fc3564b93a6f8603b7392c785165bf20da948c49fd1\
+     fb1dee4edd64356b9f21c588b75dfd81"
 );
-const ECDH_P384_PEER: [u8; 97] = hex!(
-    "04790a6e059ef9a5940163183d4a7809135d29791643fc43a2f17ee8bf677ab84f"
-    "791b64a6be15969ffa012dd9185d8796d9b954baa8a75e82df711b3b56eadff6"
-    "b0f668c3b26b4b1aeb308a1fcc1c680d329a6705025f1c98a0b5e5bfcb163caa"
+const ECDH_P384_PEER: [u8; 97] = hexlower!(
+    "04790a6e059ef9a5940163183d4a7809135d29791643fc43a2f17ee8bf677ab8\
+     4f791b64a6be15969ffa012dd9185d8796d9b954baa8a75e82df711b3b56eadf\
+     f6b0f668c3b26b4b1aeb308a1fcc1c680d329a6705025f1c98a0b5e5bfcb163c\
+     aa"
 );
-const ECDH_P384_SHARED: [u8; 48] = hex!(
-    "6461defb95d996b24296f5a1832b34db05ed031114fbe7d98d098f93859866e4"
-    "de1e229da71fef0c77fe49b249190135"
+const ECDH_P384_SHARED: [u8; 48] = hexlower!(
+    "6461defb95d996b24296f5a1832b34db05ed031114fbe7d98d098f93859866e4\
+     de1e229da71fef0c77fe49b249190135"
 );
 
 /// A scalar with one bit set, at `bit` counted from `LE` little-endian or
@@ -492,19 +494,22 @@ const ECDH_P384_FIXED_D: [u8; 48] = single_bit_scalar::<48, false>(192);
 /// octet-string (and, for EC, ECPrivateKey) headers — every length is
 /// scalar-size-determined, so the encoding is this constant followed by
 /// the scalar bytes. The setup known-answer check validates each template.
-const X25519_PKCS8_PREFIX: [u8; 16] = hex!("302e020100300506032b656e04220420");
-const P256_PKCS8_PREFIX: [u8; 35] =
-    hex!("3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201010420");
+const X25519_PKCS8_PREFIX: [u8; 16] = hexlower!("302e020100300506032b656e04220420");
+const P256_PKCS8_PREFIX: [u8; 35] = hexlower!(
+    "3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201\
+     010420"
+);
 const P384_PKCS8_PREFIX: [u8; 32] =
-    hex!("304e020100301006072a8648ce3d020106052b81040022043730350201010430");
+    hexlower!("304e020100301006072a8648ce3d020106052b81040022043730350201010430");
 
 /// The curve group orders, big-endian: a fresh ECDH scalar draw is valid
 /// iff it is nonzero and below the order, so the sampling loop can
 /// rejection-sample locally instead of routing rejections through import.
-const N_P256: [u8; 32] = hex!("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
-const N_P384: [u8; 48] = hex!(
-    "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf"
-    "581a0db248b0a77aecec196accc52973"
+const N_P256: [u8; 32] =
+    hexlower!("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+const N_P384: [u8; 48] = hexlower!(
+    "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf\
+     581a0db248b0a77aecec196accc52973"
 );
 
 /// Whether a big-endian scalar draw is in `[1, n-1]`. Byte-lexicographic

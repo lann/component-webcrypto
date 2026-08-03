@@ -69,5 +69,7 @@ getrandom = "0.3"
 zeroize = "1"
 
 [dev-dependencies]
-# Hex constants in the known-answer tests.
-hex-literal = "1"
+# Hex constants in the known-answer tests: the macro decodes literals at
+# compile time, the runtime API the vectors whose hex arrives as a `&str`.
+data-encoding-macro = "0.1"
+data-encoding = "2"

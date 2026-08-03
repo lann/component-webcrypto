@@ -26,3 +26,7 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 bytes = "1"
 # The `AsyncRead` trait for the `DataSource::from_reader` checks.
 futures-io = "0.3"
+# Decodes the known-answer vectors to byte arrays at compile time.
+data-encoding-macro = "0.1"
+# Renders bytes as hex in the checks' failure messages.
+data-encoding = "2"
