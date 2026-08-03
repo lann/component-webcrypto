@@ -113,17 +113,18 @@ mod generated {
 /// for callers driving the streams themselves and for passing resources
 /// through a consumer's own interfaces (via [`Mac::into_raw`] and friends).
 pub mod bindings {
-    // `aes` and `sha2` are here for their *types*: they define
-    // `aes-variant` and `sha2-variant`, which the minting interfaces only
-    // alias, and rustdoc renders an alias into a private module as an empty
-    // enum.
+    // `aes`, `rsa`, and `sha2` are here for their *types*: they define
+    // `aes-variant`, `rsa-variant`, and `sha2-variant`, which the minting
+    // interfaces only alias, and rustdoc renders an alias into a private
+    // module as an empty enum.
     #[cfg(feature = "sha1-checked")]
     pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw,
         bytes, cipher, derivation, digest, ecdh, ecdsa_sign, ecdsa_verify, ed25519_sign,
         ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap,
-        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, sha2, signature, types, wrapping, x25519,
+        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, rsa, rsa_pss_verify, rsassa_pkcs1_v15_verify, sha2,
+        signature, types, wrapping, x25519,
     };
     #[cfg(feature = "chacha")]
     pub use super::generated::lann::webcrypto::{
@@ -1336,6 +1337,14 @@ impl VerifyingKey {
         self.0.algorithm_hash()
     }
 
+    /// The key's length in bits for algorithms parameterized by one — the
+    /// RSA modulus length (WebCrypto's `RsaKeyAlgorithm.modulusLength`).
+    /// `None` for Ed25519 and ECDSA, whose key size is fixed by the
+    /// algorithm or curve.
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
+    }
+
     /// The public key material, in the minting interface's documented
     /// public format.
     ///
@@ -1377,6 +1386,11 @@ impl SigningKey {
     /// See [`VerifyingKey::algorithm_hash`].
     pub fn algorithm_hash(&self) -> Option<String> {
         self.0.algorithm_hash()
+    }
+
+    /// See [`VerifyingKey::algorithm_length`].
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
     }
 
     /// Whether the private key material may be exported. There is
@@ -1853,6 +1867,8 @@ pub mod hmac_sha2;
 pub mod pbkdf2;
 pub mod pbkdf2_sha1;
 pub mod pbkdf2_sha2;
+pub mod rsa_pss;
+pub mod rsassa_pkcs1_v15;
 #[cfg(feature = "sha1-checked")]
 pub mod sha1_checked;
 pub mod sha2;

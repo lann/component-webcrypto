@@ -676,6 +676,12 @@ where
     bindings::webcrypto::ed25519_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ecdsa_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::ecdsa_sign::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::rsa::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::rsassa_pkcs1_v15_verify::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::rsa_pss_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     Ok(())
 }
 

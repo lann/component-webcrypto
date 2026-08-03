@@ -794,8 +794,16 @@ interface signature {
         /// RFC 8032 fixes SHA-512 internally, so it is not a parameter.
         algorithm-hash: func() -> option<string>;
 
+        /// The key's length in bits for algorithms parameterized by one —
+        /// the RSA modulus length (WebCrypto's
+        /// `RsaKeyAlgorithm.modulusLength`). `none` for Ed25519 and
+        /// ECDSA, whose key size is fixed by the algorithm or curve.
+        algorithm-length: func() -> option<u32>;
+
         /// The public key material, in the minting interface's documented
-        /// public format.
+        /// public format. Algorithms without a raw public form (the RSA
+        /// family — the platform serves `spki` and `jwk` only) fail
+        /// `error.unsupported`.
         ///
         /// There is no extractability gate on this resource, so
         /// `error.not-extractable` never occurs here. Export is still
@@ -834,6 +842,9 @@ interface signature {
 
         /// See `verifying-key.algorithm-hash`.
         algorithm-hash: func() -> option<string>;
+
+        /// See `verifying-key.algorithm-length`.
+        algorithm-length: func() -> option<u32>;
 
         /// Whether the export functions may return this key's material.
         /// Mint-time recorded policy, which platform-backed key storage

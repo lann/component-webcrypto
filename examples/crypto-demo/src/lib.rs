@@ -95,6 +95,45 @@ const ECDSA_SIG_R: [u8; 32] =
 const ECDSA_SIG_S: [u8; 32] =
     hexlower!("f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8");
 
+// --- Wycheproof RSA-2048 + SHA-256: rsa_signature_2048_sha256_test.json
+//     tcId 1 and rsa_pss_2048_sha256_mgf1_32_test.json tcId 1 (sLen 32).
+//     Both files carry the same public key, and both tcId-1 messages are
+//     empty. -------------------------------------------------------------
+
+const RSA_SPKI: [u8; 294] = hexlower!(
+    "30820122300d06092a864886f70d01010105000382010f003082010a02820101\
+     00a2b451a07d0aa5f96e455671513550514a8a5b462ebef717094fa1fee82224\
+     e637f9746d3f7cafd31878d80325b6ef5a1700f65903b469429e89d6eac88450\
+     97b5ab393189db92512ed8a7711a1253facd20f79c15e8247f3d3e42e46e48c9\
+     8e254a2fe9765313a03eff8f17e1a029397a1fa26a8dce26f490ed81299615d9\
+     814c22da610428e09c7d9658594266f5c021d0fceca08d945a12be82de4d1ece\
+     6b4c03145b5d3495d4ed5411eb878daf05fd7afc3e09ada0f1126422f590975a\
+     1969816f48698bcbba1b4d9cae79d460d8f9f85e7975005d9bc22c4e5ac0f7c1\
+     a45d12569a62807d3b9a02e5a530e773066f453d1f5b4c2e9cf7820283f742b9\
+     d50203010001"
+);
+const RSA_MESSAGE: &[u8] = b"";
+const RSA_PKCS1_SIG: [u8; 256] = hexlower!(
+    "840f5dac53106dd1f9c57219224cf51289290c42f20466875ba8e830ac5690e5\
+     41536fcc8ab03b731f82bf66d83f194e7e180b3963ec7a2f3f7904a7ce49aed4\
+     7da4d4b79421eaf937d301b3e696169297b797c32c076a12be4de0b58e003c51\
+     23051a84a10c62f8dac2f42a8640008eb3c7cccd6760ff5b51b6897639225828\
+     45f048fb8150e5a7a6ca2eccc7bdc85349ad5b26c52137a79fa3fe5c29ab5cd7\
+     615013219c1941b6708e9c3c23feff5febaf0c8ebca5750b54e3e6e99a3e876b\
+     396f27860b7f3ec4e9191703c6332d944f6f69751167680c79c4f6b57f1cc875\
+     5d24b6ec158ccdbacdb23107a33cb6b332516c13274d1f9dccc21dced869e486"
+);
+const RSA_PSS_SIG: [u8; 256] = hexlower!(
+    "4f01e0c12b08625ecac89a69231906edf826380f37c959a96690d046316d68ff\
+     ce9d5c471694fcebfc6b45534864689256e4fc81c78e583f675d0c94b4496474\
+     51e81beff01a11a516d5e5ce3f1a910437cb8a3a5096b19fb15f4524a35b23d8\
+     9cdba12cf5b71aac1047b28c562df7c5542c34ce23a182cf7e0e231934b17294\
+     799d44877a1d68ef1b8f073619b7618e6b7c22db20030d98cf591ffc3d4da5f5\
+     8613ecd5ecfc3b40a1d02f40891ca43695cd4c088b05a8054c89c595a47e2748\
+     16f35384226f74459ee63e25a1bfc03c360490552ec38343f8ace502f065303b\
+     00bc0ec320711b211fde92e57feb9013c3609342495ec0d7cabdec21e54acc38"
+);
+
 struct Component;
 
 impl Guest for Component {
@@ -131,6 +170,7 @@ impl Guest for Component {
             ecdsa_verify_known_answer().await,
         )
         .await?;
+        check("rsa-verify-known-answer", rsa_verify_known_answer().await).await?;
         check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
         check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
         check("x25519-agreement", x25519_agreement().await).await?;
@@ -554,6 +594,75 @@ async fn ecdsa_verify_known_answer() -> Result<()> {
         key.verify(ECDSA_MESSAGE, sig).await,
         Error::AuthenticationFailed,
         "corrupted signature verified",
+    )
+}
+
+/// The Wycheproof known answers, one per RSA signature algorithm over the
+/// vector files' shared 2048-bit key: an SPKI-imported key reports its
+/// parameterization through the getters — the modulus length included —
+/// verifies the vector's valid signature, and rejects a corrupted one.
+async fn rsa_verify_known_answer() -> Result<()> {
+    use lann_webcrypto_guest::rsa_pss;
+    use lann_webcrypto_guest::rsassa_pkcs1_v15::{self, RsaVariant};
+
+    // rsa_signature_2048_sha256_test.json tcId 1.
+    let key = rsassa_pkcs1_v15::import_verifying_key_spki(RsaVariant::Sha256, RSA_SPKI)
+        .await
+        .context("rsassa-pkcs1-v15 import-verifying-key-spki")?;
+    ensure!(
+        key.algorithm_name() == "RSASSA-PKCS1-v1_5",
+        "verifying-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_hash().as_deref() == Some("SHA-256"),
+        "verifying-key.algorithm-hash: got {:?}",
+        key.algorithm_hash()
+    );
+    ensure!(
+        key.algorithm_length() == Some(2048),
+        "verifying-key.algorithm-length: got {:?}",
+        key.algorithm_length()
+    );
+    let mut sig = RSA_PKCS1_SIG.to_vec();
+    key.verify(RSA_MESSAGE, sig.clone())
+        .await
+        .context("known-answer RSASSA-PKCS1-v1_5 signature did not verify")?;
+    sig[0] ^= 0x01;
+    expect_error!(
+        key.verify(RSA_MESSAGE, sig).await,
+        Error::AuthenticationFailed,
+        "corrupted RSASSA-PKCS1-v1_5 signature verified",
+    )?;
+
+    // rsa_pss_2048_sha256_mgf1_32_test.json tcId 1 (sLen 32, bound at mint).
+    let key = rsa_pss::import_verifying_key_spki(RsaVariant::Sha256, 32, RSA_SPKI)
+        .await
+        .context("rsa-pss import-verifying-key-spki")?;
+    ensure!(
+        key.algorithm_name() == "RSA-PSS",
+        "verifying-key.algorithm-name: got {}",
+        key.algorithm_name()
+    );
+    ensure!(
+        key.algorithm_hash().as_deref() == Some("SHA-256"),
+        "verifying-key.algorithm-hash: got {:?}",
+        key.algorithm_hash()
+    );
+    ensure!(
+        key.algorithm_length() == Some(2048),
+        "verifying-key.algorithm-length: got {:?}",
+        key.algorithm_length()
+    );
+    let mut sig = RSA_PSS_SIG.to_vec();
+    key.verify(RSA_MESSAGE, sig.clone())
+        .await
+        .context("known-answer RSA-PSS signature did not verify")?;
+    sig[0] ^= 0x01;
+    expect_error!(
+        key.verify(RSA_MESSAGE, sig).await,
+        Error::AuthenticationFailed,
+        "corrupted RSA-PSS signature verified",
     )
 }
 

@@ -5,14 +5,17 @@ use crate::mint::{
     import_cbc_key, import_chacha_key, import_ecdh_public_key_jwk, import_ecdh_public_key_raw,
     import_ecdh_public_key_spki, import_ecdh_secret_key, import_hmac_key, import_hmac_sha1_key,
     import_ikm, import_internal_nonce_key as import_gcm_internal_key, import_key_raw,
-    import_kw_key, import_password, import_x25519_public_key, import_x25519_secret_key,
+    import_kw_key, import_password, import_rsa_pss_verifying_key_jwk,
+    import_rsa_pss_verifying_key_spki, import_rsassa_verifying_key_jwk,
+    import_rsassa_verifying_key_spki, import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
     mac_options,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, CbcCase, EcdhCase, EcdhCurve, EcdhPublic, HkdfAlg,
     HkdfCase, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase, KwCase, Pbkdf2Alg,
-    Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase, X25519Case,
+    Pbkdf2Case, RsaCase, RsaExpectation, RsaFamily, RsaImport, Sha2Alg, Sha2Case, SigAlg, SigCase,
+    SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, in_open, in_open_op, in_seal_ok,
@@ -29,6 +32,7 @@ use lann_webcrypto_guest::bindings::ecdsa_verify::{
 use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
 use lann_webcrypto_guest::bindings::hkdf_sha2;
 use lann_webcrypto_guest::bindings::pbkdf2_sha2;
+use lann_webcrypto_guest::bindings::rsa::RsaVariant;
 use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
 use lann_webcrypto_guest::bindings::types::Error;
 
@@ -451,6 +455,69 @@ pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
             verified,
             "verify(sig) succeeded",
         )
+    }
+}
+
+/// The `rsa-variant` for a translated case's digest parameterization.
+fn rsa_variant(sha: Sha2Alg) -> RsaVariant {
+    match sha {
+        Sha2Alg::Sha256 => RsaVariant::Sha256,
+        Sha2Alg::Sha384 => RsaVariant::Sha384,
+        Sha2Alg::Sha512 => RsaVariant::Sha512,
+    }
+}
+
+/// Run one RSA signature-verification vector: import the group's public
+/// key per the case's import path and expectation — the id-RSASSA-PSS
+/// file's cases must fail the import `invalid-key`; everything else
+/// imports and verifies `sig` over `msg` under the case's schedule,
+/// succeeding (`valid`) or failing `authentication-failed` (`invalid`,
+/// and the `acceptable` BER-laxity vectors the strict verification
+/// contract rejects uniformly).
+pub async fn run_rsa_case(case: &RsaCase) -> Result<(), String> {
+    let variant = rsa_variant(case.alg.sha);
+    let (what, key) = match (case.alg.family, &case.import) {
+        (RsaFamily::Pkcs1V15, RsaImport::Spki(spki)) => (
+            "import-verifying-key-spki",
+            import_rsassa_verifying_key_spki(variant, spki.clone()).await,
+        ),
+        (RsaFamily::Pkcs1V15, RsaImport::Jwk(jwk)) => (
+            "import-verifying-key-jwk",
+            import_rsassa_verifying_key_jwk(variant, jwk.clone()).await,
+        ),
+        (RsaFamily::Pss { salt_len }, RsaImport::Spki(spki)) => (
+            "import-verifying-key-spki",
+            import_rsa_pss_verifying_key_spki(variant, salt_len, spki.clone()).await,
+        ),
+        (RsaFamily::Pss { salt_len }, RsaImport::Jwk(jwk)) => (
+            "import-verifying-key-jwk",
+            import_rsa_pss_verifying_key_jwk(variant, salt_len, jwk.clone()).await,
+        ),
+    };
+    if matches!(case.expectation, RsaExpectation::RejectImport) {
+        return expect_err(
+            what,
+            ErrKind::InvalidKey,
+            key,
+            "imported a key carrying the id-RSASSA-PSS AlgorithmIdentifier",
+        );
+    }
+    let key = key.map_err(|e| describe(what, &e))?;
+    let schedule = case
+        .schedule
+        .ok_or("verification case carries no schedule")?;
+    let (verified, fed) = sig_verify(&key, &case.msg, &case.sig, schedule).await;
+    fed.map_err(|e| format!("verify data feeder: {e}"))?;
+    match case.expectation {
+        RsaExpectation::Valid => {
+            verified.map_err(|e| describe("verify(sig) failed for a valid vector", &e))
+        }
+        _ => expect_err(
+            "verify of an invalid vector",
+            ErrKind::AuthenticationFailed,
+            verified,
+            "verify(sig) succeeded",
+        ),
     }
 }
 

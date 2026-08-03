@@ -85,7 +85,7 @@ pub use policy::{
     not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, InternalNoncePolicy,
     KwPolicy, MacPolicy, SigningPolicy,
 };
-pub use sig::{SigPublic, SigningKeyMaterial};
+pub use sig::{RsaScheme, SigPublic, SigningKeyMaterial};
 pub use wrapping::{
     derive_kw_key, unwrap_aes_gcm_internal_key, unwrap_aes_gcm_internal_key_jwk,
     unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_chacha_key, unwrap_chacha_key_jwk,
@@ -178,7 +178,8 @@ macro_rules! impl_conversions {
         sha2: $sha2:path,
         aes: $aes:path,
         ecdsa: $ecdsa:path,
-        ecdh: $ecdh:path $(,)?
+        ecdh: $ecdh:path,
+        rsa: $rsa:path $(,)?
     ) => {
         impl From<$crate::Error> for $error {
             fn from(err: $crate::Error) -> Self {
@@ -246,6 +247,16 @@ macro_rules! impl_conversions {
                     <$ecdh>::P256 => Self::P256,
                     <$ecdh>::P384 => Self::P384,
                     <$ecdh>::P521 => Self::P521,
+                }
+            }
+        }
+
+        impl From<$rsa> for $crate::RsaVariant {
+            fn from(variant: $rsa) -> Self {
+                match variant {
+                    <$rsa>::Sha256 => Self::Sha256,
+                    <$rsa>::Sha384 => Self::Sha384,
+                    <$rsa>::Sha512 => Self::Sha512,
                 }
             }
         }
@@ -328,6 +339,15 @@ pub enum EcdhVariant {
     P521,
 }
 
+/// The WIT `rsa.rsa-variant` cases. Variant names match the generated
+/// bindings' so `{:?}` renders identically in error messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RsaVariant {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
 /// The `algorithm-name` reported by HMAC keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub const HMAC_NAME: &str = "HMAC";
@@ -354,6 +374,14 @@ pub const ED25519_NAME: &str = "Ed25519";
 /// The `algorithm-name` reported by ECDSA keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub const ECDSA_NAME: &str = "ECDSA";
+
+/// The `algorithm-name` reported by RSASSA-PKCS1-v1_5 keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const RSASSA_PKCS1_V15_NAME: &str = "RSASSA-PKCS1-v1_5";
+
+/// The `algorithm-name` reported by RSA-PSS keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const RSA_PSS_NAME: &str = "RSA-PSS";
 
 /// Whether `a` and `b` are equal, in time independent of their *contents*
 /// (necessarily dependent on their lengths) — the `bytes.constant-time-equal`

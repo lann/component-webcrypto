@@ -67,6 +67,10 @@ use crate::exports::lann::webcrypto::pbkdf2::{
 };
 use crate::exports::lann::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
 use crate::exports::lann::webcrypto::pbkdf2_sha2::Guest as Pbkdf2Sha2Guest;
+use crate::exports::lann::webcrypto::rsa_pss_verify::Guest as RsaPssVerifyGuest;
+use crate::exports::lann::webcrypto::rsassa_pkcs1_v15_verify::{
+    Guest as RsassaVerifyGuest, RsaVariant,
+};
 use crate::exports::lann::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
 use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
 use crate::exports::lann::webcrypto::signature::{
@@ -92,6 +96,7 @@ lann_webcrypto_core::impl_conversions! {
     aes: AesVariant,
     ecdsa: EcdsaVariant,
     ecdh: EcdhVariant,
+    rsa: RsaVariant,
 }
 
 /// Unwrap an entropy result: the WASI random source backing the guest's
@@ -1950,10 +1955,12 @@ options_resource! {
 }
 
 /// An exported `verifying-key`: public material bound to its algorithm
-/// (and, for ECDSA, its curve/digest variant) at minting. The ECDSA arms
-/// exist for *verification only* — secret-free, so exempt from the
-/// timing-channel classes; ECDSA signing is class D, and the shared core
-/// compiles no ECDSA signing code for wasm targets.
+/// (and its curve, digest, or salt-length parameterization) at minting.
+/// The ECDSA and RSA arms exist for *verification only* — secret-free, so
+/// exempt from the timing-channel classes; ECDSA signing is class D, its
+/// interface is not exported, and the shared core compiles no ECDSA
+/// signing code for wasm targets. The package defines no RSA private-key
+/// interface at all.
 pub struct VerifyingKey {
     public: SigPublic,
 }
@@ -1976,11 +1983,12 @@ impl GuestVerifyingKey for VerifyingKey {
         self.public.hash().map(str::to_string)
     }
 
+    fn algorithm_length(&self) -> Option<u32> {
+        self.public.length()
+    }
+
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
-        // The WIT `err` case exists for providers holding the key as an
-        // unreadable handle; this implementation holds the encoding
-        // in-process, so it never errs.
-        Ok(self.public.export())
+        Ok(self.public.export()?)
     }
 
     async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
@@ -2017,6 +2025,10 @@ impl GuestSigningKey for SigningKey {
 
     fn algorithm_hash(&self) -> Option<String> {
         self.material.hash().map(str::to_string)
+    }
+
+    fn algorithm_length(&self) -> Option<u32> {
+        self.material.length()
     }
 
     fn extractable(&self) -> bool {
@@ -2153,6 +2165,46 @@ impl EcdsaVerifyGuest for Component {
         jwk: String,
     ) -> Result<signature_iface::VerifyingKey, Error> {
         let public = SigPublic::import_ecdsa_jwk(variant.into(), &jwk)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+}
+
+// --- rsa (verification-key minting only; no RSA private-key interface exists) ----
+
+impl RsassaVerifyGuest for Component {
+    async fn import_verifying_key_spki(
+        variant: RsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_rsassa_spki(variant.into(), &spki)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_jwk(
+        variant: RsaVariant,
+        jwk: String,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_rsassa_jwk(variant.into(), &jwk)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+}
+
+impl RsaPssVerifyGuest for Component {
+    async fn import_verifying_key_spki(
+        variant: RsaVariant,
+        salt_length: u32,
+        spki: Vec<u8>,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_pss_spki(variant.into(), salt_length, &spki)?;
+        Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+
+    async fn import_verifying_key_jwk(
+        variant: RsaVariant,
+        salt_length: u32,
+        jwk: String,
+    ) -> Result<signature_iface::VerifyingKey, Error> {
+        let public = SigPublic::import_pss_jwk(variant.into(), salt_length, &jwk)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
     }
 }

@@ -51,4 +51,6 @@ world imports {
     import lann:webcrypto/ed25519-sign@0.1.0;
     import lann:webcrypto/ecdsa-verify@0.1.0;
     import lann:webcrypto/ecdsa-sign@0.1.0;
+    import lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    import lann:webcrypto/rsa-pss-verify@0.1.0;
 }
