@@ -55,11 +55,14 @@ interface ecdsa-verify {
     import-verifying-key-raw: async func(%variant: ecdsa-variant, raw: list<u8>) -> result<verifying-key, error>;
 
     /// Import a public key as an X.509 SubjectPublicKeyInfo (DER). The
-    /// encoded curve must match the declared variant's, or the import
-    /// fails with `error.invalid-key`; a point not on the curve is always
-    /// rejected. An uncompressed point is always accepted; whether a
-    /// *compressed* encoding is accepted is implementation-defined, as it
-    /// is across WebCrypto engines — do not rely on either behavior.
+    /// curve must be named by OID and must match the declared variant's,
+    /// or the import fails with `error.invalid-key`: an encoding that
+    /// carries explicit ECParameters instead of the named-curve OID is
+    /// rejected even when the parameters describe the variant's curve. A
+    /// point not on the curve is always rejected. An uncompressed point
+    /// is always accepted; whether a *compressed* encoding is accepted is
+    /// implementation-defined, as it is across WebCrypto engines — do not
+    /// rely on either behavior.
     import-verifying-key-spki: async func(%variant: ecdsa-variant, spki: list<u8>) -> result<verifying-key, error>;
 
     /// Import a public key as an EC JWK (`kty: "EC"`, with `crv`, `x`,
