@@ -16,27 +16,28 @@
 //     `wit/README.md`, "Unauthenticated modes are in, for compatibility";
 //     128- and 256-bit AES keys)
 //   - `deriveBits` / `deriveKey` (HKDF and PBKDF2 over SHA-1 and
-//     SHA-256/384/512; X25519 key agreement; derived-key targets HMAC
-//     over the same hashes and AES-GCM/CBC/CTR/KW)
+//     SHA-256/384/512; X25519 and ECDH P-256/P-384 key agreement;
+//     derived-key targets HMAC over the same hashes and
+//     AES-GCM/CBC/CTR/KW)
 //   - `wrapKey` / `unwrapKey`     (wrapping algorithms AES-KW (RFC 3394),
 //     AES-GCM, AES-CBC, AES-CTR, and ChaCha20-Poly1305; wrapped-key
 //     formats "raw"/"raw-secret"/"jwk" for the symmetric families and
-//     "pkcs8"/"jwk" for Ed25519 and X25519 private keys; unwrap targets
-//     additionally HKDF and PBKDF2, whose secrets can arrive wrapped and
-//     never surface)
+//     "pkcs8"/"jwk" for Ed25519, X25519, and ECDH private keys; unwrap
+//     targets additionally HKDF and PBKDF2, whose secrets can arrive
+//     wrapped and never surface)
 //   - `digest`                  (SHA-256/384/512; SHA-1 through the
 //     package's checked implementation — see the additive surface below)
 //   - `getRandomValues`         (from the host's `wasi:random` entropy)
 //   - `randomUUID`              (a version 4 UUID from the same entropy)
-//   - `generateKey`             (the secret-key algorithms, X25519, and
-//     Ed25519 pairs)
+//   - `generateKey`             (the secret-key algorithms and the
+//     X25519, ECDH, and Ed25519 pairs)
 //
 // The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
 // `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `aes-kw`,
 // `chacha20-poly1305`,
 // `wrapping`, `key-wrap`, `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
-// `key-agreement`, `x25519`,
+// `key-agreement`, `x25519`, `ecdh`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
 // `ed25519-sign`, and
 // `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
@@ -57,8 +58,8 @@
 // first-class design constraint":
 //
 //   - Unserved: beyond the algorithms above, everything throws
-//     `NotSupportedError` — including AES-192 (which every implementation
-//     of the package declines).
+//     `NotSupportedError` — including AES-192 and ECDH P-521 (both of
+//     which every implementation of the package declines).
 //   - Unserved: public-key wrapping. `wrapKey` on a public key (and the
 //     "spki" wrapped-key format) throws `NotSupportedError`: the WIT's
 //     public-key resources mint no `wrap-input` (the package's recorded
@@ -129,6 +130,7 @@ import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
 import * as pbkdf2Sha2Iface from "lann:webcrypto/pbkdf2-sha2@0.1.0";
 import * as pbkdf2Sha1Iface from "lann:webcrypto/pbkdf2-sha1@0.1.0";
 import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
+import * as ecdhIface from "lann:webcrypto/ecdh@0.1.0";
 import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
 import * as sha1CheckedIface from "lann:webcrypto/sha1-checked@0.1.0";
 import * as ed25519Verify from "lann:webcrypto/ed25519-verify@0.1.0";
@@ -584,6 +586,7 @@ const SERVED_ALGORITHMS = [
   "HKDF",
   "PBKDF2",
   "X25519",
+  "ECDH",
   "Ed25519",
   "ECDSA",
 ];
@@ -738,12 +741,13 @@ const USAGES = {
   "AES-KW": ["wrapKey", "unwrapKey"],
   // The proposal gives ChaCha20-Poly1305 the AEAD vocabulary AES-GCM has.
   "ChaCha20-Poly1305": ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
-  // The derive sources share WebCrypto's usage pair. X25519's entry is the
-  // *private* key's vocabulary; public keys carry no usages and are
-  // validated at their import site.
+  // The derive sources share WebCrypto's usage pair. The agreement
+  // entries (X25519, ECDH) are the *private* key's vocabulary; public
+  // keys carry no usages and are validated at their import site.
   HKDF: ["deriveKey", "deriveBits"],
   PBKDF2: ["deriveKey", "deriveBits"],
   X25519: ["deriveKey", "deriveBits"],
+  ECDH: ["deriveKey", "deriveBits"],
   // The signature vocabulary; which of it a given key *position* admits
   // (public keys verify only) is checked at the import and generate sites.
   Ed25519: ["sign", "verify"],
@@ -762,6 +766,34 @@ const ECDSA_CURVES = {
   "P-384": { tag: "p384", hash: "SHA-384" },
   "P-521": { tag: "p521", hash: "SHA-512" },
 };
+
+/**
+ * The WIT `ecdh-variant` tag for each `namedCurve`. P-521 is declared by
+ * the WIT and served by no implementation; it is passed through so the
+ * WIT's own `unsupported` renders it.
+ * @type {Readonly<Record<string, string | undefined>>}
+ */
+const ECDH_CURVES = {
+  "P-256": "p256",
+  "P-384": "p384",
+  "P-521": "p521",
+};
+
+/**
+ * The `namedCurve` and WIT `ecdh-variant` tag of an ECDH algorithm
+ * dictionary. A curve outside the WIT's enum is `NotSupportedError`, the
+ * spec's error for an unrecognized `namedCurve`.
+ * @param {NormalizedAlgorithm} alg
+ * @returns {{ namedCurve: string, tag: string }}
+ */
+function ecdhCurveOf(alg) {
+  const namedCurve = typeof alg.namedCurve === "string" ? alg.namedCurve : undefined;
+  const tag = namedCurve === undefined ? undefined : ECDH_CURVES[namedCurve];
+  if (namedCurve === undefined || tag === undefined) {
+    throw dom("NotSupportedError", `unsupported ECDH namedCurve ${alg.namedCurve}`);
+  }
+  return { namedCurve, tag };
+}
 
 /**
  * The WIT `ecdsa-variant` for a (curve, hash) pairing. The enum carries
@@ -1000,8 +1032,9 @@ function deriveMintOptions() {
 }
 
 /**
- * The `agreement-key-options` resource for an X25519 secret-key mint. Both
- * derive grants, like `deriveMintOptions`; `extractable` is recorded
+ * The `agreement-key-options` resource for an agreement secret-key mint
+ * (X25519, ECDH). Both derive grants, like `deriveMintOptions`;
+ * `extractable` is recorded
  * faithfully (the WIT keeps it as mint-time policy).
  * @param {boolean} extractable
  */
@@ -1017,32 +1050,41 @@ function agreementMintOptions(extractable) {
  * The WIT `derive-input` for one derive operation: the fully parameterized
  * derivation the spec's (baseKey, normalized params) pair denotes.
  *
- * For X25519 this is where the agreement runs (`agree` computes the shared
- * secret eagerly), so two spec-mandated errors surface here: an
- * algorithm-mismatched or non-public `public` member is `InvalidAccessError`
+ * For the agreements (X25519, ECDH) this is where the agreement runs
+ * (`agree` computes the shared secret eagerly), so two spec-mandated
+ * errors surface here: an algorithm-mismatched, curve-mismatched, or
+ * non-public `public` member is `InvalidAccessError`
  * (checked before the call, like the spec's derive-bits steps), and the
  * remaining `invalid-key` from `agree` is exactly the contributory all-zero
  * check, which the spec reports as `OperationError` — remapped from
  * `mapWitError`'s generic `DataError` because this call site knows which
- * check it is.
+ * check it is. (ECDH's strict imports reject degenerate peers at the
+ * mint, so only X25519's deliberately permissive import can reach it.)
  * @param {NormalizedAlgorithm} alg
  * @param {CryptoKey} baseKey narrowed by the caller's `requireKeyAlgorithm`
  * @returns {Promise<any>} a `derivation.derive-input` resource
  */
 async function prepareInput(alg, baseKey) {
-  if (alg.name === "X25519") {
+  if (alg.name === "X25519" || alg.name === "ECDH") {
     const peer = alg.public;
     if (!(peer instanceof CryptoKey)) {
-      throw new TypeError("X25519 derivation requires a CryptoKey as `public`");
+      throw new TypeError(`${alg.name} derivation requires a CryptoKey as \`public\``);
     }
     if (peer.type !== "public") {
       throw dom("InvalidAccessError", "the `public` member must be a public key");
     }
-    if (peer.algorithm.name !== "X25519") {
+    if (peer.algorithm.name !== alg.name) {
       throw dom(
         "InvalidAccessError",
-        `public key algorithm is ${peer.algorithm.name}, not X25519`,
+        `public key algorithm is ${peer.algorithm.name}, not ${alg.name}`,
       );
+    }
+    if (alg.name === "ECDH") {
+      const baseCurve = /** @type {EcKeyAlgorithm} */ (baseKey.algorithm).namedCurve;
+      const peerCurve = /** @type {EcKeyAlgorithm} */ (peer.algorithm).namedCurve;
+      if (peerCurve !== baseCurve) {
+        throw dom("InvalidAccessError", `public key curve is ${peerCurve}, not ${baseCurve}`);
+      }
     }
     try {
       return await callImport(handleOf(baseKey).agree(handleOf(peer)));
@@ -1390,6 +1432,65 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     return mintKey(handle, "private", { name: "X25519" }, !!extractable, usages);
   }
 
+  if (alg.name === "ECDH") {
+    const curve = ecdhCurveOf(alg);
+    /** @type {EcKeyAlgorithm} */
+    const projected = { name: "ECDH", namedCurve: curve.namedCurve };
+    if (format === "raw" || format === "spki") {
+      // Both byte-carried public formats: public keys carry no usages.
+      const requested = normalizeUsageSequence(keyUsages);
+      if (requested.length !== 0) {
+        throw dom("SyntaxError", "ECDH public keys take no usages");
+      }
+      const raw = bytesOf(keyData, "keyData");
+      const handle = await callImport(
+        format === "raw"
+          ? ecdhIface.importPublicKeyRaw(curve.tag, raw)
+          : ecdhIface.importPublicKeySpki(curve.tag, raw),
+      );
+      return mintKey(handle, "public", projected, !!extractable, []);
+    }
+    if (format === "pkcs8") {
+      const usages = normalizeUsages(keyUsages, "ECDH");
+      requireNonEmptyUsages(usages);
+      const handle = await callImport(
+        ecdhIface.importSecretKeyPkcs8(
+          curve.tag,
+          bytesOf(keyData, "keyData"),
+          agreementMintOptions(!!extractable),
+        ),
+      );
+      return mintKey(handle, "private", projected, !!extractable, usages);
+    }
+    if (typeof keyData !== "object" || keyData === null) {
+      throw new TypeError("JWK key data must be an object");
+    }
+    // A JWK carrying `d` is the private import; the `crv`-against-curve
+    // check (and `alg` being ignored, WebCrypto's ECDH-family rule) is
+    // the WIT import's own.
+    const jwk = /** @type {JsonWebKey} */ (keyData);
+    if (jwk.d === undefined) {
+      const requested = normalizeUsageSequence(keyUsages);
+      if (requested.length !== 0) {
+        throw dom("SyntaxError", "ECDH public keys take no usages");
+      }
+      const handle = await callImport(
+        ecdhIface.importPublicKeyJwk(curve.tag, jwkForImport(jwk, "enc", [])),
+      );
+      return mintKey(handle, "public", projected, !!extractable, []);
+    }
+    const usages = normalizeUsages(keyUsages, "ECDH");
+    requireNonEmptyUsages(usages);
+    const handle = await callImport(
+      ecdhIface.importSecretKeyJwk(
+        curve.tag,
+        jwkForImport(jwk, "enc", usages),
+        agreementMintOptions(!!extractable),
+      ),
+    );
+    return mintKey(handle, "private", projected, !!extractable, usages);
+  }
+
   if (alg.name === "Ed25519" || alg.name === "ECDSA") {
     /** @type {string | undefined} */
     let namedCurve;
@@ -1596,6 +1697,24 @@ async function generateKey(algorithm, extractable, keyUsages) {
       // Public keys are always extractable and carry no usages, as the
       // platform's generate steps set them.
       publicKey: mintKey(pair[1], "public", { name: "X25519" }, true, []),
+    };
+  }
+
+  if (alg.name === "ECDH") {
+    const curve = ecdhCurveOf(alg);
+    requireNonEmptyUsages(usages);
+    const pair = /** @type {[any, any]} */ (
+      await callImport(ecdhIface.generateKey(curve.tag, agreementMintOptions(!!extractable)))
+    );
+    /** @type {EcKeyAlgorithm} */
+    const privateAlgorithm = { name: "ECDH", namedCurve: curve.namedCurve };
+    /** @type {EcKeyAlgorithm} */
+    const publicAlgorithm = { name: "ECDH", namedCurve: curve.namedCurve };
+    return {
+      privateKey: mintKey(pair[0], "private", privateAlgorithm, !!extractable, usages),
+      // Public keys are always extractable and carry no usages, like
+      // X25519's.
+      publicKey: mintKey(pair[1], "public", publicAlgorithm, true, []),
     };
   }
 
@@ -2261,6 +2380,34 @@ async function mintUnwrapped(target, format, unwrapOnce, extractable, usageSeque
     return mintKey(handle, "private", { name: "X25519" }, extractable, usages);
   }
 
+  if (target.name === "ECDH") {
+    if (format !== "pkcs8" && format !== "jwk") {
+      // The public formats mint public keys, which is public-key
+      // unwrapping — unserved with public-key wrapping.
+      throw dom("NotSupportedError", "unwrapping public keys is not served");
+    }
+    const input = await unwrapOnce();
+    const usages = normalizeUsages(usageSequence, "ECDH");
+    requireNonEmptyUsages(usages);
+    const curve = ecdhCurveOf(target);
+    /** @type {EcKeyAlgorithm} */
+    const projected = { name: "ECDH", namedCurve: curve.namedCurve };
+    if (format === "pkcs8") {
+      const handle = await callImport(
+        ecdhIface.unwrapSecretKeyPkcs8(curve.tag, input, agreementMintOptions(extractable)),
+      );
+      return mintKey(handle, "private", projected, extractable, usages);
+    }
+    // The JWK mint's grants mirror the requested usages exactly, like the
+    // X25519 JWK unwrap above (the WIT's unwrap-path `key_ops` check).
+    const options = new AgreementKeyOptions();
+    options.canDeriveBits(usages.includes("deriveBits"));
+    options.canDeriveKey(usages.includes("deriveKey"));
+    options.extractable(extractable);
+    const handle = await callImport(ecdhIface.unwrapSecretKeyJwk(curve.tag, input, options));
+    return mintKey(handle, "private", projected, extractable, usages);
+  }
+
   if (target.name === "Ed25519" || target.name === "ECDSA") {
     if (target.name === "ECDSA") {
       // Unserved by composition, like the import (see the header).
@@ -2423,11 +2570,12 @@ async function deriveBits(algorithm, baseKey, length) {
   }
   if (bits % 8 !== 0) {
     // Sub-byte lengths: the KDFs reject them (the platform's own rule),
-    // and X25519 truncates with the trailing bits of the final byte
-    // zeroed. The WIT serves byte multiples and documents truncation as
+    // and the agreements (X25519, ECDH) truncate with the trailing bits
+    // of the final byte zeroed. The WIT serves byte multiples and
+    // documents truncation as
     // the consumer's (`derive-bits` doc), so the containing byte multiple
     // is derived and masked here.
-    if (alg.name !== "X25519") {
+    if (alg.name !== "X25519" && alg.name !== "ECDH") {
       throw dom("OperationError", `derive length must be a multiple of 8 bits, got ${bits}`);
     }
     const bytes = /** @type {Uint8Array} */ (

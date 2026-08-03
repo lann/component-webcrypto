@@ -10,7 +10,7 @@ package demo:componentize-webcrypto-demo@0.1.0;
 /// `js/componentize/`: it imports exactly the `lann:webcrypto` surface the
 /// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
 /// `aes-gcm`/`aead`, ChaCha20-Poly1305 via `chacha20-poly1305`/`aead`, and the derive model via `derivation`/`hkdf`/`pbkdf2`/
-/// `key-agreement`/`x25519`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the
+/// `key-agreement`/`x25519`/`ecdh`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the
 /// Rust `crypto-demo` guest, so the existing `crypto-demo-driver` can drive
 /// it.
 world componentize-demo {
@@ -37,6 +37,7 @@ world componentize-demo {
     import lann:webcrypto/pbkdf2-sha1@0.1.0;
     import lann:webcrypto/key-agreement@0.1.0;
     import lann:webcrypto/x25519@0.1.0;
+    import lann:webcrypto/ecdh@0.1.0;
     import lann:webcrypto/digest@0.1.0;
     import lann:webcrypto/sha2@0.1.0;
     @unstable(feature = sha1-checked)

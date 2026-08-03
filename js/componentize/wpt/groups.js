@@ -163,13 +163,12 @@ function classDGatedInSubset() {
 }
 
 /**
- * derive_bits_keys/cfrg_curves_bits (X25519): served except "mismatched
- * algorithms", whose fixture needs an imported ECDH public key (null
- * here, so the failure is the wrong `TypeError`).
- * @param {string} name
+ * derive_bits_keys/cfrg_curves_bits (X25519): served in whole — the
+ * "mismatched algorithms" fixture is an imported ECDH public key, which
+ * the library serves.
  */
-function cfrgBitsInSubset(name) {
-  return !name.includes("mismatched algorithms");
+function cfrgBitsInSubset() {
+  return true;
 }
 
 /**
@@ -193,11 +192,11 @@ function okpEd25519FailuresInSubset() {
  * derivations over importable base secrets, with derived-key targets the
  * WIT's `derive-key` mints span (AES-GCM 256, HMAC-SHA-256).
  *
- * Excluded, in match order: subtests needing an ECDH key (`generateKey`
- * does not serve ECDH, so the fixture is null), and unserved derived-key
- * targets. The SHA-1 rows are served (the `hkdf-sha1`/`pbkdf2-sha1`
- * interfaces), and so is the empty HKDF base key (empty KDF secrets are
- * accepted package-wide — see `wit/README.md`, "Empty KDF secrets are
+ * Excluded: unserved derived-key targets. The SHA-1 rows are served
+ * (the `hkdf-sha1`/`pbkdf2-sha1`
+ * interfaces), the wrong-key rows' fixture (a generated ECDH private
+ * key) is served, and so is the empty HKDF base key (empty KDF secrets
+ * are accepted package-wide — see `wit/README.md`, "Empty KDF secrets are
  * accepted").
  *
  * The exclusions are whole-row, so the census pins a large `outPassed`
@@ -211,9 +210,6 @@ function okpEd25519FailuresInSubset() {
 function kdfDeriveInSubset(name) {
   if (name === "setup - define tests") {
     return true;
-  }
-  if (name.includes("wrong (ECDH) key")) {
-    return false;
   }
   if (name.startsWith("Derived key of type")) {
     const served =
@@ -232,30 +228,39 @@ function kdfDeriveInSubset(name) {
 /**
  * derive_bits_keys/derived_bits_length: the `length` parameter's edge
  * semantics — explicit sizes, zero (an empty output), sub-byte lengths
- * (the KDFs reject, X25519 truncates and masks), and null/undefined/
- * omitted (the KDFs reject, an agreement yields its natural output) —
- * for the served HKDF, PBKDF2, and X25519 rows. The ECDH rows need a
- * P-curve agreement no implementation serves.
- * @param {string} name
+ * (the KDFs reject, the agreements truncate and mask), and null/
+ * undefined/omitted (the KDFs reject, an agreement yields its natural
+ * output) — for the served HKDF, PBKDF2, X25519, and ECDH rows: the
+ * whole group.
  */
-function derivedBitsLengthInSubset(name) {
-  return !name.startsWith("ECDH");
+function derivedBitsLengthInSubset() {
+  return true;
 }
 
 /**
- * import_export/ec_importKey: the public ECDSA P-256/P-384 forms are
- * served — raw and spki uncompressed points and public EC JWKs. Out: the
+ * import_export/ec_importKey: the ECDSA P-256/P-384 public forms are
+ * served — raw and spki uncompressed points and public EC JWKs — and
+ * every ECDH P-256/P-384 form: those public forms plus the private
+ * pkcs8 and JWK-with-`d` forms (ECDH private import is served, unlike
+ * ECDSA's class-D-blocked private forms; the "ECDH any JWK alg" rows
+ * ride the served JWK forms — `alg` is ignored for the ECDH family).
+ * Out: the
  * compressed-point rows (an optional feature: `assert_implements_optional`
  * is a failure in this two-status harness, and whether the WIT spki
  * import accepts compression is implementation-defined — the composed
- * provider happens to, which the census pins as `outPassed`), the private
- * forms (pkcs8 and JWKs carrying `d` — class D, see the shim header),
- * P-521 (declared by the WIT and served by nothing), and ECDH (not an
- * algorithm here at all).
+ * provider happens to, which the census pins as `outPassed`), ECDSA's
+ * private forms (pkcs8 and JWKs carrying `d` — class D, see the shim
+ * header), and P-521 (declared by the WIT and served by nothing).
  * @param {string} name
  */
 function ecImportInSubset(name) {
-  if (!name.includes("name: ECDSA") || name.includes("P-521") || name.includes("compressed")) {
+  if (name.includes("P-521") || name.includes("compressed")) {
+    return false;
+  }
+  if (name.includes("name: ECDH")) {
+    return true;
+  }
+  if (!name.includes("name: ECDSA")) {
     return false;
   }
   return !name.includes("(pkcs8") && !name.includes(", d)");
@@ -333,9 +338,10 @@ function okpImportFailuresInSubset() {
 /**
  * wrapKey_unwrapKey: every combination whose wrapping algorithm and
  * wrapped-key family the library serves — the symmetric families (HMAC,
- * AES-GCM/CBC/CTR/KW, ChaCha20-Poly1305) plus Ed25519 and X25519
+ * AES-GCM/CBC/CTR/KW, ChaCha20-Poly1305) plus Ed25519, X25519, and ECDH
  * *private* keys, under the AES and ChaCha wrappers. Out of the subset:
- * the RSA-OAEP wrapper (unserved algorithm) and every public-key wrap
+ * the RSA-OAEP wrapper (unserved algorithm), the RSA and ECDSA wrappee
+ * rows (unserved family; class D), and every public-key wrap
  * (the WIT's public-key resources mint no wrap-input; see the library
  * header's deviations list).
  * @param {string} name
@@ -344,7 +350,7 @@ function wrapKeyInSubset(name) {
   if (name === "setup") {
     return true;
   }
-  if (/RSA|ECDSA|ECDH/.test(name)) {
+  if (/RSA|ECDSA/.test(name)) {
     return false;
   }
   return !/public key/.test(name);
