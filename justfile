@@ -389,6 +389,56 @@ wpt-parity-webkit: (_wpt-parity-browser-run "webkit")
 # CI job's engine); a Linux-port recording would pin the wrong backend.
 update-wpt-parity-webkit: (_wpt-parity-browser-run "webkit" "--update")
 
+# Re-record js/componentize/wpt/parity/losses-webkit.js without a mac: pull
+# the comparator's inputs from a CI run's wpt-parity-webkit-records
+# artifact (uploaded pass or fail) and run the update comparison locally.
+# Defaults to the current branch's most recent completed CI run; pass a
+# run id to pick a specific one. Needs `gh` authenticated to the repo.
+update-wpt-parity-webkit-from-ci run_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    run="{{run_id}}"
+    if [ -z "$run" ]; then
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        run=$(gh run list --workflow ci.yml --branch "$branch" --limit 20 \
+            --json databaseId,status \
+            --jq '[.[] | select(.status == "completed")][0].databaseId // empty')
+        if [ -z "$run" ]; then
+            echo "no completed CI run found for branch $branch" >&2
+            exit 1
+        fi
+    fi
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    gh run download "$run" --name wpt-parity-webkit-records --dir "$tmp"
+    node js/componentize/wpt/parity/compare.mjs \
+        "$tmp/parity-baseline-webkit.json" \
+        "$tmp/parity-roundtrip-webkit.json" \
+        --losses losses-webkit.js --update
+    git --no-pager diff --stat -- js/componentize/wpt/parity/losses-webkit.js
+
+# Predict js/componentize/wpt/parity/losses-webkit.js from the Chromium
+# delta: apply this branch's losses-chromium.js changes (working tree vs
+# the merge base with origin/main) to the WebKit ratchet as set
+# operations. A shim change's loss-set movement is usually engine-generic,
+# so after `just update-wpt-parity-chromium` this often lands the WebKit
+# re-record without waiting for CI. The guess is safe: the gate is
+# two-sided, so a miss fails the next CI run like any stale ratchet (then
+# fall back to `just update-wpt-parity-webkit-from-ci`), and a green run
+# verifies the predicted set exactly as it would a recorded one.
+predict-wpt-parity-webkit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base=$(git merge-base HEAD origin/main)
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    git show "$base:js/componentize/wpt/parity/losses-chromium.js" > "$tmp/old-losses-chromium.js"
+    node js/componentize/wpt/parity/predict.mjs \
+        "$tmp/old-losses-chromium.js" \
+        js/componentize/wpt/parity/losses-chromium.js \
+        js/componentize/wpt/parity/losses-webkit.js
+    git --no-pager diff --stat -- js/componentize/wpt/parity/losses-webkit.js
+
 # Build everything the browser WPT parity page (js/componentize/wpt/web/)
 # loads: the suite modules under build/, the web transpile of the parity
 # runner under parity/generated-web/, and the preview2-shim browser build.
