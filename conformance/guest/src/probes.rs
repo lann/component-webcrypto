@@ -167,8 +167,9 @@ async fn gcm_any_iv_declined() -> Result<String, String> {
 }
 
 /// Assert that every ChaCha20-Poly1305 minting path declines
-/// `unsupported`: raw import, generation, the JWK import, and the two
-/// unwrap mints.
+/// `unsupported`: raw import, generation, the JWK import, and the raw
+/// unwrap mint (the JWK unwrap mint's decline is unobservable — see the
+/// comment at its absence below).
 async fn chacha_minting_declined() -> Result<String, String> {
     minting_declined_for(FEATURE_CHACHA).await?;
     expect_err(
@@ -188,16 +189,13 @@ async fn chacha_minting_declined() -> Result<String, String> {
         .await,
         "minted a key: the target serves a feature it declares missing",
     )?;
-    expect_err(
-        "chacha20-poly1305 unwrap-key-jwk",
-        ErrKind::Unsupported,
-        lann_webcrypto_guest::bindings::chacha20_poly1305::unwrap_key_jwk(
-            unwrap_input_of_32_bytes().await?,
-            crate::mint::aead_options(false),
-        )
-        .await,
-        "minted a key: the target serves a feature it declares missing",
-    )?;
+    // `unwrap-key-jwk` has no decline assertion: no feature-independent
+    // payload isolates the support condition. An unwrap-input carrying a
+    // ChaCha-valid JWK can only be minted from a ChaCha key, which a
+    // declining target cannot produce, and any other payload draws
+    // `invalid-key` from format validation on serving and declining
+    // targets alike — the WIT does not order `invalid-key` against
+    // `unsupported`, so that answer proves nothing about service.
     Ok("every ChaCha20-Poly1305 minting path declined unsupported".into())
 }
 
