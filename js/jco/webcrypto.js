@@ -2126,8 +2126,66 @@ async function importEcdhPublicKey(variant, raw) {
 }
 
 /**
- * Import an ECDH public key from a SubjectPublicKeyInfo — a platform
- * pass-through; the platform validates the DER, rejects a curve that
+ * The DER AlgorithmIdentifier TLV an EC SubjectPublicKeyInfo must open
+ * with, per served curve: `SEQUENCE { id-ecPublicKey, <named-curve OID> }`
+ * (`1.2.840.10045.2.1` plus `1.2.840.10045.3.1.7` for P-256, `1.3.132.0.34`
+ * for P-384).
+ * @type {Readonly<Record<string, Uint8Array>>}
+ */
+const EC_SPKI_ALGORITHM_IDENTIFIERS = Object.assign(Object.create(null), {
+  // 301306072a8648ce3d020106082a8648ce3d030107
+  "P-256": Uint8Array.from([
+    0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48,
+    0xce, 0x3d, 0x03, 0x01, 0x07,
+  ]),
+  // 301006072a8648ce3d020106052b81040022
+  "P-384": Uint8Array.from([
+    0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x05, 0x2b, 0x81, 0x04,
+    0x00, 0x22,
+  ]),
+});
+
+/**
+ * Guard: rejects an EC SubjectPublicKeyInfo whose AlgorithmIdentifier is
+ * not the declared curve's named-OID form before the platform sees it.
+ * Platform engines split on explicit-ECParameters ("unnamed curve")
+ * encodings — some admit equivalent groups under their own validation —
+ * and the WIT pins their rejection as `invalid-key`, so this catches the
+ * encodings the local platform would otherwise admit (it also enforces the
+ * curve-matches-variant contract before the platform does). The check is
+ * shallow and fail-closed: one DER length decode (the outer SEQUENCE
+ * header, short and long form), then a byte-compare of the next TLV
+ * against the constant. It can only over-reject — whatever it passes still
+ * gets the platform's full DER validation, and it never admits or
+ * transforms material the platform would refuse. The Wycheproof
+ * `UnnamedCurve` family (the conformance ECDH suites) is its vector
+ * coverage.
+ * @param {string} namedCurve
+ * @param {Uint8Array} spki
+ */
+function requireNamedCurveSpki(namedCurve, spki) {
+  const algorithm = EC_SPKI_ALGORITHM_IDENTIFIERS[namedCurve];
+  let offset = 0;
+  if (spki.length >= 2 && spki[0] === 0x30) {
+    const first = spki[1];
+    if (first < 0x80) {
+      offset = 2;
+    } else if (first === 0x81 && spki.length >= 3 && spki[2] >= 0x80) {
+      offset = 3;
+    } else if (first === 0x82 && spki.length >= 4 && spki[2] !== 0) {
+      offset = 4;
+    }
+  }
+  if (offset === 0 || !algorithm.every((byte, i) => spki[offset + i] === byte)) {
+    throw errInvalidKey(`${namedCurve} SPKI must name the curve by OID`);
+  }
+}
+
+/**
+ * Import an ECDH public key from a SubjectPublicKeyInfo. The
+ * AlgorithmIdentifier must be the declared curve's named-OID form (see
+ * `requireNamedCurveSpki`); past that check the import is a platform
+ * pass-through — the platform validates the DER, rejects a curve that
  * disagrees with the declared variant's, and rejects a point not on the
  * curve.
  * @param {string} variant
@@ -2135,6 +2193,7 @@ async function importEcdhPublicKey(variant, raw) {
  */
 async function importEcdhPublicKeySpki(variant, spki) {
   const entry = ecdhCurve(variant);
+  requireNamedCurveSpki(entry.namedCurve, spki);
   const key = await importPlatformKey(
     `${variant} spki`,
     "spki",
@@ -4926,14 +4985,17 @@ async function importEcdsaVerifyingKey(variant, raw) {
 }
 
 /**
- * Import an ECDSA public key from a SubjectPublicKeyInfo — a platform
- * pass-through; the platform validates the DER and rejects a curve that
+ * Import an ECDSA public key from a SubjectPublicKeyInfo. The
+ * AlgorithmIdentifier must be the declared curve's named-OID form (see
+ * `requireNamedCurveSpki`); past that check the import is a platform
+ * pass-through — the platform validates the DER and rejects a curve that
  * disagrees with the declared variant's.
  * @param {string} variant
  * @param {Uint8Array} spki
  */
 async function importEcdsaVerifyingKeySpki(variant, spki) {
   const entry = ecdsaVariant(variant);
+  requireNamedCurveSpki(entry.namedCurve, spki);
   const key = await importPlatformKey(
     `${variant} spki`,
     "spki",

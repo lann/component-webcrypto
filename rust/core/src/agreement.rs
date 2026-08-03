@@ -976,6 +976,32 @@ mod tests {
         }
     }
 
+    /// An SPKI that carries explicit ECParameters instead of the
+    /// named-curve OID fails `InvalidKey`, even when the parameters
+    /// describe the declared curve (the `import-public-key-spki`
+    /// contract). The vector is Wycheproof `ecdh_secp256r1_test` tc362: a
+    /// valid P-256 point whose SPKI spells out P-256's own parameters
+    /// (cofactor omitted), which named-OID-only admission still rejects.
+    #[test]
+    fn ecdh_spki_explicit_parameters_rejected() {
+        let spki = unhex(concat!(
+            "308201303081e906072a8648ce3d02013081dd020101302c06072a8648ce3d01",
+            "01022100ffffffff00000001000000000000000000000000ffffffffffffffff",
+            "ffffffff30440420ffffffff00000001000000000000000000000000ffffffff",
+            "fffffffffffffffc04205ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53",
+            "b0f63bce3c3e27d2604b0441046b17d1f2e12c4247f8bce6e563a440f277037d",
+            "812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33",
+            "576b315ececbb6406837bf51f5022100ffffffff00000000ffffffffffffffff",
+            "bce6faada7179e84f3b9cac2fc632551034200041510264c189c3d523ff9916a",
+            "bd7069efa6968d8dc7ddb6457d7869b53ea60cdcfafb7ed4786da15d29ee5925",
+            "6f536da3575a4888c1bb0a95b256f4a7e9fd764a",
+        ));
+        assert!(matches!(
+            AgreementPublicMaterial::import_ecdh_spki(EcdhVariant::P256, &spki),
+            Err(Error::InvalidKey(_))
+        ));
+    }
+
     /// ECDH agreed inputs carry the natural length (the curve's field
     /// size) with the same truncation semantics as X25519's.
     #[test]

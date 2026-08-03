@@ -1042,24 +1042,23 @@ fn normalize_scalar(field: &str, scalar: &[u8], size: usize) -> Vec<u8> {
 ///   point) also expects `invalid-key`: upstream marks compressed
 ///   admission policy-divergent, but the WIT pins the raw format to
 ///   uncompressed-only.
-/// - In the asn files, `acceptable` vectors and every vector flagged
-///   `UnnamedCurve` (explicit-parameter encodings, whatever upstream's
-///   verdict) are **excluded**: their acceptance is legitimately
-///   policy-divergent across implementations. The WIT deliberately
-///   leaves compressed-SPKI admission implementation-defined, ASN.1/BER
-///   strictness differs across the platform engines the jco host
-///   delegates to, and explicit-parameter admission — including how
-///   strictly the parameters are validated — is per-engine policy:
-///   RustCrypto and BoringSSL reject the encoding outright, while
-///   OpenSSL accepts equivalent groups validated to its own notion (an
-///   absent or wrong cofactor passes, being mathematically redundant for
-///   these prime-order curves, while a modified prime or zero order
-///   fails). Upstream's invalid/acceptable split within the family
-///   encodes its reference notion of unambiguous group specification,
-///   not a boundary engines share, so no single expectation holds across
-///   targets. The invalid-curve attacks, off-curve points, and
-///   wrong-curve rejections stay pinned through the named-curve SPKI
-///   cases and the ecpoint/webcrypto files.
+/// - In the asn files, every vector flagged `UnnamedCurve` (an
+///   explicit-parameter encoding, whatever upstream's verdict) expects
+///   `invalid-key`: the WIT pins named-OID-only curve admission, so the
+///   whole family rejects on every implementation — including the
+///   encodings whose parameters describe the declared curve, where
+///   upstream's verdict splits on its own notion of parameter
+///   validation.
+/// - The asn files' remaining `acceptable` vectors (the `InvalidAsn`
+///   BER-laxity family and the compressed-point encoding) are
+///   **excluded**: their acceptance is legitimately policy-divergent
+///   across implementations. The WIT deliberately leaves compressed-SPKI
+///   admission implementation-defined, and ASN.1/BER strictness beyond
+///   the documented shape differs across the platform engines the jco
+///   host delegates to, so no single expectation holds across targets.
+///   The invalid-curve attacks, off-curve points, and wrong-curve
+///   rejections stay pinned through the named-curve SPKI cases and the
+///   ecpoint/webcrypto files.
 pub fn ecdh_cases() -> Vec<EcdhCase> {
     let mut cases = Vec::new();
     for (curve, encoding, text, companion) in ECDH_VECTORS {
@@ -1099,12 +1098,9 @@ pub fn ecdh_cases() -> Vec<EcdhCase> {
                 for group in &file.test_groups {
                     for test in &group.tests {
                         let field = format!("{} tc{}", curve.name(), test.tc_id);
-                        if matches!(encoding, EcdhFileEncoding::Spki)
-                            && test.flags.iter().any(|flag| flag == "UnnamedCurve")
-                        {
-                            continue;
-                        }
+                        let unnamed_curve = test.flags.iter().any(|flag| flag == "UnnamedCurve");
                         let reject_public = match (test.result.as_str(), encoding) {
+                            _ if unnamed_curve => true,
                             ("valid", _) => false,
                             ("invalid", _) => true,
                             ("acceptable", EcdhFileEncoding::Ecpoint) => true,
