@@ -15,6 +15,9 @@ world lab {
     import lann:webcrypto/bytes@0.1.0;
     import lann:webcrypto/hmac-sha2@0.1.0;
     import lann:webcrypto/aes-gcm@0.1.0;
+    import lann:webcrypto/key-agreement@0.1.0;
+    import lann:webcrypto/x25519@0.1.0;
+    import lann:webcrypto/ecdh@0.1.0;
     @unstable(feature = chacha20-poly1305)
     import lann:webcrypto/chacha20-poly1305@0.1.0;
 }

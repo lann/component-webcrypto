@@ -1891,6 +1891,7 @@ name = "timing-lab"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "hex-literal",
  "subtle",
  "wasip3",
  "wit-bindgen 0.57.1",
