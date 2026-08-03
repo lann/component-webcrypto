@@ -52,6 +52,18 @@ commit
   and DigestInfo malleation). The 2048/SHA-256 file's e = 3 groups pin
   the guaranteed-import exponent floor; the 8192-bit file pins
   large-modulus admission inside the family's 1024–16384-bit window.
+- `rsa_pkcs1_{2048,3072,4096}_sig_gen_test.json` — RSASSA-PKCS1-v1_5
+  signature-*generation* vectors: EMSA-PKCS1-v1_5 is deterministic, so
+  signing under the group's private key (`privateKeyPkcs8`, and its
+  full-CRT `privateKeyJwk` on the JWK path) byte-compares against the
+  published signatures. These run in the host-only signing suite
+  (`conformance/signing-guest`), tagged `rsa-sign` — the gated signing
+  interfaces are class D, so the shared guest cannot import them. There
+  are no RSA-PSS generation files: PSS salts are random, so PSS signing
+  is covered by round-trip probes instead. The 1024-bit sibling file is
+  deliberately not vendored — its keys sit below the signing interfaces'
+  2048-bit floor — but its SHA-256 group's `privateKeyPkcs8` is embedded
+  in the signing guest's admission probe as the must-reject constant.
 - `rsa_pss_2048_sha256_mgf1_0_test.json`,
   `rsa_pss_2048_sha256_mgf1_32_test.json`,
   `rsa_pss_2048_sha384_mgf1_48_test.json`,
@@ -149,7 +161,9 @@ Wycheproof describes the *algorithms*; the `lann:webcrypto` WIT is
 deliberately stricter in places, so vector expectations are translated into
 the package's contract before execution. This mapping is versioned
 conformance policy; change it deliberately and in review. The authoritative
-encoding is `conformance/guest/src/translate.rs`; in summary:
+encoding is `conformance/guest/src/translate.rs` (and
+`conformance/signing-guest/src/rsa_sign.rs` for the sig-gen files, which
+only the host-only signing suite can run); in summary:
 
 | Vector property | Our expectation |
 | --- | --- |
@@ -178,6 +192,8 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | RSASSA-PKCS1-v1_5 / RSA-PSS, `invalid` | import succeeds (the same group key, via SPKI only — the rejection under test is the verifier's, not the import path's); `verify(sig)` fails `authentication-failed`. |
 | RSASSA-PKCS1-v1_5, `acceptable` (the `MissingNull` BER-laxity vectors) | `verify(sig)` fails `authentication-failed`: the WIT pins strict verification — the EMSA-PKCS1-v1_5 encoding is compared byte-exact — so upstream's lax-verifier allowances are uniform rejections here. Any target accepting one is a portability finding, not a case to exclude. |
 | `rsa_pss_2048_sha256_mgf1_32_params_test.json` (id-RSASSA-PSS keys), every case | the SPKI import fails `invalid-key` — the RSA family contract admits only `rsaEncryption` SubjectPublicKeyInfos. Coverage is SPKI-only: the file carries no JWKs, and a plain RSA public JWK has no member that could carry the PSS AlgorithmIdentifier, so no JWK-side counterpart exists. No chunking schedules: import carries no streams. |
+| RSASSA-PKCS1-v1_5 sig-gen, SHA-1 or SHA-224 group | **Skipped** — the `rsa-variant` set has no SHA-1 or SHA-224 case (SHA-1's collision resistance is broken, and no platform WebCrypto serves SHA-224), so the keys cannot mint. |
+| RSASSA-PKCS1-v1_5 sig-gen, SHA-256/384/512 group, `valid` or `acceptable` | signing `msg` under the group's private key produces exactly `sig` (deterministic EMSA-PKCS1-v1_5). Each vector translates **twice** — once importing the key via PKCS#8 (`tc<id>-pkcs8`, message delivered whole), once via the group's own full-CRT private JWK (`tc<id>-jwk`, one-byte writes) — so both signing-import paths and two chunking schedules carry vector coverage. `acceptable` translates identically to `valid`: every such vector is flagged `SmallPublicKey` (e = 3), inside the family's guaranteed-import exponent floor, and generation is deterministic regardless of the exponent. Tagged `rsa-sign` (the gated feature), so targets declaring it missing skip these and prove the decline through the signing suite's probes. |
 | X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
 | X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
 | ECDH (any file), `valid` | the public import (per the file's encoding: raw / SPKI / JWK) and `import-secret-key-jwk` (the webcrypto files' own private JWK, or one built from the normalized scalar plus the derived `x`/`y` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. Scalars are normalized to the curve's field size (the files' big-endian hex may carry a leading zero byte or be short). No chunking schedules: agreement carries no streams. |

@@ -55,7 +55,9 @@ import {
   pbkdf2,
   pbkdf2Sha1,
   pbkdf2Sha2,
+  rsaPssSign,
   rsaPssVerify,
+  rsassaPkcs1V15Sign,
   rsassaPkcs1V15Verify,
   hmacSha1,
   hmacSha2,
@@ -253,6 +255,12 @@ const rsassaPkcs1V15VerifyInterface = rsassaPkcs1V15Verify;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-verify.js")} */
 const rsaPssVerifyInterface = rsaPssVerify;
 
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsassa-pkcs1-v15-sign.js")} */
+const rsassaPkcs1V15SignInterface = rsassaPkcs1V15Sign;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-sign.js")} */
+const rsaPssSignInterface = rsaPssSign;
+
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
 const x25519Interface = x25519;
 
@@ -318,6 +326,8 @@ export const checked = {
   ecdsaSignInterface,
   rsassaPkcs1V15VerifyInterface,
   rsaPssVerifyInterface,
+  rsassaPkcs1V15SignInterface,
+  rsaPssSignInterface,
   x25519Interface,
   ecdhInterface,
 };

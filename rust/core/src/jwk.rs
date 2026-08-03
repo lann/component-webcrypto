@@ -356,6 +356,119 @@ pub fn build_rsa_public(n: &[u8], e: &[u8]) -> String {
     .to_string()
 }
 
+/// The decoded members of an RSA private JWK (RFC 7518 §6.3.2): the public
+/// pair, the private exponent, and the CRT members, which the platforms
+/// require of private RSA JWKs.
+///
+/// Unused on wasm targets: the sole consumer is RSA private import, whose
+/// code is compiled out there (class D — see the crate doc).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub struct RsaPrivateJwk {
+    pub n: Vec<u8>,
+    pub e: Vec<u8>,
+    pub d: zeroize::Zeroizing<Vec<u8>>,
+    pub p: zeroize::Zeroizing<Vec<u8>>,
+    pub q: zeroize::Zeroizing<Vec<u8>>,
+    pub dp: zeroize::Zeroizing<Vec<u8>>,
+    pub dq: zeroize::Zeroizing<Vec<u8>>,
+    pub qi: zeroize::Zeroizing<Vec<u8>>,
+}
+
+/// The fixed message a private RSA JWK missing a CRT member renders: the
+/// platforms serve only the full two-prime CRT form (RFC 7518 §6.3.2's
+/// first-representation members), so `p`, `q`, `dp`, `dq`, and `qi` are
+/// all required.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+const RSA_CRT_REQUIRED: &str = "private RSA JWKs carry the CRT parameters";
+
+/// Parse an RSA *private* JWK (RFC 7518 §6.3.2: `kty`, `n`, `e`, `d`, and
+/// the CRT members `p`/`q`/`dp`/`dq`/`qi`, all required), validated
+/// against `allowed_algs` (see `check_alg`) and the requested
+/// extractability, returning the decoded members (every failure is
+/// `invalid-key`). A present `oth` member — the multi-prime form — is
+/// `unsupported`, as on the platforms. Value-level admission — the
+/// modulus window, the exponent floor, member consistency — stays with
+/// the caller.
+///
+/// Unused on wasm targets, like [`RsaPrivateJwk`].
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub fn parse_rsa_private(
+    jwk: &str,
+    extractable: bool,
+    allowed_algs: Option<&[&str]>,
+) -> Result<RsaPrivateJwk, Error> {
+    let jwk = parse_object(jwk)?;
+    require_kty(&jwk, "RSA")?;
+    check_alg(&jwk, allowed_algs)?;
+    check_ext(&jwk, extractable)?;
+    if jwk.get("oth").is_some() {
+        return Err(Error::Unsupported(
+            "multi-prime RSA JWKs are not supported".into(),
+        ));
+    }
+    let Some(Value::String(n)) = jwk.get("n") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `n` (base64url modulus)".into(),
+        ));
+    };
+    let Some(Value::String(e)) = jwk.get("e") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `e` (base64url public exponent)".into(),
+        ));
+    };
+    let Some(Value::String(d)) = jwk.get("d") else {
+        return Err(Error::InvalidKey(
+            "RSA private JWK must carry `d` (base64url private exponent)".into(),
+        ));
+    };
+    let crt = |name: &str| -> Result<zeroize::Zeroizing<Vec<u8>>, Error> {
+        let Some(Value::String(member)) = jwk.get(name) else {
+            return Err(Error::InvalidKey(RSA_CRT_REQUIRED.into()));
+        };
+        Ok(zeroize::Zeroizing::new(decode_member(name, member)?))
+    };
+    Ok(RsaPrivateJwk {
+        n: decode_member("n", n)?,
+        e: decode_member("e", e)?,
+        d: zeroize::Zeroizing::new(decode_member("d", d)?),
+        p: crt("p")?,
+        q: crt("q")?,
+        dp: crt("dp")?,
+        dq: crt("dq")?,
+        qi: crt("qi")?,
+    })
+}
+
+/// Build the RSA private JWK (RFC 7518 §6.3.2): the public members plus
+/// the private exponent and the CRT members, all minimal big-endian.
+/// Unused on wasm targets: the sole caller is RSA private export, whose
+/// code is compiled out there (class D — see the crate doc).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+pub fn build_rsa_private(
+    n: &[u8],
+    e: &[u8],
+    d: &[u8],
+    p: &[u8],
+    q: &[u8],
+    dp: &[u8],
+    dq: &[u8],
+    qi: &[u8],
+) -> String {
+    serde_json::json!({
+        "kty": "RSA",
+        "n": BASE64URL_NOPAD.encode(strip_leading_zeros(n)),
+        "e": BASE64URL_NOPAD.encode(strip_leading_zeros(e)),
+        "d": BASE64URL_NOPAD.encode(strip_leading_zeros(d)),
+        "p": BASE64URL_NOPAD.encode(strip_leading_zeros(p)),
+        "q": BASE64URL_NOPAD.encode(strip_leading_zeros(q)),
+        "dp": BASE64URL_NOPAD.encode(strip_leading_zeros(dp)),
+        "dq": BASE64URL_NOPAD.encode(strip_leading_zeros(dq)),
+        "qi": BASE64URL_NOPAD.encode(strip_leading_zeros(qi)),
+    })
+    .to_string()
+}
+
 /// `bytes` without its leading zero octets.
 fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
     let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());

@@ -698,6 +698,74 @@ pub fn unwrap_ecdsa_signing_key_jwk(
     )
 }
 
+/// `rsassa-pkcs1-v15-sign.unwrap-signing-key-pkcs8`. Class D: like the
+/// imports it reuses, compiled only where RSA signing is (see the crate
+/// doc).
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_rsassa_signing_key_pkcs8(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: SigningPolicy,
+) -> Result<SigningKeyMaterial, Error> {
+    redact_invalid_key(
+        "RSA PKCS#8 key",
+        SigningKeyMaterial::import_rsassa_pkcs8(variant, &input.into_bytes(), policy),
+    )
+}
+
+/// `rsassa-pkcs1-v15-sign.unwrap-signing-key-jwk`. Class D, as above.
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_rsassa_signing_key_jwk(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: SigningPolicy,
+) -> Result<SigningKeyMaterial, Error> {
+    let text = unwrap_jwk_prelude(
+        "RSA JWK",
+        policy.check_useful(),
+        input,
+        &policy.webcrypto_usages(),
+        UseFamily::Sig,
+    )?;
+    redact_invalid_key(
+        "RSA JWK",
+        SigningKeyMaterial::import_rsassa_jwk(variant, &text, policy),
+    )
+}
+
+/// `rsa-pss-sign.unwrap-signing-key-pkcs8`. Class D, as above.
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_pss_signing_key_pkcs8(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: SigningPolicy,
+) -> Result<SigningKeyMaterial, Error> {
+    redact_invalid_key(
+        "RSA PKCS#8 key",
+        SigningKeyMaterial::import_pss_pkcs8(variant, &input.into_bytes(), policy),
+    )
+}
+
+/// `rsa-pss-sign.unwrap-signing-key-jwk`. Class D, as above.
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_pss_signing_key_jwk(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: SigningPolicy,
+) -> Result<SigningKeyMaterial, Error> {
+    let text = unwrap_jwk_prelude(
+        "RSA JWK",
+        policy.check_useful(),
+        input,
+        &policy.webcrypto_usages(),
+        UseFamily::Sig,
+    )?;
+    redact_invalid_key(
+        "RSA JWK",
+        SigningKeyMaterial::import_pss_jwk(variant, &text, policy),
+    )
+}
+
 /// `x25519.unwrap-secret-key-jwk`.
 pub fn unwrap_x25519_secret_key_jwk(
     input: UnwrapInputMaterial,

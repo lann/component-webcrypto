@@ -47,6 +47,9 @@ kind = "gated"
 [features.sha1-checked]
 kind = "gated"
 
+[features.rsa-sign]
+kind = "gated"
+
 [features.ecdsa-sign]
 kind = "structural"
 
@@ -57,7 +60,12 @@ kind = "structural"
 # The host-only signing guest. Its world imports `ecdsa-sign`, which the
 # class-D policy keeps out of the in-guest provider, so a target missing
 # `ecdsa-sign` cannot even link this suite's world — the requirement is
-# structural, not behavioral.
+# structural, not behavioral. The gated `rsa-sign` coverage also lives
+# here (the same class-D policy keeps those interfaces out of the
+# provider), but as feature-tagged cases, not a `requires` entry: a target
+# that links the suite may still decline RSA signing at runtime
+# (jco-browser), which tags-plus-decline-probes express and a structural
+# requirement cannot.
 requires = ["ecdsa-sign"]
 
 [targets.wasmtime]
@@ -85,8 +93,11 @@ missing-features = ["xchacha20-poly1305", "sha1-checked"]
 # The same host module as jco-node, in headless Chromium — whose WebCrypto
 # serves no ChaCha20-Poly1305 yet (the host feature-detects it per call, so
 # no declaration lives in the module and this line follows the browser's
-# capability).
-missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"]
+# capability). The host also declines the gated RSA signing mints outside
+# Node by default (`rsa-sign`): a browser is an attacker-observable timing
+# domain, so it fails closed unless the deployer opts in with
+# `setRsaSigningPolicy("serve")` — the adapter runs the default.
+missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.

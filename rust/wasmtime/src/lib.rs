@@ -561,8 +561,9 @@ minted_resources! {
 /// }
 /// ```
 ///
-/// The `@unstable`-gated ChaCha interfaces (see `wit/README.md`,
-/// "Stability gates") are **not** added: a guest whose world imports them
+/// The `@unstable`-gated interfaces — the ChaCha family, `sha1-checked`,
+/// and the RSA signing pair (see `wit/README.md`, "Stability gates") — are
+/// **not** added: a guest whose world imports them
 /// fails to instantiate against this default. Opt in with
 /// [`add_to_linker_with_options`].
 pub fn add_to_linker<T>(linker: &mut Linker<T>) -> wasmtime::Result<()>
@@ -580,6 +581,7 @@ pub struct LinkOptions {
     chacha20_poly1305: bool,
     xchacha20_poly1305: bool,
     sha1_checked: bool,
+    rsa_sign: bool,
 }
 
 impl LinkOptions {
@@ -599,6 +601,13 @@ impl LinkOptions {
     /// Serve `lann:webcrypto/sha1-checked`.
     pub fn sha1_checked(&mut self, enabled: bool) -> &mut Self {
         self.sha1_checked = enabled;
+        self
+    }
+
+    /// Serve `lann:webcrypto/rsassa-pkcs1-v15-sign` and
+    /// `lann:webcrypto/rsa-pss-sign`.
+    pub fn rsa_sign(&mut self, enabled: bool) -> &mut Self {
+        self.rsa_sign = enabled;
         self
     }
 }
@@ -682,6 +691,17 @@ where
         T::webcrypto,
     )?;
     bindings::webcrypto::rsa_pss_verify::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::rsassa_pkcs1_v15_sign::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        bindings::webcrypto::rsassa_pkcs1_v15_sign::LinkOptions::default()
+            .rsa_sign(options.rsa_sign),
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::rsa_pss_sign::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        bindings::webcrypto::rsa_pss_sign::LinkOptions::default().rsa_sign(options.rsa_sign),
+        T::webcrypto,
+    )?;
     Ok(())
 }
 

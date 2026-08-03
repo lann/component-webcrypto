@@ -24,22 +24,26 @@
 //!   surfaces it as a trap-shaped host error, the guest treats WASI random
 //!   as infallible.
 //!
-//! ## Class-D policy: ECDSA signing is not compiled for wasm
+//! ## Class-D policy: ECDSA and RSA signing are not compiled for wasm
 //!
 //! ECDSA signing handles a per-signature secret nonce whose timing leakage
-//! is key-recovering — class D in lann-webcrypto-guest-provider's timing-channel
-//! classification. The load-bearing enforcement is the in-guest provider's
-//! world, which never exports `ecdsa-sign`: a composition that needs it
-//! fails at `wac plug` time. This crate adds a second layer — the ECDSA
-//! arms of the private-key type exist only on non-wasm targets
-//! (`#[cfg(not(target_family = "wasm"))]`), so nothing in a wasm build
-//! *calls* a signing implementation.
+//! is key-recovering, and RSA private-key operations leak key material
+//! through timing unless constant-time end to end — class D in
+//! lann-webcrypto-guest-provider's timing-channel classification. The
+//! load-bearing enforcement is the in-guest provider's world, which never
+//! exports `ecdsa-sign` or the `rsa-sign` interfaces: a composition that
+//! needs them fails at `wac plug` time. This crate adds a second layer —
+//! the ECDSA and RSA arms of the private-key type exist only on non-wasm
+//! targets (`#[cfg(not(target_family = "wasm"))]`), so nothing in a wasm
+//! build *calls* a signing implementation.
 //!
-//! The signing code is nonetheless *compiled* for wasm: verification needs
-//! `p256`/`p384` with `features = ["ecdsa"]`, and cargo unifies features
-//! across a build, so no target-gated dependency removes it. Its absence
-//! from the final `.wasm` therefore rests on dead-code elimination. The
-//! world is the guarantee; the `cfg` is defence in depth.
+//! The ECDSA signing code is nonetheless *compiled* for wasm: verification
+//! needs `p256`/`p384` with `features = ["ecdsa"]`, and cargo unifies
+//! features across a build, so no target-gated dependency removes it. Its
+//! absence from the final `.wasm` therefore rests on dead-code
+//! elimination. The world is the guarantee; the `cfg` is defence in depth.
+//! RSA signing goes further: its backend (`aws-lc-rs`) is a target-gated
+//! dependency, absent from the wasm dependency graph entirely.
 //!
 //! # Exported material
 //!
@@ -97,7 +101,10 @@ pub use wrapping::{
     UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
 };
 #[cfg(not(target_family = "wasm"))]
-pub use wrapping::{unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8};
+pub use wrapping::{
+    unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8, unwrap_pss_signing_key_jwk,
+    unwrap_pss_signing_key_pkcs8, unwrap_rsassa_signing_key_jwk, unwrap_rsassa_signing_key_pkcs8,
+};
 
 /// A failure of the platform's random source, surfaced separately from WIT
 /// errors so each implementation can decide what it means (the host traps,
@@ -346,6 +353,19 @@ pub enum RsaVariant {
     Sha256,
     Sha384,
     Sha512,
+}
+
+/// The WIT `rsa.rsa-modulus` cases: the standard sizes `generate-key`
+/// serves. Deliberately absent from [`impl_conversions!`]: the type
+/// appears only in the gated `rsa-sign` interfaces, which the in-guest
+/// provider's world never references, so its bindings do not generate
+/// it — the wasmtime host converts locally instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RsaModulus {
+    M2048,
+    M3072,
+    M4096,
+    M8192,
 }
 
 /// The `algorithm-name` reported by HMAC keys (WebCrypto's

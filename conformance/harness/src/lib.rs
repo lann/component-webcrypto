@@ -18,8 +18,7 @@
 //!
 //! What deliberately stays in each guest is the harness that materializes
 //! cases, because it is typed against `wit_bindgen`-generated types that
-//! differ per world (for a probes-only suite, [`export_probe_suite!`]
-//! expands that glue in the invoking crate).
+//! differ per world.
 
 pub mod stream;
 
@@ -59,6 +58,15 @@ pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 /// that the platform hosts do not.
 pub const FEATURE_SHA1_CHECKED: &str = "sha1-checked";
 
+/// The `rsa-sign` feature: the gated RSA signing minting interfaces
+/// (`rsassa-pkcs1-v15-sign`, `rsa-pss-sign`). The signing suite's guest
+/// imports them alongside `ecdsa-sign`, so unlike `ecdsa-sign` the
+/// declaration is behavioral: a target that links the suite but declines
+/// RSA signing (the jco host outside Node — browsers fail closed) declares
+/// this feature missing and must prove every minting path returns
+/// `unsupported`.
+pub const FEATURE_RSA_SIGN: &str = "rsa-sign";
+
 /// Every feature name a target may declare missing — shared here so every
 /// guest validates the same names. `all` traps on names outside this set,
 /// so a misspelled declaration is a harness bug rather than a silently
@@ -68,6 +76,7 @@ pub const KNOWN_FEATURES: &[&str] = &[
     FEATURE_XCHACHA,
     FEATURE_ECDSA_SIGN,
     FEATURE_SHA1_CHECKED,
+    FEATURE_RSA_SIGN,
 ];
 
 /// A probe body. Boxed because each `async fn` has its own opaque type.
@@ -151,76 +160,6 @@ macro_rules! probes {
     };
     (@features ($feature:ident)) => {
         feature_tags!($feature)
-    };
-}
-
-/// Export a probes-only conformance suite: the world-typed glue between a
-/// [`probes!`] table and the generated `conformance:webcrypto/tests`
-/// export, identical for every suite that carries no vector cases.
-///
-/// Invoke at the root of a crate whose world exports that interface, after
-/// `wit_bindgen::generate!`: the expansion names the generated
-/// `exports::…::tests` types and the generated `export!` macro, which is
-/// why this is a macro rather than shared functions — those types differ
-/// per world.
-#[macro_export]
-macro_rules! export_probe_suite {
-    ($probes:expr) => {
-        struct Component;
-
-        /// One materialized probe case.
-        struct Case {
-            index: usize,
-            provided: bool,
-        }
-
-        impl exports::conformance::webcrypto::tests::GuestTestCase for Case {
-            fn name(&self) -> String {
-                $probes[self.index].case_id()
-            }
-
-            fn features(&self) -> Vec<String> {
-                $probes[self.index].feature_names()
-            }
-
-            async fn run(&self) -> exports::conformance::webcrypto::tests::Outcome {
-                use exports::conformance::webcrypto::tests::Outcome;
-                if self.provided {
-                    match $crate::run_probe($probes, self.index).await {
-                        Ok(()) => Outcome::Pass,
-                        Err(detail) => Outcome::Fail(detail),
-                    }
-                } else {
-                    // A suite exported through this macro carries no decline
-                    // assertions; a feature-tagged probe fails loudly here
-                    // until it brings one (hand-write the glue, as the
-                    // shared guest does).
-                    Outcome::Fail("probe has no decline assertion for its features".into())
-                }
-            }
-        }
-
-        impl exports::conformance::webcrypto::tests::Guest for Component {
-            type TestCase = Case;
-
-            fn all(
-                missing_features: Vec<String>,
-            ) -> Vec<exports::conformance::webcrypto::tests::TestCase> {
-                let missing = $crate::missing_features(&missing_features, $crate::KNOWN_FEATURES);
-                $probes
-                    .iter()
-                    .enumerate()
-                    .map(|(index, probe)| {
-                        exports::conformance::webcrypto::tests::TestCase::new(Case {
-                            index,
-                            provided: probe.provided_by(&missing),
-                        })
-                    })
-                    .collect()
-            }
-        }
-
-        export!(Component);
     };
 }
 

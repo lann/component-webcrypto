@@ -22,6 +22,13 @@ chacha = []
 # import to the generated world, and platform-backed providers cannot
 # serve it.
 sha1-checked = []
+# The `@unstable`-gated RSA signing interfaces (`rsassa-pkcs1-v15-sign`,
+# `rsa-pss-sign` — see wit/README.md, "Stability gates"). Off by default,
+# like `chacha`: enabling it adds the two imports to the generated world,
+# and providers in attacker-observable timing domains do not serve them
+# (see wit/README.md, "Timing-channel policy"), so the composed in-guest
+# target cannot run a consumer that enables this.
+rsa-sign = []
 
 [dependencies]
 # `async` pulls in the component-model `stream`/`future` runtime support and

@@ -75,6 +75,15 @@ getrandom = "0.3"
 # Scrub raw key material on drop.
 zeroize = "1"
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+# RSA private-key operations (the rsa-sign gate), native targets only.
+# BoringSSL lineage — the one implementation family with a verified
+# negative result under the Marvin timing methodology; RUSTSEC-2023-0071
+# (key recovery via timing) keeps the pure-Rust `rsa` crate off the
+# signing path, where it remains verification-only. See `wit/README.md`,
+# "Design notes", the lineage-pin ruling.
+aws-lc-rs = "1"
+
 [dev-dependencies]
 # Hex constants in the known-answer tests, decoded at compile time; the
 # vectors whose hex arrives as a `&str` go through `data-encoding` itself,
