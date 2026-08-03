@@ -130,9 +130,9 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | Vector property | Our expectation |
 | --- | --- |
 | GCM, keySize 192 | **Skipped** — no implementation serves AES-192 (`import-key` declines it `unsupported`; probed). keySize 128 and 256 both run, in the caller-nonce *and* internal-nonce cases. |
-| GCM, ivSize 0 | `seal`/`open` fail `invalid-nonce` (SP 800-38D requires a non-empty IV; the vectors' `ZeroLengthIv` groups are all marked invalid). |
-| GCM, any other ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. The non-96-bit sizes — including every `CounterWrap` vector — exercise the §7.1 `J0` GHASH derivation. |
-| GCM, any other ivSize, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
+| GCM, ivSize outside 96–1024 bits (12–128 bytes) | `seal`/`open` fail `invalid-nonce` — the `aes-gcm` contract's uniform nonce window, so the vectors' expected ciphertexts (and the `ZeroLengthIv` groups' invalid verdicts) are deliberately unreachable; the tc identities stay. |
+| GCM, in-window ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. The non-96-bit sizes — including every `CounterWrap` vector — exercise the §7.1 `J0` GHASH derivation. |
+| GCM, in-window ivSize, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
 | ChaCha20-Poly1305 (either variant), ivSize ≠ the variant's (96, or 192 for XChaCha) | `seal`/`open` fail `invalid-nonce` — the declared `chacha-variant` selects the accepted nonce length. Nothing is skipped: both files are all-keySize-256. |
 | ChaCha20-Poly1305, variant ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
 | ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed` (open direction only). |

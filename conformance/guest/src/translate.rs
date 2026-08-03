@@ -11,7 +11,7 @@
 //! degenerate duplicates).
 
 use conformance_harness::stream::Schedule;
-use conformance_harness::{FEATURE_CHACHA, FEATURE_GCM_ANY_IV, FEATURE_XCHACHA};
+use conformance_harness::{FEATURE_CHACHA, FEATURE_XCHACHA};
 use serde::Deserialize;
 
 /// The deterministic 1-in-N sample of rejection vectors that also run
@@ -198,17 +198,7 @@ impl VectorCase for AeadCase {
         )
     }
 
-    /// The features this case exercises beyond the baseline surface: the
-    /// algorithm's, plus `aes-gcm-any-iv` for GCM nonces outside the
-    /// 12–128-byte window every implementation serves (empty nonces are
-    /// untagged — every target rejects them `invalid-nonce`).
     fn features(&self) -> &'static [&'static str] {
-        if matches!(self.alg, AeadAlg::AesGcm)
-            && !self.iv.is_empty()
-            && !(12..=128).contains(&self.iv.len())
-        {
-            return &[FEATURE_GCM_ANY_IV];
-        }
         self.alg.features()
     }
 }
@@ -1235,11 +1225,13 @@ pub fn aead_cases() -> Vec<AeadCase> {
 }
 
 /// Decode one Wycheproof AEAD test and derive its expectation. Nonce-length
-/// policy is the algorithm's: GCM accepts any non-empty nonce (only the
-/// `ZeroLengthIv` groups fail `invalid-nonce`; every other `ivSize` runs
-/// the vector's own verdict, the non-96-bit sizes exercising the `J0`
-/// derivation), while the ChaCha constructions fail `invalid-nonce` for any
-/// `ivSize` but their own.
+/// policy is the algorithm's: GCM accepts 12–128-byte nonces (the
+/// `aes-gcm` contract's uniform window, so every outside-window `ivSize`
+/// group — including `ZeroLengthIv` — fails `invalid-nonce` on seal and
+/// open alike, and its vector's ciphertext is deliberately unreachable;
+/// in-window non-96-bit sizes run the vector's own verdict, exercising the
+/// `J0` derivation), while the ChaCha constructions fail `invalid-nonce`
+/// for any `ivSize` but their own.
 #[allow(clippy::type_complexity)]
 fn translate_aead(
     field: &str,
@@ -1259,7 +1251,7 @@ fn translate_aead(
     ct_tag.extend(unhex(field, &test.tag));
     let valid = is_valid(field, &test.result);
     let nonce_accepted = match alg {
-        AeadAlg::AesGcm => group.iv_size != 0,
+        AeadAlg::AesGcm => (96..=1024).contains(&group.iv_size),
         _ => group.iv_size == alg.iv_bits(),
     };
     let (expectation, max_input_len) = if !nonce_accepted {
