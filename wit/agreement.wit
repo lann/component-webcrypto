@@ -15,12 +15,11 @@ package lann:webcrypto@0.1.0;
 ///
 /// Security:
 /// - `agree` combines two key resources, so mixing algorithms (an X25519
-///   secret with some future ECDH public) is *representable* — the one
-///   place in the package where misuse is checked rather than
-///   unrepresentable, because an operation takes two capabilities. The
-///   check is the W3C Web Cryptography API's own: an algorithm mismatch
-///   fails `error.invalid-key`. (With one agreement algorithm defined, the
-///   check is dormant; it becomes reachable when a second arrives.)
+///   secret with an ECDH public) is *representable* — the one place in
+///   the package where misuse is checked rather than unrepresentable,
+///   because an operation takes two capabilities. The check is the W3C
+///   Web Cryptography API's own: an algorithm mismatch — including a
+///   curve mismatch between two ECDH keys — fails `error.invalid-key`.
 interface key-agreement {
     use types.{error};
     use derivation.{derive-input};
@@ -78,17 +77,20 @@ interface key-agreement {
         /// API's model: derive usages live on the secret key).
         ///
         /// The returned input has a *natural* output length — the
-        /// agreement's full shared secret (32 bytes for X25519) — so
-        /// `derive-bits(none)` returns the whole secret and
-        /// `hkdf-sha2.prepare-from` accepts it as IKM.
+        /// agreement's full shared secret (32 bytes for X25519; the
+        /// curve's field size for ECDH) — so `derive-bits(none)` returns
+        /// the whole secret and `hkdf-sha2.prepare-from` accepts it as
+        /// IKM.
         ///
         /// Security:
         /// - Fails `error.invalid-key` if the shared secret is the
         ///   all-zero value (a small-order `peer`), checked in constant
         ///   time — the W3C Web Cryptography API's mandatory contributory
-        ///   check, at the operation that computes the secret. Import of
-        ///   the peer key is deliberately permissive; this is where a
-        ///   degenerate peer surfaces.
+        ///   check, at the operation that computes the secret. Whether a
+        ///   degenerate peer can reach this check is the minting
+        ///   interface's import contract: X25519's deliberately
+        ///   permissive import admits one, and it surfaces here; ECDH's
+        ///   strict import rejects it at the mint.
         /// - Fails `error.invalid-key` if `peer` is bound to a different
         ///   algorithm than this key.
         agree: async func(peer: borrow<public-key>) -> result<derive-input, error>;

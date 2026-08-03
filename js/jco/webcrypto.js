@@ -1737,7 +1737,8 @@ export class AgreementPublicKey {
   }
 
   /**
-   * The raw u-coordinate (the minting interface's public format).
+   * The public key material in the minting interface's public format
+   * (X25519's raw u-coordinate; ECDH's uncompressed SEC1 point).
    * @returns {Promise<Uint8Array>}
    */
   async exportKeyRaw() {
@@ -1748,13 +1749,17 @@ export class AgreementPublicKey {
   }
 
   /**
-   * The key as an OKP public JWK, per the WIT contract: exactly the
-   * material-bearing members (`kty`, `crv`, `x`).
+   * The key as a public JWK (OKP for X25519, EC for ECDH), per the WIT
+   * contract: exactly the material-bearing members.
    */
   async exportKeyJwk() {
     const { key } = agreementPublicOf(this);
     const jwk = await platformCall("jwk public-key export", () => subtle.exportKey("jwk", key));
-    return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x });
+    return JSON.stringify(
+      jwk.kty === "OKP"
+        ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x }
+        : { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+    );
   }
 
   /**
@@ -1850,8 +1855,8 @@ export class AgreementSecretKey {
   }
 
   /**
-   * The private OKP JWK, material members only, behind the
-   * extractability gate.
+   * The private JWK (OKP for X25519, EC for ECDH), material members only,
+   * behind the extractability gate.
    */
   async exportKeyJwk() {
     const state = agreementSecretOf(this);
@@ -1859,7 +1864,11 @@ export class AgreementSecretKey {
     const jwk = await platformCall("jwk secret-key export", () =>
       subtle.exportKey("jwk", state.key),
     );
-    return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d });
+    return JSON.stringify(
+      jwk.kty === "OKP"
+        ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d }
+        : { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d },
+    );
   }
 
   /**
@@ -2065,6 +2074,235 @@ export const x25519 = {
   generateKey: generateX25519Key,
   unwrapSecretKeyJwk: unwrapX25519SecretKeyJwk,
   unwrapSecretKeyPkcs8: unwrapX25519SecretKeyPkcs8,
+};
+
+/**
+ * The per-curve ECDH parameters: WebCrypto's `namedCurve` (the platform
+ * algorithm at every mint is `{ name: "ECDH", namedCurve }`) and the
+ * uncompressed-SEC1 public key length the raw import enforces.
+ */
+/** @type {Readonly<Record<string, { namedCurve: string, publicLength: number } | undefined>>} */
+const ECDH_CURVES = Object.assign(Object.create(null), {
+  p256: { namedCurve: "P-256", publicLength: 65 },
+  p384: { namedCurve: "P-384", publicLength: 97 },
+});
+
+/**
+ * The served `ecdh-variant` entry for `variant`. `p521` — the enum's only
+ * other case — is declared by the WIT and served by no implementation of
+ * this package; the decline message matches the shared Rust core's
+ * rendering.
+ * @param {string} variant
+ */
+function ecdhCurve(variant) {
+  const entry = ECDH_CURVES[variant];
+  if (entry === undefined) {
+    throw errUnsupported("ECDH P-521 is not served by this implementation");
+  }
+  return entry;
+}
+
+/**
+ * Import an uncompressed-SEC1 ECDH public key of the declared variant (the
+ * `ecdh.import-public-key-raw` contract): the length and leading-`0x04`
+ * checks are enforced here — engines differ on compressed-point raw
+ * imports, and the WIT pins their rejection — and the platform validates
+ * the point is on the curve.
+ * @param {string} variant
+ * @param {Uint8Array} raw
+ */
+async function importEcdhPublicKey(variant, raw) {
+  const entry = ecdhCurve(variant);
+  if (raw.length !== entry.publicLength || raw[0] !== 0x04) {
+    throw errInvalidKey(
+      `${variant} public keys are uncompressed SEC1 points (${entry.publicLength} bytes, leading 0x04)`,
+    );
+  }
+  const key = await importPlatformKey(
+    `${variant} public key`,
+    "raw",
+    raw,
+    { name: "ECDH", namedCurve: entry.namedCurve },
+    true,
+    [],
+  );
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an ECDH public key from a SubjectPublicKeyInfo — a platform
+ * pass-through; the platform validates the DER, rejects a curve that
+ * disagrees with the declared variant's, and rejects a point not on the
+ * curve.
+ * @param {string} variant
+ * @param {Uint8Array} spki
+ */
+async function importEcdhPublicKeySpki(variant, spki) {
+  const entry = ecdhCurve(variant);
+  const key = await importPlatformKey(
+    `${variant} spki`,
+    "spki",
+    spki,
+    { name: "ECDH", namedCurve: entry.namedCurve },
+    true,
+    [],
+  );
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an ECDH public key from an EC public JWK — a platform
+ * pass-through of the material members; the platform owns the
+ * kty/crv/ext/coordinate validation (including crv-against-`namedCurve`
+ * and on-curve). Strictness of the base64url coordinates is pinned
+ * host-side.
+ * @param {string} variant
+ * @param {string} jwkText
+ */
+async function importEcdhPublicKeyJwk(variant, jwkText) {
+  const entry = ecdhCurve(variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.y);
+  const key = await importPlatformKeyJwk(
+    `${variant} public JWK`,
+    jwk,
+    { name: "ECDH", namedCurve: entry.namedCurve },
+    true,
+    [],
+  );
+  return new AgreementPublicKey(MINT, key);
+}
+
+/**
+ * Import an ECDH secret key from an EC private JWK (the
+ * `ecdh.import-secret-key-jwk` contract). The parse and validation are the
+ * platform's (`kty`, `crv` against the declared variant's curve, the
+ * mandatory `x`/`y`, `d`-in-range, `ext` against extractability);
+ * `use`/`key_ops` are stripped as the JWK contract requires, and
+ * strictness of the base64url members is pinned host-side. This host
+ * cannot promise the `x`/`y`-against-`d` consistency check (the WIT MAY)
+ * — engines differ — and per the MUST NOT it never trusts `x`/`y`: the
+ * platform derives operations from `d`.
+ * @param {string} variant
+ * @param {string} jwkText
+ * @param {AgreementKeyOptions} options
+ */
+async function importEcdhSecretKeyJwk(variant, jwkText, options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const entry = ecdhCurve(variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.x);
+  requireStrictBase64url(jwk.y);
+  requireStrictBase64url(jwk.d);
+  const key = await importPlatformKeyJwk(
+    `${variant} private JWK`,
+    jwk,
+    { name: "ECDH", namedCurve: entry.namedCurve },
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
+  if (key.type !== "private") {
+    throw errInvalidKey("EC private JWK must carry `d` (base64url private scalar)");
+  }
+  return new AgreementSecretKey(MINT, key, { ...policy });
+}
+
+/**
+ * Import an ECDH secret key from a PKCS#8 PrivateKeyInfo — a platform
+ * pass-through; the platform owns the DER validation, including the
+ * encoded-curve-against-variant check.
+ * @param {string} variant
+ * @param {Uint8Array} pkcs8
+ * @param {AgreementKeyOptions} options
+ */
+async function importEcdhSecretKeyPkcs8(variant, pkcs8, options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const entry = ecdhCurve(variant);
+  const key = await importPlatformKey(
+    `${variant} pkcs8`,
+    "pkcs8",
+    pkcs8,
+    { name: "ECDH", namedCurve: entry.namedCurve },
+    policy.extractable,
+    AGREEMENT_PLATFORM_USAGES,
+  );
+  return new AgreementSecretKey(MINT, key, { ...policy });
+}
+
+/**
+ * Generate a fresh ECDH key pair on the declared variant's curve,
+ * returning `[secret, public]`.
+ * @param {string} variant
+ * @param {AgreementKeyOptions} options
+ * @returns {Promise<[AgreementSecretKey, AgreementPublicKey]>}
+ */
+async function generateEcdhKey(variant, options) {
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const entry = ecdhCurve(variant);
+  const pair = /** @type {CryptoKeyPair} */ (
+    await platformCall(`${variant} key generation`, () =>
+      subtle.generateKey(
+        { name: "ECDH", namedCurve: entry.namedCurve },
+        policy.extractable,
+        AGREEMENT_PLATFORM_USAGES,
+      ),
+    )
+  );
+  return [
+    new AgreementSecretKey(MINT, pair.privateKey, { ...policy }),
+    new AgreementPublicKey(MINT, pair.publicKey),
+  ];
+}
+
+/**
+ * Mint an ECDH secret key of the declared variant from unwrapped key
+ * material read as an EC private JWK (the `ecdh.unwrap-secret-key-jwk`
+ * contract): the unwrap-path `use`/`key_ops` checks, then
+ * `import-secret-key-jwk`'s path with `invalid-key` details redacted (see
+ * `redactingInvalidKey`).
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {AgreementKeyOptions} options
+ */
+async function unwrapEcdhSecretKeyJwk(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  const policy = agreementPolicy(options);
+  requireAgreementGrant(policy);
+  const jwk = unwrappedJwk(bytes, "enc", agreementGrantedOps(policy));
+  return redactingInvalidKey(`unwrapped ${variant} private JWK`, () =>
+    importEcdhSecretKeyJwk(variant, jwk, options),
+  );
+}
+
+/**
+ * Mint an ECDH secret key of the declared variant from unwrapped key
+ * material read as a PKCS#8 PrivateKeyInfo: `import-secret-key-pkcs8`'s
+ * path, redacted like the JWK mint.
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {AgreementKeyOptions} options
+ */
+async function unwrapEcdhSecretKeyPkcs8(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey(`unwrapped ${variant} pkcs8`, () =>
+    importEcdhSecretKeyPkcs8(variant, bytes, options),
+  );
+}
+
+/** The `lann:webcrypto/ecdh` interface. */
+export const ecdh = {
+  importPublicKeyRaw: importEcdhPublicKey,
+  importPublicKeySpki: importEcdhPublicKeySpki,
+  importPublicKeyJwk: importEcdhPublicKeyJwk,
+  importSecretKeyJwk: importEcdhSecretKeyJwk,
+  importSecretKeyPkcs8: importEcdhSecretKeyPkcs8,
+  generateKey: generateEcdhKey,
+  unwrapSecretKeyJwk: unwrapEcdhSecretKeyJwk,
+  unwrapSecretKeyPkcs8: unwrapEcdhSecretKeyPkcs8,
 };
 
 /**

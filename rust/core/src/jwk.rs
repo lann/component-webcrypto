@@ -257,6 +257,24 @@ pub fn parse_ec(
     })
 }
 
+/// Assemble an uncompressed SEC1 point from JWK coordinates, validating
+/// their lengths for the curve: `curve` is the registry curve name (for
+/// the error message) and `len` its field size in bytes.
+pub(crate) fn ec_point(curve: &str, len: usize, x: &[u8], y: &[u8]) -> Result<Vec<u8>, Error> {
+    if x.len() != len || y.len() != len {
+        return Err(Error::InvalidKey(format!(
+            "{curve} JWK coordinates are {len} bytes each, got {}/{}",
+            x.len(),
+            y.len()
+        )));
+    }
+    let mut point = Vec::with_capacity(1 + 2 * len);
+    point.push(0x04);
+    point.extend_from_slice(x);
+    point.extend_from_slice(y);
+    Ok(point)
+}
+
 /// Build the EC public JWK (RFC 7518 §6.2.1): exactly the material-bearing
 /// members.
 pub fn build_ec_public(crv: &str, x: &[u8], y: &[u8]) -> String {

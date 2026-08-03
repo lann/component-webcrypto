@@ -43,6 +43,7 @@ use crate::exports::lann::webcrypto::derivation::{
     self, Guest as DerivationGuest, GuestDeriveInput, GuestDeriveOptions,
 };
 use crate::exports::lann::webcrypto::digest::{self as digest, Guest as DigestGuest, GuestDigest};
+use crate::exports::lann::webcrypto::ecdh::{EcdhVariant, Guest as EcdhGuest};
 use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
 use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
@@ -90,6 +91,7 @@ lann_webcrypto_core::impl_conversions! {
     sha2: Sha2Variant,
     aes: AesVariant,
     ecdsa: EcdsaVariant,
+    ecdh: EcdhVariant,
 }
 
 /// Unwrap an entropy result: the WASI random source backing the guest's
@@ -1034,7 +1036,7 @@ impl GuestPassword for Password {
     }
 }
 
-// --- key-agreement & x25519 ------------------------------------------------------
+// --- key-agreement, x25519 & ecdh -------------------------------------------------
 
 impl KeyAgreementGuest for Component {
     type AgreementKeyOptions = AgreementKeyOptions;
@@ -1074,9 +1076,9 @@ impl GuestPublicKey for AgreementPublicKey {
     }
 }
 
-/// An exported `key-agreement.secret-key`: the shared core's X25519 secret
-/// (dalek's constant-time Montgomery ladder — class B; see the README's
-/// classification table).
+/// An exported `key-agreement.secret-key`: the shared core's agreement
+/// secret (X25519 or ECDH; both class B — see the README's classification
+/// table).
 pub struct AgreementSecretKey {
     material: lann_webcrypto_core::AgreementSecretMaterial,
 }
@@ -1135,7 +1137,7 @@ impl GuestSecretKey for AgreementSecretKey {
 
 impl X25519Guest for Component {
     async fn import_public_key_raw(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import(&raw)?;
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1144,14 +1146,14 @@ impl X25519Guest for Component {
     async fn import_public_key_spki(
         spki: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_spki(&spki)?;
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
     }
 
     async fn import_public_key_jwk(jwk: String) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_jwk(&jwk)?;
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1162,7 +1164,8 @@ impl X25519Guest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_pkcs8(&pkcs8, policy)?;
+        let material =
+            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1173,7 +1176,8 @@ impl X25519Guest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_jwk(&jwk, policy)?;
+        let material =
+            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1189,9 +1193,8 @@ impl X25519Guest for Component {
         Error,
     > {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let (secret, public) = rng_infallible(
-            lann_webcrypto_core::AgreementSecretMaterial::generate(policy),
-        )?;
+        let (secret, public) =
+            rng_infallible(lann_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy))?;
         Ok((
             key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
             key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
@@ -1217,6 +1220,125 @@ impl X25519Guest for Component {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let material =
             lann_webcrypto_core::unwrap_x25519_secret_key_pkcs8(UnwrapInput::take(input), policy)?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+}
+
+impl EcdhGuest for Component {
+    async fn import_public_key_raw(
+        variant: EcdhVariant,
+        raw: Vec<u8>,
+    ) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_public_key_spki(
+        variant: EcdhVariant,
+        spki: Vec<u8>,
+    ) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_public_key_jwk(
+        variant: EcdhVariant,
+        jwk: String,
+    ) -> Result<key_agreement_iface::PublicKey, Error> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk)?;
+        Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
+            material,
+        }))
+    }
+
+    async fn import_secret_key_jwk(
+        variant: EcdhVariant,
+        jwk: String,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
+            variant.into(),
+            &jwk,
+            policy,
+        )?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+
+    async fn import_secret_key_pkcs8(
+        variant: EcdhVariant,
+        pkcs8: Vec<u8>,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
+            variant.into(),
+            &pkcs8,
+            policy,
+        )?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+
+    async fn generate_key(
+        variant: EcdhVariant,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<
+        (
+            key_agreement_iface::SecretKey,
+            key_agreement_iface::PublicKey,
+        ),
+        Error,
+    > {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let (secret, public) = rng_infallible(
+            lann_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy),
+        )?;
+        Ok((
+            key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
+            key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
+        ))
+    }
+
+    async fn unwrap_secret_key_jwk(
+        variant: EcdhVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_ecdh_secret_key_jwk(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
+        Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
+            material,
+        }))
+    }
+
+    async fn unwrap_secret_key_pkcs8(
+        variant: EcdhVariant,
+        input: wrapping_iface::UnwrapInput,
+        options: key_agreement_iface::AgreementKeyOptions,
+    ) -> Result<key_agreement_iface::SecretKey, Error> {
+        let policy = options.get::<AgreementKeyOptions>().policy.get();
+        let material = lann_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))

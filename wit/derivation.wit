@@ -77,7 +77,7 @@ interface derivation {
         /// KDF, whose output length is a caller choice — fail
         /// `error.other`, which is the platform's own null-length
         /// behavior for them (HKDF and PBKDF2 throw `OperationError`
-        /// where X25519 returns the whole secret).
+        /// where the agreements return the whole secret).
         ///
         /// Fails `error.not-permitted` without the `can-derive-bits`
         /// grant. Fallible even when granted: a platform-resident source

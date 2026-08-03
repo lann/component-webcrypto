@@ -2,16 +2,17 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::mint::{
-    import_cbc_key, import_chacha_key, import_hmac_key, import_hmac_sha1_key, import_ikm,
-    import_internal_nonce_key as import_gcm_internal_key, import_key_raw, import_kw_key,
-    import_password, import_x25519_public_key, import_x25519_secret_key,
+    import_cbc_key, import_chacha_key, import_ecdh_public_key_jwk, import_ecdh_public_key_raw,
+    import_ecdh_public_key_spki, import_ecdh_secret_key, import_hmac_key, import_hmac_sha1_key,
+    import_ikm, import_internal_nonce_key as import_gcm_internal_key, import_key_raw,
+    import_kw_key, import_password, import_x25519_public_key, import_x25519_secret_key,
     import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
     mac_options,
 };
 use crate::translate::{
-    AeadAlg, AeadCase, AeadExpectation, CbcCase, HkdfAlg, HkdfCase, HmacAlg, HmacCase,
-    InternalNonceAlg, InternalNonceCase, KwCase, Pbkdf2Alg, Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg,
-    SigCase, SpeccheckCase, X25519Case,
+    AeadAlg, AeadCase, AeadExpectation, CbcCase, EcdhCase, EcdhCurve, EcdhPublic, HkdfAlg,
+    HkdfCase, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase, KwCase, Pbkdf2Alg,
+    Pbkdf2Case, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, in_open, in_open_op, in_seal_ok,
@@ -21,6 +22,7 @@ use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
+use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
@@ -153,6 +155,66 @@ pub async fn run_x25519_case(case: &X25519Case) -> Result<(), String> {
         );
     }
     let input = agreed.map_err(|e| describe("agree", &e))?;
+    let shared = input
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (natural length)", &e))?;
+    expect_bytes(&shared, &case.shared, "shared secret")?;
+    let prefix = input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (truncated)", &e))?;
+    expect_bytes(&prefix, &case.shared[..16], "truncated shared secret")?;
+    Ok(())
+}
+
+/// The `ecdh-variant` for a translated case's curve (P-521 never reaches
+/// translation; its decline is probed).
+fn ecdh_variant(curve: EcdhCurve) -> EcdhVariant {
+    match curve {
+        EcdhCurve::P256 => EcdhVariant::P256,
+        EcdhCurve::P384 => EcdhVariant::P384,
+    }
+}
+
+/// Run one ECDH vector: import the peer's public key per the file's
+/// encoding and the secret key as an EC private JWK, `agree`, and check
+/// the derived shared secret at its natural length (and a truncated
+/// prefix) — or, for the rejection cases, expect the public import to
+/// fail `invalid-key` (every rejection in these files is a public-key
+/// admission failure; the WIT pins strict admission at import).
+pub async fn run_ecdh_case(case: &EcdhCase) -> Result<(), String> {
+    let variant = ecdh_variant(case.curve);
+    let (what, peer) = match &case.public {
+        EcdhPublic::Raw(raw) => (
+            "import-public-key-raw",
+            import_ecdh_public_key_raw(variant, raw.clone()).await,
+        ),
+        EcdhPublic::Spki(spki) => (
+            "import-public-key-spki",
+            import_ecdh_public_key_spki(variant, spki.clone()).await,
+        ),
+        EcdhPublic::Jwk(jwk) => (
+            "import-public-key-jwk",
+            import_ecdh_public_key_jwk(variant, jwk.clone()).await,
+        ),
+    };
+    if case.reject_public {
+        return expect_err(
+            what,
+            ErrKind::InvalidKey,
+            peer,
+            "imported a public key upstream marks for rejection",
+        );
+    }
+    let peer = peer.map_err(|e| describe(what, &e))?;
+    let secret = import_ecdh_secret_key(variant, case.secret_jwk.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    let input = secret
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree", &e))?;
     let shared = input
         .derive_bits(None)
         .await

@@ -121,9 +121,9 @@ pub mod bindings {
     pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw,
-        bytes, cipher, derivation, digest, ecdsa_sign, ecdsa_verify, ed25519_sign, ed25519_verify,
-        hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap, mac, pbkdf2,
-        pbkdf2_sha1, pbkdf2_sha2, sha2, signature, types, wrapping, x25519,
+        bytes, cipher, derivation, digest, ecdh, ecdsa_sign, ecdsa_verify, ed25519_sign,
+        ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap,
+        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, sha2, signature, types, wrapping, x25519,
     };
     #[cfg(feature = "chacha")]
     pub use super::generated::lann::webcrypto::{
@@ -1842,6 +1842,7 @@ pub mod aes_gcm_internal_nonce;
 pub mod aes_kw;
 #[cfg(feature = "chacha")]
 pub mod chacha20_poly1305;
+pub mod ecdh;
 pub mod ecdsa;
 pub mod ed25519;
 pub mod hkdf;

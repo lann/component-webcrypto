@@ -43,6 +43,7 @@ import {
   aesKw,
   bytes,
   chacha20Poly1305,
+  ecdh,
   ecdsaSign,
   ecdsaVerify,
   ed25519Sign,
@@ -247,6 +248,9 @@ const ecdsaSignInterface = ecdsaSign;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
 const x25519Interface = x25519;
 
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdh.js")} */
+const ecdhInterface = ecdh;
+
 /**
  * `Omit` of the token-constructor resource classes, like `hkdfInterface`:
  * the instance assertions above carry them.
@@ -305,4 +309,5 @@ export const checked = {
   ecdsaVerifyInterface,
   ecdsaSignInterface,
   x25519Interface,
+  ecdhInterface,
 };

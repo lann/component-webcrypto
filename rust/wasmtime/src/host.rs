@@ -51,13 +51,13 @@ use crate::bindings::webcrypto::wrapping::{
 use crate::bindings::webcrypto::{
     aes_cbc as aes_cbc_iface, aes_ctr as aes_ctr_iface, aes_gcm as aes_gcm_iface,
     aes_gcm_internal_nonce as aes_gcm_in_iface, aes_kw as aes_kw_iface, bytes as bytes_iface,
-    chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdsa_sign as ecdsa_sign_iface,
-    ecdsa_verify as ecdsa_verify_iface, ed25519_sign as ed25519_sign_iface,
-    ed25519_verify as ed25519_verify_iface, hkdf_sha1 as hkdf_sha1_iface,
-    hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface, hmac_sha2 as hmac_sha2_iface,
-    pbkdf2_sha1 as pbkdf2_sha1_iface, pbkdf2_sha2 as pbkdf2_sha2_iface,
-    sha1_checked as sha1_checked_iface, sha2 as sha2_iface, signature as signature_iface,
-    x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
+    chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdh as ecdh_iface,
+    ecdsa_sign as ecdsa_sign_iface, ecdsa_verify as ecdsa_verify_iface,
+    ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
+    hkdf_sha1 as hkdf_sha1_iface, hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface,
+    hmac_sha2 as hmac_sha2_iface, pbkdf2_sha1 as pbkdf2_sha1_iface,
+    pbkdf2_sha2 as pbkdf2_sha2_iface, sha1_checked as sha1_checked_iface, sha2 as sha2_iface,
+    signature as signature_iface, x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
     xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::{admit_input, Reservation};
@@ -76,6 +76,7 @@ lann_webcrypto_core::impl_conversions! {
     sha2: sha2_iface::Sha2Variant,
     aes: aes_gcm_iface::AesVariant,
     ecdsa: ecdsa_verify_iface::EcdsaVariant,
+    ecdh: ecdh_iface::EcdhVariant,
 }
 
 /// Render an entropy failure as the trap-shaped host error for key or nonce
@@ -1522,7 +1523,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import(&raw);
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw);
         mint(accessor, material).await
     }
 
@@ -1530,7 +1531,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_spki(&spki);
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki);
         mint(accessor, material).await
     }
 
@@ -1538,7 +1539,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         jwk: String,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_jwk(&jwk);
+        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk);
         mint(accessor, material).await
     }
 
@@ -1548,7 +1549,8 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::AgreementKeyOptions>,
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_pkcs8(&pkcs8, policy);
+        let material =
+            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy);
         mint(accessor, material).await
     }
 
@@ -1558,7 +1560,8 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::AgreementKeyOptions>,
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_jwk(&jwk, policy);
+        let material =
+            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy);
         mint(accessor, material).await
     }
 
@@ -1569,7 +1572,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
     > {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::generate(policy)
+        let material = lann_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy)
             .map_err(rng_trap("random key generation"))?;
         match material {
             Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
@@ -1596,6 +1599,115 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material = lann_webcrypto_core::unwrap_x25519_secret_key_pkcs8(input, policy);
+        mint(accessor, material).await
+    }
+}
+
+// --- ecdh (key minting) ----------------------------------------------------------
+
+impl ecdh_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_public_key_raw(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        raw: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw);
+        mint(accessor, material).await
+    }
+
+    async fn import_public_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki);
+        mint(accessor, material).await
+    }
+
+    async fn import_public_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
+        let material =
+            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk);
+        mint(accessor, material).await
+    }
+
+    async fn import_secret_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        jwk: String,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
+            variant.into(),
+            &jwk,
+            policy,
+        );
+        mint(accessor, material).await
+    }
+
+    async fn import_secret_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
+            variant.into(),
+            &pkcs8,
+            policy,
+        );
+        mint(accessor, material).await
+    }
+
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<
+        std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
+    > {
+        let policy = take_options(accessor, options).await?.policy;
+        let material =
+            lann_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy)
+                .map_err(rng_trap("random key generation"))?;
+        match material {
+            Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
+            Err(err) => Ok(Err(err.into())),
+        }
+    }
+
+    async fn unwrap_secret_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_ecdh_secret_key_jwk(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_secret_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: ecdh_iface::EcdhVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::AgreementKeyOptions>,
+    ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }

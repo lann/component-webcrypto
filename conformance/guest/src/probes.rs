@@ -7,15 +7,16 @@
 //! [`contract`]: crate::contract
 
 use crate::mint::{
-    agreement_options, cipher_options, derive_options, generate_ed25519_key, generate_hmac_key,
-    generate_internal_nonce_key, generate_key, generate_kw_key, generate_x25519_key,
-    generate_xchacha_internal_nonce_key, import_aes_key_jwk, import_cbc_key, import_chacha_key,
-    import_ctr_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
+    agreement_options, cipher_options, derive_options, ecdh_secret_jwk, generate_ecdh_key,
+    generate_ed25519_key, generate_hmac_key, generate_internal_nonce_key, generate_key,
+    generate_kw_key, generate_x25519_key, generate_xchacha_internal_nonce_key, import_aes_key_jwk,
+    import_cbc_key, import_chacha_key, import_ctr_key, import_ecdh_public_key_raw,
+    import_ecdh_secret_key, import_hmac_key, import_hmac_key_jwk, import_hmac_sha1_key, import_ikm,
     import_internal_nonce_key, import_key_raw, import_kw_key, import_password,
     import_x25519_public_key, import_x25519_secret_key, import_xchacha_internal_nonce_key,
     import_xchacha_key, internal_nonce_options, kw_options, mac_options, signing_options,
-    x25519_secret_jwk, RFC7748_ALICE_D, RFC7748_ALICE_X, RFC7748_BOB_D, RFC7748_BOB_X,
-    RFC7748_SHARED,
+    x25519_secret_jwk, ECDH_P256_D, ECDH_P256_PEER, ECDH_P256_SHARED, ECDH_P256_X, ECDH_P256_Y,
+    RFC7748_ALICE_D, RFC7748_ALICE_X, RFC7748_BOB_D, RFC7748_BOB_X, RFC7748_SHARED,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt, ci_encrypt_ok, ci_encrypt_op, compute, compute_ok,
@@ -107,10 +108,14 @@ probes! {
     x25519_key_contract,
     x25519_agree_contract,
     x25519_chaining,
+    ecdh_key_contract,
+    ecdh_agree_contract,
+    ecdh_chaining,
     sig_public_format_imports,
     ed25519_private_format_imports,
     ecdsa_cross_hash_variants,
     x25519_format_roundtrips,
+    ecdh_format_roundtrips,
     internal_nonce_jwk,
     sha1_checked_postures(sha1_checked),
     ctr_known_answers,
@@ -1987,6 +1992,333 @@ async fn x25519_chaining() -> Result<(), String> {
     )
 }
 
+/// The ECDH key surface, on P-256: metadata getters in both grant
+/// directions, generated-key freshness, the public raw-export round trip,
+/// the wrong-length and crv-mismatch import rejections, extractability
+/// recording, and the zero-grant mint refusal.
+async fn ecdh_key_contract() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
+
+    let (secret, public) = generate_ecdh_key(EcdhVariant::P256, true, true)
+        .await
+        .map_err(|e| describe("generate-key", &e))?;
+    expect(
+        secret.algorithm_name(),
+        "ECDH".to_string(),
+        "secret-key algorithm-name",
+    )?;
+    expect(
+        public.algorithm_name(),
+        "ECDH".to_string(),
+        "public-key algorithm-name",
+    )?;
+    expect(secret.can_derive_bits(), true, "secret-key can-derive-bits")?;
+    expect(secret.can_derive_key(), true, "secret-key can-derive-key")?;
+    expect(
+        secret.extractable(),
+        false,
+        "secret-key extractable (mint default)",
+    )?;
+
+    // Single-grant mints report through the getters in both directions.
+    let (bits_only, _) = generate_ecdh_key(EcdhVariant::P256, true, false)
+        .await
+        .map_err(|e| describe("bits-only generate-key", &e))?;
+    expect(
+        bits_only.can_derive_bits(),
+        true,
+        "bits-only secret-key can-derive-bits",
+    )?;
+    expect(
+        bits_only.can_derive_key(),
+        false,
+        "bits-only secret-key can-derive-key",
+    )?;
+    let (key_only, _) = generate_ecdh_key(EcdhVariant::P256, false, true)
+        .await
+        .map_err(|e| describe("key-only generate-key", &e))?;
+    expect(
+        key_only.can_derive_bits(),
+        false,
+        "key-only secret-key can-derive-bits",
+    )?;
+    expect(
+        key_only.can_derive_key(),
+        true,
+        "key-only secret-key can-derive-key",
+    )?;
+
+    // A generated public key exports as the 65-byte uncompressed SEC1
+    // point and re-imports to an equivalent key: both peers derive the
+    // same secret.
+    let raw = public
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("public-key export-key-raw", &e))?;
+    expect(raw.len(), 65, "exported public-point length")?;
+    let reimported = import_ecdh_public_key_raw(EcdhVariant::P256, raw.clone())
+        .await
+        .map_err(|e| describe("re-import of exported public key", &e))?;
+    let direct = secret
+        .agree(&public)
+        .await
+        .map_err(|e| describe("agree (original public)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (original public)", &e))?;
+    let via_reimport = secret
+        .agree(&reimported)
+        .await
+        .map_err(|e| describe("agree (re-imported public)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (re-imported public)", &e))?;
+    expect_bytes(&via_reimport, &direct, "agreement after raw round trip")?;
+
+    // Generated keys are fresh: a second generate yields a different
+    // public point (the same randomness observable the X25519 probe
+    // pins).
+    let (_, public2) = generate_ecdh_key(EcdhVariant::P256, true, true)
+        .await
+        .map_err(|e| describe("second generate-key", &e))?;
+    let raw2 = public2
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("second public-key export-key-raw", &e))?;
+    if raw2 == raw {
+        return Err("two generated keys share a public point".into());
+    }
+
+    // The public JWK export carries the EC material members.
+    let jwk = public
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("public-key export-key-jwk", &e))?;
+    let x = b64url(&raw[1..33]);
+    let y = b64url(&raw[33..]);
+    if !jwk.contains("\"EC\"")
+        || !jwk.contains("\"P-256\"")
+        || !jwk.contains(&x)
+        || !jwk.contains(&y)
+    {
+        return Err(format!(
+            "exported public JWK missing material members: {jwk}"
+        ));
+    }
+
+    // Import rejections: a wrong-length public point, and EC JWKs whose
+    // crv disagrees with the declared variant, on both key halves.
+    expect_err(
+        "64-byte public point",
+        ErrKind::InvalidKey,
+        import_ecdh_public_key_raw(EcdhVariant::P256, raw[..64].to_vec()).await,
+        "imported a truncated public point",
+    )?;
+    let d = unhex(ECDH_P256_D);
+    let secret_x = unhex(ECDH_P256_X);
+    let secret_y = unhex(ECDH_P256_Y);
+    expect_err(
+        "wrong-crv EC private JWK",
+        ErrKind::InvalidKey,
+        ecdh::import_secret_key_jwk(
+            EcdhVariant::P256,
+            ecdh_secret_jwk("P-384", &secret_x, &secret_y, &d),
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported a P-384-labeled JWK as P-256",
+    )?;
+    let peer = unhex(ECDH_P256_PEER);
+    expect_err(
+        "wrong-crv EC public JWK",
+        ErrKind::InvalidKey,
+        ecdh::import_public_key_jwk(
+            EcdhVariant::P256,
+            format!(
+                r#"{{"kty":"EC","crv":"P-384","x":"{}","y":"{}"}}"#,
+                b64url(&peer[1..33]),
+                b64url(&peer[33..]),
+            ),
+        )
+        .await,
+        "imported a P-384-labeled JWK as P-256",
+    )?;
+
+    // The zero-usage mint check on the generation path (the import path's
+    // is the derive battery's `ecdh/contract/grants` case).
+    expect_err(
+        "zero-grant generate",
+        ErrKind::NotPermitted,
+        generate_ecdh_key(EcdhVariant::P256, false, false).await,
+        "generated a key with no enabled grant",
+    )?;
+
+    // The extractable grant records through the options onto the minted
+    // key (secret keys have no ungated export; the getter is the
+    // observable).
+    let extractable_import = ecdh::import_secret_key_jwk(
+        EcdhVariant::P256,
+        ecdh_secret_jwk("P-256", &secret_x, &secret_y, &d),
+        agreement_options(true, true, true),
+    )
+    .await
+    .map_err(|e| describe("extractable import", &e))?;
+    expect(
+        extractable_import.extractable(),
+        true,
+        "extractable import's getter",
+    )
+}
+
+/// The agreement operation on generated ECDH pairs: agreement commutes
+/// and the shared secret's natural length is the curve's field size (32
+/// bytes on P-256, 48 on P-384); a curve- or algorithm-mismatched peer
+/// fails `agree` with `invalid-key` in both directions. The ECDH × X25519
+/// pairings exercise the `key-agreement` kind's cross-algorithm check,
+/// unobservable while X25519 was the only algorithm minting the kind's
+/// resources.
+async fn ecdh_agree_contract() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
+
+    for (variant, size, what) in [
+        (EcdhVariant::P256, 32usize, "P-256"),
+        (EcdhVariant::P384, 48, "P-384"),
+    ] {
+        let (a_secret, a_public) = generate_ecdh_key(variant, true, true)
+            .await
+            .map_err(|e| describe(&format!("generate-key ({what} pair A)"), &e))?;
+        let (b_secret, b_public) = generate_ecdh_key(variant, true, true)
+            .await
+            .map_err(|e| describe(&format!("generate-key ({what} pair B)"), &e))?;
+        let ab = a_secret
+            .agree(&b_public)
+            .await
+            .map_err(|e| describe(&format!("agree ({what}, A with B)"), &e))?
+            .derive_bits(None)
+            .await
+            .map_err(|e| describe(&format!("derive-bits ({what}, A's direction)"), &e))?;
+        expect(
+            ab.len(),
+            size,
+            &format!("natural shared-secret length ({what})"),
+        )?;
+        let ba = b_secret
+            .agree(&a_public)
+            .await
+            .map_err(|e| describe(&format!("agree ({what}, B with A)"), &e))?
+            .derive_bits(None)
+            .await
+            .map_err(|e| describe(&format!("derive-bits ({what}, B's direction)"), &e))?;
+        expect_bytes(&ba, &ab, &format!("agreement commutes ({what})"))?;
+    }
+
+    let (p256_secret, p256_public) = generate_ecdh_key(EcdhVariant::P256, true, true)
+        .await
+        .map_err(|e| describe("generate-key (P-256)", &e))?;
+    let (p384_secret, p384_public) = generate_ecdh_key(EcdhVariant::P384, true, true)
+        .await
+        .map_err(|e| describe("generate-key (P-384)", &e))?;
+    let (x_secret, x_public) = generate_x25519_key(true, true)
+        .await
+        .map_err(|e| describe("generate-key (X25519)", &e))?;
+    expect_err(
+        "agree (P-256 secret, P-384 peer)",
+        ErrKind::InvalidKey,
+        p256_secret.agree(&p384_public).await,
+        "agreed across curves",
+    )?;
+    expect_err(
+        "agree (P-384 secret, P-256 peer)",
+        ErrKind::InvalidKey,
+        p384_secret.agree(&p256_public).await,
+        "agreed across curves",
+    )?;
+    expect_err(
+        "agree (X25519 secret, ECDH peer)",
+        ErrKind::InvalidKey,
+        x_secret.agree(&p256_public).await,
+        "agreed across algorithms",
+    )?;
+    expect_err(
+        "agree (ECDH secret, X25519 peer)",
+        ErrKind::InvalidKey,
+        p256_secret.agree(&x_public).await,
+        "agreed across algorithms",
+    )
+}
+
+/// `hkdf-sha2.prepare-from` chains from an ECDH agreement exactly as from
+/// an X25519 one: the chained derivation equals HKDF over the same shared
+/// secret imported as IKM, and chaining rides the `derive-key` grant,
+/// refusing `not-permitted` from a key-less input.
+async fn ecdh_chaining() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
+    use lann_webcrypto_guest::bindings::hkdf_sha2;
+
+    let shared = unhex(ECDH_P256_SHARED);
+    let secret_jwk = ecdh_secret_jwk(
+        "P-256",
+        &unhex(ECDH_P256_X),
+        &unhex(ECDH_P256_Y),
+        &unhex(ECDH_P256_D),
+    );
+    let secret = import_ecdh_secret_key(EcdhVariant::P256, secret_jwk.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    let peer = import_ecdh_public_key_raw(EcdhVariant::P256, unhex(ECDH_P256_PEER))
+        .await
+        .map_err(|e| describe("import-public-key-raw", &e))?;
+
+    // Chaining equivalence: prepare-from over the agreed input equals
+    // hkdf-sha2.prepare over the same shared secret imported as IKM.
+    let input = secret
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree", &e))?;
+    let chained = hkdf_sha2::prepare_from(
+        Sha2Variant::Sha256,
+        &input,
+        b"chain salt".to_vec(),
+        b"chain info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare-from", &e))?;
+    let via_chain = chained
+        .derive_bits(Some(256))
+        .await
+        .map_err(|e| describe("derive-bits (chained)", &e))?;
+    let ikm = import_ikm(shared.clone(), true, true)
+        .await
+        .map_err(|e| describe("import-ikm (shared secret)", &e))?;
+    let direct = hkdf_sha2::prepare(
+        Sha2Variant::Sha256,
+        &ikm,
+        b"chain salt".to_vec(),
+        b"chain info".to_vec(),
+    )
+    .await
+    .map_err(|e| describe("prepare (imported shared secret)", &e))?
+    .derive_bits(Some(256))
+    .await
+    .map_err(|e| describe("derive-bits (direct HKDF)", &e))?;
+    expect_bytes(&via_chain, &direct, "chaining equals HKDF over the secret")?;
+
+    // Chaining rides the derive-key grant: a bits-only input refuses it.
+    let bits_only = import_ecdh_secret_key(EcdhVariant::P256, secret_jwk, true, false)
+        .await
+        .map_err(|e| describe("bits-only import", &e))?;
+    let input = bits_only
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree (bits-only)", &e))?;
+    expect_err(
+        "chaining without the derive-key grant",
+        ErrKind::NotPermitted,
+        hkdf_sha2::prepare_from(Sha2Variant::Sha256, &input, Vec::new(), Vec::new()).await,
+        "chained from a key-less input",
+    )
+}
+
 // RFC 8032 §7.1 TEST 3: the seed, its public key, and the deterministic
 // signature over the two-byte message `af82` — a cross-implementation
 // known answer, since RFC 8032 signing is deterministic.
@@ -2456,6 +2788,232 @@ async fn x25519_format_roundtrips() -> Result<(), String> {
         ErrKind::NotExtractable,
         non_extractable.export_key_jwk().await,
         "exported a non-extractable secret key",
+    )
+}
+
+/// The X.509 SubjectPublicKeyInfo encoding of an uncompressed P-256
+/// public point (the id-ecPublicKey AlgorithmIdentifier with the
+/// prime256v1 named-curve parameter).
+fn p256_ec_spki(point: &[u8]) -> Vec<u8> {
+    let mut out = unhex("3059301306072a8648ce3d020106082a8648ce3d030107034200");
+    out.extend_from_slice(point);
+    out
+}
+
+/// The ECDH format surface: the Wycheproof P-256 known-answer keys
+/// through the SPKI and JWK public imports and the PKCS#8 secret round
+/// trip all derive the published shared secret, the public exports are
+/// the pinned encodings, the extractability gate holds on the secret
+/// exports, cross-curve material is rejected on every import format, and
+/// the declared-but-unserved P-521 declines `unsupported`.
+async fn ecdh_format_roundtrips() -> Result<(), String> {
+    use lann_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
+
+    let d = unhex(ECDH_P256_D);
+    let x = unhex(ECDH_P256_X);
+    let y = unhex(ECDH_P256_Y);
+    let peer_point = unhex(ECDH_P256_PEER);
+    let shared = unhex(ECDH_P256_SHARED);
+    let peer_jwk_text = format!(
+        r#"{{"kty":"EC","crv":"P-256","x":"{}","y":"{}"}}"#,
+        b64url(&peer_point[1..33]),
+        b64url(&peer_point[33..]),
+    );
+
+    // Peer public via SPKI and JWK: every pairing derives the published
+    // shared secret.
+    let secret = ecdh::import_secret_key_jwk(
+        EcdhVariant::P256,
+        ecdh_secret_jwk("P-256", &x, &y, &d),
+        agreement_options(true, true, true),
+    )
+    .await
+    .map_err(|e| describe("import-secret-key-jwk", &e))?;
+    let peer_spki = ecdh::import_public_key_spki(EcdhVariant::P256, p256_ec_spki(&peer_point))
+        .await
+        .map_err(|e| describe("import-public-key-spki", &e))?;
+    let peer_jwk = ecdh::import_public_key_jwk(EcdhVariant::P256, peer_jwk_text.clone())
+        .await
+        .map_err(|e| describe("import-public-key-jwk", &e))?;
+    for (what, peer) in [("spki peer", &peer_spki), ("jwk peer", &peer_jwk)] {
+        let derived = secret
+            .agree(peer)
+            .await
+            .map_err(|e| describe(&format!("agree ({what})"), &e))?
+            .derive_bits(None)
+            .await
+            .map_err(|e| describe(&format!("derive-bits ({what})"), &e))?;
+        expect_bytes(&derived, &shared, &format!("known shared secret ({what})"))?;
+    }
+
+    // The public exports are the pinned encodings of the raw point.
+    let peer = import_ecdh_public_key_raw(EcdhVariant::P256, peer_point.clone())
+        .await
+        .map_err(|e| describe("import-public-key-raw", &e))?;
+    let raw = peer
+        .export_key_raw()
+        .await
+        .map_err(|e| describe("public-key export-key-raw", &e))?;
+    expect_bytes(&raw, &peer_point, "raw public-point export")?;
+    let spki = peer
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("public-key export-key-spki", &e))?;
+    expect_bytes(
+        &spki,
+        &p256_ec_spki(&peer_point),
+        "P-256 SubjectPublicKeyInfo export",
+    )?;
+
+    // The gated secret exports carry the imported material. The PKCS#8
+    // export round-trips through its own import rather than pinning
+    // bytes: encoders legitimately differ on the ECPrivateKey optional
+    // members (the embedded public key and parameters).
+    let jwk = secret
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("secret-key export-key-jwk", &e))?;
+    let d_b64 = b64url(&d);
+    if !jwk.contains("\"EC\"") || !jwk.contains("\"P-256\"") || !jwk.contains(&d_b64) {
+        return Err(format!(
+            "exported secret JWK missing material members: {jwk}"
+        ));
+    }
+    let pkcs8 = secret
+        .export_key_pkcs8()
+        .await
+        .map_err(|e| describe("secret-key export-key-pkcs8", &e))?;
+    let reimported = ecdh::import_secret_key_pkcs8(
+        EcdhVariant::P256,
+        pkcs8.clone(),
+        agreement_options(true, true, false),
+    )
+    .await
+    .map_err(|e| describe("import-secret-key-pkcs8", &e))?;
+    let derived = reimported
+        .agree(&peer)
+        .await
+        .map_err(|e| describe("agree (pkcs8 round trip)", &e))?
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (pkcs8 round trip)", &e))?;
+    expect_bytes(&derived, &shared, "known shared secret (pkcs8 round trip)")?;
+
+    // The extractability gate, in the failing direction.
+    let non_extractable = import_ecdh_secret_key(
+        EcdhVariant::P256,
+        ecdh_secret_jwk("P-256", &x, &y, &d),
+        true,
+        true,
+    )
+    .await
+    .map_err(|e| describe("non-extractable import", &e))?;
+    expect_err(
+        "export-key-pkcs8",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_pkcs8().await,
+        "exported a non-extractable secret key",
+    )?;
+    expect_err(
+        "export-key-jwk",
+        ErrKind::NotExtractable,
+        non_extractable.export_key_jwk().await,
+        "exported a non-extractable secret key",
+    )?;
+
+    // Cross-curve material is rejected on every import format, in both
+    // directions.
+    let (p384_secret, p384_public) =
+        ecdh::generate_key(EcdhVariant::P384, agreement_options(true, true, true))
+            .await
+            .map_err(|e| describe("generate-key (P-384)", &e))?;
+    let p384_spki = p384_public
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("P-384 public export-key-spki", &e))?;
+    let p384_jwk = p384_secret
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("P-384 secret export-key-jwk", &e))?;
+    let p384_pkcs8 = p384_secret
+        .export_key_pkcs8()
+        .await
+        .map_err(|e| describe("P-384 secret export-key-pkcs8", &e))?;
+    expect_err(
+        "P-256 SPKI under p384",
+        ErrKind::InvalidKey,
+        ecdh::import_public_key_spki(EcdhVariant::P384, p256_ec_spki(&peer_point)).await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-256 public JWK under p384",
+        ErrKind::InvalidKey,
+        ecdh::import_public_key_jwk(EcdhVariant::P384, peer_jwk_text).await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-256 private JWK under p384",
+        ErrKind::InvalidKey,
+        ecdh::import_secret_key_jwk(
+            EcdhVariant::P384,
+            ecdh_secret_jwk("P-256", &x, &y, &d),
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-256 PKCS#8 under p384",
+        ErrKind::InvalidKey,
+        ecdh::import_secret_key_pkcs8(
+            EcdhVariant::P384,
+            pkcs8,
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-384 SPKI under p256",
+        ErrKind::InvalidKey,
+        ecdh::import_public_key_spki(EcdhVariant::P256, p384_spki).await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-384 private JWK under p256",
+        ErrKind::InvalidKey,
+        ecdh::import_secret_key_jwk(
+            EcdhVariant::P256,
+            p384_jwk,
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported cross-curve material",
+    )?;
+    expect_err(
+        "P-384 PKCS#8 under p256",
+        ErrKind::InvalidKey,
+        ecdh::import_secret_key_pkcs8(
+            EcdhVariant::P256,
+            p384_pkcs8,
+            agreement_options(true, true, false),
+        )
+        .await,
+        "imported cross-curve material",
+    )?;
+
+    // P-521 is declared but unserved: minting declines `unsupported`.
+    expect_err(
+        "import-public-key-raw (p521)",
+        ErrKind::Unsupported,
+        ecdh::import_public_key_raw(EcdhVariant::P521, vec![0x04; 133]).await,
+        "served the unserved curve",
+    )?;
+    expect_err(
+        "generate-key (p521)",
+        ErrKind::Unsupported,
+        ecdh::generate_key(EcdhVariant::P521, agreement_options(true, true, false)).await,
+        "served the unserved curve",
     )
 }
 
