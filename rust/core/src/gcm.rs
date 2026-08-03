@@ -215,14 +215,12 @@ fn tag<C: BlockEncrypt + BlockCipher<BlockSize = U16>>(
 mod tests {
     use aes::cipher::KeyInit as _;
     use aes::{Aes128, Aes256};
+    use data_encoding::HEXLOWER;
 
     use super::*;
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
+        HEXLOWER.decode(s.as_bytes()).unwrap()
     }
 
     /// Wycheproof aes_gcm_test.json tcId 68 (64-bit IV): the non-96-bit

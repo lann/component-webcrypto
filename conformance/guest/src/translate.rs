@@ -12,6 +12,7 @@
 
 use conformance_harness::stream::Schedule;
 use conformance_harness::{FEATURE_CHACHA, FEATURE_XCHACHA};
+use data_encoding::HEXLOWER_PERMISSIVE;
 use serde::Deserialize;
 
 /// The deterministic 1-in-N sample of rejection vectors that also run
@@ -774,7 +775,9 @@ struct AeadTest {
 }
 
 fn unhex(field: &str, hex: &str) -> Vec<u8> {
-    hex::decode(hex).unwrap_or_else(|err| panic!("vector field {field} is not hex: {err}"))
+    HEXLOWER_PERMISSIVE
+        .decode(hex.as_bytes())
+        .unwrap_or_else(|err| panic!("vector field {field} is not hex: {err}"))
 }
 
 fn is_valid(field: &str, result: &str) -> bool {

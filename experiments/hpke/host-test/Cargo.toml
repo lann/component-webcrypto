@@ -11,4 +11,5 @@ wasmtime = { version = "47", features = ["component-model", "component-model-asy
 anyhow = "1"
 
 [dev-dependencies]
+data-encoding-macro = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

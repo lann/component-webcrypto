@@ -578,7 +578,8 @@ impl AgreementSecretMaterial {
 mod tests {
     use super::*;
     use crate::jwk::{build_ec_private, build_ec_public, build_okp_private};
-    use hex_literal::hex;
+    use data_encoding::HEXLOWER;
+    use data_encoding_macro::hexlower;
 
     fn policy_all() -> AgreementPolicy {
         AgreementPolicy {
@@ -589,10 +590,7 @@ mod tests {
     }
 
     fn unhex(hex: &str) -> Vec<u8> {
-        (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect()
+        HEXLOWER.decode(hex.as_bytes()).unwrap()
     }
 
     /// RFC 7748 §6.1: Alice and Bob's published key pairs agree on the
@@ -733,12 +731,13 @@ mod tests {
     /// output length.
     #[test]
     fn ecdh_p256_known_answer() {
-        let public = hex!(
-            "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f26"
-            "ac333a93a9e70a81cd5a95b5bf8d13990eb741c8c38872b4a07d275a014e30cf"
+        let public = hexlower!(
+            "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f\
+             26ac333a93a9e70a81cd5a95b5bf8d13990eb741c8c38872b4a07d275a014e30\
+             cf"
         );
-        let private = hex!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
-        let shared = hex!("53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285");
+        let private = hexlower!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
+        let shared = hexlower!("53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285");
 
         let peer = AgreementPublicMaterial::import_ecdh(EcdhVariant::P256, &public).unwrap();
         let secret = ecdh_secret_from_scalar(EcdhVariant::P256, &private);
@@ -751,18 +750,19 @@ mod tests {
     /// Wycheproof `ecdh_secp384r1_ecpoint_test.json` tcId 1 (normal case).
     #[test]
     fn ecdh_p384_known_answer() {
-        let public = hex!(
-            "04790a6e059ef9a5940163183d4a7809135d29791643fc43a2f17ee8bf677ab84f"
-            "791b64a6be15969ffa012dd9185d8796d9b954baa8a75e82df711b3b56eadff6"
-            "b0f668c3b26b4b1aeb308a1fcc1c680d329a6705025f1c98a0b5e5bfcb163caa"
+        let public = hexlower!(
+            "04790a6e059ef9a5940163183d4a7809135d29791643fc43a2f17ee8bf677ab8\
+             4f791b64a6be15969ffa012dd9185d8796d9b954baa8a75e82df711b3b56eadf\
+             f6b0f668c3b26b4b1aeb308a1fcc1c680d329a6705025f1c98a0b5e5bfcb163c\
+             aa"
         );
-        let private = hex!(
-            "766e61425b2da9f846c09fc3564b93a6f8603b7392c785165bf20da948c49fd1"
-            "fb1dee4edd64356b9f21c588b75dfd81"
+        let private = hexlower!(
+            "766e61425b2da9f846c09fc3564b93a6f8603b7392c785165bf20da948c49fd1\
+             fb1dee4edd64356b9f21c588b75dfd81"
         );
-        let shared = hex!(
-            "6461defb95d996b24296f5a1832b34db05ed031114fbe7d98d098f93859866e4"
-            "de1e229da71fef0c77fe49b249190135"
+        let shared = hexlower!(
+            "6461defb95d996b24296f5a1832b34db05ed031114fbe7d98d098f93859866e4\
+             de1e229da71fef0c77fe49b249190135"
         );
 
         let peer = AgreementPublicMaterial::import_ecdh(EcdhVariant::P384, &public).unwrap();
@@ -886,7 +886,8 @@ mod tests {
         ));
         // A mismatched public point is rejected (the MAY this
         // implementation takes).
-        let other_scalar = hex!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
+        let other_scalar =
+            hexlower!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
         assert!(matches!(
             AgreementSecretMaterial::import_ecdh_jwk(
                 EcdhVariant::P256,

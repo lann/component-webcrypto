@@ -41,10 +41,10 @@ ctr = "0.9"
 # The JWK carrier (import-key-jwk / export-key-jwk): JSON via `serde_json`'s
 # Value (duplicate members resolve last-wins, matching the engines'
 # JSON.parse semantics the WIT contract pins) and strict unpadded base64url
-# via `base64` (rejects padding, non-alphabet bytes, and non-zero trailing
-# bits, per RFC 7515).
+# via `data-encoding` (rejects padding, non-alphabet bytes, and non-zero
+# trailing bits, per RFC 7515).
 serde_json = "1"
-base64 = "0.22"
+data-encoding = "2"
 chacha20poly1305 = "0.10"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
@@ -69,5 +69,7 @@ getrandom = "0.3"
 zeroize = "1"
 
 [dev-dependencies]
-# Hex constants in the known-answer tests.
-hex-literal = "1"
+# Hex constants in the known-answer tests, decoded at compile time; the
+# vectors whose hex arrives as a `&str` go through `data-encoding` itself,
+# which the JWK carrier already pulls in.
+data-encoding-macro = "0.1"

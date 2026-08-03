@@ -17,4 +17,3 @@ lann-webcrypto-guest = { path = "../../rust/guest" }
 conformance-harness = { path = "../harness" }
 wit-bindgen = { version = "0.59", features = ["async"] }
 futures = { version = "0.3", default-features = false, features = ["async-await"] }
-hex = "0.4"

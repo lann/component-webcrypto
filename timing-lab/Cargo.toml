@@ -18,5 +18,5 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 # The in-guest constant-time control surface.
 subtle = "2"
 # The agreement surfaces' known-answer constants (fixed scalars, peers,
-# and published shared secrets).
-hex-literal = "1"
+# and published shared secrets), decoded at compile time.
+data-encoding-macro = "0.1"

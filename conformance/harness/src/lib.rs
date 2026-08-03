@@ -25,6 +25,8 @@ pub mod stream;
 
 use std::collections::BTreeSet;
 
+use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
+
 use lann_webcrypto_guest::bindings::types::Error;
 
 /// The `chacha20-poly1305` feature: the IETF ChaCha20-Poly1305 (RFC 8439)
@@ -382,26 +384,15 @@ pub fn expect_bytes(got: &[u8], want: &[u8], what: &str) -> Result<(), String> {
 
 /// Decode a hex constant (probe-internal known-answer material).
 pub fn unhex(hex: &str) -> Vec<u8> {
-    hex::decode(hex).expect("probe hex constants are valid")
+    HEXLOWER
+        .decode(hex.as_bytes())
+        .expect("probe hex constants are valid")
 }
 
 /// Unpadded base64url, for building the members of the JWKs the imports
 /// take.
 pub fn b64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
-        for i in 0..=chunk.len() {
-            out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
-        }
-    }
-    out
+    BASE64URL_NOPAD.encode(bytes)
 }
 
 /// RFC 6979 A.2.5: the P-256 example key's public x-coordinate

@@ -13,5 +13,6 @@ lann-webcrypto-guest = { path = "../../rust/guest" }
 # `join!` runs an operation and its stream feeder concurrently within a
 # single cooperative task — the core of the stream helpers.
 futures = { version = "0.3", default-features = false, features = ["async-await"] }
-# Decoding probe-internal hex constants.
-hex = "0.4"
+# Decoding probe-internal hex constants and building the base64url JWK
+# members.
+data-encoding = "2"

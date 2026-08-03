@@ -775,7 +775,7 @@ pub fn unwrap_password(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use data_encoding_macro::hexupper;
 
     fn kw_policy() -> KwPolicy {
         KwPolicy {
@@ -790,24 +790,24 @@ mod tests {
     fn rfc3394_known_answer_128() {
         let kek = KwKeyMaterial::import(
             AesVariant::Aes128,
-            hex!("000102030405060708090A0B0C0D0E0F").to_vec(),
+            hexupper!("000102030405060708090A0B0C0D0E0F").to_vec(),
             kw_policy(),
         )
         .unwrap();
         let wrapped = kek
             .wrap(WrapInputMaterial::new(
                 WrapFormat::Raw,
-                hex!("00112233445566778899AABBCCDDEEFF").to_vec(),
+                hexupper!("00112233445566778899AABBCCDDEEFF").to_vec(),
             ))
             .unwrap();
         assert_eq!(
             wrapped,
-            hex!("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5").to_vec()
+            hexupper!("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5").to_vec()
         );
         let back = kek.unwrap(&wrapped).unwrap();
         assert_eq!(
             back.into_bytes().to_vec(),
-            hex!("00112233445566778899AABBCCDDEEFF").to_vec()
+            hexupper!("00112233445566778899AABBCCDDEEFF").to_vec()
         );
     }
 
@@ -816,20 +816,22 @@ mod tests {
     fn rfc3394_known_answer_256() {
         let kek = KwKeyMaterial::import(
             AesVariant::Aes256,
-            hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F").to_vec(),
+            hexupper!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F").to_vec(),
             kw_policy(),
         )
         .unwrap();
         let wrapped = kek
             .wrap(WrapInputMaterial::new(
                 WrapFormat::Raw,
-                hex!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F").to_vec(),
+                hexupper!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F")
+                    .to_vec(),
             ))
             .unwrap();
         assert_eq!(
             wrapped,
-            hex!(
-                "28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43BFB988B9B7A02DD21"
+            hexupper!(
+                "28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43B\
+                 FB988B9B7A02DD21"
             )
             .to_vec()
         );

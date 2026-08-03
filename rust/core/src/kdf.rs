@@ -514,6 +514,9 @@ fn extract(hash: HmacHash, salt: &[u8], ikm: &[u8]) -> Prk {
 
 #[cfg(test)]
 mod tests {
+    use data_encoding::HEXLOWER;
+    use data_encoding_macro::hexlower;
+
     use super::*;
 
     fn full() -> DerivePolicy {
@@ -534,8 +537,9 @@ mod tests {
         let okm = input.derive_bits(Some(42 * 8)).unwrap();
         assert_eq!(
             okm.as_slice(),
-            hex_literal::hex!(
-                "085a01ea1b10f36933068b56efa5ad81a4f14b822f5b091568a9cdd4f155fda2c22e422478d305f3f896"
+            hexlower!(
+                "085a01ea1b10f36933068b56efa5ad81a4f14b822f5b091568a9cdd4f155fda2\
+                 c22e422478d305f3f896"
             )
         );
     }
@@ -546,14 +550,8 @@ mod tests {
     fn pbkdf2_sha1_rfc6070() {
         let password = PasswordMaterial::import(b"password".to_vec(), full()).unwrap();
         for (iterations, expected) in [
-            (
-                1u32,
-                hex_literal::hex!("0c60c80f961f0e71f3a9b524af6012062fe037a6"),
-            ),
-            (
-                4096,
-                hex_literal::hex!("4b007901b765489abead49d926f721d065a429c1"),
-            ),
+            (1u32, hexlower!("0c60c80f961f0e71f3a9b524af6012062fe037a6")),
+            (4096, hexlower!("4b007901b765489abead49d926f721d065a429c1")),
         ] {
             let input =
                 DeriveInputMaterial::prepare_pbkdf2_sha1(&password, b"salt".to_vec(), iterations)
@@ -571,10 +569,7 @@ mod tests {
     }
 
     fn unhex(hex: &str) -> Vec<u8> {
-        (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect()
+        HEXLOWER.decode(hex.as_bytes()).unwrap()
     }
 
     /// RFC 5869 A.1: basic SHA-256 case.

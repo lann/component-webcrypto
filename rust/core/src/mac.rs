@@ -246,6 +246,8 @@ fn hmac_jwk_alg(hash: HmacHash) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use data_encoding_macro::hexlower;
+
     use super::*;
 
     // RFC 2202 test case 1: HMAC-SHA-1 known answer, pinning the SHA-1
@@ -255,10 +257,7 @@ mod tests {
         let key = MacKeyMaterial::import_sha1(vec![0x0b; 20], xp()).unwrap();
         assert_eq!(key.hash_name(), "SHA-1");
         let tag = key.sign(b"Hi There").unwrap();
-        assert_eq!(
-            tag,
-            hex_literal::hex!("b617318655057264e28bc0b6fb378c8ef146be00")
-        );
+        assert_eq!(tag, hexlower!("b617318655057264e28bc0b6fb378c8ef146be00"));
         key.verify(b"Hi There", &tag).unwrap();
         assert!(key.export_jwk().unwrap().contains("HS1"));
         // The wrong-alg rejection: an HS256 JWK is not an HMAC-SHA-1 key.

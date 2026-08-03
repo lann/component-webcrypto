@@ -21,6 +21,7 @@ wit_bindgen::generate!({
 });
 
 use anyhow::{ensure, Context, Result};
+use data_encoding_macro::hexlower;
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann_webcrypto_guest::aes_gcm::AesVariant;
 use lann_webcrypto_guest::sha2::Sha2Variant;
@@ -47,39 +48,52 @@ macro_rules! expect_error {
 
 const HMAC_KEY: &[u8] = b"Jefe";
 const HMAC_DATA: &[u8] = b"what do ya want for nothing?";
-const HMAC_TAG: &str = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+const HMAC_TAG: [u8; 32] =
+    hexlower!("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
 
 // --- NIST GCM revised spec, test case 16 (AES-256-GCM) ----------------------
 
-const GCM_KEY: &str = "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308";
-const GCM_IV: &str = "cafebabefacedbaddecaf888";
-const GCM_PLAINTEXT: &str = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
-                             1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39";
-const GCM_AAD: &str = "feedfacedeadbeeffeedfacedeadbeefabaddad2";
-const GCM_CIPHERTEXT: &str = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa\
-                              8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
-const GCM_TAG: &str = "76fc6ece0f4e1768cddf8853bb2d551b";
+const GCM_KEY: [u8; 32] =
+    hexlower!("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+const GCM_IV: [u8; 12] = hexlower!("cafebabefacedbaddecaf888");
+const GCM_PLAINTEXT: [u8; 60] = hexlower!(
+    "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
+     1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39"
+);
+const GCM_AAD: [u8; 20] = hexlower!("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+const GCM_CIPHERTEXT: [u8; 60] = hexlower!(
+    "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa\
+     8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662"
+);
+const GCM_TAG: [u8; 16] = hexlower!("76fc6ece0f4e1768cddf8853bb2d551b");
 
 // --- RFC 3394 §4.1 (AES-KW: a 128-bit KEK wrapping 128 bits of key data) -----
 
-const KW_KEK: &str = "000102030405060708090a0b0c0d0e0f";
-const KW_DATA: &str = "00112233445566778899aabbccddeeff";
-const KW_WRAPPED: &str = "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5";
+const KW_KEK: [u8; 16] = hexlower!("000102030405060708090a0b0c0d0e0f");
+const KW_DATA: [u8; 16] = hexlower!("00112233445566778899aabbccddeeff");
+const KW_WRAPPED: [u8; 24] = hexlower!("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5");
 
 // --- RFC 8032 §7.1 test 2 (Ed25519) ------------------------------------------
 
-const ED25519_PUBLIC: &str = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+const ED25519_PUBLIC: [u8; 32] =
+    hexlower!("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
 const ED25519_MESSAGE: &[u8] = &[0x72];
-const ED25519_SIG: &str = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
-                           085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+const ED25519_SIG: [u8; 64] = hexlower!(
+    "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
+     085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+);
 
 // --- RFC 6979 A.2.5 (ECDSA P-256 + SHA-256, message "sample") ----------------
 
-const ECDSA_PUBLIC_X: &str = "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
-const ECDSA_PUBLIC_Y: &str = "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+const ECDSA_PUBLIC_X: [u8; 32] =
+    hexlower!("60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6");
+const ECDSA_PUBLIC_Y: [u8; 32] =
+    hexlower!("7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299");
 const ECDSA_MESSAGE: &[u8] = b"sample";
-const ECDSA_SIG_R: &str = "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716";
-const ECDSA_SIG_S: &str = "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8";
+const ECDSA_SIG_R: [u8; 32] =
+    hexlower!("efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716");
+const ECDSA_SIG_S: [u8; 32] =
+    hexlower!("f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8");
 
 struct Component;
 
@@ -165,9 +179,10 @@ async fn hmac_key_export() -> Result<()> {
     );
     let tag = key.sign(HMAC_DATA).await.context("sign")?;
     ensure!(
-        hex(&tag) == HMAC_TAG,
-        "wrapper sign tag: got {}, want {HMAC_TAG}",
-        hex(&tag)
+        tag == HMAC_TAG,
+        "wrapper sign tag: got {}, want {}",
+        hex(&tag),
+        hex(&HMAC_TAG)
     );
     key.verify(HMAC_DATA, &tag)
         .await
@@ -203,7 +218,8 @@ async fn hmac_key_export() -> Result<()> {
 // --- digest & bytes -------------------------------------------------------
 
 /// The FIPS 180-2 "abc" SHA-256 example digest.
-const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+const SHA256_ABC: [u8; 32] =
+    hexlower!("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
 /// The digest tour: the `Digest` wrapper computes the FIPS 180-2 "abc"
 /// example digest, and the resource is reusable — a second compute agrees.
@@ -214,17 +230,21 @@ async fn digest_wrapper() -> Result<()> {
         "algorithm-name: got {}",
         digest.algorithm_name()
     );
-    let got = hex(&digest.compute(b"abc").await?);
-    ensure!(got == SHA256_ABC, "computed digest: got {got}");
-    let again = hex(&digest.compute(b"abc").await?);
-    ensure!(again == SHA256_ABC, "recomputed digest: got {again}");
+    let got = digest.compute(b"abc").await?;
+    ensure!(got == SHA256_ABC, "computed digest: got {}", hex(&got));
+    let again = digest.compute(b"abc").await?;
+    ensure!(
+        again == SHA256_ABC,
+        "recomputed digest: got {}",
+        hex(&again)
+    );
     Ok(())
 }
 
 /// `constant-time-equal` agrees with plain equality.
 async fn bytes_equal() -> Result<()> {
-    let digest = unhex(SHA256_ABC);
-    let mut tampered = digest.clone();
+    let digest = SHA256_ABC;
+    let mut tampered = digest;
     tampered[0] ^= 0x01;
     ensure!(
         constant_time_equal(&digest, &digest),
@@ -264,19 +284,19 @@ async fn aead_wrapper_seal() -> Result<()> {
         open: true,
         ..Default::default()
     };
-    let key = aes_gcm::import_key_raw(AesVariant::Aes256, unhex(GCM_KEY), seal_open)
+    let key = aes_gcm::import_key_raw(AesVariant::Aes256, GCM_KEY, seal_open)
         .await
         .context("import-key-raw")?;
-    let nonce = unhex(GCM_IV);
-    let plaintext = unhex(GCM_PLAINTEXT);
-    let aad = unhex(GCM_AAD);
+    let nonce = GCM_IV;
+    let plaintext = GCM_PLAINTEXT;
+    let aad = GCM_AAD;
 
     let sealed = key
         .seal(&nonce[..], &aad[..], &plaintext[..])
         .await
         .context("wrapper seal")?;
     ensure!(
-        hex(&sealed) == format!("{GCM_CIPHERTEXT}{GCM_TAG}"),
+        sealed == [GCM_CIPHERTEXT.as_slice(), GCM_TAG.as_slice()].concat(),
         "wrapper sealed message: got {}",
         hex(&sealed)
     );
@@ -441,7 +461,7 @@ async fn aes_ctr_wrapper_roundtrip() -> Result<()> {
 /// `authentication-failed`.
 async fn ed25519_verify_check() -> Result<()> {
     use lann_webcrypto_guest::ed25519;
-    let key = ed25519::import_verifying_key_raw(unhex(ED25519_PUBLIC))
+    let key = ed25519::import_verifying_key_raw(ED25519_PUBLIC)
         .await
         .context("import-verifying-key-raw")?;
     ensure!(
@@ -450,7 +470,7 @@ async fn ed25519_verify_check() -> Result<()> {
         key.algorithm_name()
     );
 
-    let mut sig = unhex(ED25519_SIG);
+    let mut sig = ED25519_SIG.to_vec();
     key.verify(ED25519_MESSAGE, sig.clone())
         .await
         .context("correct signature did not verify")?;
@@ -502,8 +522,8 @@ async fn ed25519_wrapper_roundtrip() -> Result<()> {
 async fn ecdsa_verify_known_answer() -> Result<()> {
     use lann_webcrypto_guest::ecdsa::{self, EcdsaVariant};
     let mut point = vec![0x04];
-    point.extend(unhex(ECDSA_PUBLIC_X));
-    point.extend(unhex(ECDSA_PUBLIC_Y));
+    point.extend(ECDSA_PUBLIC_X);
+    point.extend(ECDSA_PUBLIC_Y);
     let key = ecdsa::import_verifying_key_raw(EcdsaVariant::P256Sha256, point)
         .await
         .context("import-verifying-key-raw")?;
@@ -523,8 +543,8 @@ async fn ecdsa_verify_known_answer() -> Result<()> {
         key.algorithm_hash()
     );
 
-    let mut sig = unhex(ECDSA_SIG_R);
-    sig.extend(unhex(ECDSA_SIG_S));
+    let mut sig = ECDSA_SIG_R.to_vec();
+    sig.extend(ECDSA_SIG_S);
     key.verify(ECDSA_MESSAGE, sig.clone())
         .await
         .context("known-answer signature did not verify")?;
@@ -554,13 +574,13 @@ async fn hkdf_derive() -> Result<()> {
     let input = hkdf_sha2::prepare(
         Sha2Variant::Sha256,
         &ikm,
-        unhex("000102030405060708090a0b0c"),
-        unhex("f0f1f2f3f4f5f6f7f8f9"),
+        hexlower!("000102030405060708090a0b0c"),
+        hexlower!("f0f1f2f3f4f5f6f7f8f9"),
     )
     .await?;
     let okm = input.derive_bits(Some(42 * 8)).await?;
     ensure!(
-        okm == unhex(
+        okm == hexlower!(
             "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
         ),
         "OKM mismatch: got {}",
@@ -601,7 +621,7 @@ async fn pbkdf2_derive() -> Result<()> {
     let input = pbkdf2_sha2::prepare(Sha2Variant::Sha256, &password, b"salt", 1).await?;
     let dk = input.derive_bits(Some(64 * 8)).await?;
     ensure!(
-        dk == unhex(
+        dk == hexlower!(
             "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc\
              49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
         ),
@@ -707,7 +727,7 @@ async fn mac_datasource_equivalence() -> Result<()> {
         },
     )
     .await?;
-    let expected = unhex(HMAC_TAG);
+    let expected = HMAC_TAG;
 
     let borrowed = key.sign(HMAC_DATA).await?;
     ensure!(
@@ -831,7 +851,7 @@ async fn key_wrap_tour() -> Result<()> {
 
     let kek = aes_kw::import_key_raw(
         AesVariant::Aes128,
-        unhex(KW_KEK),
+        KW_KEK,
         KwKeyOptions {
             wrap: true,
             unwrap: true,
@@ -849,7 +869,7 @@ async fn key_wrap_tour() -> Result<()> {
     // The key data enters the wrap path as an extractable key's material.
     let payload = hmac_sha2::import_key_raw(
         Sha2Variant::Sha256,
-        unhex(KW_DATA),
+        KW_DATA,
         MacKeyOptions {
             sign: true,
             verify: false,
@@ -863,7 +883,7 @@ async fn key_wrap_tour() -> Result<()> {
         .await
         .context("kw-key.wrap")?;
     ensure!(
-        hex(&wrapped) == KW_WRAPPED,
+        wrapped == KW_WRAPPED,
         "RFC 3394 wire format: got {}",
         hex(&wrapped)
     );
@@ -892,7 +912,7 @@ async fn key_wrap_tour() -> Result<()> {
     // exported bytes.
     let aead_kek = aes_gcm::import_key_raw(
         AesVariant::Aes256,
-        unhex(GCM_KEY),
+        GCM_KEY,
         lann_webcrypto_guest::AeadKeyOptions {
             seal: true,
             wrap: true,
@@ -901,10 +921,10 @@ async fn key_wrap_tour() -> Result<()> {
     )
     .await
     .context("aead kek import")?;
-    let nonce = unhex(GCM_IV);
+    let nonce = GCM_IV;
     let wrapped = aead_kek
         .wrap(
-            nonce.clone(),
+            nonce,
             Vec::new(),
             None,
             payload.to_wrap_input_raw().await.context("to-wrap-input")?,
@@ -923,15 +943,7 @@ async fn key_wrap_tour() -> Result<()> {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn unhex(hex: &str) -> Vec<u8> {
-    let hex: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
-    hex.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
+    data_encoding::HEXLOWER.encode(bytes)
 }
 
 export!(Component);

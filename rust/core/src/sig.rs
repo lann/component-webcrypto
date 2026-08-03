@@ -820,19 +820,18 @@ mod tests {
     /// A P-256 EC public JWK from the RFC 6979 A.2.5 key, with the given
     /// coordinate lengths and an optional `alg` member.
     fn ec_public_jwk(x_len: usize, y_len: usize, alg: Option<&str>) -> String {
-        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        use base64::Engine as _;
-        use hex_literal::hex;
+        use data_encoding::BASE64URL_NOPAD;
+        use data_encoding_macro::hexlower;
 
-        let x = hex!("60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6");
-        let y = hex!("7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299");
+        let x = hexlower!("60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6");
+        let y = hexlower!("7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299");
         let alg = alg
             .map(|alg| format!(r#","alg":"{alg}""#))
             .unwrap_or_default();
         format!(
             r#"{{"kty":"EC","crv":"P-256","x":"{}","y":"{}"{alg}}}"#,
-            URL_SAFE_NO_PAD.encode(&x[..x_len]),
-            URL_SAFE_NO_PAD.encode(&y[..y_len]),
+            BASE64URL_NOPAD.encode(&x[..x_len]),
+            BASE64URL_NOPAD.encode(&y[..y_len]),
         )
     }
 
@@ -905,16 +904,16 @@ mod tests {
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_rfc6979_known_answers() {
-        use hex_literal::hex;
+        use data_encoding_macro::hexlower;
 
-        let scalar = hex!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+        let scalar = hexlower!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
         let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha256, &scalar, xp())
             .unwrap();
 
         // Deterministic signature: exact r ‖ s reproduction.
-        let expected = hex!(
-            "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716"
-            "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
+        let expected = hexlower!(
+            "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716\
+             f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
         );
         assert_eq!(key.sign(b"sample").unwrap(), expected);
 
@@ -922,10 +921,10 @@ mod tests {
         assert_eq!(key.export().unwrap(), scalar);
 
         // Derived public point (uncompressed SEC1).
-        let point = hex!(
-            "04"
-            "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
-            "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299"
+        let point = hexlower!(
+            "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29f\
+             b67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d44622\
+             99"
         );
         assert_eq!(key.public().export(), point);
     }
@@ -949,8 +948,8 @@ mod tests {
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ecdsa_cross_variant_binds_the_hash() {
-        use hex_literal::hex;
-        let scalar = hex!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+        use data_encoding_macro::hexlower;
+        let scalar = hexlower!("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
         let key = SigningKeyMaterial::import_ecdsa_scalar(EcdsaVariant::P256Sha384, &scalar, xp())
             .unwrap();
         let sig = key.sign(b"sample").unwrap();
