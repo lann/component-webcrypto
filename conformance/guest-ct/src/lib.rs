@@ -4,9 +4,11 @@
 //! The corpus is the incumbent's, reused wholesale: the `#[path]` modules
 //! below are `conformance-guest`'s own sources (translation, minting,
 //! runners, contract batteries, probes), compiled here unmodified. What
-//! is new is the registration layer: `#[case_generator]` rows for the
+//! is new is the registration layer: `#[case_row]` rows for the
 //! vector and contract suites (one per census two-segment prefix, tags at
-//! the row), literal `#[case]` fns for the probes, and — replacing the
+//! the row, registration delegated to `plan::register` — under the
+//! `rkyv-corpus` feature that is the allocation-free per-row-archive
+//! fast path), literal `#[case]` fns for the probes, and — replacing the
 //! incumbent's in-case `provided`/`run_declined` branch — explicit
 //! `!feature` decline cases. Cases never inspect feature state:
 //! scheduling against a target's capability manifest is the runner's job.
@@ -49,232 +51,232 @@ mod census_test;
 #[cfg(target_arch = "wasm32")]
 #[component_test_sdk::suite(name = "")]
 mod webcrypto {
+    use component_test_sdk::{ArcStr, Registry, Tags};
 
-    #[case_generator(prefix = "hkdf-sha1/wycheproof")]
-    fn row_hkdf_sha1_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hkdf-sha1/wycheproof").into_iter()
+    #[case_row(prefix = "hkdf-sha1/wycheproof")]
+    fn row_hkdf_sha1_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hkdf-sha256/wycheproof")]
-    fn row_hkdf_sha256_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hkdf-sha256/wycheproof").into_iter()
+    #[case_row(prefix = "hkdf-sha256/wycheproof")]
+    fn row_hkdf_sha256_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hkdf-sha384/wycheproof")]
-    fn row_hkdf_sha384_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hkdf-sha384/wycheproof").into_iter()
+    #[case_row(prefix = "hkdf-sha384/wycheproof")]
+    fn row_hkdf_sha384_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hkdf-sha512/wycheproof")]
-    fn row_hkdf_sha512_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hkdf-sha512/wycheproof").into_iter()
+    #[case_row(prefix = "hkdf-sha512/wycheproof")]
+    fn row_hkdf_sha512_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "pbkdf2-sha1/wycheproof")]
-    fn row_pbkdf2_sha1_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("pbkdf2-sha1/wycheproof").into_iter()
+    #[case_row(prefix = "pbkdf2-sha1/wycheproof")]
+    fn row_pbkdf2_sha1_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "pbkdf2-sha256/wycheproof")]
-    fn row_pbkdf2_sha256_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("pbkdf2-sha256/wycheproof").into_iter()
+    #[case_row(prefix = "pbkdf2-sha256/wycheproof")]
+    fn row_pbkdf2_sha256_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "pbkdf2-sha384/wycheproof")]
-    fn row_pbkdf2_sha384_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("pbkdf2-sha384/wycheproof").into_iter()
+    #[case_row(prefix = "pbkdf2-sha384/wycheproof")]
+    fn row_pbkdf2_sha384_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "pbkdf2-sha512/wycheproof")]
-    fn row_pbkdf2_sha512_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("pbkdf2-sha512/wycheproof").into_iter()
+    #[case_row(prefix = "pbkdf2-sha512/wycheproof")]
+    fn row_pbkdf2_sha512_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha1/wycheproof")]
-    fn row_hmac_sha1_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha1/wycheproof").into_iter()
+    #[case_row(prefix = "hmac-sha1/wycheproof")]
+    fn row_hmac_sha1_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha256/wycheproof")]
-    fn row_hmac_sha256_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha256/wycheproof").into_iter()
+    #[case_row(prefix = "hmac-sha256/wycheproof")]
+    fn row_hmac_sha256_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha384/wycheproof")]
-    fn row_hmac_sha384_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha384/wycheproof").into_iter()
+    #[case_row(prefix = "hmac-sha384/wycheproof")]
+    fn row_hmac_sha384_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha512/wycheproof")]
-    fn row_hmac_sha512_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha512/wycheproof").into_iter()
+    #[case_row(prefix = "hmac-sha512/wycheproof")]
+    fn row_hmac_sha512_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-gcm/wycheproof")]
-    fn row_aes_gcm_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-gcm/wycheproof").into_iter()
+    #[case_row(prefix = "aes-gcm/wycheproof")]
+    fn row_aes_gcm_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "chacha20-poly1305/wycheproof", tags("chacha20-poly1305"))]
-    fn row_chacha20_poly1305_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("chacha20-poly1305/wycheproof").into_iter()
+    #[case_row(prefix = "chacha20-poly1305/wycheproof", tags("chacha20-poly1305"))]
+    fn row_chacha20_poly1305_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "xchacha20-poly1305/wycheproof", tags("xchacha20-poly1305"))]
-    fn row_xchacha20_poly1305_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("xchacha20-poly1305/wycheproof").into_iter()
+    #[case_row(prefix = "xchacha20-poly1305/wycheproof", tags("xchacha20-poly1305"))]
+    fn row_xchacha20_poly1305_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-cbc/wycheproof")]
-    fn row_aes_cbc_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-cbc/wycheproof").into_iter()
+    #[case_row(prefix = "aes-cbc/wycheproof")]
+    fn row_aes_cbc_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-kw/wycheproof")]
-    fn row_aes_kw_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-kw/wycheproof").into_iter()
+    #[case_row(prefix = "aes-kw/wycheproof")]
+    fn row_aes_kw_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-gcm-internal-nonce/wycheproof")]
-    fn row_aes_gcm_internal_nonce_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-gcm-internal-nonce/wycheproof").into_iter()
+    #[case_row(prefix = "aes-gcm-internal-nonce/wycheproof")]
+    fn row_aes_gcm_internal_nonce_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(
+    #[case_row(
         prefix = "xchacha20-poly1305-internal-nonce/wycheproof",
         tags("xchacha20-poly1305")
     )]
-    fn row_xchacha20_poly1305_internal_nonce_wycheproof() -> impl Iterator<Item = Case>
-    {
-        crate::plan::generated("xchacha20-poly1305-internal-nonce/wycheproof").into_iter()
+    fn row_xchacha20_poly1305_internal_nonce_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "sha2/nist-cavp")]
-    fn row_sha2_nist_cavp() -> impl Iterator<Item = Case> {
-        crate::plan::generated("sha2/nist-cavp").into_iter()
+    #[case_row(prefix = "sha2/nist-cavp")]
+    fn row_sha2_nist_cavp(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ed25519/wycheproof")]
-    fn row_ed25519_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ed25519/wycheproof").into_iter()
+    #[case_row(prefix = "ed25519/wycheproof")]
+    fn row_ed25519_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ed25519/speccheck")]
-    fn row_ed25519_speccheck() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ed25519/speccheck").into_iter()
+    #[case_row(prefix = "ed25519/speccheck")]
+    fn row_ed25519_speccheck(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdsa-p256-sha256/wycheproof")]
-    fn row_ecdsa_p256_sha256_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdsa-p256-sha256/wycheproof").into_iter()
+    #[case_row(prefix = "ecdsa-p256-sha256/wycheproof")]
+    fn row_ecdsa_p256_sha256_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdsa-p384-sha384/wycheproof")]
-    fn row_ecdsa_p384_sha384_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdsa-p384-sha384/wycheproof").into_iter()
+    #[case_row(prefix = "ecdsa-p384-sha384/wycheproof")]
+    fn row_ecdsa_p384_sha384_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "x25519/wycheproof")]
-    fn row_x25519_wycheproof() -> impl Iterator<Item = Case> {
-        crate::plan::generated("x25519/wycheproof").into_iter()
+    #[case_row(prefix = "x25519/wycheproof")]
+    fn row_x25519_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p256/wycheproof-spki")]
-    fn row_ecdh_p256_wycheproof_spki() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p256/wycheproof-spki").into_iter()
+    #[case_row(prefix = "ecdh-p256/wycheproof-spki")]
+    fn row_ecdh_p256_wycheproof_spki(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p256/wycheproof-ecpoint")]
-    fn row_ecdh_p256_wycheproof_ecpoint() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p256/wycheproof-ecpoint").into_iter()
+    #[case_row(prefix = "ecdh-p256/wycheproof-ecpoint")]
+    fn row_ecdh_p256_wycheproof_ecpoint(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p256/wycheproof-webcrypto")]
-    fn row_ecdh_p256_wycheproof_webcrypto() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p256/wycheproof-webcrypto").into_iter()
+    #[case_row(prefix = "ecdh-p256/wycheproof-webcrypto")]
+    fn row_ecdh_p256_wycheproof_webcrypto(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p384/wycheproof-spki")]
-    fn row_ecdh_p384_wycheproof_spki() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p384/wycheproof-spki").into_iter()
+    #[case_row(prefix = "ecdh-p384/wycheproof-spki")]
+    fn row_ecdh_p384_wycheproof_spki(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p384/wycheproof-ecpoint")]
-    fn row_ecdh_p384_wycheproof_ecpoint() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p384/wycheproof-ecpoint").into_iter()
+    #[case_row(prefix = "ecdh-p384/wycheproof-ecpoint")]
+    fn row_ecdh_p384_wycheproof_ecpoint(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh-p384/wycheproof-webcrypto")]
-    fn row_ecdh_p384_wycheproof_webcrypto() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh-p384/wycheproof-webcrypto").into_iter()
+    #[case_row(prefix = "ecdh-p384/wycheproof-webcrypto")]
+    fn row_ecdh_p384_wycheproof_webcrypto(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-gcm/contract")]
-    fn row_aes_gcm_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-gcm/contract").into_iter()
+    #[case_row(prefix = "aes-gcm/contract")]
+    fn row_aes_gcm_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "chacha20-poly1305/contract", tags("chacha20-poly1305"))]
-    fn row_chacha20_poly1305_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("chacha20-poly1305/contract").into_iter()
+    #[case_row(prefix = "chacha20-poly1305/contract", tags("chacha20-poly1305"))]
+    fn row_chacha20_poly1305_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "xchacha20-poly1305/contract", tags("xchacha20-poly1305"))]
-    fn row_xchacha20_poly1305_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("xchacha20-poly1305/contract").into_iter()
+    #[case_row(prefix = "xchacha20-poly1305/contract", tags("xchacha20-poly1305"))]
+    fn row_xchacha20_poly1305_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha1/contract")]
-    fn row_hmac_sha1_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha1/contract").into_iter()
+    #[case_row(prefix = "hmac-sha1/contract")]
+    fn row_hmac_sha1_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hmac-sha2/contract")]
-    fn row_hmac_sha2_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hmac-sha2/contract").into_iter()
+    #[case_row(prefix = "hmac-sha2/contract")]
+    fn row_hmac_sha2_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-cbc/contract")]
-    fn row_aes_cbc_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-cbc/contract").into_iter()
+    #[case_row(prefix = "aes-cbc/contract")]
+    fn row_aes_cbc_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-ctr/contract")]
-    fn row_aes_ctr_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-ctr/contract").into_iter()
+    #[case_row(prefix = "aes-ctr/contract")]
+    fn row_aes_ctr_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "aes-gcm-internal-nonce/contract")]
-    fn row_aes_gcm_internal_nonce_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("aes-gcm-internal-nonce/contract").into_iter()
+    #[case_row(prefix = "aes-gcm-internal-nonce/contract")]
+    fn row_aes_gcm_internal_nonce_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(
+    #[case_row(
         prefix = "xchacha20-poly1305-internal-nonce/contract",
         tags("xchacha20-poly1305")
     )]
-    fn row_xchacha20_poly1305_internal_nonce_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("xchacha20-poly1305-internal-nonce/contract").into_iter()
+    fn row_xchacha20_poly1305_internal_nonce_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "hkdf-sha2/contract")]
-    fn row_hkdf_sha2_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("hkdf-sha2/contract").into_iter()
+    #[case_row(prefix = "hkdf-sha2/contract")]
+    fn row_hkdf_sha2_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "pbkdf2-sha2/contract")]
-    fn row_pbkdf2_sha2_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("pbkdf2-sha2/contract").into_iter()
+    #[case_row(prefix = "pbkdf2-sha2/contract")]
+    fn row_pbkdf2_sha2_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "x25519/contract")]
-    fn row_x25519_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("x25519/contract").into_iter()
+    #[case_row(prefix = "x25519/contract")]
+    fn row_x25519_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_generator(prefix = "ecdh/contract")]
-    fn row_ecdh_contract() -> impl Iterator<Item = Case> {
-        crate::plan::generated("ecdh/contract").into_iter()
+    #[case_row(prefix = "ecdh/contract")]
+    fn row_ecdh_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
     }
 
     /// The hand-written API-contract probes: one literal case per

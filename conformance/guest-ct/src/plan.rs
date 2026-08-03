@@ -2,7 +2,7 @@
 //! the incumbent corpus (translate/contract/probes, reused wholesale from
 //! `conformance-guest`) onto the `#[suite]` generator rows.
 //!
-//! Every generator in `lib.rs` delegates here ([`generated`]), and the
+//! Every `#[case_row]` in `lib.rs` delegates here ([`register`]), and the
 //! native census-parity test (`census_test`) expands the same [`ROWS`]
 //! table, so the inventory the suite registers and the inventory the test
 //! asserts cannot drift from each other. Case *bodies* are the incumbent
@@ -10,7 +10,9 @@
 
 use std::rc::Rc;
 
-use component_test_sdk::{Failure, GeneratedCase, Verdict};
+use component_test_sdk::{ArcStr, Failure, Registry, Tags, Verdict};
+#[cfg(not(feature = "rkyv-corpus"))]
+use component_test_sdk::GeneratedCase;
 use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA};
 use futures::future::LocalBoxFuture;
 
@@ -229,9 +231,46 @@ pub fn cases_under(prefix: &str) -> Vec<PlanCase> {
         .collect()
 }
 
+/// Register one generator row: the `#[case_row]` entry point every row
+/// in `lib.rs` delegates to. Under `rkyv-corpus`, vector rows take the
+/// allocation-free fast path ([`register_row`]) over their per-row
+/// archives; contract rows (table-driven, a dozen-odd cases each) keep
+/// the [`PlanCase`] shape, whose costs are negligible at that count.
+#[cfg(feature = "rkyv-corpus")]
+pub fn register(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    if rows::register_vector(registry, prefix, tags) {
+        return;
+    }
+    for case in cases_under(prefix) {
+        let name = component_test_sdk::CaseName::new(ArcStr::from(case.id))
+            .unwrap_or_else(|e| panic!("invalid case id under `{prefix}`: {e}"));
+        let run = case.run;
+        registry.generated_named(
+            prefix,
+            tags,
+            name,
+            Box::new(move |_ctx| {
+                let fut = run();
+                Box::pin(async move { fut.await.map_err(Failure::Failed) })
+            }),
+        );
+    }
+}
+
+/// Register one generator row (default/`preparsed` modes: the original
+/// [`GeneratedCase`] path, costs unchanged — these modes exist for
+/// measurement comparison).
+#[cfg(not(feature = "rkyv-corpus"))]
+pub fn register(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    for case in generated(prefix) {
+        registry.generated(prefix, tags, case);
+    }
+}
+
 /// The generator-shaped view of a row: leaves (which may be
 /// multi-segment: `tc375/whole`) plus verdict-shaped bodies.
-pub fn generated(prefix: &'static str) -> Vec<GeneratedCase> {
+#[cfg(not(feature = "rkyv-corpus"))]
+pub fn generated(prefix: &str) -> Vec<GeneratedCase> {
     let head = format!("{prefix}/");
     cases_under(prefix)
         .into_iter()
@@ -278,11 +317,11 @@ pub async fn declined(feature: &'static str) -> Verdict {
 /// incumbent translate iterators (JSON parsed at registry-build time);
 /// under the `preparsed` measurement feature, each is a postcard decode
 /// of the same corpus serialized by build.rs — same values, same
-/// call-per-row structure, no JSON parsing. Under `rkyv-corpus`, each is
-/// a `&'static` view of the corpus rkyv-archived by build.rs — no corpus
-/// deserialization at all at registry build.
+/// call-per-row structure, no JSON parsing. (Under `rkyv-corpus` the
+/// corpora are per-row archives instead — see [`rows`].)
+#[cfg(not(feature = "rkyv-corpus"))]
 mod corpus {
-    #[cfg(not(any(feature = "preparsed", feature = "rkyv-corpus")))]
+    #[cfg(not(feature = "preparsed"))]
     pub use crate::translate::{
         aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases,
         kw_cases, pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
@@ -321,63 +360,353 @@ mod corpus {
         (x25519_cases, crate::translate::X25519Case, "x25519.bin"),
         (ecdh_cases, crate::translate::EcdhCase, "ecdh.bin"),
     ];
+}
 
-    #[cfg(feature = "rkyv-corpus")]
-    macro_rules! rkyv_corpus {
-        ($(($fn_name:ident, $case:ty, $blob:literal),)*) => {
-            $(pub fn $fn_name() -> &'static rkyv::Archived<crate::corpus::Corpus<$case>> {
-                // include_bytes! only guarantees byte alignment; give the
-                // blob rkyv's 16-byte alignment via a wrapper static.
-                #[repr(C, align(16))]
-                struct Aligned<B: ?Sized>(B);
-                static BYTES: &Aligned<[u8]> =
-                    &Aligned(*include_bytes!(concat!(env!("OUT_DIR"), "/", $blob)));
-                // SAFETY: unvalidated access is sound here because we
-                // control both ends — build.rs serialized these bytes with
-                // the same rkyv version and the very same `Corpus` type
-                // (shared source file) — and the consumer is a sandboxed
-                // test guest: a corrupted blob can at worst fail its own
-                // suite, not confuse a trust boundary.
-                unsafe {
-                    rkyv::access_unchecked::<rkyv::Archived<crate::corpus::Corpus<$case>>>(
-                        &BYTES.0,
-                    )
+/// The per-row archived corpora (`rkyv-corpus`): one `RowCorpus` blob
+/// per vector generator row, written by build.rs with names pre-split
+/// into shared prefix/leaf blobs (see `src/corpus.rs`). No runtime
+/// prefix filtering, no shared-corpus multi-walk: each row includes
+/// exactly its own cases.
+#[cfg(feature = "rkyv-corpus")]
+mod rows {
+    use super::*;
+
+    macro_rules! vector_rows {
+        ($(($prefix:literal, $accessor:ident, $ty:ty, $blob:literal, $run:expr),)*) => {
+            $(
+                fn $accessor() -> &'static rkyv::Archived<crate::corpus::RowCorpus<$ty>> {
+                    // include_bytes! only guarantees byte alignment; give
+                    // the blob rkyv's 16-byte alignment via a wrapper
+                    // static.
+                    #[repr(C, align(16))]
+                    struct Aligned<B: ?Sized>(B);
+                    static BYTES: &Aligned<[u8]> =
+                        &Aligned(*include_bytes!(concat!(env!("OUT_DIR"), "/", $blob)));
+                    // SAFETY: unvalidated access is sound here because we
+                    // control both ends — build.rs serialized these bytes
+                    // with the same rkyv version and the very same
+                    // `RowCorpus` type (shared source file) — and the
+                    // consumer is a sandboxed test guest: a corrupted blob
+                    // can at worst fail its own suite, not confuse a trust
+                    // boundary.
+                    unsafe {
+                        rkyv::access_unchecked::<
+                            rkyv::Archived<crate::corpus::RowCorpus<$ty>>,
+                        >(&BYTES.0)
+                    }
                 }
-            })*
+            )*
+
+            /// Register a vector row via the fast path; `false` if the
+            /// prefix is not a vector row (i.e. a contract row).
+            pub fn register_vector(
+                registry: &mut Registry,
+                prefix: &ArcStr,
+                tags: &Tags,
+            ) -> bool {
+                match &**prefix {
+                    $($prefix => {
+                        super::register_row(registry, prefix, tags, $accessor(), $run);
+                        true
+                    })*
+                    _ => false,
+                }
+            }
+
+            /// The [`PlanCase`] view of a vector row (census-parity test
+            /// and any non-fast-path consumer; old costs are fine here).
+            pub fn plan_cases(prefix: &str) -> Option<Vec<PlanCase>> {
+                match prefix {
+                    $($prefix => Some(super::row_plan($accessor(), $run)),)*
+                    _ => None,
+                }
+            }
         };
     }
 
-    #[cfg(feature = "rkyv-corpus")]
-    rkyv_corpus![
-        (hkdf_cases, crate::translate::HkdfCase, "hkdf.rkyv"),
-        (pbkdf2_cases, crate::translate::Pbkdf2Case, "pbkdf2.rkyv"),
-        (hmac_cases, crate::translate::HmacCase, "hmac.rkyv"),
-        (aead_cases, crate::translate::AeadCase, "aead.rkyv"),
-        (cbc_cases, crate::translate::CbcCase, "cbc.rkyv"),
-        (kw_cases, crate::translate::KwCase, "kw.rkyv"),
+    vector_rows![
         (
-            internal_nonce_cases,
+            "hkdf-sha1/wycheproof",
+            hkdf_sha1_wycheproof,
+            crate::translate::HkdfCase,
+            "hkdf-sha1_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hkdf_case(&c).await })
+        ),
+        (
+            "hkdf-sha256/wycheproof",
+            hkdf_sha256_wycheproof,
+            crate::translate::HkdfCase,
+            "hkdf-sha256_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hkdf_case(&c).await })
+        ),
+        (
+            "hkdf-sha384/wycheproof",
+            hkdf_sha384_wycheproof,
+            crate::translate::HkdfCase,
+            "hkdf-sha384_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hkdf_case(&c).await })
+        ),
+        (
+            "hkdf-sha512/wycheproof",
+            hkdf_sha512_wycheproof,
+            crate::translate::HkdfCase,
+            "hkdf-sha512_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hkdf_case(&c).await })
+        ),
+        (
+            "pbkdf2-sha1/wycheproof",
+            pbkdf2_sha1_wycheproof,
+            crate::translate::Pbkdf2Case,
+            "pbkdf2-sha1_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_pbkdf2_case(&c).await })
+        ),
+        (
+            "pbkdf2-sha256/wycheproof",
+            pbkdf2_sha256_wycheproof,
+            crate::translate::Pbkdf2Case,
+            "pbkdf2-sha256_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_pbkdf2_case(&c).await })
+        ),
+        (
+            "pbkdf2-sha384/wycheproof",
+            pbkdf2_sha384_wycheproof,
+            crate::translate::Pbkdf2Case,
+            "pbkdf2-sha384_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_pbkdf2_case(&c).await })
+        ),
+        (
+            "pbkdf2-sha512/wycheproof",
+            pbkdf2_sha512_wycheproof,
+            crate::translate::Pbkdf2Case,
+            "pbkdf2-sha512_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_pbkdf2_case(&c).await })
+        ),
+        (
+            "hmac-sha1/wycheproof",
+            hmac_sha1_wycheproof,
+            crate::translate::HmacCase,
+            "hmac-sha1_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hmac_case(&c).await })
+        ),
+        (
+            "hmac-sha256/wycheproof",
+            hmac_sha256_wycheproof,
+            crate::translate::HmacCase,
+            "hmac-sha256_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hmac_case(&c).await })
+        ),
+        (
+            "hmac-sha384/wycheproof",
+            hmac_sha384_wycheproof,
+            crate::translate::HmacCase,
+            "hmac-sha384_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hmac_case(&c).await })
+        ),
+        (
+            "hmac-sha512/wycheproof",
+            hmac_sha512_wycheproof,
+            crate::translate::HmacCase,
+            "hmac-sha512_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_hmac_case(&c).await })
+        ),
+        (
+            "aes-gcm/wycheproof",
+            aes_gcm_wycheproof,
+            crate::translate::AeadCase,
+            "aes-gcm_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_aead_case(&c).await })
+        ),
+        (
+            "chacha20-poly1305/wycheproof",
+            chacha20_poly1305_wycheproof,
+            crate::translate::AeadCase,
+            "chacha20-poly1305_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_aead_case(&c).await })
+        ),
+        (
+            "xchacha20-poly1305/wycheproof",
+            xchacha20_poly1305_wycheproof,
+            crate::translate::AeadCase,
+            "xchacha20-poly1305_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_aead_case(&c).await })
+        ),
+        (
+            "aes-cbc/wycheproof",
+            aes_cbc_wycheproof,
+            crate::translate::CbcCase,
+            "aes-cbc_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_cbc_case(&c).await })
+        ),
+        (
+            "aes-kw/wycheproof",
+            aes_kw_wycheproof,
+            crate::translate::KwCase,
+            "aes-kw_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_kw_case(&c).await })
+        ),
+        (
+            "aes-gcm-internal-nonce/wycheproof",
+            aes_gcm_internal_nonce_wycheproof,
             crate::translate::InternalNonceCase,
-            "internal_nonce.rkyv"
+            "aes-gcm-internal-nonce_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
         ),
-        (sha2_cases, crate::translate::Sha2Case, "sha2.rkyv"),
-        (sig_cases, crate::translate::SigCase, "sig.rkyv"),
         (
-            speccheck_cases,
-            crate::translate::SpeccheckCase,
-            "speccheck.rkyv"
+            "xchacha20-poly1305-internal-nonce/wycheproof",
+            xchacha20_poly1305_internal_nonce_wycheproof,
+            crate::translate::InternalNonceCase,
+            "xchacha20-poly1305-internal-nonce_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
         ),
-        (x25519_cases, crate::translate::X25519Case, "x25519.rkyv"),
-        (ecdh_cases, crate::translate::EcdhCase, "ecdh.rkyv"),
+        (
+            "sha2/nist-cavp",
+            sha2_nist_cavp,
+            crate::translate::Sha2Case,
+            "sha2_nist-cavp.rkyv",
+            |c| Box::pin(async move { vectors::run_sha2_case(&c).await })
+        ),
+        (
+            "ed25519/wycheproof",
+            ed25519_wycheproof,
+            crate::translate::SigCase,
+            "ed25519_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_sig_case(&c).await })
+        ),
+        (
+            "ed25519/speccheck",
+            ed25519_speccheck,
+            crate::translate::SpeccheckCase,
+            "ed25519_speccheck.rkyv",
+            |c| Box::pin(async move { vectors::run_speccheck_case(&c).await })
+        ),
+        (
+            "ecdsa-p256-sha256/wycheproof",
+            ecdsa_p256_sha256_wycheproof,
+            crate::translate::SigCase,
+            "ecdsa-p256-sha256_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_sig_case(&c).await })
+        ),
+        (
+            "ecdsa-p384-sha384/wycheproof",
+            ecdsa_p384_sha384_wycheproof,
+            crate::translate::SigCase,
+            "ecdsa-p384-sha384_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_sig_case(&c).await })
+        ),
+        (
+            "x25519/wycheproof",
+            x25519_wycheproof,
+            crate::translate::X25519Case,
+            "x25519_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_x25519_case(&c).await })
+        ),
+        (
+            "ecdh-p256/wycheproof-spki",
+            ecdh_p256_wycheproof_spki,
+            crate::translate::EcdhCase,
+            "ecdh-p256_wycheproof-spki.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
+        (
+            "ecdh-p256/wycheproof-ecpoint",
+            ecdh_p256_wycheproof_ecpoint,
+            crate::translate::EcdhCase,
+            "ecdh-p256_wycheproof-ecpoint.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
+        (
+            "ecdh-p256/wycheproof-webcrypto",
+            ecdh_p256_wycheproof_webcrypto,
+            crate::translate::EcdhCase,
+            "ecdh-p256_wycheproof-webcrypto.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
+        (
+            "ecdh-p384/wycheproof-spki",
+            ecdh_p384_wycheproof_spki,
+            crate::translate::EcdhCase,
+            "ecdh-p384_wycheproof-spki.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
+        (
+            "ecdh-p384/wycheproof-ecpoint",
+            ecdh_p384_wycheproof_ecpoint,
+            crate::translate::EcdhCase,
+            "ecdh-p384_wycheproof-ecpoint.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
+        (
+            "ecdh-p384/wycheproof-webcrypto",
+            ecdh_p384_wycheproof_webcrypto,
+            crate::translate::EcdhCase,
+            "ecdh-p384_wycheproof-webcrypto.rkyv",
+            |c| Box::pin(async move { vectors::run_ecdh_case(&c).await })
+        ),
     ];
 }
 
 /// The corpus slice a prefix draws from (the incumbent iterator + runner
-/// pairing, exactly the incumbent `suites!` table's rows). Several
-/// prefixes share a builder (e.g. the four HMAC parameterizations live in
-/// one iterator); `cases_under` filters by prefix.
+/// pairing, exactly the incumbent `suites!` table's rows). Vector rows
+/// come from [`vector_builder`] (mode-dependent); contract rows are
+/// table-driven.
 fn builder(prefix: &str) -> Vec<PlanCase> {
+    if let Some(cases) = vector_builder(prefix) {
+        return cases;
+    }
     match prefix {
+        "aes-gcm/contract" | "chacha20-poly1305/contract" | "xchacha20-poly1305/contract" => {
+            contract_cases(
+                contract::AEAD_FAMILIES,
+                |f| f.areas().collect(),
+                |f, a| f.case_id(a),
+                |f| f.features,
+                |f, a| Box::pin(contract::run(f, a)),
+            )
+        }
+        "hmac-sha1/contract" | "hmac-sha2/contract" => contract_cases(
+            contract::MAC_FAMILIES,
+            |_| contract::MacArea::ALL.to_vec(),
+            |f, a| f.case_id(a),
+            |f| f.features,
+            |f, a| Box::pin(contract::run_mac(f, a)),
+        ),
+        "aes-cbc/contract" | "aes-ctr/contract" => contract_cases(
+            contract::CIPHER_FAMILIES,
+            |_| contract::CipherArea::ALL.to_vec(),
+            |f, a| f.case_id(a),
+            |f| f.features,
+            |f, a| Box::pin(contract::run_cipher(f, a)),
+        ),
+        "aes-gcm-internal-nonce/contract" | "xchacha20-poly1305-internal-nonce/contract" => {
+            contract_cases(
+                contract::INTERNAL_NONCE_FAMILIES,
+                |f| f.areas().collect(),
+                |f, a| f.case_id(a),
+                |f| f.features,
+                |f, a| Box::pin(contract::run_internal_nonce(f, a)),
+            )
+        }
+        "hkdf-sha2/contract" | "pbkdf2-sha2/contract" | "x25519/contract" | "ecdh/contract" => {
+            contract_cases(
+                contract::DERIVE_SOURCE_FAMILIES,
+                |_| contract::DeriveArea::ALL.to_vec(),
+                |f, a| f.case_id(a),
+                |f| f.features,
+                |f, a| Box::pin(contract::run_derive(f, a)),
+            )
+        }
+        other => panic!("no builder for prefix {other}"),
+    }
+}
+
+/// The vector rows, per corpus mode: `None` means "not a vector row".
+/// Several prefixes share a corpus in the default/`preparsed` modes
+/// (e.g. the four HMAC parameterizations live in one iterator);
+/// `cases_under` filters by prefix. Under `rkyv-corpus` each row is its
+/// own build-time archive, so no filtering happens at all.
+#[cfg(not(feature = "rkyv-corpus"))]
+fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
+    Some(match prefix {
         p if p.starts_with("hkdf-") && p.ends_with("/wycheproof") => {
             vector_cases(corpus::hkdf_cases(), |c| {
                 Box::pin(async move { vectors::run_hkdf_case(&c).await })
@@ -426,49 +755,13 @@ fn builder(prefix: &str) -> Vec<PlanCase> {
         p if p.starts_with("ecdh-p") => vector_cases(corpus::ecdh_cases(), |c| {
             Box::pin(async move { vectors::run_ecdh_case(&c).await })
         }),
-        "aes-gcm/contract" | "chacha20-poly1305/contract" | "xchacha20-poly1305/contract" => {
-            contract_cases(
-                contract::AEAD_FAMILIES,
-                |f| f.areas().collect(),
-                |f, a| f.case_id(a),
-                |f| f.features,
-                |f, a| Box::pin(contract::run(f, a)),
-            )
-        }
-        "hmac-sha1/contract" | "hmac-sha2/contract" => contract_cases(
-            contract::MAC_FAMILIES,
-            |_| contract::MacArea::ALL.to_vec(),
-            |f, a| f.case_id(a),
-            |f| f.features,
-            |f, a| Box::pin(contract::run_mac(f, a)),
-        ),
-        "aes-cbc/contract" | "aes-ctr/contract" => contract_cases(
-            contract::CIPHER_FAMILIES,
-            |_| contract::CipherArea::ALL.to_vec(),
-            |f, a| f.case_id(a),
-            |f| f.features,
-            |f, a| Box::pin(contract::run_cipher(f, a)),
-        ),
-        "aes-gcm-internal-nonce/contract" | "xchacha20-poly1305-internal-nonce/contract" => {
-            contract_cases(
-                contract::INTERNAL_NONCE_FAMILIES,
-                |f| f.areas().collect(),
-                |f, a| f.case_id(a),
-                |f| f.features,
-                |f, a| Box::pin(contract::run_internal_nonce(f, a)),
-            )
-        }
-        "hkdf-sha2/contract" | "pbkdf2-sha2/contract" | "x25519/contract" | "ecdh/contract" => {
-            contract_cases(
-                contract::DERIVE_SOURCE_FAMILIES,
-                |_| contract::DeriveArea::ALL.to_vec(),
-                |f, a| f.case_id(a),
-                |f| f.features,
-                |f, a| Box::pin(contract::run_derive(f, a)),
-            )
-        }
-        other => panic!("no builder for prefix {other}"),
-    }
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "rkyv-corpus")]
+fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
+    rows::plan_cases(prefix)
 }
 
 #[cfg(not(feature = "rkyv-corpus"))]
@@ -489,12 +782,56 @@ fn vector_cases<T: VectorCase + 'static>(
         .collect()
 }
 
-/// The zero-copy variant: registry build only walks the archived corpus
-/// (ids and feature indices were precomputed natively by build.rs); each
-/// case deserializes itself — one small rkyv decode — when it *runs*.
+/// The zero-alloc registration fast path over one row's archive: one
+/// `ArcStr` per shared name blob (two allocations per row), then per
+/// case a `CaseName` of two refcounted substrings and a single boxed
+/// closure. The per-case rkyv deserialize still happens when the case
+/// *runs*, exactly as before.
 #[cfg(feature = "rkyv-corpus")]
-fn vector_cases<T>(
-    corpus: &'static rkyv::Archived<crate::corpus::Corpus<T>>,
+fn register_row<T>(
+    registry: &mut Registry,
+    row_prefix: &ArcStr,
+    tags: &Tags,
+    corpus: &'static rkyv::Archived<crate::corpus::RowCorpus<T>>,
+    run: fn(Rc<T>) -> LocalBoxFuture<'static, Result<(), String>>,
+) where
+    T: rkyv::Archive + 'static,
+    T::Archived:
+        rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+{
+    let prefixes = ArcStr::from(corpus.prefixes_blob.as_str());
+    let leaves = ArcStr::from(corpus.leaves_blob.as_str());
+    for ((case, pr), lr) in corpus
+        .cases
+        .iter()
+        .zip(corpus.prefix_ranges.iter())
+        .zip(corpus.leaf_ranges.iter())
+    {
+        let name = component_test_sdk::CaseName::from_parts(
+            prefixes.substr(pr.0.to_native() as usize..pr.1.to_native() as usize),
+            leaves.substr(lr.0.to_native() as usize..lr.1.to_native() as usize),
+        )
+        .unwrap_or_else(|e| panic!("invalid archived name under `{row_prefix}`: {e}"));
+        registry.generated_named(
+            row_prefix,
+            tags,
+            name,
+            Box::new(move |_ctx| {
+                Box::pin(async move {
+                    let case = rkyv::deserialize::<T, rkyv::rancor::Error>(case)
+                        .expect("deserializing an archived case we serialized ourselves");
+                    run(Rc::new(case)).await.map_err(Failure::Failed)
+                })
+            }),
+        );
+    }
+}
+
+/// The [`PlanCase`] view of one row's archive (census-parity test and
+/// slow-path consumers; id assembly allocates — fine off the hot path).
+#[cfg(feature = "rkyv-corpus")]
+fn row_plan<T>(
+    corpus: &'static rkyv::Archived<crate::corpus::RowCorpus<T>>,
     run: fn(Rc<T>) -> LocalBoxFuture<'static, Result<(), String>>,
 ) -> Vec<PlanCase>
 where
@@ -503,18 +840,24 @@ where
         rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
     corpus
-        .ids
+        .cases
         .iter()
-        .zip(corpus.cases.iter())
-        .zip(corpus.features.iter())
-        .map(|((id, case), &feature)| PlanCase {
-            id: id.as_str().to_string(),
-            features: crate::corpus::FEATURE_SETS[feature as usize],
-            run: Box::new(move || {
-                let case = rkyv::deserialize::<T, rkyv::rancor::Error>(case)
-                    .expect("deserializing an archived case we serialized ourselves");
-                run(Rc::new(case))
-            }),
+        .zip(corpus.prefix_ranges.iter())
+        .zip(corpus.leaf_ranges.iter())
+        .map(|((case, pr), lr)| {
+            let prefix =
+                &corpus.prefixes_blob[pr.0.to_native() as usize..pr.1.to_native() as usize];
+            let leaf =
+                &corpus.leaves_blob[lr.0.to_native() as usize..lr.1.to_native() as usize];
+            PlanCase {
+                id: format!("{prefix}/{leaf}"),
+                features: crate::corpus::FEATURE_SETS[corpus.features as usize],
+                run: Box::new(move || {
+                    let case = rkyv::deserialize::<T, rkyv::rancor::Error>(case)
+                        .expect("deserializing an archived case we serialized ourselves");
+                    run(Rc::new(case))
+                }),
+            }
         })
         .collect()
 }
