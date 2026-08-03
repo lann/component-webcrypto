@@ -410,6 +410,25 @@ short:
   no security line falls at empty. An implementation under an explicit
   security policy MAY still reject degenerate material (the same
   allowance as the HMAC import's short-key bound).
+- **AES-192 is declared but declined, everywhere.** The `aes-variant`
+  case exists because AES closes the set; no implementation serves it,
+  by ruling rather than circumstance. Uniform service is impossible —
+  Chromium's WebCrypto omits AES-192 deliberately, a settled position
+  with no convergence trajectory — so the choice is between a uniform
+  decline and a permanent divergence. The divergence earns no exception:
+  AES-192 buys nothing 128 or 256 do not (no security increment that
+  matters here, near-zero demand), and unlike the gated features (see
+  "Portability contract") it would sit on the ungated, stable AES
+  surface, where a consumer reaches it with a `length: 192` typo rather
+  than by naming a gate. The uniform decline converts
+  works-here-fails-there into a predictable `error.unsupported` on every
+  minting path, key derivation at 192 bits included. If real demand
+  materializes (JOSE `A192*` interop, say), the exit is the gated-feature
+  pattern — served behind an `@unstable` feature and declared missing
+  where the platform withholds it — never an implementation serving it
+  ungated, which the portability contract forbids. (Contrast P-521,
+  whose `ecdsa-variant`/`ecdh-variant` docs leave the door open: every
+  platform serves those curves, so a future serving can be uniform.)
 - **Per-algorithm interfaces instead of variant enums** where platform
   support splits along the algorithm boundary (IETF ChaCha20-Poly1305
   versus XChaCha20-Poly1305): a composition that needs the missing one
