@@ -820,8 +820,7 @@ mod tests {
     /// A P-256 EC public JWK from the RFC 6979 A.2.5 key, with the given
     /// coordinate lengths and an optional `alg` member.
     fn ec_public_jwk(x_len: usize, y_len: usize, alg: Option<&str>) -> String {
-        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        use base64::Engine as _;
+        use data_encoding::BASE64URL_NOPAD;
         use data_encoding_macro::hexlower;
 
         let x = hexlower!("60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6");
@@ -831,8 +830,8 @@ mod tests {
             .unwrap_or_default();
         format!(
             r#"{{"kty":"EC","crv":"P-256","x":"{}","y":"{}"{alg}}}"#,
-            URL_SAFE_NO_PAD.encode(&x[..x_len]),
-            URL_SAFE_NO_PAD.encode(&y[..y_len]),
+            BASE64URL_NOPAD.encode(&x[..x_len]),
+            BASE64URL_NOPAD.encode(&y[..y_len]),
         )
     }
 

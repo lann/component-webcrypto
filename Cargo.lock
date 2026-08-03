@@ -1197,7 +1197,6 @@ dependencies = [
  "aes",
  "aes-gcm",
  "aes-kw",
- "base64",
  "chacha20poly1305",
  "ctr",
  "data-encoding",

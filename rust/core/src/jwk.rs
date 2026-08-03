@@ -17,8 +17,7 @@
 //!   them in the caller's stead ([`check_unwrap_members`]). `ext` is
 //!   validated against the requested extractability everywhere.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
+use data_encoding::BASE64URL_NOPAD;
 use serde_json::Value;
 
 use crate::Error;
@@ -281,8 +280,8 @@ pub fn build_ec_public(crv: &str, x: &[u8], y: &[u8]) -> String {
     serde_json::json!({
         "kty": "EC",
         "crv": crv,
-        "x": URL_SAFE_NO_PAD.encode(x),
-        "y": URL_SAFE_NO_PAD.encode(y),
+        "x": BASE64URL_NOPAD.encode(x),
+        "y": BASE64URL_NOPAD.encode(y),
     })
     .to_string()
 }
@@ -295,9 +294,9 @@ pub fn build_ec_private(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
     serde_json::json!({
         "kty": "EC",
         "crv": crv,
-        "x": URL_SAFE_NO_PAD.encode(x),
-        "y": URL_SAFE_NO_PAD.encode(y),
-        "d": URL_SAFE_NO_PAD.encode(d),
+        "x": BASE64URL_NOPAD.encode(x),
+        "y": BASE64URL_NOPAD.encode(y),
+        "d": BASE64URL_NOPAD.encode(d),
     })
     .to_string()
 }
@@ -367,8 +366,8 @@ fn check_ext(jwk: &serde_json::Map<String, Value>, extractable: bool) -> Result<
 
 /// Decode a material-bearing member as strict unpadded base64url.
 fn decode_member(name: &str, value: &str) -> Result<Vec<u8>, Error> {
-    URL_SAFE_NO_PAD
-        .decode(value)
+    BASE64URL_NOPAD
+        .decode(value.as_bytes())
         .map_err(|err| Error::InvalidKey(format!("JWK `{name}` is not unpadded base64url: {err}")))
 }
 
@@ -377,7 +376,7 @@ fn decode_member(name: &str, value: &str) -> Result<Vec<u8>, Error> {
 pub fn build_oct(raw: &[u8], alg: &str) -> String {
     serde_json::json!({
         "kty": "oct",
-        "k": URL_SAFE_NO_PAD.encode(raw),
+        "k": BASE64URL_NOPAD.encode(raw),
         "alg": alg,
     })
     .to_string()
@@ -389,7 +388,7 @@ pub fn build_okp_public(crv: &str, x: &[u8]) -> String {
     serde_json::json!({
         "kty": "OKP",
         "crv": crv,
-        "x": URL_SAFE_NO_PAD.encode(x),
+        "x": BASE64URL_NOPAD.encode(x),
     })
     .to_string()
 }
@@ -399,8 +398,8 @@ pub fn build_okp_private(crv: &str, x: &[u8], d: &[u8]) -> String {
     serde_json::json!({
         "kty": "OKP",
         "crv": crv,
-        "x": URL_SAFE_NO_PAD.encode(x),
-        "d": URL_SAFE_NO_PAD.encode(d),
+        "x": BASE64URL_NOPAD.encode(x),
+        "d": BASE64URL_NOPAD.encode(d),
     })
     .to_string()
 }
