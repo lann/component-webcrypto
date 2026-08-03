@@ -31,6 +31,8 @@ export const EXPECTED = {
   "generateKey/failures (ChaCha20-Poly1305)": { inPassed: 500, inFailed: 0, outPassed: 0, outFailed: 0 },
   "derive_bits_keys/cfrg_curves_bits (X25519)": { inPassed: 19, inFailed: 0, outPassed: 0, outFailed: 0 },
   "derive_bits_keys/cfrg_curves_keys (X25519)": { inPassed: 17, inFailed: 0, outPassed: 0, outFailed: 0 },
+  "derive_bits_keys/ecdh_bits": { inPassed: 25, inFailed: 0, outPassed: 2, outFailed: 13 },
+  "derive_bits_keys/ecdh_keys": { inPassed: 19, inFailed: 0, outPassed: 2, outFailed: 10 },
   "import_export/okp_importKey (X25519)": { inPassed: 54, inFailed: 0, outPassed: 0, outFailed: 0 },
   "import_export/okp_importKey_failures (X25519)": { inPassed: 454, inFailed: 0, outPassed: 0, outFailed: 0 },
   "generateKey/successes (X25519)": { inPassed: 32, inFailed: 0, outPassed: 0, outFailed: 0 },

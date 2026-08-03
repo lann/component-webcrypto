@@ -188,6 +188,19 @@ var publicKeys, privateKeys, noDeriveBitsKeys, noDeriveKeyKeys, ecdhKeys;
 JS
     cat "$V"/helpers.js "$V"/cfrg_curves_bits_fixtures.js "$V"/cfrg_curves_keys.js >> "$B"/group-cfrg-keys.js
     echo 'export { define_tests_25519 };' >> "$B"/group-cfrg-keys.js
+    # The ecdh helpers assign their key tables (and the wrong-named-curve
+    # test's `publicKey`) as sloppy-mode implicit globals, like the cfrg
+    # ones above: declare them here.
+    cat > "$B"/group-ecdh-bits.js <<'JS'
+var publicKeys, privateKeys, ecdsaKeyPairs, noDeriveBitsKeys, publicKey;
+JS
+    cat "$V"/helpers.js "$V"/ecdh_bits.js >> "$B"/group-ecdh-bits.js
+    echo 'export { define_tests };' >> "$B"/group-ecdh-bits.js
+    cat > "$B"/group-ecdh-keys.js <<'JS'
+var publicKeys, privateKeys, ecdsaKeyPairs, noDeriveKeyKeys, publicKey;
+JS
+    cat "$V"/helpers.js "$V"/ecdh_keys.js >> "$B"/group-ecdh-keys.js
+    echo 'export { define_tests };' >> "$B"/group-ecdh-keys.js
     cat "$V"/helpers.js "$V"/okp_importKey_fixtures.js "$V"/okp_importKey.js > "$B"/group-okp-import-key.js
     echo 'export { runTests };' >> "$B"/group-okp-import-key.js
     cat "$V"/helpers.js "$V"/okp_importKey_failures_fixtures.js "$V"/importKey_failures.js > "$B"/group-okp-import-key-failures.js

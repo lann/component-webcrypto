@@ -38,6 +38,8 @@ import * as groupChacha from "./js/componentize/wpt/build/group-chacha20-poly130
 import * as groupWrapKey from "./js/componentize/wpt/build/group-wrap-key.js";
 import * as groupCfrgBits from "./js/componentize/wpt/build/group-cfrg-bits.js";
 import * as groupCfrgKeys from "./js/componentize/wpt/build/group-cfrg-keys.js";
+import * as groupEcdhBits from "./js/componentize/wpt/build/group-ecdh-bits.js";
+import * as groupEcdhKeys from "./js/componentize/wpt/build/group-ecdh-keys.js";
 import * as groupOkpImportKey from "./js/componentize/wpt/build/group-okp-import-key.js";
 import * as groupOkpImportKeyFailures from "./js/componentize/wpt/build/group-okp-import-key-failures.js";
 import * as groupDigest from "./js/componentize/wpt/build/group-digest.js";
@@ -68,6 +70,8 @@ const MODULES = {
   "group-wrap-key.js": groupWrapKey,
   "group-cfrg-bits.js": groupCfrgBits,
   "group-cfrg-keys.js": groupCfrgKeys,
+  "group-ecdh-bits.js": groupEcdhBits,
+  "group-ecdh-keys.js": groupEcdhKeys,
   "group-okp-import-key.js": groupOkpImportKey,
   "group-okp-import-key-failures.js": groupOkpImportKeyFailures,
   "group-digest.js": groupDigest,

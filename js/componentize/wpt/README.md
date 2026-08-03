@@ -229,6 +229,8 @@ reaches this harness as a re-vendor with a census diff.
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
 | `import_export/ec_importKey` | `ec_importKey.https.any.js` (wrapped callable), `ec_importKey_failures_ECDSA.https.any.js` (reference), `ec_importKey_failures_fixtures.js` |
 | `derive_bits_keys/cfrg_curves` (X25519) | `cfrg_curves_bits_curve25519.https.any.js`, `cfrg_curves_keys_curve25519.https.any.js` (references), `cfrg_curves_bits.js`, `cfrg_curves_keys.js`, `cfrg_curves_bits_fixtures.js` |
+| `derive_bits_keys/ecdh_bits` | `ecdh_bits.https.any.js` (reference), `ecdh_bits.js` (fixtures inline) |
+| `derive_bits_keys/ecdh_keys` | `ecdh_keys.https.any.js` (reference), `ecdh_keys.js` (fixtures inline) |
 | `derive_bits_keys/hkdf` | `hkdf.https.any.js` (reference), `hkdf.js`, `hkdf_vectors.js` |
 | `derive_bits_keys/pbkdf2` | `pbkdf2.https.any.js` (reference), `pbkdf2.js`, `pbkdf2_vectors.js` |
 | `derive_bits_keys/derived_bits_length` | `derived_bits_length.https.any.js` (reference), `derived_bits_length.js`, `derived_bits_length_vectors.js`, `derived_bits_length_testcases.js` |

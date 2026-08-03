@@ -172,6 +172,30 @@ function cfrgBitsInSubset() {
 }
 
 /**
+ * derive_bits_keys/{ecdh_bits,ecdh_keys}: the P-256 and P-384 rows are
+ * served — the agreements (with ecdh_bits' truncated and non-multiple-of-8
+ * lengths), the mixed-case algorithm names, and the TypeError/
+ * InvalidAccessError rejections, whose fixtures all import (the
+ * mismatched-curves peer is the other served curve; the secret-key
+ * fixtures are AES-CBC and HMAC). Out: the P-521 rows (declared by the
+ * WIT, served by nothing — except that its missing-public and
+ * non-CryptoKey rows expect a `TypeError` thrown before any P-521 key is
+ * touched, so they pass, which the census pins as `outPassed`), and every
+ * curve's "not an ECDSA public key" row, whose fixture is a generated
+ * ECDSA pair (class D, see the shim header).
+ * @param {string} name
+ */
+function ecdhDeriveInSubset(name) {
+  if (name === "setup - define tests") {
+    return true;
+  }
+  if (name.startsWith("P-521")) {
+    return false;
+  }
+  return !name.includes("not an ECDSA public key");
+}
+
+/**
  * import_export/okp_importKey (Ed25519): every served form — raw and spki
  * public, private PKCS#8 and OKP JWKs (public and private).
  */
@@ -451,6 +475,18 @@ export const GROUPS = [
     module: "group-cfrg-keys.js",
     start: (ns) => promise_test(ns.define_tests_25519, "setup - define tests"),
     inSubset: cfrgBitsInSubset,
+  },
+  {
+    name: "derive_bits_keys/ecdh_bits",
+    module: "group-ecdh-bits.js",
+    start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
+    inSubset: ecdhDeriveInSubset,
+  },
+  {
+    name: "derive_bits_keys/ecdh_keys",
+    module: "group-ecdh-keys.js",
+    start: (ns) => promise_test(ns.define_tests, "setup - define tests"),
+    inSubset: ecdhDeriveInSubset,
   },
   {
     name: "import_export/okp_importKey (X25519)",
