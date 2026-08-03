@@ -35,7 +35,7 @@ silently differing.
 Within that subset the library tracks the spec closely enough to pass the
 relevant [web-platform-tests] suites: [`wpt/`](wpt) vendors the WebCryptoAPI
 sign/verify, encrypt/decrypt, importKey, and generateKey tests and runs them
-against this library (`just test-webcrypto-componentize-wpt`, a gating CI
+against this library (`just wpt::test`, a gating CI
 check); every in-subset test must pass, and the out-of-subset remainder of
 WPT's parameter sweep is reported failing closed. See
 [`wpt/README.md`](wpt/README.md) for the vendoring and subset policy, and
@@ -72,7 +72,7 @@ operation fails).
 ## Toolchain
 
 The componentize-js CLI turns a JS guest into a component
-(`just build-componentize-demo`, and the WPT check's runner); it is not
+(`just componentize::build-demo`, and the WPT check's runner); it is not
 needed to *run* one. Nobody here builds it: building compiles SpiderMonkey
 to wasm and needs WASI-SDK 30 and Clang 19+, so the
 [`componentize-js-toolchain`](../.github/workflows/componentize-js-toolchain.yml)
@@ -83,7 +83,7 @@ digests in [`componentize-js.sha256`](componentize-js.sha256), since this
 binary compiles the component the WPT gate tests. Changing the revision
 pinned in [`componentize-js.rev`](componentize-js.rev) triggers a new build;
 checks that need it fail with instructions until it is published *and*
-`just update-toolchain-digest` has recorded its digests (that step verifies
+`just componentize::update-toolchain-digest` has recorded its digests (that step verifies
 the build-provenance attestation, so trusting a new binary is a reviewable
 diff).
 

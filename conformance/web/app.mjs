@@ -493,7 +493,7 @@ function makeRun(model) {
     if (problems.length > 0) {
       warn(
         "this browser's run diverged from the static cases (stale transpiled " +
-          `guests? rerun \`just conformance-web\`):\n${problems.join("\n")}`,
+          `guests? rerun \`just conformance::web\`):\n${problems.join("\n")}`,
       );
     }
   }
@@ -610,7 +610,7 @@ async function main() {
     el("run").disabled = true;
     el("main").textContent =
       `no results data at ${DATA_URL} (${err}) — serve this page with ` +
-      "`just conformance-web`, which runs the conformance tests first";
+      "`just conformance::web`, which runs the conformance tests first";
     return;
   }
   const model = buildModel(data);

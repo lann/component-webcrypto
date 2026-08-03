@@ -1,0 +1,14 @@
+# The jco host library (@lann/webcrypto-jco): a browser-compatible
+# implementation of the lann:webcrypto imports over the Web Crypto API.
+
+# Type-check the jco host against the interface definitions jco-transpile
+# derives from `wit/`. The definitions are generated on demand, so there is
+# no checked-in copy to go stale.
+typecheck:
+    npm run typecheck
+
+# Run the jco host's own unit tests: the input-buffering admission subsystem,
+# which the conformance suite cannot reach because its workers each run their
+# cases sequentially against their own host instance.
+test-host:
+    npm test

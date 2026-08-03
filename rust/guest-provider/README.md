@@ -4,7 +4,7 @@ The in-guest implementation of `lann:webcrypto`: a wasm component (built for
 `wasm32-wasip2`) that runs RustCrypto entirely inside the guest and **exports**
 the package surface. Compose it under any consumer with `wac plug` and the
 result is a single self-contained component whose cryptography needs no crypto
-capability from the host — `just test-webcrypto-composed` runs the shared
+capability from the host — `just demo::test-composed` runs the shared
 `crypto-demo` guest this way under a plain `wasmtime run`.
 
 ## Security notice: timing channels in wasm
@@ -64,7 +64,7 @@ code for wasm targets at all (`#[cfg(not(target_family = "wasm"))]`), so the
 class-D code is absent from this component's binary, not merely unexported.
 Choose a host-side provider for them.
 
-`just class-d-composition` is that enforcement's gate: it asserts that the
+`just conformance::class-d` is that enforcement's gate: it asserts that the
 conformance signing guest, whose world imports `ecdsa-sign`, does not
 compose with this provider.
 

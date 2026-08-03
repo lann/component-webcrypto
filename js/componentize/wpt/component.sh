@@ -110,7 +110,7 @@ error: js/componentize/componentize-js.sha256 pins no digest for
 $(platform) at revision ${REV}.
 
 A toolchain is only trusted once its digests are recorded. Run
-\`just update-toolchain-digest\` (it verifies the build-provenance
+\`just componentize::update-toolchain-digest\` (it verifies the build-provenance
 attestation before recording), or supply your own build on
 COMPONENTIZE_JS.
 EOF
@@ -135,7 +135,7 @@ error: ${what} does not match the digest pinned for revision ${REV}.
 
 The file has been removed. Either the published asset was replaced, the
 pin is stale, or the download was tampered with. Re-record deliberately
-with \`just update-toolchain-digest\` after establishing why it changed.
+with \`just componentize::update-toolchain-digest\` after establishing why it changed.
 EOF
         exit 1
     fi

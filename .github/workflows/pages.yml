@@ -5,7 +5,7 @@ name: pages
 # crates' API docs. Runs the full conformance suite on every push to main
 # (under Actions that includes the jco-browser target, so the published
 # matrix carries every column), builds the WPT page's artifacts and the
-# rustdoc, then deploys the site assembled by `just conformance-web-site`.
+# rustdoc, then deploys the site assembled by `just gha::pages-site`.
 # The pages' URLs are all relative, so they serve correctly from the
 # project subpath.
 
@@ -54,13 +54,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Run the conformance suite
-        run: just conformance
+        run: just conformance::run
 
       - name: Build the WPT parity page artifacts
-        run: just wpt-web-artifacts
+        run: just wpt::web-artifacts
 
       - name: Assemble the static site
-        run: just conformance-web-site
+        run: just gha::pages-site
 
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@v4

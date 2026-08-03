@@ -12,7 +12,7 @@
 # checked on download. The binary digest is what actually gets executed, and
 # is checked on every use, including from the local cache.
 #
-# Regenerate with `just update-toolchain-digest` when the revision changes:
+# Regenerate with `just componentize::update-toolchain-digest` when the revision changes:
 # it verifies the attestation before recording, so adding a line here is the
 # deliberate, reviewable act of trusting a new binary.
 linux-aarch64  043b3695a82fef4114454fa3e7195d8bfcaf704ac8e3880ba53e27526d2620ee  e64592d1009bf7eed52d2d3efe33420c5c4c8d323bd9c3062db4fffe75cb713c

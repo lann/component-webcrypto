@@ -46,7 +46,7 @@ jobs:
       # cross-implementation conformance suite. The justfile's `_step` wrapper
       # emits ::group::/::error:: annotations per recipe.
       - name: Run rust checks
-        run: just rust-checks
+        run: just gha::rust-checks
 
   # The webcrypto-componentize JS guest library's gates: the composed demo
   # (the JS guest's checks against the in-guest provider, including the
@@ -79,7 +79,7 @@ jobs:
           SKIP_NODE: "1"
 
       - name: Run the componentize checks
-        run: just componentize-checks
+        run: just gha::componentize-checks
 
   # Guest component build + jco (Web Crypto) host test. jco's async ABI uses
   # JSPI, which Node exposes behind --experimental-wasm-jspi from 24 on.
@@ -138,7 +138,7 @@ jobs:
           fi
 
       - name: Run the jco host checks
-        run: just jco-checks
+        run: just gha::jco-checks
 
   # The WebKit WPT parity gate runs on macOS: Playwright's WebKit there
   # uses Apple's crypto backend — the closest CI proxy for mobile Safari —
@@ -164,7 +164,7 @@ jobs:
         run: cd js/componentize/wpt/parity && npm ci --no-audit --no-fund
 
       - name: Build the parity page artifacts
-        run: just wpt-web-artifacts
+        run: just wpt::web-artifacts
 
       - name: Upload the artifacts
         uses: actions/upload-artifact@v4
@@ -212,14 +212,14 @@ jobs:
           npx playwright-core install webkit
 
       - name: Run the WebKit WPT parity gate
-        run: just wpt-parity-webkit
+        run: just wpt::parity-webkit
 
       - name: Record the proposed ratchet
         # On a gate failure, re-run the comparator in update mode: the step
         # summary carries the reviewable losses-webkit.js diff and the
         # artifact below carries the rewritten file, so a re-record needs
         # no local run (commit the file, or use
-        # `just update-wpt-parity-webkit-from-ci` on the records artifact).
+        # `just gha::update-webkit-losses-from-ci` on the records artifact).
         if: failure()
         run: |
           if [ ! -f js/componentize/wpt/build/parity-baseline-webkit.json ]; then
@@ -249,7 +249,7 @@ jobs:
         # The comparator's inputs, kept whether the gate passes or fails:
         # losses-webkit.js is recorded from a macOS run, and this artifact
         # is how a Linux-bound change re-records it
-        # (`just update-wpt-parity-webkit-from-ci`).
+        # (`just gha::update-webkit-losses-from-ci`).
         if: always()
         uses: actions/upload-artifact@v4
         with:

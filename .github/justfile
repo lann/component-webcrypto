@@ -1,0 +1,149 @@
+# GitHub Actions plumbing: the CI job entry points (one job recipe per CI
+# job in ci.yml), the pages-site assembly, and workflow-only recipes.
+# Everything here runs at the repository root, in both module and
+# standalone invocation.
+
+set working-directory := '..'
+
+# Everything the rust-checks CI job runs, in order.
+rust-checks:
+    @just gha::_step fmt-check
+    @just gha::_step validate-wit
+    @just gha::_step clippy
+    @just gha::_step test
+    @just gha::_step demo::test-composed
+    @just gha::_step conformance::run
+
+# Everything the jco CI job runs. The three WPT parity engines run in
+# parallel over one shared artifact build (wpt::_parity-gates).
+jco-checks:
+    @just gha::_step jco::typecheck
+    @just gha::_step jco::test-host
+    @just gha::_step demo::test-node
+    @just gha::_step wpt::_parity-gates
+
+# Everything the componentize CI job runs: the webcrypto-componentize JS
+# guest library's behavioral checks (the composed demo) and the WPT
+# WebCryptoAPI suites against it.
+componentize-checks:
+    @just gha::_step componentize::typecheck
+    @just gha::_step componentize::test
+    @just gha::_step wpt::test
+
+# Run one recipe, wrapped in GitHub Actions log groups (and, on failure, an
+# error annotation naming the recipe) when running under Actions; a plain
+# `just <recipe>` otherwise.
+_step recipe:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    gha=; [ "${GITHUB_ACTIONS:-}" = "true" ] && gha=1
+    [ -n "$gha" ] && echo "::group::just {{recipe}}"
+    just {{recipe}}
+    status=$?
+    [ -n "$gha" ] && echo "::endgroup::"
+    if [ $status -ne 0 ] && [ -n "$gha" ]; then
+        echo "::error title=just {{recipe}} failed::exit status $status"
+    fi
+    exit $status
+
+# Run the timing lab as the scheduled job does: a run whose verdicts diverge
+# is retried once at 4x samples, and only a second divergence is a failure.
+# A dudect verdict is a statistical test, and the lab's own advice on a
+# surprising one is to rerun with more samples before drawing conclusions —
+# shared runners make that advice mandatory rather than optional. Under
+# GitHub Actions the report also lands in the job summary.
+timing-lab-scheduled:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    samples="${TIMING_LAB_SAMPLES:-2000}"
+    run() { TIMING_LAB_SAMPLES="$1" just timing-lab::run 2>&1; }
+
+    report=$(run "$samples"); status=$?
+    printf '%s\n' "$report"
+    if [ $status -ne 0 ]; then
+        samples=$(( samples * 4 ))
+        echo
+        echo "timing lab: verdicts diverged; retrying at ${samples} samples/class before reporting failure."
+        report=$(run "$samples"); status=$?
+        printf '%s\n' "$report"
+    fi
+
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo "### timing lab — ${samples} samples/class"
+            echo
+            # The lab prints its report as a markdown table; lift it verbatim.
+            printf '%s\n' "$report" | sed -n '/^| surface/,/^$/p'
+            if [ $status -eq 0 ]; then
+                echo "All surfaces matched expectations."
+            else
+                echo "**Surfaces diverged from expectation, and again on a retry at ${samples} samples/class.**"
+                echo "A quiet positive control means the harness cannot detect leaks at this"
+                echo "measurement distance; a LEAK on a real surface warrants investigation."
+            fi
+        } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    exit $status
+
+# Assemble the Pages site in target/conformance-site: the conformance
+# results viewer, the browser WPT parity page, the public crates' API docs,
+# and the landing page linking them (used by the pages workflow; assumes a
+# conformance run already produced results/matrix.json and the transpiled
+# guests, and `wpt::web-artifacts` already produced the WPT page's
+# artifacts). Each page's subtree mirrors the repository layout, which the
+# pages' relative URLs and the transpiled components' relative imports both
+# rely on.
+pages-site:
+    just rust-docs
+    rm -rf target/conformance-site
+    mkdir -p target/conformance-site/conformance/results \
+        target/conformance-site/conformance/adapters/jco \
+        target/conformance-site/js/jco
+    cp -r conformance/web target/conformance-site/conformance/web
+    rm target/conformance-site/conformance/web/serve.mjs
+    cp conformance/results/matrix.json target/conformance-site/conformance/results/
+    cp -r conformance/adapters/jco/generated \
+        conformance/adapters/jco/generated-signing \
+        target/conformance-site/conformance/adapters/jco/
+    cp js/jco/webcrypto.js target/conformance-site/js/jco/
+    mkdir -p target/conformance-site/js/componentize/wpt/build \
+        target/conformance-site/js/componentize/wpt/parity
+    cp -r js/componentize/wpt/web target/conformance-site/js/componentize/wpt/web
+    rm target/conformance-site/js/componentize/wpt/web/.gitignore
+    cp js/componentize/wpt/groups.js js/componentize/wpt/harness.js \
+        js/componentize/wpt/parity-helpers.js js/componentize/wpt/reporter.js \
+        target/conformance-site/js/componentize/wpt/
+    cp js/componentize/wpt/build/group-*.js \
+        target/conformance-site/js/componentize/wpt/build/
+    cp -r js/componentize/wpt/parity/generated-web \
+        target/conformance-site/js/componentize/wpt/parity/
+    cp -r target/doc target/conformance-site/doc
+    cp .github/pages/index.html target/conformance-site/index.html
+
+# Re-record js/componentize/wpt/parity/losses-webkit.js without a mac: pull
+# the comparator's inputs from a CI run's wpt-parity-webkit-records
+# artifact (uploaded pass or fail) and run the update comparison locally.
+# Defaults to the current branch's most recent completed CI run; pass a
+# run id to pick a specific one. Needs `gh` authenticated to the repo.
+update-webkit-losses-from-ci run_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    run="{{run_id}}"
+    if [ -z "$run" ]; then
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        run=$(gh run list --workflow ci.yml --branch "$branch" --limit 20 \
+            --json databaseId,status \
+            --jq '[.[] | select(.status == "completed")][0].databaseId // empty')
+        if [ -z "$run" ]; then
+            echo "no completed CI run found for branch $branch" >&2
+            exit 1
+        fi
+    fi
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    gh run download "$run" --name wpt-parity-webkit-records --dir "$tmp"
+    node js/componentize/wpt/parity/compare.mjs \
+        "$tmp/parity-baseline-webkit.json" \
+        "$tmp/parity-roundtrip-webkit.json" \
+        --losses losses-webkit.js --update
+    git --no-pager diff --stat -- js/componentize/wpt/parity/losses-webkit.js

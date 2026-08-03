@@ -116,7 +116,7 @@ jobs:
             echo "binary $(sha256sum "$RUNNER_TEMP/out/bin/componentize-js" | cut -d" " -f1)"
             echo '```'
             echo
-            echo "Record with \`just update-toolchain-digest\`."
+            echo "Record with \`just componentize::update-toolchain-digest\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish on the toolchains release

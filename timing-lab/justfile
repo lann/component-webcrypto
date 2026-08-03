@@ -1,0 +1,24 @@
+# The dudect-style statistical timing tests of the composed in-guest
+# provider. Non-gating; see README.md (this directory) for methodology and
+# detection limits. The scheduled wrapper CI runs is gha::timing-lab-scheduled.
+
+import '../justfile.shared.just'
+
+# Compose the timing lab with the in-guest provider: the lab's lann:webcrypto
+# imports are satisfied by the provider under measurement, yielding one
+# self-contained component in target/timing-lab-composed.wasm.
+compose: build-guest-provider
+    cargo build --release -p timing-lab --target wasm32-wasip2 \
+        --manifest-path '{{root}}/Cargo.toml'
+    wac plug '{{root}}/target/wasm32-wasip2/release/timing_lab.wasm' \
+        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
+        -o '{{root}}/target/timing-lab-composed.wasm'
+
+# Run the dudect-style timing lab against the composed in-guest provider.
+# Statistical and environment-sensitive by nature, so deliberately NOT part
+# of `just ci` — run it on a quiet machine. Set TIMING_LAB_SAMPLES to trade
+# runtime for sensitivity.
+run: compose
+    wasmtime run -W component-model-async=y -S cli \
+        --env TIMING_LAB_SAMPLES \
+        '{{root}}/target/timing-lab-composed.wasm'

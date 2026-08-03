@@ -9,7 +9,7 @@
 // fails on unlisted losses *and* on listed losses not observed), so a
 // wrong guess cannot pass — it fails on the next CI run exactly like a
 // stale ratchet, and the fallback is the ordinary re-record
-// (`just update-wpt-parity-webkit-from-ci`). A right guess is verified by
+// (`just gha::update-webkit-losses-from-ci`). A right guess is verified by
 // that same run, so a green gate over a predicted file carries the same
 // assurance as one over a recorded file.
 //
@@ -73,4 +73,4 @@ if (absent.length > 0) {
   console.log(`  ${absent.length} removed key(s) were not in the target:`);
   for (const key of absent.slice(0, 10)) console.log(`    ${key}`);
 }
-console.log("review the diff, then let CI verify the guess (a miss fails the gate; fall back to `just update-wpt-parity-webkit-from-ci`)");
+console.log("review the diff, then let CI verify the guess (a miss fails the gate; fall back to `just gha::update-webkit-losses-from-ci`)");

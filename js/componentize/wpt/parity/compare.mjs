@@ -7,7 +7,7 @@
 //     does not is a regression and fails the run.
 //   - A recorded loss that is no longer observed also fails the run, so
 //     progress lands as a reviewable diff and the file only shrinks
-//     deliberately (`just update-wpt-parity`).
+//     deliberately (`just wpt::update-losses`).
 //   - A test the round trip passes and the baseline fails is reported but
 //     does not gate: it is not a loss, but it is the shim diverging from
 //     the platform, which the report should keep visible.

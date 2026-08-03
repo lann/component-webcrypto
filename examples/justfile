@@ -1,0 +1,32 @@
+# The demo guest and its drivers: the crypto-demo guest component run under
+# the native Wasmtime host, fully in-guest (composed with the in-guest
+# provider), and under the jco host on Node.
+
+import '../justfile.shared.just'
+
+# Run the Wasmtime (native, RustCrypto) host demo.
+wasmtime: build-component
+    cargo run --release --manifest-path '{{root}}/Cargo.toml' --bin wasmtime-demo-host -- \
+        crypto-demo/build/crypto-demo.component.wasm
+
+# Compose the fully in-guest demo: the crypto-demo guest's lann:webcrypto
+# imports are satisfied by the in-guest provider's exports (`wac plug`), then
+# the CLI driver (async wasi:cli/run) is plugged on top, yielding one
+# self-contained component in target/crypto-demo-composed.wasm.
+compose: build-component (_compose "crypto-demo" "examples/crypto-demo/build/crypto-demo.component.wasm" "crypto-demo-driver")
+
+# In-guest integration test: run the composed demo under `wasmtime` — the
+# guest checks execute against RustCrypto running entirely inside wasm.
+# Needs `wasmtime` (v47+) and `wac` on PATH.
+test-composed: compose
+    timeout 120 wasmtime run -W component-model-async=y -S cli \
+        '{{root}}/target/crypto-demo-composed.wasm'
+
+# Transpile the crypto-demo component for the Node host (runs build-component).
+transpile: build-component
+    cd jco-demo && npm run transpile
+
+# Run the Node (browser-compatible WebCrypto) host. Needs Node 24+ (jco's
+# async ABI uses JSPI, which Node exposes behind --experimental-wasm-jspi).
+test-node: transpile
+    cd jco-demo && npm test

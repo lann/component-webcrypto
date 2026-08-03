@@ -8,7 +8,7 @@
 // handles `wit-world`'s `u8Stream()` mints. Pointing this file at jco's
 // output would assert that difference away — a confident type where the
 // truth is that nothing here is verified except by componentizing and
-// running (`just test-webcrypto-componentize-wpt`).
+// running (`just wpt::test`).
 declare module "lann:webcrypto/hmac-sha2@0.1.0";
 declare module "lann:webcrypto/hmac-sha1@0.1.0";
 declare module "lann:webcrypto/aes-gcm@0.1.0";

@@ -47,7 +47,7 @@ pub const FEATURE_XCHACHA: &str = "xchacha20-poly1305";
 /// rather than case by case. No case *can* be tagged with it: a guest
 /// asking whether the interface declines must import it, and a target
 /// missing it cannot instantiate that guest. The declaration is held to
-/// the truth by `just class-d-composition` instead.
+/// the truth by `just conformance::class-d` instead.
 pub const FEATURE_ECDSA_SIGN: &str = "ecdsa-sign";
 
 /// The `sha1-checked` feature: the checked-SHA-1 minting interface (both

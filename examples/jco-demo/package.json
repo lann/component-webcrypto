@@ -5,7 +5,7 @@
   "type": "module",
   "description": "crypto-demo driver for the jco host (js/jco/webcrypto.js): transpiles the guest with jco and runs it on Node 24+.",
   "scripts": {
-    "build:component": "cd ../.. && just build-component",
+    "build:component": "cd ../.. cd ../.. && just build-componentcd ../.. && just build-component just demo::build-component",
     "transpile": "node ../../scripts/jco-transpile.mjs transpile ../crypto-demo/build/crypto-demo.component.wasm --name crypto-demo --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../js/jco/webcrypto.js#*' -o generated",
     "start": "node --experimental-wasm-jspi src/run.mjs",
     "test": "node --experimental-wasm-jspi src/run.mjs"

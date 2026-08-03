@@ -5,7 +5,7 @@ a guest component carrying its cases — run against every implementation of
 `lann:webcrypto`; the runner aggregates per-target results — validating them
 against the target facts in [`targets.toml`](targets.toml) and the
 checked-in suite lockfiles — and renders `matrix.md`. Run it with
-`just conformance` (see that recipe for the currently enabled targets).
+`just conformance::run` (see that recipe for the currently enabled targets).
 
 ## Self-describing cases, target facts, and the lockfiles
 
@@ -35,7 +35,7 @@ target missing a structurally required feature cannot instantiate the
 guest that would ask — a target declaring `ecdsa-sign` missing drops the
 signing suite by declaration, and no case can contradict it. What holds
 the composed target's declaration to the truth is the negative-composition
-gate, `just class-d-composition`: it asserts that the signing guest does
+gate, `just conformance::class-d`: it asserts that the signing guest does
 not compose with the in-guest provider, so the provider cannot start
 exporting `ecdsa-sign` while this manifest still says it does not.
 
@@ -43,7 +43,7 @@ Each suite's case inventory is pinned by a lockfile (`guest/tests.lock`,
 `signing-guest/tests.lock`; TOML, one case per line with its feature tags,
 Cargo.lock-style): the runner rejects any results file whose case names or
 tags diverge, so case changes land intentionally via
-`just update-conformance-lock` with a reviewable diff.
+`just conformance::update-lock` with a reviewable diff.
 
 The lockfiles pin the **inventory**, not the assertions. A case that keeps
 its name while weakening what it checks — `Err(_)` where it demanded
@@ -105,7 +105,7 @@ errors — failing *cases* are the runner's business. The runner errors (exit
 nonzero) when a derived-required (target, suite) pair has no results file
 or an excluded pair has one, a file's cases diverge from its suite
 lockfile, a file's `missing-features` diverges from targets.toml, any
-(target, suite) pair appears twice, or any case fails; `just conformance`
+(target, suite) pair appears twice, or any case fails; `just conformance::run`
 clears `results/` first, so stale files never classify as current.
 
 ## Test identity
@@ -126,7 +126,7 @@ buffer-based API could not even express.
 
 ## Results viewer
 
-`just conformance-web` serves [`web/`](web) after a full conformance run: a
+`just conformance::web` serves [`web/`](web) after a full conformance run: a
 dependency-free static page rendering every case as a collapsing tree (rows
 grouped by the `/` segments of case names, with per-subtree rollups) against
 one column per target. Its data is the runner's `--json-out` aggregate
@@ -154,7 +154,7 @@ The viewer is published at
 <https://lann.github.io/component-webcrypto/> (the site root links it
 alongside the public crates' API docs) by the `pages` workflow: every
 push to main reruns the conformance tests (including the jco-browser target)
-and deploys the site assembled by `just conformance-web-site` — a pruned
+and deploys the site assembled by `just gha::pages-site` — a pruned
 mirror of the repository layout, which the page's relative URLs and the
 transpiled guests' relative imports of `js/jco/webcrypto.js` both rely on.
 
@@ -222,7 +222,7 @@ cases are here: vendor the vectors, extend the translation policy in
 `vectors/README.md` + `guest/src/translate.rs` (they must agree), tag the
 new cases with a feature name if any target legitimately cannot serve them
 (declaring it missing in `targets.toml` for those targets), and run
-`just update-conformance-lock` so the change lands as a reviewable
+`just conformance::update-lock` so the change lands as a reviewable
 lockfile diff. An algorithm of a kind with a contract battery
 (`guest/src/contract.rs`) also adds its table row there, inheriting the
 kind's standard cases — getters, extractability, key-material rejection,

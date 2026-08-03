@@ -11,7 +11,7 @@
 // `js/componentize/webcrypto.js` actually serves.
 //
 // This is the WPT path's equivalent of conformance/*/tests.lock, and it is
-// maintained the same way: regenerate with `just update-wpt-expectations`
+// maintained the same way: regenerate with `just wpt::update-expectations`
 // when a change to the library or the vendored files legitimately moves a
 // number, and review the diff.
 

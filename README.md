@@ -141,33 +141,33 @@ async ABI uses JSPI). `./scripts/setup.sh` installs the rest.
 
 ```sh
 just test                    # Rust tests, incl. the guest-under-Wasmtime integration test
-just demo-wasmtime           # run the guest under the Wasmtime (RustCrypto) host
-just test-node               # transpile and run the same guest under the jco host
-just test-webcrypto-composed # compose guest + in-guest provider + driver (wac plug)
+just demo::wasmtime          # run the guest under the Wasmtime (RustCrypto) host
+just demo::test-node         # transpile and run the same guest under the jco host
+just demo::test-composed     # compose guest + in-guest provider + driver (wac plug)
                              #   and run the whole thing under `wasmtime run`
-just test-webcrypto-componentize-wpt # the WPT WebCryptoAPI suites against the
+just wpt::test               # the WPT WebCryptoAPI suites against the
                              #   webcrypto-componentize JS guest library, via its
                              #   published runner component (no componentize-js
                              #   toolchain needed — see js/componentize/wpt/)
-just test-webcrypto-componentize # the composed pipeline with the JS demo guest
+just componentize::test      # the composed pipeline with the JS demo guest
                              #   (needs the componentize-js CLI — see
                              #   js/componentize/README.md)
-just wpt-parity              # the WPT suites against the platform's own
+just wpt::parity             # the WPT suites against the platform's own
                              #   crypto.subtle and through the jco round trip;
                              #   holds the round trip to the platform's pass set
                              #   (see js/componentize/wpt/README.md)
-just wpt-parity-firefox      # the same two legs in headless Firefox against
-just wpt-parity-chromium     #   (or Chromium, or WebKit) that engine's own
-just wpt-parity-webkit       #   pinned loss set (Playwright engines; gate in
+just wpt::parity-firefox     # the same two legs in headless Firefox against
+just wpt::parity-chromium    #   (or Chromium, or WebKit) that engine's own
+just wpt::parity-webkit      #   pinned loss set (Playwright engines; gate in
                              #   CI — WebKit on macOS, the mobile-Safari proxy)
-just wpt-web                 # serve the browser WPT parity page locally: the
+just wpt::web                # serve the browser WPT parity page locally: the
                              #   same two legs run live in your browser
-just conformance             # the Wycheproof-derived conformance tests over the
+just conformance::run        # the Wycheproof-derived conformance tests over the
                              #   enabled targets; renders conformance/matrix.md
-just conformance-web         # serve the conformance results viewer locally
+just conformance::web        # serve the conformance results viewer locally
                              #   (published with the public crates' rustdoc at
                              #   https://lann.github.io/component-webcrypto/)
-just timing-lab              # dudect-style timing tests of the composed in-guest
+just timing-lab::run         # dudect-style timing tests of the composed in-guest
                              #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs
 ```
