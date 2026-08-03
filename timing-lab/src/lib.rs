@@ -423,20 +423,20 @@ async fn measure_seal(
     .await
 }
 
-/// The agreement surfaces' known-answer constants: a fixed secret scalar,
-/// its peer's public key, and the published shared secret. Each surface's
-/// setup agrees the fixed key with the peer and checks the published
-/// value, so a wrong PKCS#8 template or import path fails loudly before
-/// sampling. X25519 is RFC 7748 §6.1 (Alice's scalar, Bob's public key);
-/// the ECDH pairs are Wycheproof `ecdh_secp{256,384}r1_ecpoint_test.json`
-/// tcId 1.
-const X25519_FIXED_D: [u8; 32] =
+/// The agreement surfaces' known-answer constants: a published secret
+/// scalar, its peer's public key, and the published shared secret. Each
+/// surface's setup agrees the known-answer key with the peer and checks
+/// the published value, so a wrong PKCS#8 template or import path fails
+/// loudly before sampling. X25519 is RFC 7748 §6.1 (Alice's scalar, Bob's
+/// public key); the ECDH pairs are Wycheproof
+/// `ecdh_secp{256,384}r1_ecpoint_test.json` tcId 1.
+const X25519_KAT_D: [u8; 32] =
     hex!("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
 const X25519_PEER: [u8; 32] =
     hex!("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
 const X25519_SHARED: [u8; 32] =
     hex!("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
-const ECDH_P256_FIXED_D: [u8; 32] =
+const ECDH_P256_KAT_D: [u8; 32] =
     hex!("0612465c89a023ab17855b0a6bcebfd3febb53aef84138647b5352e02c10c346");
 const ECDH_P256_PEER: [u8; 65] = hex!(
     "0462d5bd3372af75fe85a040715d0f502428e07046868b0bfdfa61d731afe44f26"
@@ -444,7 +444,7 @@ const ECDH_P256_PEER: [u8; 65] = hex!(
 );
 const ECDH_P256_SHARED: [u8; 32] =
     hex!("53020d908b0219328b658b525f26780e3ae12bcd952bb25a93bc0895e1714285");
-const ECDH_P384_FIXED_D: [u8; 48] = hex!(
+const ECDH_P384_KAT_D: [u8; 48] = hex!(
     "766e61425b2da9f846c09fc3564b93a6f8603b7392c785165bf20da948c49fd1"
     "fb1dee4edd64356b9f21c588b75dfd81"
 );
@@ -457,6 +457,35 @@ const ECDH_P384_SHARED: [u8; 48] = hex!(
     "6461defb95d996b24296f5a1832b34db05ed031114fbe7d98d098f93859866e4"
     "de1e229da71fef0c77fe49b249190135"
 );
+
+/// A scalar with one bit set, at `bit` counted from `LE` little-endian or
+/// big-endian byte order.
+const fn single_bit_scalar<const N: usize, const LE: bool>(bit: usize) -> [u8; N] {
+    let mut scalar = [0u8; N];
+    let byte = bit / 8;
+    scalar[if LE { byte } else { N - 1 - byte }] = 1 << (bit % 8);
+    scalar
+}
+
+/// The measured fixed class's scalars: a single mid-position bit, the
+/// extreme low end of the Hamming-weight distribution the random class
+/// draws from (mean n/2 ± ~√n/2). The canonical leak the fixed-vs-random
+/// scalar shape targets — weight-proportional scalar-mult timing, a
+/// double-and-add regression — separates the class *means* by the weight
+/// difference times the per-bit cost, so the fixed scalar's distance from
+/// the random mean is a direct multiplier on the surface's sensitivity; a
+/// near-mean fixed scalar (a typical published test vector) would leave
+/// almost none. Deliberately distinct from the known-answer scalars above,
+/// which validate the template and import path against published vectors.
+///
+/// A mid-position bit keeps the value an unremarkable in-range scalar
+/// (complete-formula P-curve code and the Montgomery ladder have no
+/// small-scalar special cases, but nothing is gained by sitting near one).
+/// X25519 clamping sets bit 254, so its fixed scalar measures at weight 2;
+/// the P-curve scalars measure at weight 1.
+const X25519_FIXED_D: [u8; 32] = single_bit_scalar::<32, true>(128);
+const ECDH_P256_FIXED_D: [u8; 32] = single_bit_scalar::<32, false>(128);
+const ECDH_P384_FIXED_D: [u8; 48] = single_bit_scalar::<48, false>(192);
 
 /// PKCS#8 PrivateKeyInfo prefixes for a bare scalar of the algorithm's
 /// fixed field size: version, algorithm identifier, and the nested
@@ -498,11 +527,13 @@ async fn timed_agree(key: &AgreementSecretKey, peer: &AgreementPublicKey) -> Res
 }
 
 /// One agreement algorithm's fixed inputs: the known-answer scalar and
-/// shared secret, the PKCS#8 template, and the curve order for local
-/// rejection-sampling of random draws (`None` for X25519, where every
-/// 32-byte string is a valid clamped scalar).
+/// shared secret, the low-weight fixed-class scalar, the PKCS#8 template,
+/// and the curve order for local rejection-sampling of random draws
+/// (`None` for X25519, where every 32-byte string is a valid clamped
+/// scalar).
 struct AgreeSurface {
     name: &'static str,
+    kat_scalar: &'static [u8],
     fixed_scalar: &'static [u8],
     prefix: &'static [u8],
     order: Option<&'static [u8]>,
@@ -513,8 +544,11 @@ struct AgreeSurface {
 /// key-agreement algorithm's `agree`: the peer — and with it every
 /// point-dependent operand — is identical across classes, each trial
 /// assembles and imports a fresh PKCS#8 key whichever class it feeds, and
-/// the timed window is `agree` alone, so only scalar-bit-dependent control
-/// flow in the scalar multiplication separates the classes.
+/// the timed window is `agree` alone, so only scalar-dependent control
+/// flow or memory access in the scalar multiplication separates the
+/// classes. The fixed class's scalar has minimal Hamming weight (see the
+/// `*_FIXED_D` constants), maximizing the class-mean separation a
+/// weight-shaped leak would produce.
 ///
 /// `control/data-dependent-work` brackets this class shape's
 /// detectability, as for the seal surfaces.
@@ -533,18 +567,19 @@ where
 {
     let AgreeSurface {
         name,
+        kat_scalar,
         fixed_scalar,
         prefix,
         order,
         expected_shared,
     } = surface;
-    // Known-answer check: the fixed scalar's key must agree with the peer
-    // on the published shared secret, or the template/import path is wrong
-    // and every measurement below would be of something else.
-    let fixed_key = import([prefix, fixed_scalar].concat())
+    // Known-answer check: the published scalar's key must agree with the
+    // peer on the published shared secret, or the template/import path is
+    // wrong and every measurement below would be of something else.
+    let kat_key = import([prefix, kat_scalar].concat())
         .await
-        .map_err(|e| format!("{name}: fixed-key import failed: {e:?}"))?;
-    let input = fixed_key
+        .map_err(|e| format!("{name}: known-answer import failed: {e:?}"))?;
+    let input = kat_key
         .agree(peer)
         .await
         .map_err(|e| format!("{name}: known-answer agree failed: {e:?}"))?;
@@ -804,6 +839,7 @@ async fn run_lab() -> Result<(), String> {
             measure_agree(
                 AgreeSurface {
                     name: "x25519/agree fixed-vs-random scalar",
+                    kat_scalar: &X25519_KAT_D,
                     fixed_scalar: &X25519_FIXED_D,
                     prefix: &X25519_PKCS8_PREFIX,
                     order: None,
@@ -825,6 +861,7 @@ async fn run_lab() -> Result<(), String> {
             measure_agree(
                 AgreeSurface {
                     name: "ecdh-p256/agree fixed-vs-random scalar",
+                    kat_scalar: &ECDH_P256_KAT_D,
                     fixed_scalar: &ECDH_P256_FIXED_D,
                     prefix: &P256_PKCS8_PREFIX,
                     order: Some(&N_P256),
@@ -848,6 +885,7 @@ async fn run_lab() -> Result<(), String> {
             measure_agree(
                 AgreeSurface {
                     name: "ecdh-p384/agree fixed-vs-random scalar",
+                    kat_scalar: &ECDH_P384_KAT_D,
                     fixed_scalar: &ECDH_P384_FIXED_D,
                     prefix: &P384_PKCS8_PREFIX,
                     order: Some(&N_P384),

@@ -52,11 +52,15 @@ For key-agreement surfaces (X25519, ECDH P-256/P-384) the classes are
 *fixed* vs *freshly random* secret **scalar** against a fixed peer: the
 peer — and with it every point-dependent operand — is identical across
 classes, and each trial assembles and imports a fresh PKCS#8 key whichever
-class it feeds, so only scalar-bit-dependent control flow in the scalar
-multiplication separates the classes. Each agreement surface's setup
-agrees its fixed key against a published known answer (RFC 7748 §6.1,
-Wycheproof) before sampling, so a wrong key template would fail the run
-rather than time something else.
+class it feeds, so only scalar-dependent control flow or memory access in
+the scalar multiplication separates the classes. The fixed scalar has a
+single mid-position bit set: the weight-shaped leak this class design
+targets separates the class means in proportion to the Hamming-weight
+difference, so the fixed class sits at the extreme of the distribution the
+random class draws from rather than near its mean. Each agreement
+surface's setup agrees a published known-answer scalar against the fixed
+peer (RFC 7748 §6.1, Wycheproof) before sampling, so a wrong key template
+would fail the run rather than time something else.
 
 Three properties of the sampling loop keep class from correlating with
 anything but the input:
@@ -128,6 +132,7 @@ not how small a leak it would catch.
   scheduled job automates exactly that rerun (see Automation).
 
 ## Relation to the timing-channel classes
+
 `rust/guest-provider/README.md` classifies each algorithm's timing behavior (classes
 A–D) by *construction* — argument from the code's shape. The lab is the
 *empirical* companion: it can confirm the positive claims are not obviously
