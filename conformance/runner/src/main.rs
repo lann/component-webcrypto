@@ -30,6 +30,26 @@ use indexmap::IndexMap;
 struct Targets {
     suites: BTreeMap<String, Suite>,
     targets: BTreeMap<String, Target>,
+    /// The classification of every declarable feature name (see
+    /// targets.toml's header and `wit/README.md`, "Portability contract").
+    #[serde(default)]
+    features: BTreeMap<String, Feature>,
+}
+
+#[derive(serde::Deserialize)]
+struct Feature {
+    kind: FeatureKind,
+}
+
+#[derive(serde::Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
+#[serde(rename_all = "lowercase")]
+enum FeatureKind {
+    /// `@unstable` in the WIT: the consumer opt-in for capability that
+    /// cannot be uniform.
+    Gated,
+    /// A whole interface a world withholds; absence fails at `wac plug`
+    /// time.
+    Structural,
 }
 
 #[derive(serde::Deserialize)]
@@ -91,6 +111,58 @@ fn group_of(name: &str) -> String {
         return format!("{}/{}", rest.0, rest.1);
     }
     name.to_string()
+}
+
+/// Validate the manifest's own declarations against the portability
+/// contract (`wit/README.md`, "Portability contract"): every feature a
+/// target declares missing, every feature a suite requires, and every
+/// feature tag a lockfile carries must be classified in the `[features]`
+/// table. An unclassified name is a typo or an ungated runtime
+/// divergence, and the policy forbids declaring the latter — it is a
+/// defect to resolve, not a fact to record (AGENTS.md, "Portability:
+/// divergence is resolved, not accumulated").
+fn validate_declarations(
+    targets: &Targets,
+    locks: &BTreeMap<String, Lock>,
+    problems: &mut Vec<String>,
+) {
+    for (name, target) in &targets.targets {
+        for feature in &target.missing_features {
+            if !targets.features.contains_key(feature) {
+                problems.push(format!(
+                    "target {name}: missing-features entry {feature:?} is not classified in \
+                     [features] — only gated or structural features may be declared missing"
+                ));
+            }
+        }
+    }
+    for (name, suite) in &targets.suites {
+        for feature in &suite.requires {
+            match targets.features.get(feature) {
+                None => problems.push(format!(
+                    "suite {name}: requires {feature:?}, which is not classified in [features]"
+                )),
+                Some(f) if f.kind != FeatureKind::Structural => problems.push(format!(
+                    "suite {name}: requires {feature:?}, which is classified {:?} — `requires` \
+                     expresses a world-level (structural) need",
+                    f.kind
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+    for (suite, lock) in locks {
+        for (case, tags) in &lock.cases {
+            for tag in tags {
+                if !targets.features.contains_key(tag) {
+                    problems.push(format!(
+                        "suite {suite}: case {case:?} is tagged {tag:?}, which is not classified \
+                         in [features]"
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// Validate one results file against the target table and its suite lock,
@@ -537,6 +609,7 @@ fn main() -> anyhow::Result<()> {
     let mut problems = Vec::new();
     let mut warnings = Vec::new();
     check_presence(&targets, &files, &mut problems, &mut warnings);
+    validate_declarations(&targets, &locks, &mut problems);
     for file in &files {
         validate_file(file, &targets, &locks, &mut problems);
     }
@@ -595,6 +668,12 @@ mod tests {
     fn targets() -> Targets {
         toml::from_str(
             r#"
+            [features.chacha20-poly1305]
+            kind = "gated"
+
+            [features.ecdsa-sign]
+            kind = "structural"
+
             [suites.shared]
 
             [suites.signing]
@@ -664,6 +743,74 @@ mod tests {
         let locks = BTreeMap::from([("shared".to_string(), lock())]);
         validate_file(file, &targets(), &locks, &mut problems);
         problems
+    }
+
+    fn declaration_problems(manifest: &str, lock_text: &str) -> Vec<String> {
+        let targets: Targets = toml::from_str(manifest).unwrap();
+        let locks = BTreeMap::from([("shared".to_string(), parse_lock(lock_text).unwrap())]);
+        let mut problems = Vec::new();
+        validate_declarations(&targets, &locks, &mut problems);
+        problems
+    }
+
+    /// The classified manifest passes the declaration check whole.
+    #[test]
+    fn classified_declarations_pass() {
+        let locks = BTreeMap::from([("shared".to_string(), lock())]);
+        let mut problems = Vec::new();
+        validate_declarations(&targets(), &locks, &mut problems);
+        assert_eq!(problems, Vec::<String>::new());
+    }
+
+    /// A missing-features entry with no [features] classification is
+    /// refused: an ungated runtime divergence may not be declared.
+    #[test]
+    fn unclassified_missing_feature_is_refused() {
+        let problems = declaration_problems(
+            r#"
+            [suites.shared]
+            [targets.native]
+            missing-features = ["some-quirk"]
+            "#,
+            r#"cases = [{ name = "probe/check" }]"#,
+        );
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("\"some-quirk\" is not classified"));
+    }
+
+    /// A suite `requires` must name a structural feature: gated features
+    /// are declined at runtime, not linked out of a world.
+    #[test]
+    fn gated_feature_in_requires_is_refused() {
+        let problems = declaration_problems(
+            r#"
+            [features.chacha20-poly1305]
+            kind = "gated"
+            [suites.shared]
+            requires = ["chacha20-poly1305"]
+            [targets.native]
+            missing-features = []
+            "#,
+            r#"cases = [{ name = "probe/check" }]"#,
+        );
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("classified Gated"));
+    }
+
+    /// A lockfile feature tag outside the [features] table is refused —
+    /// the typo guard for case tagging.
+    #[test]
+    fn unclassified_lock_tag_is_refused() {
+        let problems = declaration_problems(
+            r#"
+            [suites.shared]
+            [targets.native]
+            missing-features = []
+            "#,
+            r#"cases = [{ name = "alg/src/tc1/whole", features = ["chacha20-polly1305"] }]"#,
+        );
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("\"chacha20-polly1305\", which is not classified"));
     }
 
     #[test]

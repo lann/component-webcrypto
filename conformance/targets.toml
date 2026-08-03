@@ -8,14 +8,21 @@
 # target is missing (and why), and whether a target's missing results file
 # is an error.
 #
-# A declarable feature is *behavioral* or *structural*, and what polices a
-# `missing-features` entry differs:
+# A declarable feature is *gated* or *structural* — the `[features]` table
+# below classifies every name, and the runner refuses a `missing-features`
+# entry, a suite `requires`, or a lockfile feature tag that is not in it.
+# The classification is the portability contract's enforcement
+# (`wit/README.md`, "Portability contract"): an ungated runtime divergence
+# may not be declared here at all — it is a defect to resolve, not a fact
+# to record (AGENTS.md, "Portability: divergence is resolved, not
+# accumulated"). What polices an entry differs by kind:
 #
-# - Behavioral (`chacha20-poly1305`): the guest imports the interface, so a
-#   target that lacks it must still answer. The feature-tagged probes assert
-#   the correct decline both ways — a target declaring it missing has to
-#   prove every minting path returns `unsupported`, and `run_declined`
-#   refuses any tagged probe that has no decline assertion.
+# - Gated (`chacha20-poly1305`): `@unstable` in the WIT — the consumer
+#   opt-in. The guest imports the interface, so a target that lacks it
+#   must still answer: the feature-tagged probes assert the correct
+#   decline both ways — a target declaring it missing has to prove every
+#   minting path returns `unsupported`, and `run_declined` refuses any
+#   tagged probe that has no decline assertion.
 # - Structural (`ecdsa-sign`): the interface is not imported at all, so
 #   there is nothing to observe at runtime — a guest carrying such a probe
 #   could not instantiate on a target that lacks the feature, which is why
@@ -30,6 +37,18 @@
 # the target is missing. The runner cross-checks each results file's
 # declared missing-features against this table, so a target's adapter and
 # this manifest cannot drift apart silently.
+
+[features.chacha20-poly1305]
+kind = "gated"
+
+[features.xchacha20-poly1305]
+kind = "gated"
+
+[features.sha1-checked]
+kind = "gated"
+
+[features.ecdsa-sign]
+kind = "structural"
 
 [suites.shared]
 # The shared conformance guest: importable against every implementation.
