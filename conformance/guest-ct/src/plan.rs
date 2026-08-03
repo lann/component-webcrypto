@@ -231,7 +231,7 @@ pub fn cases_under(prefix: &str) -> Vec<PlanCase> {
 
 /// The generator-shaped view of a row: leaves (which may be
 /// multi-segment: `tc375/whole`) plus verdict-shaped bodies.
-pub fn generated<Ctx>(prefix: &'static str) -> Vec<GeneratedCase<Ctx>> {
+pub fn generated(prefix: &'static str) -> Vec<GeneratedCase> {
     let head = format!("{prefix}/");
     cases_under(prefix)
         .into_iter()
@@ -242,7 +242,7 @@ pub fn generated<Ctx>(prefix: &'static str) -> Vec<GeneratedCase<Ctx>> {
                 .expect("cases_under filtered by prefix")
                 .to_string();
             let run = case.run;
-            GeneratedCase::new(leaf, move |_ctx: &Ctx| {
+            GeneratedCase::new(leaf, move |_ctx| {
                 let fut = run();
                 Box::pin(async move { fut.await.map_err(Failure::Failed) })
             })
