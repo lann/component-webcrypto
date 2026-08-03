@@ -17,5 +17,7 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 # members.
 data-encoding = "2"
 # `Schedule` is (de)serializable so translated cases can be preparsed at
-# build time (the guest-ct `preparsed` measurement feature).
+# build time (the guest-ct `preparsed` and `rkyv-corpus` measurement
+# features).
 serde = { version = "1", features = ["derive"] }
+rkyv = "0.8"

@@ -14,6 +14,7 @@ use component_test_sdk::{Failure, GeneratedCase, Verdict};
 use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA};
 use futures::future::LocalBoxFuture;
 
+#[cfg(not(feature = "rkyv-corpus"))]
 use crate::translate::VectorCase;
 use crate::{contract, vectors};
 
@@ -277,9 +278,11 @@ pub async fn declined(feature: &'static str) -> Verdict {
 /// incumbent translate iterators (JSON parsed at registry-build time);
 /// under the `preparsed` measurement feature, each is a postcard decode
 /// of the same corpus serialized by build.rs — same values, same
-/// call-per-row structure, no JSON parsing.
+/// call-per-row structure, no JSON parsing. Under `rkyv-corpus`, each is
+/// a `&'static` view of the corpus rkyv-archived by build.rs — no corpus
+/// deserialization at all at registry build.
 mod corpus {
-    #[cfg(not(feature = "preparsed"))]
+    #[cfg(not(any(feature = "preparsed", feature = "rkyv-corpus")))]
     pub use crate::translate::{
         aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases,
         kw_cases, pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
@@ -317,6 +320,55 @@ mod corpus {
         ),
         (x25519_cases, crate::translate::X25519Case, "x25519.bin"),
         (ecdh_cases, crate::translate::EcdhCase, "ecdh.bin"),
+    ];
+
+    #[cfg(feature = "rkyv-corpus")]
+    macro_rules! rkyv_corpus {
+        ($(($fn_name:ident, $case:ty, $blob:literal),)*) => {
+            $(pub fn $fn_name() -> &'static rkyv::Archived<crate::corpus::Corpus<$case>> {
+                // include_bytes! only guarantees byte alignment; give the
+                // blob rkyv's 16-byte alignment via a wrapper static.
+                #[repr(C, align(16))]
+                struct Aligned<B: ?Sized>(B);
+                static BYTES: &Aligned<[u8]> =
+                    &Aligned(*include_bytes!(concat!(env!("OUT_DIR"), "/", $blob)));
+                // SAFETY: unvalidated access is sound here because we
+                // control both ends — build.rs serialized these bytes with
+                // the same rkyv version and the very same `Corpus` type
+                // (shared source file) — and the consumer is a sandboxed
+                // test guest: a corrupted blob can at worst fail its own
+                // suite, not confuse a trust boundary.
+                unsafe {
+                    rkyv::access_unchecked::<rkyv::Archived<crate::corpus::Corpus<$case>>>(
+                        &BYTES.0,
+                    )
+                }
+            })*
+        };
+    }
+
+    #[cfg(feature = "rkyv-corpus")]
+    rkyv_corpus![
+        (hkdf_cases, crate::translate::HkdfCase, "hkdf.rkyv"),
+        (pbkdf2_cases, crate::translate::Pbkdf2Case, "pbkdf2.rkyv"),
+        (hmac_cases, crate::translate::HmacCase, "hmac.rkyv"),
+        (aead_cases, crate::translate::AeadCase, "aead.rkyv"),
+        (cbc_cases, crate::translate::CbcCase, "cbc.rkyv"),
+        (kw_cases, crate::translate::KwCase, "kw.rkyv"),
+        (
+            internal_nonce_cases,
+            crate::translate::InternalNonceCase,
+            "internal_nonce.rkyv"
+        ),
+        (sha2_cases, crate::translate::Sha2Case, "sha2.rkyv"),
+        (sig_cases, crate::translate::SigCase, "sig.rkyv"),
+        (
+            speccheck_cases,
+            crate::translate::SpeccheckCase,
+            "speccheck.rkyv"
+        ),
+        (x25519_cases, crate::translate::X25519Case, "x25519.rkyv"),
+        (ecdh_cases, crate::translate::EcdhCase, "ecdh.rkyv"),
     ];
 }
 
@@ -419,6 +471,7 @@ fn builder(prefix: &str) -> Vec<PlanCase> {
     }
 }
 
+#[cfg(not(feature = "rkyv-corpus"))]
 fn vector_cases<T: VectorCase + 'static>(
     cases: Vec<T>,
     run: fn(Rc<T>) -> LocalBoxFuture<'static, Result<(), String>>,
@@ -432,6 +485,36 @@ fn vector_cases<T: VectorCase + 'static>(
                 features: case.features(),
                 run: Box::new(move || run(case.clone())),
             }
+        })
+        .collect()
+}
+
+/// The zero-copy variant: registry build only walks the archived corpus
+/// (ids and feature indices were precomputed natively by build.rs); each
+/// case deserializes itself — one small rkyv decode — when it *runs*.
+#[cfg(feature = "rkyv-corpus")]
+fn vector_cases<T>(
+    corpus: &'static rkyv::Archived<crate::corpus::Corpus<T>>,
+    run: fn(Rc<T>) -> LocalBoxFuture<'static, Result<(), String>>,
+) -> Vec<PlanCase>
+where
+    T: rkyv::Archive + 'static,
+    T::Archived:
+        rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+{
+    corpus
+        .ids
+        .iter()
+        .zip(corpus.cases.iter())
+        .zip(corpus.features.iter())
+        .map(|((id, case), &feature)| PlanCase {
+            id: id.as_str().to_string(),
+            features: crate::corpus::FEATURE_SETS[feature as usize],
+            run: Box::new(move || {
+                let case = rkyv::deserialize::<T, rkyv::rancor::Error>(case)
+                    .expect("deserializing an archived case we serialized ourselves");
+                run(Rc::new(case))
+            }),
         })
         .collect()
 }

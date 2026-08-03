@@ -34,6 +34,12 @@ pub mod vectors;
 
 pub mod plan;
 
+#[cfg(feature = "rkyv-corpus")]
+pub mod corpus;
+
+#[cfg(all(feature = "preparsed", feature = "rkyv-corpus"))]
+compile_error!("`preparsed` and `rkyv-corpus` are mutually exclusive corpus modes");
+
 #[cfg(test)]
 mod census_test;
 

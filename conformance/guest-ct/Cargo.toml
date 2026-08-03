@@ -12,6 +12,11 @@ build = "build.rs"
 # postcard); plan.rs then decodes the blobs instead of re-parsing JSON at
 # registry-build time. Off by default; behavior-identical corpus.
 preparsed = ["dep:postcard"]
+# Measurement experiment, step two: archive each corpus with rkyv at
+# build time (ids and feature indices precomputed natively) and access
+# it zero-copy at registry build; each case deserializes itself only
+# when it runs. Mutually exclusive with `preparsed`.
+rkyv-corpus = []
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -35,6 +40,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 data-encoding = "2"
 postcard = { version = "1", features = ["alloc"], optional = true }
+# Not optional: the crate compiles translate.rs (whose case types carry
+# the rkyv derives) in every mode; `rkyv-corpus` only switches the
+# corpus source.
+rkyv = "0.8"
 
 # build.rs (under the `preparsed` feature) runs the same translate.rs the
 # crate itself #[path]-includes, so it needs the module's dependencies
@@ -45,3 +54,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 data-encoding = "2"
 postcard = { version = "1", features = ["alloc"] }
+rkyv = "0.8"

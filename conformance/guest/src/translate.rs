@@ -70,6 +70,7 @@ fn vector_case_id(alg: &str, source: &str, tc_id: u64, schedule: Option<Schedule
 
 /// A served HMAC digest parameterization, as named in test ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum HmacAlg {
     Sha1,
     Sha256,
@@ -102,6 +103,7 @@ impl HmacAlg {
 
 /// One executed HMAC vector under one schedule.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct HmacCase {
     pub alg: HmacAlg,
     pub tc_id: u64,
@@ -127,6 +129,7 @@ impl VectorCase for HmacCase {
 
 /// What the `lann:webcrypto` contract requires of an AEAD vector.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AeadExpectation {
     /// Both `seal` and `open` must fail `invalid-nonce`.
     InvalidNonce,
@@ -139,6 +142,7 @@ pub enum AeadExpectation {
 /// A caller-nonce AEAD algorithm, as named in test ids (aligned with the
 /// minting interfaces).
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AeadAlg {
     AesGcm,
     ChaCha20Poly1305,
@@ -175,6 +179,7 @@ impl AeadAlg {
 
 /// One executed caller-nonce AEAD vector under one schedule.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AeadCase {
     pub alg: AeadAlg,
     /// The key size in bits (128 or 256 for AES-GCM; the ChaCha vector
@@ -209,6 +214,7 @@ impl VectorCase for AeadCase {
 /// The algorithm behind an [`InternalNonceCase`], as named in test ids
 /// (the minting interface's name).
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum InternalNonceAlg {
     AesGcm,
     XChaCha20Poly1305,
@@ -236,6 +242,7 @@ impl InternalNonceAlg {
 /// `iv || ct || tag` as a sealed message, driven through the `open`
 /// direction (the only deterministic one; `seal` draws a random nonce).
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct InternalNonceCase {
     pub alg: InternalNonceAlg,
     /// The AES key size in bits for [`InternalNonceAlg::AesGcm`] (128 or
@@ -481,6 +488,7 @@ const ECDH_VECTORS: [(EcdhCurve, EcdhFileEncoding, &str, Option<&str>); 6] = [
 
 /// A served HKDF parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum HkdfAlg {
     Sha1,
     Sha256,
@@ -505,6 +513,7 @@ impl HkdfAlg {
 /// the `SizeTooLarge` vectors, expect the RFC 5869 output bound to fail
 /// the derivation.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct HkdfCase {
     pub alg: HkdfAlg,
     pub tc_id: u64,
@@ -570,6 +579,7 @@ pub fn hkdf_cases() -> Vec<HkdfCase> {
 
 /// A served PBKDF2 parameterization, as named in derivation vector ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Pbkdf2Alg {
     Sha1,
     Sha256,
@@ -594,6 +604,7 @@ impl Pbkdf2Alg {
 /// upstream vector is `valid` (the file has no invalid cases), including
 /// the empty-password ones (empty KDF secrets are accepted package-wide).
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Pbkdf2Case {
     pub alg: Pbkdf2Alg,
     pub tc_id: u64,
@@ -659,6 +670,7 @@ pub fn pbkdf2_cases() -> Vec<Pbkdf2Case> {
 
 /// A served SHA-2 algorithm, as named in digest vector ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Sha2Alg {
     Sha256,
     Sha384,
@@ -679,6 +691,7 @@ impl Sha2Alg {
 /// One executed SHA-2 digest vector under one schedule: `compute(msg)` must
 /// equal `md`.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Sha2Case {
     pub alg: Sha2Alg,
     /// The vector's `Len` field (the message length in bits), which
@@ -801,6 +814,7 @@ fn is_valid(field: &str, result: &str) -> bool {
 /// to fail `invalid-key`. No chunking schedules: agreement carries no
 /// streams.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct X25519Case {
     pub tc_id: u64,
     /// The peer's raw u-coordinate.
@@ -886,6 +900,7 @@ pub fn x25519_cases() -> Vec<X25519Case> {
 
 /// A served ECDH curve, as named in test ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum EcdhCurve {
     P256,
     P384,
@@ -934,6 +949,7 @@ enum EcdhFileEncoding {
 /// A vector's peer public key in its file's encoding, carrying the
 /// dispatch to the matching import function.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum EcdhPublic {
     /// `import-public-key-raw` (the ecpoint files).
     Raw(Vec<u8>),
@@ -962,6 +978,7 @@ impl EcdhPublic {
 /// cases, expect the peer's import to fail `invalid-key`. No chunking
 /// schedules: agreement carries no streams.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct EcdhCase {
     pub curve: EcdhCurve,
     pub tc_id: u64,
@@ -1290,6 +1307,7 @@ fn translate_aead(
 ///   `authentication-failed` (bad ICV and malformed lengths are
 ///   deliberately indistinguishable).
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct KwCase {
     /// The key size in bits (128 or 256; AES-192 is declined at minting,
     /// covered by probes).
@@ -1336,6 +1354,7 @@ pub fn kw_cases() -> Vec<KwCase> {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct CbcCase {
     /// The key size in bits (128 or 256; AES-192 is declined at minting,
     /// covered by probes).
@@ -1439,6 +1458,7 @@ pub fn sha2_cases() -> Vec<Sha2Case> {
 
 /// A served signature algorithm, as named in vector ids.
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum SigAlg {
     Ed25519,
     EcdsaP256Sha256,
@@ -1460,6 +1480,7 @@ impl SigAlg {
 /// the group's public key and verifying `sig` over `msg` must succeed
 /// (`valid`) or fail `authentication-failed` (`invalid`).
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SigCase {
     pub alg: SigAlg,
     pub tc_id: u64,
@@ -1488,6 +1509,7 @@ impl VectorCase for SigCase {
 /// out-of-range `S`, mixed-order torsion components) that pin the
 /// `ed25519-verify` verification criterion cross-target.
 #[derive(Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SpeccheckCase {
     /// The vector's index in the published set.
     pub tc_id: u64,

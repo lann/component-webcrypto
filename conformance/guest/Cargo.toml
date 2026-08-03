@@ -20,4 +20,7 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 # Parsing the vendored Wycheproof JSON compiled into the guest.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Archive derives on the translated case types, so guest-ct's
+# `rkyv-corpus` measurement feature can embed the corpus zero-copy.
+rkyv = "0.8"
 data-encoding = "2"
