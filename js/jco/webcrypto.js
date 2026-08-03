@@ -4665,13 +4665,27 @@ export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
   }
 
   /**
-   * The private JWK, material members only, behind the extractability
-   * gate (checked on the `CryptoKey` itself, like `exportRawGated`).
+   * The private JWK (OKP for Ed25519, EC for ECDSA, full-CRT RSA for the
+   * RSA family), material members only, behind the extractability gate
+   * (checked on the `CryptoKey` itself, like `exportRawGated`).
    */
   async exportKeyJwk() {
     const privateKey = platformKeyOf(this);
     if (!privateKey.extractable) throw errNotExtractable();
     const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", privateKey));
+    if (jwk.kty === "RSA") {
+      return JSON.stringify({
+        kty: jwk.kty,
+        n: jwk.n,
+        e: jwk.e,
+        d: jwk.d,
+        p: jwk.p,
+        q: jwk.q,
+        dp: jwk.dp,
+        dq: jwk.dq,
+        qi: jwk.qi,
+      });
+    }
     return JSON.stringify(
       jwk.kty === "OKP"
         ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, d: jwk.d }
@@ -5215,38 +5229,64 @@ export const ecdsaSign = {
 
 /**
  * The mint-bound digest for each served `rsa-variant` enum case (the
- * `rsa` interface's one variant set, shared by both RSA signature
- * interfaces).
+ * `rsa` interface's one variant set, shared by the four RSA signature
+ * interfaces), with the digest output length the PSS signing mints fix
+ * their salt length to (the JOSE `PS*` profile).
  */
-/** @type {Readonly<Record<string, string | undefined>>} */
+/** @type {Readonly<Record<string, { hash: string, digestBytes: number } | undefined>>} */
 const RSA_VARIANTS = Object.assign(Object.create(null), {
-  sha256: "SHA-256",
-  sha384: "SHA-384",
-  sha512: "SHA-512",
+  sha256: { hash: "SHA-256", digestBytes: 32 },
+  sha384: { hash: "SHA-384", digestBytes: 48 },
+  sha512: { hash: "SHA-512", digestBytes: 64 },
 });
 
 /** The RSA family's modulus admission window, in bits (inclusive). */
 const RSA_MODULUS_MIN_BITS = 1024;
 const RSA_MODULUS_MAX_BITS = 16384;
 
+/** The signing interfaces' tightened modulus window, in bits (inclusive). */
+const RSA_SIGNING_MIN_BITS = 2048;
+const RSA_SIGNING_MAX_BITS = 8192;
+
 /**
- * The family admission checks the platform does not enforce, run after a
+ * The generated modulus length for each `rsa-modulus` enum case.
+ */
+/** @type {Readonly<Record<string, number | undefined>>} */
+const RSA_MODULUS_BITS = Object.assign(Object.create(null), {
+  m2048: 2048,
+  m3072: 3072,
+  m4096: 4096,
+  m8192: 8192,
+});
+
+/**
+ * The admission checks the platform does not enforce, run after a
  * platform RSA import on the imported key's metadata (`RsaKeyAlgorithm`) —
  * no DER or JWK parsing; a rejected key is simply discarded. Node 24
  * admits keys the family contract rejects on both counts — 512-bit moduli
  * via SPKI, and even or < 3 exponents via JWK (`e = 4` and `e = 1` both
  * import) — so both rules live here:
- * - the modulus length must be within the admission window;
+ * - the modulus length must be within the caller's admission window (the
+ *   family window for verification imports, the tightened 2048–8192
+ *   signing window for signing imports; the platform admits either way —
+ *   a 1024-bit PKCS#8 imports on Node 24);
  * - the public exponent must be odd and at least 3.
  * @param {CryptoKey} key
  * @param {string} what
+ * @param {number} minBits
+ * @param {number} maxBits
  * @returns {number} the admitted modulus length, in bits
  */
-function rsaAdmittedModulusLength(key, what) {
+function rsaAdmittedModulusLength(
+  key,
+  what,
+  minBits = RSA_MODULUS_MIN_BITS,
+  maxBits = RSA_MODULUS_MAX_BITS,
+) {
   const { modulusLength, publicExponent } = /** @type {RsaHashedKeyAlgorithm} */ (key.algorithm);
-  if (modulusLength < RSA_MODULUS_MIN_BITS || modulusLength > RSA_MODULUS_MAX_BITS) {
+  if (modulusLength < minBits || modulusLength > maxBits) {
     throw errInvalidKey(
-      `invalid ${what}: RSA modulus must be ${RSA_MODULUS_MIN_BITS}-${RSA_MODULUS_MAX_BITS} bits, got ${modulusLength}`,
+      `invalid ${what}: RSA modulus must be ${minBits}-${maxBits} bits, got ${modulusLength}`,
     );
   }
   // `publicExponent` is the big-endian magnitude; leading zeros only make
@@ -5295,7 +5335,7 @@ function rsaAlgorithm(name, hash, modulusLength, saltLength) {
  * @param {number | undefined} saltLength
  */
 async function importRsaVerifyingKeySpki(name, variant, spki, saltLength) {
-  const hash = served(RSA_VARIANTS, variant);
+  const { hash } = served(RSA_VARIANTS, variant);
   requireRsaEncryptionSpki(spki);
   const key = await importPlatformKey(`${name} spki`, "spki", spki, { name, hash }, true, [
     "verify",
@@ -5318,7 +5358,7 @@ async function importRsaVerifyingKeySpki(name, variant, spki, saltLength) {
  * @param {number | undefined} saltLength
  */
 async function importRsaVerifyingKeyJwk(name, variant, jwkText, saltLength) {
-  const hash = served(RSA_VARIANTS, variant);
+  const { hash } = served(RSA_VARIANTS, variant);
   const jwk = jwkMaterial(jwkText);
   requireStrictBase64url(jwk.n);
   requireStrictBase64url(jwk.e);
@@ -5361,4 +5401,294 @@ export const rsaPssVerify = {
    */
   importVerifyingKeyJwk: (variant, saltLength, jwk) =>
     importRsaVerifyingKeyJwk("RSA-PSS", variant, jwk, saltLength),
+};
+
+/**
+ * The RSA signing posture: whether this host serves the gated
+ * `rsassa-pkcs1-v15-sign` / `rsa-pss-sign` minting functions. `undefined`
+ * means the environment default, evaluated per minting call (see
+ * `requireRsaSigningServed`).
+ * @type {"serve" | "decline" | undefined}
+ */
+let rsaSigningPolicy;
+
+/**
+ * Choose whether the RSA signing interfaces' minting functions are served
+ * (`"serve"`), declined with `{ tag: 'unsupported' }` (`"decline"`), or
+ * left to the environment default (`undefined`): serve under Node, decline
+ * everywhere else — browsers and unknown runtimes fail closed.
+ *
+ * The default encodes the WIT gate's recorded ruling (`wit/rsa.wit`;
+ * `wit/README.md`, "Stability gates"): RSA private-key operations leak key
+ * material through execution timing unless the implementation is
+ * constant-time end to end, and a browser is the archetypal
+ * attacker-observable timing domain — scripts, workers, and cross-origin
+ * frames share the machine and a clock with the signing operation, and the
+ * one WebCrypto RSA private-op key-recovery CVE to date was a browser's
+ * (CVE-2023-5388, Firefox NSS). Node deployments choose their co-tenants,
+ * so Node serves by default. Opting a browser in is the deployer's
+ * assertion that its timing domain is not attacker-observable.
+ * @param {"serve" | "decline" | undefined} policy
+ */
+export function setRsaSigningPolicy(policy) {
+  if (policy !== "serve" && policy !== "decline" && policy !== undefined) {
+    throw new TypeError(
+      `RSA signing policy must be "serve", "decline", or undefined, got ${policy}`,
+    );
+  }
+  rsaSigningPolicy = policy;
+}
+
+/**
+ * The posture check every RSA signing mint runs first. Per minting call
+ * rather than at module load, so a `setRsaSigningPolicy` call takes effect
+ * immediately, and the environment default reads the environment as the
+ * mint sees it. The environment probe goes through a structural cast: this
+ * file type-checks against the DOM lib alone (the browser-compatibility
+ * charter), which does not declare `process`.
+ */
+function requireRsaSigningServed() {
+  const environment = /** @type {{ process?: { versions?: { node?: unknown } } }} */ (globalThis);
+  const policy =
+    rsaSigningPolicy ?? (environment.process?.versions?.node ? "serve" : "decline");
+  if (policy !== "serve") {
+    throw errUnsupported("RSA signing is declined in this environment; see setRsaSigningPolicy");
+  }
+}
+
+/**
+ * The mint-bound algorithm record for an RSA signing mint: `rsaAlgorithm`
+ * with the salt length the signing interfaces fix — the digest length for
+ * RSA-PSS (the JOSE `PS*` and RFC 8017 default profile; `rsa-pss-sign`
+ * takes no salt parameter), none for RSASSA-PKCS1-v1_5.
+ * @param {string} name `"RSASSA-PKCS1-v1_5"` or `"RSA-PSS"`
+ * @param {{ hash: string, digestBytes: number }} entry
+ * @param {number} modulusLength in bits
+ */
+function rsaSigningAlgorithm(name, entry, modulusLength) {
+  return rsaAlgorithm(
+    name,
+    entry.hash,
+    modulusLength,
+    name === "RSA-PSS" ? entry.digestBytes : undefined,
+  );
+}
+
+/**
+ * Generate a fresh RSA signing key pair of the declared variant and modulus
+ * length for `name`, returning `[signing, verifying]`. The public exponent
+ * is 65537 (the WIT fixes it; not a parameter).
+ * @param {string} name
+ * @param {string} variant
+ * @param {string} modulus
+ * @param {SigningKeyOptions} options
+ * @returns {Promise<[SigningKey, VerifyingKey]>}
+ */
+async function generateRsaSigningKey(name, variant, modulus, options) {
+  requireRsaSigningServed();
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const modulusLength = served(RSA_MODULUS_BITS, modulus);
+  const pair = await platformCall(`${name} key generation`, () =>
+    subtle.generateKey(
+      {
+        name,
+        hash: entry.hash,
+        modulusLength,
+        publicExponent: new Uint8Array([1, 0, 1]),
+      },
+      policy.extractable,
+      ["sign", "verify"],
+    ),
+  );
+  const algorithm = rsaSigningAlgorithm(name, entry, modulusLength);
+  return [new SigningKey(pair.privateKey, algorithm), new VerifyingKey(pair.publicKey, algorithm)];
+}
+
+/**
+ * Import an RSA signing key of the declared variant from a PKCS#8
+ * PrivateKeyInfo, for `name`. The platform validates the DER — including
+ * the rsaEncryption-only algorithm rule, which the WebCrypto import steps
+ * mandate (an `id-RSASSA-PSS` PKCS#8 fails the platform import with
+ * `DataError`) — and the signing window runs on the imported key's
+ * metadata (`rsaAdmittedModulusLength`; the platform admits wider).
+ * @param {string} name
+ * @param {string} variant
+ * @param {Uint8Array} pkcs8
+ * @param {SigningKeyOptions} options
+ */
+async function importRsaSigningKeyPkcs8(name, variant, pkcs8, options) {
+  requireRsaSigningServed();
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const key = await importPlatformKey(
+    `${name} pkcs8`,
+    "pkcs8",
+    pkcs8,
+    { name, hash: entry.hash },
+    policy.extractable,
+    ["sign"],
+  );
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    `${name} pkcs8`,
+    RSA_SIGNING_MIN_BITS,
+    RSA_SIGNING_MAX_BITS,
+  );
+  return new SigningKey(key, rsaSigningAlgorithm(name, entry, modulusLength));
+}
+
+/**
+ * Import an RSA signing key of the declared variant from an RSA private
+ * JWK, for `name` — a platform pass-through of the material members. The
+ * platform owns the kty/alg/ext validation (including the
+ * alg-against-variant rule, as on the `-verify` path) and the full-CRT
+ * requirement the WIT pins: a `d`-only or partial-CRT private JWK fails
+ * the platform import with `DataError`. Strictness of the base64url
+ * members is pinned host-side, and the signing window runs on the imported
+ * key's metadata.
+ * @param {string} name
+ * @param {string} variant
+ * @param {string} jwkText
+ * @param {SigningKeyOptions} options
+ */
+async function importRsaSigningKeyJwk(name, variant, jwkText, options) {
+  requireRsaSigningServed();
+  const policy = signingPolicy(options);
+  requireSigningGrant(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const jwk = jwkMaterial(jwkText);
+  for (const member of ["n", "e", "d", "p", "q", "dp", "dq", "qi"]) {
+    requireStrictBase64url(jwk[member]);
+  }
+  const key = await importPlatformKeyJwk(
+    `${name} private JWK`,
+    jwk,
+    { name, hash: entry.hash },
+    policy.extractable,
+    ["sign"],
+  );
+  if (key.type !== "private") {
+    throw errInvalidKey("RSA private JWK must carry `d` and the CRT members");
+  }
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    `${name} private JWK`,
+    RSA_SIGNING_MIN_BITS,
+    RSA_SIGNING_MAX_BITS,
+  );
+  return new SigningKey(key, rsaSigningAlgorithm(name, entry, modulusLength));
+}
+
+/**
+ * Mint an RSA signing key of the declared variant from unwrapped key
+ * material read as a PKCS#8 PrivateKeyInfo (see
+ * `unwrapEd25519SigningKeyPkcs8`).
+ * @param {string} name
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapRsaSigningKeyPkcs8(name, variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey(`unwrapped ${name} pkcs8`, () =>
+    importRsaSigningKeyPkcs8(name, variant, bytes, options),
+  );
+}
+
+/**
+ * Mint an RSA signing key of the declared variant from unwrapped key
+ * material read as an RSA private JWK (see `unwrapEd25519SigningKeyJwk`).
+ * @param {string} name
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {SigningKeyOptions} options
+ */
+async function unwrapRsaSigningKeyJwk(name, variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  requireSigningGrant(signingPolicy(options));
+  const jwk = unwrappedJwk(bytes, "sig", ["sign"]);
+  return redactingInvalidKey(`unwrapped ${name} private JWK`, () =>
+    importRsaSigningKeyJwk(name, variant, jwk, options),
+  );
+}
+
+/** The `lann:webcrypto/rsassa-pkcs1-v15-sign` interface. */
+export const rsassaPkcs1V15Sign = {
+  /**
+   * @param {string} variant
+   * @param {string} modulus
+   * @param {SigningKeyOptions} options
+   */
+  generateKey: (variant, modulus, options) =>
+    generateRsaSigningKey("RSASSA-PKCS1-v1_5", variant, modulus, options),
+  /**
+   * @param {string} variant
+   * @param {Uint8Array} pkcs8
+   * @param {SigningKeyOptions} options
+   */
+  importSigningKeyPkcs8: (variant, pkcs8, options) =>
+    importRsaSigningKeyPkcs8("RSASSA-PKCS1-v1_5", variant, pkcs8, options),
+  /**
+   * @param {string} variant
+   * @param {string} jwk
+   * @param {SigningKeyOptions} options
+   */
+  importSigningKeyJwk: (variant, jwk, options) =>
+    importRsaSigningKeyJwk("RSASSA-PKCS1-v1_5", variant, jwk, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {SigningKeyOptions} options
+   */
+  unwrapSigningKeyPkcs8: (variant, input, options) =>
+    unwrapRsaSigningKeyPkcs8("RSASSA-PKCS1-v1_5", variant, input, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {SigningKeyOptions} options
+   */
+  unwrapSigningKeyJwk: (variant, input, options) =>
+    unwrapRsaSigningKeyJwk("RSASSA-PKCS1-v1_5", variant, input, options),
+};
+
+/** The `lann:webcrypto/rsa-pss-sign` interface. */
+export const rsaPssSign = {
+  /**
+   * @param {string} variant
+   * @param {string} modulus
+   * @param {SigningKeyOptions} options
+   */
+  generateKey: (variant, modulus, options) =>
+    generateRsaSigningKey("RSA-PSS", variant, modulus, options),
+  /**
+   * @param {string} variant
+   * @param {Uint8Array} pkcs8
+   * @param {SigningKeyOptions} options
+   */
+  importSigningKeyPkcs8: (variant, pkcs8, options) =>
+    importRsaSigningKeyPkcs8("RSA-PSS", variant, pkcs8, options),
+  /**
+   * @param {string} variant
+   * @param {string} jwk
+   * @param {SigningKeyOptions} options
+   */
+  importSigningKeyJwk: (variant, jwk, options) =>
+    importRsaSigningKeyJwk("RSA-PSS", variant, jwk, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {SigningKeyOptions} options
+   */
+  unwrapSigningKeyPkcs8: (variant, input, options) =>
+    unwrapRsaSigningKeyPkcs8("RSA-PSS", variant, input, options),
+  /**
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {SigningKeyOptions} options
+   */
+  unwrapSigningKeyJwk: (variant, input, options) =>
+    unwrapRsaSigningKeyJwk("RSA-PSS", variant, input, options),
 };

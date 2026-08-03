@@ -1,19 +1,26 @@
 //! `conformance-signing-guest`: the host-only conformance component.
 //!
-//! Probes the signature-minting surface the in-guest provider deliberately
-//! does not export — `ecdsa-sign` is class D (see rust/guest-provider/README.md) —
-//! which the shared `conformance-guest` therefore cannot import, since it
-//! must compose with that provider. This guest runs only under the
-//! host-backed targets (wasmtime, jco).
+//! Covers the signature-minting surface the in-guest provider deliberately
+//! does not export — `ecdsa-sign` and the gated RSA signing interfaces are
+//! class D (see rust/guest-provider/README.md) — which the shared
+//! `conformance-guest` therefore cannot import, since it must compose with
+//! that provider. This guest runs only under the host-backed targets
+//! (wasmtime, jco).
 //!
-//! This suite is probes only. Private-key imports are exercised as
-//! sign-then-verify round trips against separately imported public
-//! points, never as known signature bytes: the WIT deliberately leaves
-//! ECDSA signatures nondeterministic across implementations, and no
-//! import ever derives a public half (the w3c/webcrypto#356 gap). The
-//! Rust-side private-import known answers (the RFC 6979 A.2.5
-//! deterministic signature, out-of-range scalar rejection) are pinned by
-//! `lann-webcrypto-core`'s unit tests.
+//! Two case families. The ECDSA coverage is probes only: private-key
+//! imports are exercised as sign-then-verify round trips against
+//! separately imported public points, never as known signature bytes —
+//! the WIT deliberately leaves ECDSA signatures nondeterministic across
+//! implementations, and no import ever derives a public half (the
+//! w3c/webcrypto#356 gap). The Rust-side private-import known answers
+//! (the RFC 6979 A.2.5 deterministic signature, out-of-range scalar
+//! rejection) are pinned by `lann-webcrypto-core`'s unit tests. The RSA
+//! signing coverage ([`rsa_sign`]) additionally carries vector cases:
+//! RSASSA-PKCS1-v1_5 generation is deterministic, so the Wycheproof
+//! `sig_gen` vectors byte-compare here the way verification vectors do in
+//! the shared suite. `rsa-sign` is a *gated* feature (unlike the
+//! structural `ecdsa-sign`), so its cases carry the feature tag and its
+//! probes assert the decline on targets declaring it missing.
 
 wit_bindgen::generate!({
     path: "../guest/wit",
@@ -21,15 +28,23 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+mod rsa_sign;
+
+use std::collections::BTreeSet;
+
 use conformance_harness::stream::{sig_sign_ok, sig_verify_ok, sig_verify_op, Schedule};
 use conformance_harness::{
-    b64url, describe, expect, expect_err, export_probe_suite, probes, ErrKind, P256_A25_X,
-    P256_A25_Y,
+    b64url, describe, expect, expect_err, probes, ErrKind, FEATURE_RSA_SIGN, KNOWN_FEATURES,
+    P256_A25_X, P256_A25_Y,
 };
+use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
+use rsa_sign::{
+    rsa_pss_sign_round_trip, rsa_sign_admission, rsa_sign_declined, rsa_sign_key_contract,
+};
 
 /// Generate a signing key with `sign` granted, carrying only the
 /// `extractable` choice (the probes' subject is ECDSA, not usage policy).
@@ -43,6 +58,14 @@ async fn generate_key(
     raw_generate_key(variant, options).await
 }
 
+/// The features a bare tag in the `probes!` table stands for. Which
+/// features exist is this suite's business, not the harness's.
+macro_rules! feature_tags {
+    (rsa_sign) => {
+        &[FEATURE_RSA_SIGN]
+    };
+}
+
 probes! {
     ecdsa_p256_sign_roundtrip,
     ecdsa_p384_generate_roundtrip,
@@ -52,9 +75,131 @@ probes! {
     ecdsa_signing_key_exports,
     ecdsa_cross_hash_sign_roundtrip,
     ecdsa_unwrap_signing_key,
+    rsa_sign_key_contract(rsa_sign),
+    rsa_pss_sign_round_trip(rsa_sign),
+    rsa_sign_admission(rsa_sign),
+    rsa_sign_declined(rsa_sign),
 }
 
-export_probe_suite!(PROBES);
+/// Run the probe case whose `features` a target declares missing: assert
+/// the correct decline (the shared guest's `run_declined`, ported for the
+/// features this suite tags). This is the two-way guarantee behind the
+/// plain `skipped` the vector cases report: a target cannot silently
+/// serve a feature it declares missing.
+async fn run_declined(features: &[&str]) -> Result<String, String> {
+    if features == [FEATURE_RSA_SIGN] {
+        rsa_sign::minting_declined().await
+    } else {
+        Err("probe has no decline assertion for its features".into())
+    }
+}
+
+struct Component;
+
+/// The data to run one materialized case.
+enum CaseKind {
+    /// One RSASSA-PKCS1-v1_5 signature-generation vector.
+    RsaSign(rsa_sign::RsaSignCase),
+    /// An index into [`PROBES`].
+    Probe(usize),
+}
+
+impl CaseKind {
+    /// Run the case's subject, yielding the failure detail on expectation
+    /// mismatch.
+    async fn execute(&self) -> Result<(), String> {
+        match self {
+            CaseKind::RsaSign(case) => rsa_sign::run_case(case).await,
+            CaseKind::Probe(index) => conformance_harness::run_probe(PROBES, *index).await,
+        }
+    }
+
+    /// Whether this case, when its features are declared missing, asserts
+    /// the correct decline before reporting `skipped` (the shared guest's
+    /// posture: probes assert it on every minting path, vector cases skip
+    /// without re-asserting it hundreds of times).
+    fn asserts_decline(&self) -> bool {
+        matches!(self, CaseKind::Probe(_))
+    }
+}
+
+/// One materialized conformance case: its stable name, the features it
+/// exercises, whether the target provides them, and the data to run it.
+pub struct Case {
+    name: String,
+    features: &'static [&'static str],
+    provided: bool,
+    kind: CaseKind,
+}
+
+/// Materialize the suite for a target missing `missing`, in census order:
+/// the vector cases, then the probes.
+fn all_cases(missing: &BTreeSet<&str>) -> Vec<TestCase> {
+    let mut cases = Vec::new();
+    for case in rsa_sign::cases() {
+        cases.push(TestCase::new(Case {
+            name: case.case_id(),
+            features: case.features(),
+            provided: conformance_harness::provided(case.features(), missing),
+            kind: CaseKind::RsaSign(case),
+        }));
+    }
+    for (index, probe) in PROBES.iter().enumerate() {
+        cases.push(TestCase::new(Case {
+            name: probe.case_id(),
+            features: probe.features,
+            provided: probe.provided_by(missing),
+            kind: CaseKind::Probe(index),
+        }));
+    }
+    cases
+}
+
+impl GuestTestCase for Case {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn features(&self) -> Vec<String> {
+        self.features.iter().map(|s| s.to_string()).collect()
+    }
+
+    async fn run(&self) -> Outcome {
+        if self.provided {
+            match self.kind.execute().await {
+                Ok(()) => Outcome::Pass,
+                Err(detail) => Outcome::Fail(detail),
+            }
+        } else {
+            // The target declares this case's feature missing; see
+            // `CaseKind::asserts_decline` for which cases assert the
+            // correct decline before skipping.
+            let asserted = if self.kind.asserts_decline() {
+                run_declined(self.features).await
+            } else {
+                Ok(format!(
+                    "feature {} declared missing by the target",
+                    self.features.join("+")
+                ))
+            };
+            match asserted {
+                Ok(detail) => Outcome::Skipped(detail),
+                Err(detail) => Outcome::Fail(detail),
+            }
+        }
+    }
+}
+
+impl Guest for Component {
+    type TestCase = Case;
+
+    fn all(missing_features: Vec<String>) -> Vec<TestCase> {
+        let missing = conformance_harness::missing_features(&missing_features, KNOWN_FEATURES);
+        all_cases(&missing)
+    }
+}
+
+export!(Component);
 
 // --- probes --------------------------------------------------------------------
 

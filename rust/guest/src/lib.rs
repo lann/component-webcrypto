@@ -74,7 +74,19 @@ mod generated {
     // n where this stops being tolerable, the bindings move to a build
     // script that computes the flag list (tracked with the SDK's other
     // cargo-feature debt in #85).
-    #[cfg(all(feature = "chacha", feature = "sha1-checked"))]
+    #[cfg(all(feature = "chacha", feature = "sha1-checked", feature = "rsa-sign"))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        feature = "sha1-checked",
+        not(feature = "rsa-sign")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"],
@@ -82,7 +94,23 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(feature = "chacha", not(feature = "sha1-checked")))]
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["chacha20-poly1305", "xchacha20-poly1305"],
@@ -90,7 +118,23 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(not(feature = "chacha"), feature = "sha1-checked"))]
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        feature = "rsa-sign"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["sha1-checked", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        not(feature = "rsa-sign")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["sha1-checked"],
@@ -98,7 +142,23 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(not(feature = "chacha"), not(feature = "sha1-checked")))]
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         world: "imports",
@@ -130,6 +190,8 @@ pub mod bindings {
     pub use super::generated::lann::webcrypto::{
         chacha20_poly1305, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
+    #[cfg(feature = "rsa-sign")]
+    pub use super::generated::lann::webcrypto::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
 }
 
 pub use generated::wit_stream;

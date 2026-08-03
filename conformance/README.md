@@ -73,10 +73,12 @@ guest/             # the shared suite's guest: vectors compiled in (no I/O
                    #   `wasmtime run`); exports all(missing) ->
                    #   list<test-case>; tests.lock pins its cases
 signing-guest/     # the signing suite's host-only guest: probes for
-                   #   interfaces the in-guest
-                   #   provider deliberately does not export (ecdsa-sign);
-                   #   runs under the wasmtime and jco targets only, with
-                   #   its own tests.lock
+                   #   interfaces the in-guest provider deliberately does
+                   #   not export (ecdsa-sign, the gated rsa-sign
+                   #   interfaces), plus the RSASSA-PKCS1-v1_5 sig-gen
+                   #   known-answer cases (deterministic signing
+                   #   byte-compares); runs under the wasmtime and jco
+                   #   targets only, with its own tests.lock
 adapters/
   wasmtime/        # native adapter over lann-webcrypto-wasmtime's add_to_linker
   composed-driver/   # CLI driver for the composed in-guest target (guest +

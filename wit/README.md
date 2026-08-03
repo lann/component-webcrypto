@@ -312,18 +312,23 @@ gate's reasons and exit conditions are listed here:
   when the toolchains this package rides can express an optional import,
   so consumers never stabilize onto the stopgap as if it were the final
   consumption story.
+- **Consent**: the interface is servable, but serving it is a
+  per-deployment security judgment the package cannot make or verify
+  from inside — the gate is the consumer's explicit assertion of their
+  threat model. Consent gates do not lift on tooling improvements; they
+  lift only if the underlying judgment ever becomes unconditional.
 
 The gates:
 
 - `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305` —
-  both reasons. Shape: the algorithm is IETF-standard (RFC 8439), but
+  shape and linkage. Shape: the algorithm is IETF-standard (RFC 8439), but
   its browser WebCrypto surface is a proposal (W3C ["Modern Algorithms
   in the Web Cryptography API"]) this package tracks; the JWK contract
   has already moved once to follow the proposal's registered `"C20P"`.
   Exits when the proposal settles *and* optional imports are
   expressible.
 - `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
-  `xchacha20-poly1305-internal-nonce` — both reasons. Shape: the
+  `xchacha20-poly1305-internal-nonce` — shape and linkage. Shape: the
   construction is deployed (libsodium lineage) but not
   IETF-standardized, and no platform WebCrypto serves it. Exits on a
   standardization-or-durability judgment once optional imports are
@@ -333,6 +338,18 @@ The gates:
   nothing external pending), but platform WebCrypto carries no sha1dc,
   so platform-backed providers can never serve it. Exits when optional
   imports are expressible.
+- `@unstable(feature = rsa-sign)` on `rsassa-pkcs1-v15-sign` and
+  `rsa-pss-sign` — consent, primarily. RSA private-key operations leak
+  key material through timing unless constant-time end to end, the
+  attack lineage is 25 years old and current (the Marvin attack), and
+  whether a deployment's timing is attacker-observable is a fact only
+  the deployer knows — so the gate is the consumer's assertion of that
+  judgment, made under exactly the long-lived, high-value keys
+  (code-forge app credentials, DKIM domain keys, open-banking client
+  keys) the interfaces exist to serve. The in-guest absence is
+  *structural* (the provider's world, like `ecdsa-sign`) and carries no
+  gate; browser-backed hosts additionally decline by default behind
+  their own recorded opt-in. The consent dimension does not exit.
 
 Neither kind of gate speaks to per-call runtime availability: an
 implementation may decline any minting path with `error.unsupported`
@@ -469,7 +486,35 @@ short:
   making salt-length confusion unrepresentable — the same mint-binding
   as ECDSA's digest, with the same consumer story (JOSE's `PS*` fixes
   the salt to the digest length, and a caller holding public material
-  can mint one key per parameterization it must serve).
+  can mint one key per parameterization it must serve). Signing goes
+  further: `rsa-pss-sign` keys emit salt = digest length with no
+  parameter at all — the JOSE/FIPS profile, and the only
+  parameterization the verified-lineage backends serve — while
+  verification stays parameterized because foreign signatures are facts
+  a verifier must meet.
+- **RSA signing floors at 2048 bits and generates only standard sizes.**
+  The signing interfaces' admission window (2048–8192) and the
+  verification window (1024–16384) split exactly along NIST SP
+  800-131A's line: sub-2048 signature *generation* has been disallowed
+  since 2013 and no deployed protocol requires new sub-2048 signatures
+  (DKIM, DNSSEC, and the PKI all verify 2048 everywhere), while
+  sub-2048 *verification* remains legacy-use for grandfathered keys.
+  `generate-key` narrows further to an enum of the four standard sizes
+  with the exponent fixed at 65537 — existing keys are facts an import
+  must meet; new keys are choices the API need not offer badly.
+- **RSA private-key operations are lineage-pinned where this package
+  controls the implementation.** Only one implementation family has
+  ever passed side-channel verification for RSA private operations
+  (the Marvin methodology's negative result on BoringSSL); the pure-Rust
+  `rsa` crate carries an open key-recovery advisory (RUSTSEC-2023-0071)
+  for exactly these operations. The package's native host therefore
+  backs `rsa-sign` with a BoringSSL-derived implementation and uses the
+  pure-Rust crate for verification only, where no secret exists.
+  Browser-backed hosts decline the signing interfaces by default — a
+  browser is the archetypal attacker-observable timing domain, and the
+  one WebCrypto RSA private-op CVE to date was a browser's — behind a
+  documented module-level opt-in, mirroring the checked-SHA-1 posture
+  export.
 - **Unauthenticated modes are in, for compatibility.** AES-CBC and
   AES-CTR are WebCrypto-committed formats real systems must read and
   write, so the package carries them — quarantined in the `cipher` kind,
