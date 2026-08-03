@@ -1,0 +1,114 @@
+//! component-test host-embed driver: runs the ported conformance suite
+//! (conformance-guest-ct) against the wasmtime-impl RustCrypto host.
+//!
+//! Usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...]
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use anyhow::{bail, Result};
+use component_test_runner::{CtCtx, OutputMode, Runner, RunnerView};
+use lann_webcrypto_wasmtime::{
+    add_to_linker_with_options, LinkOptions, WasiWebcryptoCtx, WasiWebcryptoCtxView,
+    WasiWebcryptoView,
+};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+
+/// Store data: WASI + the runner's diagnostic sink + the SUT context.
+struct Data {
+    wasi: WasiCtx,
+    table: ResourceTable,
+    ct: CtCtx,
+    webcrypto: WasiWebcryptoCtx,
+}
+
+impl WasiView for Data {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+
+impl WasiWebcryptoView for Data {
+    fn webcrypto(&mut self) -> WasiWebcryptoCtxView<'_> {
+        WasiWebcryptoCtxView {
+            ctx: &mut self.webcrypto,
+            table: &mut self.table,
+        }
+    }
+}
+
+impl RunnerView for Data {
+    fn ct(&mut self) -> &mut CtCtx {
+        &mut self.ct
+    }
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode> {
+    let mut suite: Option<PathBuf> = None;
+    let mut mode = OutputMode::Human;
+    let mut missing: Vec<String> = Vec::new();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--missing" => {
+                let list = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--missing needs a list"))?;
+                missing.extend(list.split(',').filter(|s| !s.is_empty()).map(String::from));
+            }
+            "--jsonl" => mode = OutputMode::Jsonl,
+            _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
+            other => bail!("unexpected argument `{other}`"),
+        }
+    }
+    let suite = suite.ok_or_else(|| {
+        anyhow::anyhow!("usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2]")
+    })?;
+    let suite_name = suite
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("suite")
+        .to_string();
+
+    let runner = Runner::with_data(
+        &suite,
+        || Data {
+            wasi: WasiCtxBuilder::new().inherit_stderr().build(),
+            table: ResourceTable::new(),
+            ct: CtCtx::default(),
+            webcrypto: WasiWebcryptoCtx::default(),
+        },
+        |linker| {
+            // The full-support target: every gated interface enabled.
+            let mut options = LinkOptions::default();
+            options
+                .chacha20_poly1305(true)
+                .xchacha20_poly1305(true)
+                .sha1_checked(true);
+            add_to_linker_with_options(linker, &options)
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+
+    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite(&suite_name, mode, &missing))
+        .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+
+    Ok(if summary.failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
