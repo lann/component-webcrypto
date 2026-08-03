@@ -158,7 +158,13 @@ jobs:
           node-version: 24
 
       - name: Install just
-        run: sudo apt-get update && sudo apt-get install -y just
+        # The same pin as scripts/setup.sh (this job skips the Rust
+        # toolchain, so it cannot use setup.sh's cargo-binstall path).
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --tag 1.54.0 --to "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install the parity package's dependencies
         run: cd js/componentize/wpt/parity && npm ci --no-audit --no-fund
@@ -189,7 +195,13 @@ jobs:
           node-version: 24
 
       - name: Install just
-        run: brew install just
+        # The same pin as scripts/setup.sh (this job skips the Rust
+        # toolchain, so it cannot use setup.sh's cargo-binstall path).
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --tag 1.54.0 --to "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Download the parity page artifacts
         uses: actions/download-artifact@v4
