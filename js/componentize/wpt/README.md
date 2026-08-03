@@ -150,6 +150,31 @@ leg. WebKit's baseline is the strongest of the gated engines
 (JavaScriptCore ships JSPI; Apple's backend serves Ed25519, X25519,
 P-521, and AES-192).
 
+The venue constraints make the WebKit ratchet the only one a Linux
+machine cannot re-record by running the leg, so it has two mac-free
+paths, both riding CI's macOS runner as the recording engine:
+
+- **Re-record from CI's records.** The macOS job uploads the
+  comparator's two inputs as the `wpt-parity-webkit-records` artifact on
+  every run, pass or fail; `just update-wpt-parity-webkit-from-ci`
+  downloads the branch's latest and runs the update comparison locally.
+  On a gate failure the job also writes the proposed `losses-webkit.js`
+  diff to its step summary and uploads the rewritten file
+  (`wpt-parity-webkit-proposed-ratchet`), so the re-record can be a
+  review-and-commit with no local tooling.
+- **Predict from the Chromium delta.** A shim change's loss-set movement
+  is usually engine-generic (decided in the shim/WIT layers before the
+  engine's crypto is reached), so `just predict-wpt-parity-webkit`
+  applies the branch's `losses-chromium.js` delta to the WebKit ratchet
+  as set operations — often landing the re-record before any CI run.
+  The guess is safe because the gate is two-sided (unlisted losses fail,
+  and so do listed losses not observed): a wrong prediction cannot pass,
+  it fails CI like any stale ratchet and falls back to the record path
+  above, and a green run verifies a predicted file exactly as it would a
+  recorded one. Predictions miss where the engines genuinely diverge —
+  a delta addition for a test WebKit's baseline fails natively, or names
+  the two engines' records render differently.
+
 [web-platform-tests]: https://github.com/web-platform-tests/wpt
 
 ## The browser parity page (web/)
