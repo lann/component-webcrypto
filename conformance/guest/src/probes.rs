@@ -111,6 +111,9 @@ probes! {
     sig_public_format_imports,
     ed25519_private_format_imports,
     ecdsa_cross_hash_variants,
+    rsa_key_contract,
+    rsa_admission_contract,
+    rsa_pss_salt_binding,
     x25519_format_roundtrips,
     ecdh_format_roundtrips,
     internal_nonce_jwk,
@@ -2658,6 +2661,354 @@ async fn ecdsa_cross_hash_variants() -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// The 2048-bit rsaEncryption SubjectPublicKeyInfo (e = 65537) shared by
+/// Wycheproof `rsa_signature_2048_sha256_test.json` (group 1) and the
+/// `rsa_pss_2048_sha256_mgf1_{0,32}` files.
+const RSA_2048_SPKI: &str = "30820122300d06092a864886f70d01010105000382010f003082010a02820101\
+     00a2b451a07d0aa5f96e455671513550514a8a5b462ebef717094fa1fee82224\
+     e637f9746d3f7cafd31878d80325b6ef5a1700f65903b469429e89d6eac88450\
+     97b5ab393189db92512ed8a7711a1253facd20f79c15e8247f3d3e42e46e48c9\
+     8e254a2fe9765313a03eff8f17e1a029397a1fa26a8dce26f490ed81299615d9\
+     814c22da610428e09c7d9658594266f5c021d0fceca08d945a12be82de4d1ece\
+     6b4c03145b5d3495d4ed5411eb878daf05fd7afc3e09ada0f1126422f590975a\
+     1969816f48698bcbba1b4d9cae79d460d8f9f85e7975005d9bc22c4e5ac0f7c1\
+     a45d12569a62807d3b9a02e5a530e773066f453d1f5b4c2e9cf7820283f742b9\
+     d50203010001";
+
+/// [`RSA_2048_SPKI`]'s modulus as a JWK `n` member (Wycheproof
+/// `rsa_signature_2048_sha256_test.json` group 1 `keyJwk`).
+const RSA_2048_N: &str = "orRRoH0KpfluRVZxUTVQUUqKW0YuvvcXCU-h_ugiJOY3-XRtP3yv0xh42AMltu9aFwD2WQO0aUKeidbqyIRQl7WrOTGJ25JRLtincRoSU_rNIPecFegkfz0-QuRuSMmOJUov6XZTE6A-_48X4aApOXofomqNzib0kO2BKZYV2YFMItphBCjgnH2WWFlCZvXAIdD87KCNlFoSvoLeTR7Oa0wDFFtdNJXU7VQR64eNrwX9evw-Ca2g8RJkIvWQl1oZaYFvSGmLy7obTZyuedRg2Pn4Xnl1AF2bwixOWsD3waRdElaaYoB9O5oC5aUw53MGb0U9H1tMLpz3ggKD90K51Q";
+
+/// The 2048-bit e = 3 rsaEncryption SubjectPublicKeyInfo of Wycheproof
+/// `rsa_signature_2048_sha256_test.json` group 2.
+const RSA_2048_E3_SPKI: &str = "30820120300d06092a864886f70d01010105000382010d003082010802820101\
+     0090a5d7aba2c8dc828e616fc1fc45c7c52130c8589dcbe2913da187572f6c23\
+     217b89a5186b6f90cbe053abfb0885a91f141dbe106ce6ad303904a5941df26c\
+     ed10478cb56a7bd6cf1313c4966d9cf7c4509d9dc63566aa323e110af219f339\
+     8c04e79bb486de8703793473136f5c9051af24bd2c0208ea1bf9321a3e8f24af\
+     00aaca1216842eab248d58cf46ac786c49fd3ca8557e9b53993a4b9718cdc5c4\
+     74bf1cfe58c07ad97b2c5acb7d86accc0fc7bed147adb2e77b8697d801509481\
+     17714b806ff76f9d88147d84e93987b724bf4870429e85a7a7b51486a78d8a88\
+     f1688f60e215d43d06221e2b993b5c12a607b80e9e0122472b29945f76b55737\
+     c1020103";
+
+/// The id-RSASSA-PSS SubjectPublicKeyInfo (algorithm 1.2.840.113549.1.1.10
+/// with PSS parameters) carried by every group of Wycheproof
+/// `rsa_pss_2048_sha256_mgf1_32_params_test.json`; its key material is
+/// [`RSA_2048_SPKI`]'s.
+const RSA_PSS_PARAMS_SPKI: &str =
+    "30820156304106092a864886f70d01010a3034a00f300d060960864801650304\
+     02010500a11c301a06092a864886f70d010108300d0609608648016503040201\
+     0500a2030201200382010f003082010a0282010100a2b451a07d0aa5f96e4556\
+     71513550514a8a5b462ebef717094fa1fee82224e637f9746d3f7cafd31878d8\
+     0325b6ef5a1700f65903b469429e89d6eac8845097b5ab393189db92512ed8a7\
+     711a1253facd20f79c15e8247f3d3e42e46e48c98e254a2fe9765313a03eff8f\
+     17e1a029397a1fa26a8dce26f490ed81299615d9814c22da610428e09c7d9658\
+     594266f5c021d0fceca08d945a12be82de4d1ece6b4c03145b5d3495d4ed5411\
+     eb878daf05fd7afc3e09ada0f1126422f590975a1969816f48698bcbba1b4d9c\
+     ae79d460d8f9f85e7975005d9bc22c4e5ac0f7c1a45d12569a62807d3b9a02e5\
+     a530e773066f453d1f5b4c2e9cf7820283f742b9d50203010001";
+
+/// A 768-bit rsaEncryption SubjectPublicKeyInfo (e = 65537), below the
+/// RSA family's 1024-bit modulus floor. Generated for this probe with
+/// `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:768`; only
+/// its well-formedness and modulus length matter.
+const RSA_768_SPKI: &str = "307c300d06092a864886f70d0101010500036b003068026100e5106a432f4deb\
+     715d592e2ea049ed8a9d20f6cab20847ff350d40e3e4bf24e43fd841d80e2948\
+     73794fac6ea95292c3e2a8894d82241133f475da49680efb5fdb4eded935680c\
+     fb9a84deb995c52896248f2f23949cfcb512cc1e0cdb4c42210203010001";
+
+/// Wycheproof `rsa_pss_2048_sha256_mgf1_32_test.json` tcId 1 (sLen 32): a
+/// valid RSA-PSS SHA-256 signature over the empty message under
+/// [`RSA_2048_SPKI`].
+const RSA_PSS_SALT32_SIG: &str = "4f01e0c12b08625ecac89a69231906edf826380f37c959a96690d046316d68ff\
+     ce9d5c471694fcebfc6b45534864689256e4fc81c78e583f675d0c94b4496474\
+     51e81beff01a11a516d5e5ce3f1a910437cb8a3a5096b19fb15f4524a35b23d8\
+     9cdba12cf5b71aac1047b28c562df7c5542c34ce23a182cf7e0e231934b17294\
+     799d44877a1d68ef1b8f073619b7618e6b7c22db20030d98cf591ffc3d4da5f5\
+     8613ecd5ecfc3b40a1d02f40891ca43695cd4c088b05a8054c89c595a47e2748\
+     16f35384226f74459ee63e25a1bfc03c360490552ec38343f8ace502f065303b\
+     00bc0ec320711b211fde92e57feb9013c3609342495ec0d7cabdec21e54acc38";
+
+/// Wycheproof `rsa_pss_2048_sha256_mgf1_0_test.json` tcId 1 (sLen 0): a
+/// valid RSA-PSS SHA-256 signature over the empty message under the same
+/// key.
+const RSA_PSS_SALT0_SIG: &str = "20081f8894a1330c4d503f642880e3c30e398fc6235c24f1be752e2d49cd9493\
+     ac0cf999e275c4f89ff08f0d9ba4e264a332525a616d336bd9e822f41ab3f4fa\
+     e2f48ec66c2e52642ed93b7cb944396fbaa727cbfdfc1f20aace99a6f2a74475\
+     c338f8d9f22a38cb5bc51752076503b3aef1e65e5a8f8583d9ae7378ded038cf\
+     516898ad06beb90a42b85764526fcea44f74258fa4efb1da253d337f65619181\
+     ceb832dfe285ce78ae6b15f204e23bab274e87445d9f5df97f41dc8e3a97736b\
+     62591d075744b2552f90bcf1b1393e1e7627ef1f985f2bbabd52e43a35d0ddf4\
+     c67126e391f922ef7b1bb1911cd6e1b303cb2910dd70672bbfb62ea4eaad725c";
+
+/// The RSA verifying-key contract on both minting families: the getters
+/// report the mint binding (name, mint-bound hash, modulus length, no
+/// curve), raw export fails `unsupported` (RSA public keys have no raw
+/// form), the SPKI export round-trips the imported DER, the JWK export
+/// re-imports to the same key, a JWK `alg` disagreeing with the variant —
+/// or with the other RSA family — fails `invalid-key`, and a public JWK
+/// carrying `d` is not a verifying key.
+async fn rsa_key_contract() -> Result<(), String> {
+    use crate::mint::{
+        import_rsa_pss_verifying_key_jwk, import_rsa_pss_verifying_key_spki,
+        import_rsassa_verifying_key_jwk, import_rsassa_verifying_key_spki,
+    };
+    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+
+    let spki = unhex(RSA_2048_SPKI);
+    let v15 = import_rsassa_verifying_key_spki(RsaVariant::Sha256, spki.clone())
+        .await
+        .map_err(|e| describe("rsassa import-verifying-key-spki", &e))?;
+    expect(
+        v15.algorithm_name(),
+        "RSASSA-PKCS1-v1_5".to_string(),
+        "RSASSA verifying-key algorithm-name",
+    )?;
+    expect(
+        v15.algorithm_hash(),
+        Some("SHA-256".to_string()),
+        "RSASSA verifying-key algorithm-hash",
+    )?;
+    expect(
+        v15.algorithm_length(),
+        Some(2048),
+        "RSASSA verifying-key algorithm-length",
+    )?;
+    expect(
+        v15.algorithm_curve(),
+        None,
+        "RSASSA verifying-key algorithm-curve",
+    )?;
+
+    let pss = import_rsa_pss_verifying_key_spki(RsaVariant::Sha384, 48, spki.clone())
+        .await
+        .map_err(|e| describe("pss import-verifying-key-spki", &e))?;
+    expect(
+        pss.algorithm_name(),
+        "RSA-PSS".to_string(),
+        "RSA-PSS verifying-key algorithm-name",
+    )?;
+    expect(
+        pss.algorithm_hash(),
+        Some("SHA-384".to_string()),
+        "RSA-PSS verifying-key algorithm-hash",
+    )?;
+    expect(
+        pss.algorithm_length(),
+        Some(2048),
+        "RSA-PSS verifying-key algorithm-length",
+    )?;
+    expect(
+        pss.algorithm_curve(),
+        None,
+        "RSA-PSS verifying-key algorithm-curve",
+    )?;
+
+    for (what, key) in [("rsassa", &v15), ("pss", &pss)] {
+        expect_err(
+            &format!("{what} export-key-raw"),
+            ErrKind::Unsupported,
+            key.export_key_raw().await,
+            "exported a raw form for an RSA public key",
+        )?;
+        let exported = key
+            .export_key_spki()
+            .await
+            .map_err(|e| describe(&format!("{what} export-key-spki"), &e))?;
+        expect_bytes(&exported, &spki, &format!("{what} SPKI export"))?;
+    }
+
+    // The JWK round trip: export carries the material members, and
+    // re-importing yields a key whose SPKI equals the original.
+    let jwk = v15
+        .export_key_jwk()
+        .await
+        .map_err(|e| describe("rsassa export-key-jwk", &e))?;
+    if !jwk.contains("\"RSA\"") || !jwk.contains(RSA_2048_N) {
+        return Err(format!("exported RSA JWK missing material members: {jwk}"));
+    }
+    let reimported = import_rsassa_verifying_key_jwk(RsaVariant::Sha256, jwk)
+        .await
+        .map_err(|e| describe("re-import of exported JWK", &e))?;
+    let exported = reimported
+        .export_key_spki()
+        .await
+        .map_err(|e| describe("export-key-spki after the JWK round trip", &e))?;
+    expect_bytes(&exported, &spki, "SPKI after the JWK round trip")?;
+
+    // The JWK `alg` policy: the variant's own JOSE alg is accepted, an
+    // alg of another digest — or of the other RSA family — is
+    // `invalid-key`.
+    let jwk_with =
+        |alg: &str| format!(r#"{{"kty":"RSA","n":"{RSA_2048_N}","e":"AQAB","alg":"{alg}"}}"#);
+    import_rsassa_verifying_key_jwk(RsaVariant::Sha256, jwk_with("RS256"))
+        .await
+        .map_err(|e| describe("rsassa import with alg RS256", &e))?;
+    import_rsa_pss_verifying_key_jwk(RsaVariant::Sha256, 32, jwk_with("PS256"))
+        .await
+        .map_err(|e| describe("pss import with alg PS256", &e))?;
+    expect_err(
+        "RS256 JWK under the sha384 variant",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_jwk(RsaVariant::Sha384, jwk_with("RS256")).await,
+        "imported a JWK with another variant's alg",
+    )?;
+    expect_err(
+        "RS256 JWK under RSA-PSS",
+        ErrKind::InvalidKey,
+        import_rsa_pss_verifying_key_jwk(RsaVariant::Sha256, 32, jwk_with("RS256")).await,
+        "imported a JWK with the other RSA family's alg",
+    )?;
+    expect_err(
+        "PS256 JWK under RSASSA-PKCS1-v1_5",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_jwk(RsaVariant::Sha256, jwk_with("PS256")).await,
+        "imported a JWK with the other RSA family's alg",
+    )?;
+
+    // Private material on a public import path.
+    expect_err(
+        "d-carrying RSA JWK",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_jwk(
+            RsaVariant::Sha256,
+            format!(r#"{{"kty":"RSA","n":"{RSA_2048_N}","e":"AQAB","d":"AQID"}}"#),
+        )
+        .await,
+        "imported a d-carrying JWK as a verifying key",
+    )
+}
+
+/// The RSA family admission contract at its edges: a 768-bit modulus
+/// (below the 1024-bit floor) and a 16392-bit JWK `n` (above the
+/// 16384-bit ceiling) fail `invalid-key`; e = 1 (odd but below the floor)
+/// and e = 4 (even) fail `invalid-key`; e = 3 is guaranteed to import
+/// (the vector cases verify under it); and an SPKI carrying the
+/// id-RSASSA-PSS AlgorithmIdentifier fails `invalid-key` on both
+/// families' SPKI imports.
+async fn rsa_admission_contract() -> Result<(), String> {
+    use crate::mint::{
+        import_rsa_pss_verifying_key_spki, import_rsassa_verifying_key_jwk,
+        import_rsassa_verifying_key_spki,
+    };
+    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+
+    let spki_768 = unhex(RSA_768_SPKI);
+    expect_err(
+        "768-bit SPKI (rsassa)",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_spki(RsaVariant::Sha256, spki_768.clone()).await,
+        "imported a modulus below the 1024-bit floor",
+    )?;
+    expect_err(
+        "768-bit SPKI (pss)",
+        ErrKind::InvalidKey,
+        import_rsa_pss_verifying_key_spki(RsaVariant::Sha256, 32, spki_768).await,
+        "imported a modulus below the 1024-bit floor",
+    )?;
+
+    // 2049 bytes with the top bit set: a 16392-bit modulus (odd, so only
+    // the ceiling is in play).
+    let oversized = format!(
+        r#"{{"kty":"RSA","n":"{}","e":"AQAB"}}"#,
+        b64url(&vec![0xffu8; 2049])
+    );
+    expect_err(
+        "16392-bit JWK n",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_jwk(RsaVariant::Sha256, oversized).await,
+        "imported a modulus above the 16384-bit ceiling",
+    )?;
+
+    for (what, e) in [("e = 1", "AQ"), ("e = 4", "BA")] {
+        expect_err(
+            &format!("JWK with {what}"),
+            ErrKind::InvalidKey,
+            import_rsassa_verifying_key_jwk(
+                RsaVariant::Sha256,
+                format!(r#"{{"kty":"RSA","n":"{RSA_2048_N}","e":"{e}"}}"#),
+            )
+            .await,
+            "imported a public exponent the family floor rejects",
+        )?;
+    }
+
+    let e3 = import_rsassa_verifying_key_spki(RsaVariant::Sha256, unhex(RSA_2048_E3_SPKI))
+        .await
+        .map_err(|e| describe("import of the e = 3 SPKI", &e))?;
+    expect(
+        e3.algorithm_length(),
+        Some(2048),
+        "e = 3 key algorithm-length",
+    )?;
+
+    let params_spki = unhex(RSA_PSS_PARAMS_SPKI);
+    expect_err(
+        "id-RSASSA-PSS SPKI (rsassa)",
+        ErrKind::InvalidKey,
+        import_rsassa_verifying_key_spki(RsaVariant::Sha256, params_spki.clone()).await,
+        "imported a key carrying the id-RSASSA-PSS AlgorithmIdentifier",
+    )?;
+    expect_err(
+        "id-RSASSA-PSS SPKI (pss)",
+        ErrKind::InvalidKey,
+        import_rsa_pss_verifying_key_spki(RsaVariant::Sha256, 32, params_spki).await,
+        "imported a key carrying the id-RSASSA-PSS AlgorithmIdentifier",
+    )
+}
+
+/// The mint-bound PSS salt length is part of the verification criterion:
+/// each of the two vendored sLen-0/sLen-32 tcId-1 signatures (same key,
+/// same digest, empty message) verifies under its own salt length's mint
+/// and fails `authentication-failed` under the other's.
+async fn rsa_pss_salt_binding() -> Result<(), String> {
+    use crate::mint::import_rsa_pss_verifying_key_spki;
+    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+
+    let spki = unhex(RSA_2048_SPKI);
+    let sig_salt32 = unhex(RSA_PSS_SALT32_SIG);
+    let sig_salt0 = unhex(RSA_PSS_SALT0_SIG);
+    let salt32 = import_rsa_pss_verifying_key_spki(RsaVariant::Sha256, 32, spki.clone())
+        .await
+        .map_err(|e| describe("import (salt 32)", &e))?;
+    let salt0 = import_rsa_pss_verifying_key_spki(RsaVariant::Sha256, 0, spki)
+        .await
+        .map_err(|e| describe("import (salt 0)", &e))?;
+
+    sig_verify_ok(
+        &salt32,
+        b"",
+        &sig_salt32,
+        Schedule::Whole,
+        "the sLen-32 signature did not verify under its own salt length",
+    )
+    .await?;
+    sig_verify_ok(
+        &salt0,
+        b"",
+        &sig_salt0,
+        Schedule::Whole,
+        "the sLen-0 signature did not verify under its own salt length",
+    )
+    .await?;
+
+    let verified = sig_verify_op(&salt0, b"", &sig_salt32, Schedule::Whole).await?;
+    expect_err(
+        "salt-0 mint verifying the sLen-32 signature",
+        ErrKind::AuthenticationFailed,
+        verified,
+        "a signature verified under the wrong mint-bound salt length",
+    )?;
+    let verified = sig_verify_op(&salt32, b"", &sig_salt0, Schedule::Whole).await?;
+    expect_err(
+        "salt-32 mint verifying the sLen-0 signature",
+        ErrKind::AuthenticationFailed,
+        verified,
+        "a signature verified under the wrong mint-bound salt length",
+    )
 }
 
 /// The X25519 format surface: the RFC 7748 §6.1 keys through the SPKI and

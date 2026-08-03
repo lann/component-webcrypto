@@ -56,9 +56,10 @@ use crate::bindings::webcrypto::{
     ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
     hkdf_sha1 as hkdf_sha1_iface, hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface,
     hmac_sha2 as hmac_sha2_iface, pbkdf2_sha1 as pbkdf2_sha1_iface,
-    pbkdf2_sha2 as pbkdf2_sha2_iface, sha1_checked as sha1_checked_iface, sha2 as sha2_iface,
-    signature as signature_iface, x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
-    xchacha20_poly1305_internal_nonce as xchacha_in_iface,
+    pbkdf2_sha2 as pbkdf2_sha2_iface, rsa as rsa_iface, rsa_pss_verify as rsa_pss_verify_iface,
+    rsassa_pkcs1_v15_verify as rsassa_verify_iface, sha1_checked as sha1_checked_iface,
+    sha2 as sha2_iface, signature as signature_iface, x25519 as x25519_iface,
+    xchacha20_poly1305 as xchacha_iface, xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::{admit_input, Reservation};
 use crate::streams::{drain_stream, GuardedOutput};
@@ -77,6 +78,7 @@ lann_webcrypto_core::impl_conversions! {
     aes: aes_gcm_iface::AesVariant,
     ecdsa: ecdsa_verify_iface::EcdsaVariant,
     ecdh: ecdh_iface::EcdhVariant,
+    rsa: rsa_iface::RsaVariant,
 }
 
 /// Render an entropy failure as the trap-shaped host error for key or nonce
@@ -2274,6 +2276,10 @@ impl signature_iface::HostVerifyingKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_hash(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<String>> {
         Ok(self.table.get(&self_)?.public.hash().map(str::to_string))
     }
+
+    fn algorithm_length(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.public.length())
+    }
 }
 
 impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
@@ -2293,10 +2299,10 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         self_: Resource<VerifyingKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        // The WIT `err` case exists for providers holding the key as an
-        // unreadable handle; this implementation holds the encoding
-        // in-process, so it never errs.
-        with_resource(accessor, self_, |key| Ok(key.public.export())).await
+        with_resource(accessor, self_, |key| {
+            key.public.export().map_err(Error::from)
+        })
+        .await
     }
 
     async fn export_key_spki(
@@ -2329,6 +2335,10 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_hash(&mut self, self_: Resource<SigningKey>) -> Result<Option<String>> {
         Ok(self.table.get(&self_)?.material.hash().map(str::to_string))
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<SigningKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.material.length())
     }
 
     fn extractable(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
@@ -2599,6 +2609,54 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let material =
             lann_webcrypto_core::unwrap_ecdsa_signing_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
+    }
+}
+
+// --- rsa (key minting) -----------------------------------------------------------
+
+impl rsa_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsassa_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsa_pss_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> rsassa_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_rsassa_spki(variant.into(), &spki);
+        mint(accessor, public).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_rsassa_jwk(variant.into(), &jwk);
+        mint(accessor, public).await
+    }
+}
+
+impl<T: Send> rsa_pss_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        salt_length: u32,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_pss_spki(variant.into(), salt_length, &spki);
+        mint(accessor, public).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        salt_length: u32,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_pss_jwk(variant.into(), salt_length, &jwk);
+        mint(accessor, public).await
     }
 }
 

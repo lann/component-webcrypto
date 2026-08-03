@@ -61,4 +61,6 @@ world provider {
     export lann:webcrypto/ed25519-verify@0.1.0;
     export lann:webcrypto/ed25519-sign@0.1.0;
     export lann:webcrypto/ecdsa-verify@0.1.0;
+    export lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    export lann:webcrypto/rsa-pss-verify@0.1.0;
 }

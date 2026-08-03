@@ -65,16 +65,21 @@ const subtle = globalThis.crypto.subtle;
  */
 
 /**
- * The algorithm record bound to a signature key at mint. One shape for both
+ * The algorithm record bound to a signature key at mint. One shape for all
  * families: Ed25519 has no curve and no mint-bound hash (RFC 8032 fixes
- * SHA-512 internally).
+ * SHA-512 internally); the RSA families have no curve and no raw public
+ * form (so no `publicLength`/`scalarLength`), and carry the imported key's
+ * modulus length as `length` (bits) plus, for RSA-PSS, the mint-bound
+ * `saltLength` (bytes).
  * @typedef {object} SignatureAlgorithm
  * @property {string} name
  * @property {string | undefined} namedCurve
  * @property {string | undefined} hash
- * @property {number} publicLength
- * @property {number} scalarLength
+ * @property {number | undefined} [length]
+ * @property {number | undefined} [publicLength]
+ * @property {number | undefined} [scalarLength]
  * @property {number} signatureLength
+ * @property {number | undefined} [saltLength]
  */
 
 /**
@@ -2146,6 +2151,23 @@ const EC_SPKI_ALGORITHM_IDENTIFIERS = Object.assign(Object.create(null), {
 });
 
 /**
+ * The offset of the AlgorithmIdentifier TLV inside a SubjectPublicKeyInfo —
+ * one DER length decode of the outer SEQUENCE header (short and long form,
+ * minimal-encoding checks included) — or 0 when the input does not open as
+ * one.
+ * @param {Uint8Array} spki
+ */
+function spkiAlgorithmOffset(spki) {
+  if (spki.length >= 2 && spki[0] === 0x30) {
+    const first = spki[1];
+    if (first < 0x80) return 2;
+    if (first === 0x81 && spki.length >= 3 && spki[2] >= 0x80) return 3;
+    if (first === 0x82 && spki.length >= 4 && spki[2] !== 0) return 4;
+  }
+  return 0;
+}
+
+/**
  * Guard: rejects an EC SubjectPublicKeyInfo whose AlgorithmIdentifier is
  * not the declared curve's named-OID form before the platform sees it.
  * Platform engines split on explicit-ECParameters ("unnamed curve")
@@ -2153,31 +2175,53 @@ const EC_SPKI_ALGORITHM_IDENTIFIERS = Object.assign(Object.create(null), {
  * and the WIT pins their rejection as `invalid-key`, so this catches the
  * encodings the local platform would otherwise admit (it also enforces the
  * curve-matches-variant contract before the platform does). The check is
- * shallow and fail-closed: one DER length decode (the outer SEQUENCE
- * header, short and long form), then a byte-compare of the next TLV
- * against the constant. It can only over-reject — whatever it passes still
- * gets the platform's full DER validation, and it never admits or
- * transforms material the platform would refuse. The Wycheproof
- * `UnnamedCurve` family (the conformance ECDH suites) is its vector
- * coverage.
+ * shallow and fail-closed: one DER length decode (`spkiAlgorithmOffset`),
+ * then a byte-compare of the next TLV against the constant. It can only
+ * over-reject — whatever it passes still gets the platform's full DER
+ * validation, and it never admits or transforms material the platform
+ * would refuse. The Wycheproof `UnnamedCurve` family (the conformance ECDH
+ * suites) is its vector coverage.
  * @param {string} namedCurve
  * @param {Uint8Array} spki
  */
 function requireNamedCurveSpki(namedCurve, spki) {
   const algorithm = EC_SPKI_ALGORITHM_IDENTIFIERS[namedCurve];
-  let offset = 0;
-  if (spki.length >= 2 && spki[0] === 0x30) {
-    const first = spki[1];
-    if (first < 0x80) {
-      offset = 2;
-    } else if (first === 0x81 && spki.length >= 3 && spki[2] >= 0x80) {
-      offset = 3;
-    } else if (first === 0x82 && spki.length >= 4 && spki[2] !== 0) {
-      offset = 4;
-    }
-  }
+  const offset = spkiAlgorithmOffset(spki);
   if (offset === 0 || !algorithm.every((byte, i) => spki[offset + i] === byte)) {
     throw errInvalidKey(`${namedCurve} SPKI must name the curve by OID`);
+  }
+}
+
+/**
+ * The DER AlgorithmIdentifier TLV an RSA SubjectPublicKeyInfo must open
+ * with: `SEQUENCE { rsaEncryption (1.2.840.113549.1.1.1), NULL }` — the
+ * form the platform's own RSA SPKI exports carry, for RSASSA-PKCS1-v1_5
+ * and RSA-PSS keys alike.
+ */
+// 300d06092a864886f70d0101010500
+const RSA_SPKI_ALGORITHM_IDENTIFIER = Uint8Array.from([
+  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+]);
+
+/**
+ * Guard: rejects an RSA SubjectPublicKeyInfo whose AlgorithmIdentifier is
+ * not the `rsaEncryption` form before the platform sees it. The RSA family
+ * admission contract (see `wit/rsa.wit`) pins rejection of SPKIs carrying
+ * `id-RSASSA-PSS` parameters as `invalid-key`, and this enforces it
+ * uniformly regardless of engine behavior. The check is shallow and
+ * fail-closed like `requireNamedCurveSpki`: one DER length decode, then a
+ * byte-compare of the AlgorithmIdentifier TLV against the constant. It can
+ * only over-reject — whatever it passes still gets the platform's full DER
+ * validation.
+ * @param {Uint8Array} spki
+ */
+function requireRsaEncryptionSpki(spki) {
+  const offset = spkiAlgorithmOffset(spki);
+  if (
+    offset === 0 ||
+    !RSA_SPKI_ALGORITHM_IDENTIFIER.every((byte, i) => spki[offset + i] === byte)
+  ) {
+    throw errInvalidKey("RSA SPKI must carry the rsaEncryption AlgorithmIdentifier");
   }
 }
 
@@ -4382,22 +4426,31 @@ function ecdsaVariant(variant) {
 }
 
 /**
- * The WebCrypto sign/verify algorithm parameter for a key's mint binding.
+ * The WebCrypto sign/verify algorithm parameter for a key's mint binding:
+ * ECDSA passes its mint-bound hash per operation, RSA-PSS its mint-bound
+ * salt length; every other family's binding is carried by the `CryptoKey`
+ * itself.
  * @param {SignatureAlgorithm} algorithm
- * @returns {AlgorithmIdentifier | EcdsaParams}
+ * @returns {AlgorithmIdentifier | EcdsaParams | RsaPssParams}
  */
 function signParams(algorithm) {
-  return algorithm.name === "ECDSA" ? { name: "ECDSA", hash: algorithm.hash } : algorithm.name;
+  if (algorithm.name === "ECDSA") return { name: "ECDSA", hash: algorithm.hash };
+  if (algorithm.name === "RSA-PSS") {
+    return { name: "RSA-PSS", saltLength: /** @type {number} */ (algorithm.saltLength) };
+  }
+  return algorithm.name;
 }
 
 /**
  * The `verifying-key` resource: a public `CryptoKey` plus the algorithm
- * record bound at mint (`ED25519_ALGORITHM` or an `ECDSA_VARIANTS` entry).
- * The record — not `CryptoKey.algorithm` — is the authority for every
- * algorithm fact this class needs: the hash WebCrypto passes per-operation
- * for ECDSA, the signature width, and the getters' answers. Instances are
- * minted by the `ed25519-verify` / `ecdsa-verify` interface functions
- * below, or paired with a `SigningKey` by `generate-key`.
+ * record bound at mint (`ED25519_ALGORITHM`, an `ECDSA_VARIANTS` entry, or
+ * a per-key RSA record from `rsaAlgorithm`). The record — not
+ * `CryptoKey.algorithm` — is the authority for every algorithm fact this
+ * class needs: the hash WebCrypto passes per-operation for ECDSA, the
+ * PSS salt length, the signature width, and the getters' answers.
+ * Instances are minted by the `ed25519-verify` / `ecdsa-verify` /
+ * `rsassa-pkcs1-v15-verify` / `rsa-pss-verify` interface functions below,
+ * or paired with a `SigningKey` by `generate-key`.
  */
 export class VerifyingKey {
   #key;
@@ -4426,8 +4479,9 @@ export class VerifyingKey {
    */
   async verify(data, sig) {
     await withCollectedInput(data, async (message) => {
-      // Each algorithm's signature width is fixed by the WIT (Ed25519's
-      // 64-byte `R ‖ S`; ECDSA's P1363 `r ‖ s`). Chromium's engine rejects
+      // Each algorithm's signature width is fixed at mint (Ed25519's
+      // 64-byte `R ‖ S`; ECDSA's P1363 `r ‖ s`; RSA's modulus-length
+      // octet string, RFC 8017's `k`). Chromium's engine rejects
       // other lengths itself; Firefox zero-pads short halves and accepts
       // truncated encodings (observed accepting a 2-byte signature), so
       // enforce the width here — a pure length check on public data,
@@ -4471,9 +4525,15 @@ export class VerifyingKey {
     return this.#algorithm.hash;
   }
 
+  algorithmLength() {
+    return this.#algorithm.length;
+  }
+
   /**
    * The public key material (`raw`: 32 bytes for Ed25519, an uncompressed
-   * SEC1 point for ECDSA).
+   * SEC1 point for ECDSA). The RSA family has no raw public form (the
+   * platform serves `spki` and `jwk` only), so its keys fail `unsupported`
+   * here, as the WIT pins.
    *
    * There is no extractability gate on this resource — WebCrypto sets
    * `[[extractable]]` true on every generated public key, and the importers
@@ -4483,13 +4543,17 @@ export class VerifyingKey {
    * accessed, which `platformCall` renders as `other`.
    */
   async exportKeyRaw() {
+    if (this.#algorithm.name === "RSASSA-PKCS1-v1_5" || this.#algorithm.name === "RSA-PSS") {
+      throw errUnsupported("RSA public keys have no raw form");
+    }
     return new Uint8Array(
       await platformCall("raw key export", () => subtle.exportKey("raw", this.#key)),
     );
   }
 
   /**
-   * The SubjectPublicKeyInfo form, with `exportKeyRaw`'s fallibility.
+   * The SubjectPublicKeyInfo form, with `exportKeyRaw`'s fallibility (less
+   * the RSA refusal: every family has an SPKI form).
    * @returns {Promise<Uint8Array>}
    */
   async exportKeySpki() {
@@ -4499,16 +4563,14 @@ export class VerifyingKey {
   }
 
   /**
-   * The public JWK (OKP for Ed25519, EC for ECDSA), material members only
-   * per the package-wide JWK contract.
+   * The public JWK (OKP for Ed25519, EC for ECDSA, RSA for the RSA
+   * family), material members only per the package-wide JWK contract.
    */
   async exportKeyJwk() {
     const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", this.#key));
-    return JSON.stringify(
-      jwk.kty === "OKP"
-        ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x }
-        : { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
-    );
+    if (jwk.kty === "OKP") return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x });
+    if (jwk.kty === "RSA") return JSON.stringify({ kty: jwk.kty, n: jwk.n, e: jwk.e });
+    return JSON.stringify({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y });
   }
 }
 
@@ -4596,6 +4658,10 @@ export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
 
   algorithmHash() {
     return this.#algorithm.hash;
+  }
+
+  algorithmLength() {
+    return this.#algorithm.length;
   }
 
   /**
@@ -4755,7 +4821,7 @@ function invalidKey(err, what) {
  * @param {string} what
  * @param {Exclude<KeyFormat, "jwk">} format
  * @param {Uint8Array} bytes
- * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams | RsaHashedImportParams} algorithm
  * @param {boolean} extractable
  * @param {KeyUsage[]} usages
  * @returns {Promise<CryptoKey>}
@@ -4774,7 +4840,7 @@ async function importPlatformKey(what, format, bytes, algorithm, extractable, us
  * strictness and post-import shape checks stay at the call site.
  * @param {string} what
  * @param {Record<string, unknown>} jwk
- * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams} algorithm
+ * @param {AlgorithmIdentifier | EcKeyImportParams | HmacImportParams | RsaHashedImportParams} algorithm
  * @param {boolean} extractable
  * @param {KeyUsage[]} usages
  * @returns {Promise<CryptoKey>}
@@ -5145,4 +5211,154 @@ export const ecdsaSign = {
   importSigningKeyJwk: importEcdsaSigningKeyJwk,
   unwrapSigningKeyPkcs8: unwrapEcdsaSigningKeyPkcs8,
   unwrapSigningKeyJwk: unwrapEcdsaSigningKeyJwk,
+};
+
+/**
+ * The mint-bound digest for each served `rsa-variant` enum case (the
+ * `rsa` interface's one variant set, shared by both RSA signature
+ * interfaces).
+ */
+/** @type {Readonly<Record<string, string | undefined>>} */
+const RSA_VARIANTS = Object.assign(Object.create(null), {
+  sha256: "SHA-256",
+  sha384: "SHA-384",
+  sha512: "SHA-512",
+});
+
+/** The RSA family's modulus admission window, in bits (inclusive). */
+const RSA_MODULUS_MIN_BITS = 1024;
+const RSA_MODULUS_MAX_BITS = 16384;
+
+/**
+ * The family admission checks the platform does not enforce, run after a
+ * platform RSA import on the imported key's metadata (`RsaKeyAlgorithm`) —
+ * no DER or JWK parsing; a rejected key is simply discarded. Node 24
+ * admits keys the family contract rejects on both counts — 512-bit moduli
+ * via SPKI, and even or < 3 exponents via JWK (`e = 4` and `e = 1` both
+ * import) — so both rules live here:
+ * - the modulus length must be within the admission window;
+ * - the public exponent must be odd and at least 3.
+ * @param {CryptoKey} key
+ * @param {string} what
+ * @returns {number} the admitted modulus length, in bits
+ */
+function rsaAdmittedModulusLength(key, what) {
+  const { modulusLength, publicExponent } = /** @type {RsaHashedKeyAlgorithm} */ (key.algorithm);
+  if (modulusLength < RSA_MODULUS_MIN_BITS || modulusLength > RSA_MODULUS_MAX_BITS) {
+    throw errInvalidKey(
+      `invalid ${what}: RSA modulus must be ${RSA_MODULUS_MIN_BITS}-${RSA_MODULUS_MAX_BITS} bits, got ${modulusLength}`,
+    );
+  }
+  // `publicExponent` is the big-endian magnitude; leading zeros only make
+  // the value's octet count larger, never its value.
+  let first = 0;
+  while (first < publicExponent.length && publicExponent[first] === 0) first++;
+  const octets = publicExponent.length - first;
+  const low = octets === 0 ? 0 : publicExponent[publicExponent.length - 1];
+  if ((low & 1) === 0 || (octets === 1 && low < 3)) {
+    throw errInvalidKey(`invalid ${what}: RSA public exponent must be odd and at least 3`);
+  }
+  return modulusLength;
+}
+
+/**
+ * The mint-bound algorithm record for an admitted RSA verification key:
+ * the modulus length is the imported key's, and the signature width is
+ * the modulus length in octets (RFC 8017's `k`).
+ * @param {string} name `"RSASSA-PKCS1-v1_5"` or `"RSA-PSS"`
+ * @param {string} hash
+ * @param {number} modulusLength in bits
+ * @param {number | undefined} saltLength RSA-PSS's mint-bound salt length, in bytes
+ * @returns {SignatureAlgorithm}
+ */
+function rsaAlgorithm(name, hash, modulusLength, saltLength) {
+  return {
+    name,
+    namedCurve: undefined,
+    hash,
+    length: modulusLength,
+    signatureLength: Math.ceil(modulusLength / 8),
+    saltLength,
+  };
+}
+
+/**
+ * Import an RSA public key of the declared variant from a
+ * SubjectPublicKeyInfo, for `name` (`"RSASSA-PKCS1-v1_5"` or `"RSA-PSS"`).
+ * The AlgorithmIdentifier must be the `rsaEncryption` form (see
+ * `requireRsaEncryptionSpki`); the platform validates the DER, and the
+ * family admission checks run on the imported key's metadata
+ * (`rsaAdmittedModulusLength`).
+ * @param {string} name
+ * @param {string} variant
+ * @param {Uint8Array} spki
+ * @param {number | undefined} saltLength
+ */
+async function importRsaVerifyingKeySpki(name, variant, spki, saltLength) {
+  const hash = served(RSA_VARIANTS, variant);
+  requireRsaEncryptionSpki(spki);
+  const key = await importPlatformKey(`${name} spki`, "spki", spki, { name, hash }, true, [
+    "verify",
+  ]);
+  const modulusLength = rsaAdmittedModulusLength(key, `${name} spki`);
+  return new VerifyingKey(key, rsaAlgorithm(name, hash, modulusLength, saltLength));
+}
+
+/**
+ * Import an RSA public key of the declared variant from an RSA public JWK,
+ * for `name` — a platform pass-through of the material members; the
+ * platform owns the kty/alg/ext validation, including the
+ * alg-against-variant rule the WIT pins (an `alg` member that disagrees
+ * with the requested hash fails the platform import with `DataError`).
+ * Strictness of the base64url members is pinned host-side, and the family
+ * admission checks run on the imported key's metadata.
+ * @param {string} name
+ * @param {string} variant
+ * @param {string} jwkText
+ * @param {number | undefined} saltLength
+ */
+async function importRsaVerifyingKeyJwk(name, variant, jwkText, saltLength) {
+  const hash = served(RSA_VARIANTS, variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.n);
+  requireStrictBase64url(jwk.e);
+  const key = await importPlatformKeyJwk(`${name} public JWK`, jwk, { name, hash }, true, [
+    "verify",
+  ]);
+  const modulusLength = rsaAdmittedModulusLength(key, `${name} public JWK`);
+  return new VerifyingKey(key, rsaAlgorithm(name, hash, modulusLength, saltLength));
+}
+
+/** The `lann:webcrypto/rsassa-pkcs1-v15-verify` interface. */
+export const rsassaPkcs1V15Verify = {
+  /**
+   * @param {string} variant
+   * @param {Uint8Array} spki
+   */
+  importVerifyingKeySpki: (variant, spki) =>
+    importRsaVerifyingKeySpki("RSASSA-PKCS1-v1_5", variant, spki, undefined),
+  /**
+   * @param {string} variant
+   * @param {string} jwk
+   */
+  importVerifyingKeyJwk: (variant, jwk) =>
+    importRsaVerifyingKeyJwk("RSASSA-PKCS1-v1_5", variant, jwk, undefined),
+};
+
+/** The `lann:webcrypto/rsa-pss-verify` interface. */
+export const rsaPssVerify = {
+  /**
+   * @param {string} variant
+   * @param {number} saltLength
+   * @param {Uint8Array} spki
+   */
+  importVerifyingKeySpki: (variant, saltLength, spki) =>
+    importRsaVerifyingKeySpki("RSA-PSS", variant, spki, saltLength),
+  /**
+   * @param {string} variant
+   * @param {number} saltLength
+   * @param {string} jwk
+   */
+  importVerifyingKeyJwk: (variant, saltLength, jwk) =>
+    importRsaVerifyingKeyJwk("RSA-PSS", variant, jwk, saltLength),
 };

@@ -120,6 +120,7 @@ what marks where secrets flow.
 | Checked SHA-1 digests (`sha1-checked`) | exempt (secret-free) | `sha1-checked` (sha1dc counter-cryptanalysis; both postures) | Unkeyed, like SHA-2; the collision detection branches only on the input, which the digest kind treats as public. |
 | Ed25519 (sign + verify) | B | `ed25519-dalek` (complete addition laws, no per-signature secret nonce, constant-time scalar arithmetic) | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | ECDSA P-256/P-384 (**verify only**) | exempt (secret-free) | `p256`/`p384` verification — public keys and public signatures | Signing is class D (per-signature secret nonce; small leaks are key-recovering) and its interface (`ecdsa-sign`) is **not exported**; compositions requiring it fail at `wac plug` time. |
+| RSASSA-PKCS1-v1_5 / RSA-PSS (**verify only**) | exempt (secret-free) | `rsa` crate verification — public keys and public signatures | Signing and decryption are class D (per-message secrets and blinded private-key ops; the `rsa` crate's private-key operations additionally carry RUSTSEC-2023-0071, the Marvin timing sidechannel) — no RSA private-key interface exists in the package. |
 
 ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
 constant time by construction rather than by countermeasure, it is the

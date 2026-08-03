@@ -18,7 +18,7 @@ item; everything shared lives here.
   `derivation` holds `derive-input`.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
   `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
-  `ecdh`) only mint keys, bound
+  `ecdh`, `rsassa-pkcs1-v15-*`, `rsa-pss-*`) only mint keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -442,7 +442,34 @@ short:
   `sha2-variant`, which SHA-1 cannot join by name; the per-hash prepare
   interfaces share `hkdf.ikm` and `pbkdf2.password`, so one imported
   secret parameterizes either hash family. Bare SHA-1
-  digests remain `sha1-checked`'s alone.
+  digests remain `sha1-checked`'s alone, and **no signature interface
+  pairs with SHA-1** (`ecdsa-variant` and `rsa-variant` carry no SHA-1
+  case, though every platform serves both pairings): collision
+  resistance *is* load-bearing for signature verification — an attacker
+  holding a collision presents the signed document's crafted twin — and
+  the platforms serve the pairing unmitigated (no engine runs sha1dc),
+  a compatibility ratchet this package has no reason to inherit. If
+  legacy demand ever materializes, the exit is a *checked* variant
+  behind the `sha1-checked` gate — verification whose digest runs
+  through sha1dc, byte-identical to the platform on every honest
+  document and rejecting collision-crafted ones — never the unmitigated
+  pairing.
+- **The RSA modulus window is 1024–16384 bits.** A security narrowing,
+  not a portability one: engines uniformly admit far smaller moduli
+  (512-bit imports verified on Chromium, Firefox, and Node alike), but
+  768-bit RSA was publicly factored in 2009 and verification under a
+  factorable key authenticates nothing, so the window floors admission
+  at the deprecated-but-deployed tier SP 800-131A still allows for
+  legacy verification — also the smallest size the platform's own test
+  suite exercises. The ceiling bounds work on absurd moduli. Stricter
+  policy profiles MAY reject more (the HMAC short-key allowance
+  pattern).
+- **PSS binds its salt length at mint**, where WebCrypto's `saltLength`
+  is per-operation: a granted key verifies one PSS parameterization,
+  making salt-length confusion unrepresentable — the same mint-binding
+  as ECDSA's digest, with the same consumer story (JOSE's `PS*` fixes
+  the salt to the digest length, and a caller holding public material
+  can mint one key per parameterization it must serve).
 - **Unauthenticated modes are in, for compatibility.** AES-CBC and
   AES-CTR are WebCrypto-committed formats real systems must read and
   write, so the package carries them — quarantined in the `cipher` kind,

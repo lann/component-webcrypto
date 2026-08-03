@@ -46,6 +46,30 @@ commit
   with fixed-width `r ‖ s` (IEEE P1363) signatures, this package's wire
   format (the ASN.1-DER variants of these files are deliberately not
   vendored: DER signatures are unrepresentable in the WIT contract).
+- `rsa_signature_{2048,3072,4096}_{sha256,sha384,sha512}_test.json`,
+  `rsa_signature_8192_sha256_test.json` — RSASSA-PKCS1-v1_5 verification
+  vectors for every served digest, with heavy invalid coverage (padding
+  and DigestInfo malleation). The 2048/SHA-256 file's e = 3 groups pin
+  the guaranteed-import exponent floor; the 8192-bit file pins
+  large-modulus admission inside the family's 1024–16384-bit window.
+- `rsa_pss_2048_sha256_mgf1_0_test.json`,
+  `rsa_pss_2048_sha256_mgf1_32_test.json`,
+  `rsa_pss_2048_sha384_mgf1_48_test.json`,
+  `rsa_pss_3072_sha256_mgf1_32_test.json`,
+  `rsa_pss_4096_{sha256_mgf1_32,sha384_mgf1_48,sha512_mgf1_32,sha512_mgf1_64}_test.json`
+  — RSA-PSS verification vectors, restricted to the WebCrypto-expressible
+  parameterizations (the MGF1 digest equals the message digest, as the
+  WIT fixes it); each group carries the salt length the WIT binds at
+  mint. The `sha512_mgf1_32` file pins a salt length differing from the
+  digest length (JOSE's `PS*` fix them equal; the WIT does not). Two
+  files (`mgf1_0` and `4096_sha512_mgf1_32`) carry no `publicKeyJwk`, so
+  their JWK-path cases use a minimal `{kty, n, e}` JWK built from the
+  group's published modulus and exponent.
+- `rsa_pss_2048_sha256_mgf1_32_params_test.json` — RSA-PSS keys carrying
+  the id-RSASSA-PSS AlgorithmIdentifier (RFC 8017 Appendix A parameters),
+  which the RSA family contract rejects at import: the file exists as
+  coverage for that rule, and every case translates to an SPKI
+  import-must-fail (see the translation policy below).
 - `x25519_test.json` — X25519 key-agreement vectors, including the twist,
   non-canonical, and small-order public keys that discriminate agreement
   policies. The vectors carry each private key as a raw scalar, but the
@@ -150,6 +174,10 @@ encoding is `conformance/guest/src/translate.rs`; in summary:
 | ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |
 | ed25519-speccheck, every other case | rejected at import (`invalid-key`) or verification (`authentication-failed`), per the `ed25519-verify` criterion; where the rejection lands is implementation-defined. |
 | Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
+| RSASSA-PKCS1-v1_5 / RSA-PSS, `valid` | import succeeds and `verify(sig)` succeeds. Each valid vector translates **twice** — once importing the group key via SPKI (`tc<id>-spki`), once via the RSA public JWK (`tc<id>-jwk`: the group's own JWK where the file carries one, else a minimal `{kty, n, e}` built from the group's modulus and exponent) — so both import paths carry vector coverage. |
+| RSASSA-PKCS1-v1_5 / RSA-PSS, `invalid` | import succeeds (the same group key, via SPKI only — the rejection under test is the verifier's, not the import path's); `verify(sig)` fails `authentication-failed`. |
+| RSASSA-PKCS1-v1_5, `acceptable` (the `MissingNull` BER-laxity vectors) | `verify(sig)` fails `authentication-failed`: the WIT pins strict verification — the EMSA-PKCS1-v1_5 encoding is compared byte-exact — so upstream's lax-verifier allowances are uniform rejections here. Any target accepting one is a portability finding, not a case to exclude. |
+| `rsa_pss_2048_sha256_mgf1_32_params_test.json` (id-RSASSA-PSS keys), every case | the SPKI import fails `invalid-key` — the RSA family contract admits only `rsaEncryption` SubjectPublicKeyInfos. Coverage is SPKI-only: the file carries no JWKs, and a plain RSA public JWK has no member that could carry the PSS AlgorithmIdentifier, so no JWK-side counterpart exists. No chunking schedules: import carries no streams. |
 | X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
 | X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
 | ECDH (any file), `valid` | the public import (per the file's encoding: raw / SPKI / JWK) and `import-secret-key-jwk` (the webcrypto files' own private JWK, or one built from the normalized scalar plus the derived `x`/`y` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. Scalars are normalized to the curve's field size (the files' big-endian hex may carry a leading zero byte or be short). No chunking schedules: agreement carries no streams. |

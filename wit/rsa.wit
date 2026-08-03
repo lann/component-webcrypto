@@ -1,0 +1,103 @@
+package lann:webcrypto@0.1.0;
+
+/// The RSA signature family's shared parameterization and admission
+/// contract. Interfaces minting RSA verification keys
+/// (`rsassa-pkcs1-v15-verify`, `rsa-pss-verify`) declare their variant
+/// from this one set (the `sha2`/`aes` pattern: one definition per
+/// family).
+///
+/// Key admission, shared by every RSA import:
+/// - The modulus length must be 1024–16384 bits inclusive; anything
+///   outside fails `error.invalid-key`. The small end of RSA is
+///   factorable — 768-bit was publicly factored in 2009 — and a
+///   signature that verifies under a factorable key authenticates
+///   nothing (see `README.md`, "Design notes").
+/// - The public exponent must be odd and at least 3, or the import
+///   fails `error.invalid-key`. `3` and `65537` are guaranteed to
+///   import; whether a larger exponent is admitted is
+///   implementation-defined — do not rely on either behavior.
+/// - The SubjectPublicKeyInfo algorithm must be `rsaEncryption`; a key
+///   carrying `id-RSASSA-PSS` parameters fails `error.invalid-key`.
+/// - RSA public keys have no raw form (the platform serves `spki` and
+///   `jwk` only), so `verifying-key.export-key-raw` fails
+///   `error.unsupported` for keys minted by this family.
+interface rsa {
+    /// The mint-bound digests RSA signature verification serves: RSA's
+    /// parameterization is the digest alone — the modulus length is a
+    /// property of the imported material, reported by
+    /// `verifying-key.algorithm-length`. (Each algorithm interface
+    /// names its closed set of parameterizations `<algorithm>-variant`;
+    /// the two RSA signature interfaces share this one.)
+    ///
+    /// SHA-1 is deliberately absent, though platforms serve it:
+    /// collision resistance is load-bearing for signature verification,
+    /// and SHA-1's is broken (see `README.md`, "Design notes").
+    enum rsa-variant {
+        sha256,
+        sha384,
+        sha512,
+    }
+}
+
+/// RSASSA-PKCS1-v1_5 verification-key minting (RFC 8017 §8.2), as the
+/// Web Cryptography API serves it.
+///
+/// The variant binds the digest at mint — WebCrypto's own model for RSA
+/// (`RsaHashedImportParams`). Keys report `algorithm-name`
+/// `"RSASSA-PKCS1-v1_5"`, the variant's digest (`algorithm-hash`), and
+/// the modulus length (`algorithm-length`).
+///
+/// Security:
+/// - Verification is strict: the EMSA-PKCS1-v1_5 encoding is compared
+///   byte-exact, so a signature carrying BER laxities in its DigestInfo
+///   or mis-sized padding fails `error.authentication-failed`.
+interface rsassa-pkcs1-v15-verify {
+    use types.{error};
+    use signature.{verifying-key};
+    use rsa.{rsa-variant};
+
+    /// Import a public key as an X.509 SubjectPublicKeyInfo (DER).
+    /// Admission follows the family contract (see `rsa`).
+    import-verifying-key-spki: async func(%variant: rsa-variant, spki: list<u8>) -> result<verifying-key, error>;
+
+    /// Import a public key as an RSA public JWK (`kty: "RSA"`, with `n`
+    /// and `e`). `jwk` is the JWK as JSON text; see
+    /// `mac-key.export-key-jwk` for the package-wide JWK contract. An
+    /// `alg` member, when present, must be the variant's JOSE alg
+    /// (`"RS256"`, `"RS384"`, or `"RS512"`).
+    import-verifying-key-jwk: async func(%variant: rsa-variant, jwk: string) -> result<verifying-key, error>;
+}
+
+/// RSA-PSS verification-key minting (RFC 8017 §8.1), as the Web
+/// Cryptography API serves it.
+///
+/// The variant binds the digest at mint (WebCrypto's
+/// `RsaHashedImportParams`), and — unlike WebCrypto, whose `saltLength`
+/// is a per-operation parameter — the salt length binds at mint too: a
+/// granted key verifies exactly one PSS parameterization, so
+/// salt-length confusion is unrepresentable (see `README.md`, "Design
+/// notes"). The MGF1 digest is the message digest, as WebCrypto fixes
+/// it. Keys report `algorithm-name` `"RSA-PSS"`, the variant's digest,
+/// and the modulus length.
+interface rsa-pss-verify {
+    use types.{error};
+    use signature.{verifying-key};
+    use rsa.{rsa-variant};
+
+    /// Import a public key as an X.509 SubjectPublicKeyInfo (DER).
+    /// Admission follows the family contract (see `rsa`).
+    ///
+    /// `salt-length` is the PSS salt length in bytes the minted key
+    /// verifies with; a signature made under any other salt length
+    /// fails `error.authentication-failed`, like any other
+    /// non-verifying signature. (JOSE's `PS*` algorithms fix the salt
+    /// length to the digest length.)
+    import-verifying-key-spki: async func(%variant: rsa-variant, salt-length: u32, spki: list<u8>) -> result<verifying-key, error>;
+
+    /// Import a public key as an RSA public JWK (`kty: "RSA"`, with `n`
+    /// and `e`); see `import-verifying-key-spki` for `salt-length`, and
+    /// `mac-key.export-key-jwk` for the package-wide JWK contract. An
+    /// `alg` member, when present, must be the variant's JOSE alg
+    /// (`"PS256"`, `"PS384"`, or `"PS512"`).
+    import-verifying-key-jwk: async func(%variant: rsa-variant, salt-length: u32, jwk: string) -> result<verifying-key, error>;
+}
