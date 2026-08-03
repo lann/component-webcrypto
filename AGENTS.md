@@ -63,7 +63,7 @@ js/                     # the JS library surface (directory = npm name minus
                         #   wit/world.wit names the interfaces it serves;
                         #   `jco-transpile` derives their definitions from
                         #   it and interface-check.js asserts the host
-                        #   against them (`just typecheck-jco`); test/
+                        #   against them (`just jco::typecheck`); test/
                         #   covers the admission subsystem conformance
                         #   cannot reach
   componentize/         # @lann/webcrypto-componentize: JS guest library for
@@ -76,14 +76,14 @@ js/                     # the JS library surface (directory = npm name minus
                         #   componentize-js.rev; interface-check.js asserts
                         #   the exported subset against the SubtleCrypto and
                         #   CryptoKey definitions TypeScript ships
-                        #   (`just typecheck-webcrypto-componentize`); wpt/
+                        #   (`just componentize::typecheck`); wpt/
                         #   vendors the WebCryptoAPI web-platform-tests and
                         #   gates in CI, componentizing its runner from the
                         #   tree with a digest-pinned componentize-js build
                         #   (wpt/component.sh, componentize-js.sha256); the
                         #   run's census is pinned by wpt/expected.js;
                         #   wpt/web/ is the browser parity page on the
-                        #   Pages site (serve with `just wpt-web`)
+                        #   Pages site (serve with `just wpt::web`)
 examples/
   crypto-demo/          # guest component exercising the primitive kinds end
                         #   to end (reaches lann:webcrypto via lann-webcrypto-guest)
@@ -98,7 +98,7 @@ examples/
   componentize-demo/    # JS guest (componentize-js) exercising the
                         #   webcrypto-componentize library; exports the same demo
                         #   interface as crypto-demo, composed and run via
-                        #   `just test-webcrypto-componentize` (gates in CI)
+                        #   `just componentize::test` (gates in CI)
 conformance/            # cross-implementation conformance tests — see
                         #   conformance/README.md for its architecture and
                         #   the rationale for how it deliberately diverges
@@ -128,7 +128,7 @@ conformance/            # cross-implementation conformance tests — see
                         #     conformance/matrix.md + the viewer data
   web/                  #   results viewer: static page (collapsing
                         #     cross-target tree + a live "test this
-                        #     browser" run); serve with `just conformance-web`
+                        #     browser" run); serve with `just conformance::web`
   targets.toml          #   suite facts (required features) + target facts
                         #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
@@ -228,7 +228,7 @@ time. Secret-free operations (hashing public data, signature *verification*)
 are exempt from the classes. Keep the classification table in sync when
 adding algorithms, and keep class D out of the provider's world.
 
-`just class-d-composition` (a dependency of `just conformance`) gates that
+`just conformance::class-d` (a dependency of `just conformance::run`) gates that
 last sentence: it asserts the conformance signing guest, whose world imports
 `ecdsa-sign`, does not compose with the provider. Adding a class-D export
 turns that composition green and fails the gate. The failure mode it guards
@@ -341,7 +341,18 @@ jco path. Run `./scripts/setup.sh` once (idempotent; `SKIP_NODE=1` to skip the
 npm install).
 
 The [`justfile`](justfile) is the single entry point; run `just` to list
-recipes. `.github/workflows/ci.yml` runs the same recipes.
+recipes. Component-scoped recipes live in module justfiles colocated with
+their component (`conformance/justfile`, `js/componentize/wpt/justfile`, …),
+declared as modules at the root: invoke them as `just <module>::<recipe>`,
+list one module with `just --list <module>`, or work from inside the
+component's directory, where `just` resolves its local justfile directly.
+Shared building blocks (the `wac plug` composition, the guest/provider
+builds, the CI/opt-in predicates) live in `justfile.shared.just`, imported
+by the root and module justfiles; its recipes anchor every path on the
+repository root, so they behave identically from any importer.
+`.github/workflows/ci.yml` runs the same recipes (the `gha` module —
+`.github/justfile` — holds the CI job entry points and other
+workflow-only plumbing).
 `.github/workflows/timing-lab.yml` runs the weekly lab — the timing lab and
 the mutation run (`just mutants`) — schedule-only, because a statistical
 experiment cannot gate pull requests (see timing-lab/README.md,
@@ -358,28 +369,28 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just clippy` | any Rust source (lints the guest on its wasm target too). |
 | `just validate-wit` | any `.wit` file. |
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
-| `just build-component` | the `crypto-demo` guest or its WIT. |
-| `just test-webcrypto-composed` | the `lann-webcrypto-guest-provider` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
-| `just typecheck-webcrypto-componentize` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
-| `just test-webcrypto-componentize` | the `webcrypto-componentize` library, the componentize-demo guest, the in-guest provider, or any WIT. Gates in CI. Componentizes the JS demo guest from your tree (with the downloaded, digest-verified componentize-js — see the WPT row for the pin mechanics), composes it with the in-guest provider and driver, and runs it under `wasmtime`. The behavioral gate on the shim's checks the WPT census cannot observe (the SHA-1 collision postures, the extension-error transport). |
-| `just test-webcrypto-componentize-wpt` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just update-wpt-expectations`. |
-| `just conformance` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just update-conformance-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
-| `just transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
-| `just test-jco-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since its workers each run their cases sequentially against their own host instance. |
-| `just typecheck-jco` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
-| `just test-node` | the jco host (`webcrypto.js`) or the component it runs. |
-| `just wpt-parity` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `js/componentize/wpt/parity/losses.js`. Intentional loss-set changes need `just update-wpt-parity`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
-| `just wpt-parity-firefox` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_FIREFOX=1. The same two legs run in headless Firefox (Playwright's pinned build, Gecko's JSPI pref) against the engine's own ratchet, `js/componentize/wpt/parity/losses-firefox.js` — loss sets are per-engine facts, so intentional changes need `just update-wpt-parity-firefox`. Needs Playwright Firefox (`cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`). |
-| `just wpt-parity-chromium` | the same surfaces as `just wpt-parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_CHROMIUM=1. Like the Firefox row, in Playwright's pinned Chromium against `js/componentize/wpt/parity/losses-chromium.js`; intentional changes need `just update-wpt-parity-chromium`. |
-| `just wpt-parity-webkit` | the same surfaces as `just wpt-parity`. Gates in CI as its own macOS job pair (no componentize-js toolchain exists for darwin, so an ubuntu job builds the page artifacts and hands them over). The ratchet `js/componentize/wpt/parity/losses-webkit.js` is recorded from Playwright WebKit on macOS — Apple's crypto backend, the mobile-Safari proxy; the Linux port serves less and crashes, so record intentional changes without a mac via `just update-wpt-parity-webkit-from-ci` (the CI job's records artifact) or optimistically via `just predict-wpt-parity-webkit` (the Chromium delta; a miss fails the next run, never mispins) — `just update-wpt-parity-webkit` needs a mac. |
+| `just demo::build-component` | the `crypto-demo` guest or its WIT. |
+| `just demo::test-composed` | the `lann-webcrypto-guest-provider` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just componentize::typecheck` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
+| `just componentize::test` | the `webcrypto-componentize` library, the componentize-demo guest, the in-guest provider, or any WIT. Gates in CI. Componentizes the JS demo guest from your tree (with the downloaded, digest-verified componentize-js — see the WPT row for the pin mechanics), composes it with the in-guest provider and driver, and runs it under `wasmtime`. The behavioral gate on the shim's checks the WPT census cannot observe (the SHA-1 collision postures, the extension-error transport). |
+| `just wpt::test` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just componentize::update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just wpt::update-expectations`. |
+| `just conformance::run` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance guest/vectors/translation policy, or targets.toml. Intentional case changes also need `just conformance::update-lock`. Gates on the wasmtime, composed, and jco-node targets (Node 24+); jco-browser additionally gates in CI (the Actions runner ships Chrome) — locally, opt in with `CONFORMANCE_BROWSER=1` (needs Chrome/Chromium 137+). |
+| `just demo::transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
+| `just jco::test-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since its workers each run their cases sequentially against their own host instance. |
+| `just jco::typecheck` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
+| `just demo::test-node` | the jco host (`webcrypto.js`) or the component it runs. |
+| `just wpt::parity` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the jco host, or any WIT. Gates in CI (the jco job). Runs the vendored WPT suites against the platform's own `crypto.subtle` and through the jco-transpiled shim, holding the round trip to the baseline's pass set; the known losses are pinned in `js/componentize/wpt/parity/losses.js`. Intentional loss-set changes need `just wpt::update-losses`. Needs Node 24+ and the pinned componentize-js (downloaded, like the composed WPT gate). |
+| `just wpt::parity-firefox` | the same surfaces as `just wpt::parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_FIREFOX=1. The same two legs run in headless Firefox (Playwright's pinned build, Gecko's JSPI pref) against the engine's own ratchet, `js/componentize/wpt/parity/losses-firefox.js` — loss sets are per-engine facts, so intentional changes need `just wpt::update-losses-firefox`. Needs Playwright Firefox (`cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`). |
+| `just wpt::parity-chromium` | the same surfaces as `just wpt::parity`. Gates in CI (the jco job); locally opt-in via WPT_PARITY_CHROMIUM=1. Like the Firefox row, in Playwright's pinned Chromium against `js/componentize/wpt/parity/losses-chromium.js`; intentional changes need `just wpt::update-losses-chromium`. |
+| `just wpt::parity-webkit` | the same surfaces as `just wpt::parity`. Gates in CI as its own macOS job pair (no componentize-js toolchain exists for darwin, so an ubuntu job builds the page artifacts and hands them over). The ratchet `js/componentize/wpt/parity/losses-webkit.js` is recorded from Playwright WebKit on macOS — Apple's crypto backend, the mobile-Safari proxy; the Linux port serves less and crashes, so record intentional changes without a mac via `just gha::update-webkit-losses-from-ci` (the CI job's records artifact) or optimistically via `just wpt::predict-losses-webkit` (the Chromium delta; a miss fails the next run, never mispins) — `just wpt::update-losses-webkit` needs a mac. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
 Behavioral changes must keep all three implementations in sync: the
-conformance tests (`just conformance`) gate the wasmtime, composed, and
+conformance tests (`just conformance::run`) gate the wasmtime, composed, and
 jco-node targets, and the same guest component must report every check
-passing under `just test` (Wasmtime), `just test-node` (jco), and
-`just test-webcrypto-composed` (in-guest). When adding behavior, extend the
+passing under `just test` (Wasmtime), `just demo::test-node` (jco), and
+`just demo::test-composed` (in-guest). When adding behavior, extend the
 conformance suites (vectors or
 probes), not just the demo guest — an algorithm interface is not done until
 its vector cases exist (see conformance/README.md, "Growing the suites")
@@ -529,7 +540,7 @@ closed numbers remain stable references.
 ## Direction (designed, not yet built)
 
 - WPT platform parity through the jco path: the measuring harness exists
-  (`just wpt-parity` — see js/componentize/wpt/README.md, "The parity
+  (`just wpt::parity` — see js/componentize/wpt/README.md, "The parity
   gate") and pins the loss set; what remains is driving that set down.
   Growing toward parity is tiered — first behaviors the WIT already
   carries but the shim does not serve (more hashes, the usages model),
@@ -542,7 +553,7 @@ closed numbers remain stable references.
   platform. A browser leg exists as the live parity page on the Pages
   site (js/componentize/wpt/web/ — see that README's "The browser parity
   page"), and gating Firefox, Chromium, and WebKit legs run in CI, each
-  against its own pinned loss set (`just wpt-parity-firefox` /
+  against its own pinned loss set (`just wpt::parity-firefox` /
   `-chromium` / `-webkit`; the WebKit leg runs on a macOS runner, where
   Playwright's WebKit uses Apple's crypto backend — the mobile-Safari
   proxy).

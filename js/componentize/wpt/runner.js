@@ -142,7 +142,7 @@ export const demoWebcryptoDemoDemo010 = {
       );
     }
 
-    // Emitted on every run, pass or fail, so `just update-wpt-expectations`
+    // Emitted on every run, pass or fail, so `just wpt::update-expectations`
     // can record it mechanically.
     const censusLine = `WPT-CENSUS ${JSON.stringify(census)}`;
 
@@ -168,7 +168,7 @@ export const demoWebcryptoDemoDemo010 = {
       throw new ComponentError(
         `WPT census does not match js/componentize/wpt/expected.js:\n` +
           drift.join("\n") +
-          `\nRe-record with \`just update-wpt-expectations\` once the change is understood.` +
+          `\nRe-record with \`just wpt::update-expectations\` once the change is understood.` +
           `\n${censusLine}`,
       );
     }

@@ -1,0 +1,226 @@
+# The WPT harnesses: the vendored web-platform-tests WebCryptoAPI suites
+# run through the webcrypto-componentize shim (the composed WPT gate) and
+# the WPT parity gates (baseline vs round trip, per engine). See README.md
+# (this directory) for the vendoring and subset policy, and parity/ for the
+# parity gate's architecture.
+
+import '../../../justfile.shared.just'
+
+# Run the vendored WPT suites against the webcrypto-componentize library:
+# every in-subset test must pass; out-of-subset tests are reported by count
+# (README.md has the vendoring and subset policy). The runner is
+# componentized from the working tree with the pinned componentize-js
+# (downloaded on first use), then composed with a freshly built in-guest
+# provider and driver and run under `wasmtime` (v47+) and `wac`, like
+# demo::test-composed.
+test: compose-runner
+    timeout 600 wasmtime run -W component-model-async=y -S cli \
+        '{{root}}/target/wpt-runner-composed.wasm'
+
+# Componentize the WPT runner from the working tree and compose it with a
+# freshly built in-guest provider and driver.
+compose-runner: _componentize-runner (_compose "wpt-runner" "js/componentize/wpt/build/runner.component.wasm" "crypto-demo-driver")
+
+# Componentize the WPT runner from the working tree with the pinned
+# componentize-js (downloaded on first use).
+_componentize-runner:
+    ./component.sh build
+
+# Re-record expected.js from an actual run: run this when a change
+# legitimately moves a count, and review the diff — each moved number is a
+# test that appeared, vanished, or crossed the in-subset boundary.
+update-expectations: compose-runner
+    ./update-expectations.sh '{{root}}/target/wpt-runner-composed.wasm'
+
+# Run the WPT parity gate: the vendored WPT suites run twice — directly
+# against this platform's own crypto.subtle (the baseline) and through the
+# componentized shim transpiled by jco against js/jco/webcrypto.js (the
+# round trip) — and the comparator holds the round trip to the baseline's
+# pass set, with known losses pinned in parity/losses.js. Both legs end at
+# the same platform crypto, so the delta isolates exactly what the carrier
+# stack (shim, WIT shape, component ABI, jco) loses. Needs Node 24+ and the
+# pinned componentize-js (downloaded — see component.sh).
+parity: _parity-artifacts _parity-node-run
+
+# The Node engine's legs + comparator; the artifacts are already built
+# (_parity-artifacts), so parallel engine runs share one build.
+_parity-node-run: _parity-node-legs
+    node parity/compare.mjs \
+        build/parity-baseline.json \
+        build/parity-roundtrip.json
+
+# Re-record parity/losses.js from an actual run: run this when a change
+# legitimately moves the loss set, and review the diff — every removed line
+# is a platform behavior the round trip now preserves, and every added line
+# needs a classification in the shim header's deviations registry.
+update-losses: _parity-legs
+    node parity/compare.mjs \
+        build/parity-baseline.json \
+        build/parity-roundtrip.json --update
+
+# Run the WPT parity gate in headless Firefox: the same two legs as
+# `just wpt::parity`, both executed in the browser (the round trip through
+# the same worker-loadable transpile the parity page uses), held to the
+# engine's own pinned loss set in parity/losses-firefox.js — a loss set is
+# a fact about one engine's baseline, so each engine ratchets separately.
+# The engine is Playwright's pinned Firefox build, launched with Gecko's
+# JSPI pref; install it once with
+# `cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox`.
+parity-firefox: web-artifacts _firefox-run
+
+# One browser engine's parity run + comparator: the shared body of the six
+# per-engine recipes (three engines x run/update), so the engines cannot
+# drift apart. `update` is "" or "--update". The run is bounded by
+# scripts/run-with-timeout.mjs, not GNU `timeout`: the WebKit leg runs on
+# macOS, which does not ship it, and Node (already required here) does the
+# same job portably.
+_browser-run engine update="":
+    cd parity && \
+        node '{{root}}/scripts/run-with-timeout.mjs' 900 -- \
+        npm run -s run:{{engine}}
+    node parity/compare.mjs \
+        build/parity-baseline-{{engine}}.json \
+        build/parity-roundtrip-{{engine}}.json \
+        --losses losses-{{engine}}.js {{update}}
+
+# The Firefox engine's run + comparator; the web artifacts are already
+# built (web-artifacts).
+_firefox-run: (_browser-run "firefox")
+
+# Re-record parity/losses-firefox.js from an actual run, like update-losses.
+update-losses-firefox: web-artifacts (_browser-run "firefox" "--update")
+
+# Run the WPT parity gate in headless Chromium: like parity-firefox,
+# against Chromium's own pinned loss set in parity/losses-chromium.js. The
+# engine is Playwright's pinned Chromium build (which ships JSPI); install
+# it once with
+# `cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium`.
+parity-chromium: web-artifacts _chromium-run
+
+# The Chromium engine's run + comparator; the web artifacts are already
+# built (web-artifacts).
+_chromium-run: (_browser-run "chromium")
+
+# Re-record parity/losses-chromium.js from an actual run, like update-losses.
+update-losses-chromium: web-artifacts (_browser-run "chromium" "--update")
+
+# Run every applicable WPT parity gate, the engines in parallel over one
+# shared artifact build: Node always; Firefox and Chromium always under
+# GitHub Actions, locally only when opted in with WPT_PARITY_FIREFOX=1 /
+# WPT_PARITY_CHROMIUM=1 (each skips with a notice otherwise — the
+# Playwright browser downloads are not baseline local dependencies; see
+# parity-firefox / parity-chromium for the installs). The engines are
+# independent — each writes its own record files and pins its own loss
+# set — so they parallelize cleanly (scripts/parallel-recipes.sh buffers
+# each engine's output and prints it whole, so failures read per engine).
+# (The WebKit leg is not driven from here: it needs macOS — see
+# parity-webkit.)
+_parity-gates:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _parity-artifacts
+    if [ -n "{{firefox-enabled}}" ] || [ -n "{{chromium-enabled}}" ]; then
+        just _web-transpile
+    fi
+    engines=(_parity-node-run)
+    if [ -n "{{firefox-enabled}}" ]; then engines+=(_firefox-run); else
+        echo "skipping the Firefox WPT parity gate (opt in with WPT_PARITY_FIREFOX=1; needs Playwright Firefox: cd js/componentize/wpt/parity && npx playwright-core install --with-deps firefox)"
+    fi
+    if [ -n "{{chromium-enabled}}" ]; then engines+=(_chromium-run); else
+        echo "skipping the Chromium WPT parity gate (opt in with WPT_PARITY_CHROMIUM=1; needs Playwright Chromium: cd js/componentize/wpt/parity && npx playwright-core install --with-deps chromium)"
+    fi
+    '{{root}}/scripts/parallel-recipes.sh' '{{root}}/target/wpt-parity' "${engines[@]}"
+
+# Produce both of the Node engine's parity legs' results under build/
+# (artifacts + legs; the update recipe's hook).
+_parity-legs: _parity-artifacts _parity-node-legs
+
+# Build what the Node engine's legs consume: componentize the ungated
+# parity runner from the tree and transpile it with jco against the jco
+# host.
+_parity-artifacts:
+    ./component.sh build-parity
+    cd parity && npm run -s transpile
+
+# Run the Node engine's two legs on this Node, each writing its records
+# under build/.
+_parity-node-legs:
+    node parity/baseline.mjs \
+        > build/parity-baseline.json
+    cd parity && node --experimental-wasm-jspi roundtrip.mjs \
+        > ../build/parity-roundtrip.json
+
+# Run the WPT parity gate in headless WebKit: like the other browser legs,
+# against WebKit's own pinned loss set in parity/losses-webkit.js. That
+# ratchet is recorded from Playwright's WebKit on macOS, where it uses
+# Apple's crypto backend — the closest available proxy for mobile Safari;
+# the Linux port's libgcrypt backend serves less (no Ed25519/X25519) and
+# does not match it. Unlike the other legs this recipe does not build the
+# page artifacts: no componentize-js toolchain is published for darwin, so
+# CI builds them on ubuntu (`just wpt::web-artifacts`) and hands them to
+# the macOS job.
+parity-webkit: (_browser-run "webkit")
+
+# Re-record parity/losses-webkit.js from an actual run, like update-losses.
+# Record from Playwright WebKit on macOS (the CI job's engine); a
+# Linux-port recording would pin the wrong backend.
+update-losses-webkit: (_browser-run "webkit" "--update")
+
+# Predict parity/losses-webkit.js from the Chromium delta: apply this
+# branch's losses-chromium.js changes (working tree vs the merge base with
+# origin/main) to the WebKit ratchet as set operations. A shim change's
+# loss-set movement is usually engine-generic, so after
+# `just wpt::update-losses-chromium` this often lands the WebKit re-record
+# without waiting for CI. The guess is safe: the gate is two-sided, so a
+# miss fails the next CI run like any stale ratchet (then fall back to
+# `just gha::update-webkit-losses-from-ci`), and a green run verifies the
+# predicted set exactly as it would a recorded one.
+predict-losses-webkit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base=$(git merge-base HEAD origin/main)
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    git show "$base:js/componentize/wpt/parity/losses-chromium.js" > "$tmp/old-losses-chromium.js"
+    node parity/predict.mjs \
+        "$tmp/old-losses-chromium.js" \
+        parity/losses-chromium.js \
+        parity/losses-webkit.js
+    git --no-pager diff --stat -- parity/losses-webkit.js
+
+# Build everything the browser WPT parity page (web/) loads: the suite
+# modules under build/, the web transpile of the parity runner under
+# parity/generated-web/, and the preview2-shim browser build.
+web-artifacts:
+    ./component.sh build-parity
+    @just _web-transpile
+
+# The web-transpile half of web-artifacts (the parity runner component is
+# already built): the web transpile of the parity runner under
+# parity/generated-web/ (every import a relative path, so it loads in the
+# page's worker; the guard keeps that invariant honest), and the
+# preview2-shim browser build those imports resolve to (vendored from the
+# parity package's node_modules into web/preview2-shim/, with its license).
+_web-transpile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd parity && npm run -s transpile:web)
+    if grep -q "from '@" parity/generated-web/parity-runner.js; then
+        echo "wpt web transpile: generated-web carries a bare module import (a wasi map in" >&2
+        echo "parity/package.json's transpile:web no longer covers every wasi interface?):" >&2
+        grep "from '@" parity/generated-web/parity-runner.js >&2
+        exit 1
+    fi
+    rm -rf web/preview2-shim
+    mkdir -p web/preview2-shim
+    cp parity/node_modules/@bytecodealliance/preview2-shim/dist/browser/*.js \
+        parity/node_modules/@bytecodealliance/preview2-shim/LICENSE \
+        web/preview2-shim/
+
+# Serve the browser WPT parity page: the same two legs as `just wpt::parity`
+# run live in your browser (the round trip needs JSPI — Chrome/Chromium
+# 137+). Serves the repository root, which the page's relative imports rely
+# on; PORT overrides the port (default 8787).
+web: web-artifacts
+    @echo "the WPT parity page: http://127.0.0.1:${PORT:-8787}/js/componentize/wpt/web/"
+    node '{{root}}/conformance/web/serve.mjs'

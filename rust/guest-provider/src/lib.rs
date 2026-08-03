@@ -10,7 +10,7 @@
 //! Because it exports the package surface and needs no crypto capability from
 //! the host, it can be composed (`wac plug`) with any consumer component that
 //! imports these interfaces, producing a single self-contained component — the
-//! `just test-webcrypto-composed` recipe plugs it under the `crypto-demo`
+//! `just demo::test-composed` recipe plugs it under the `crypto-demo`
 //! guest and runs the result under the `wasmtime` CLI.
 //!
 //! The exported resources live in the [`provider`] module.

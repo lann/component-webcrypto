@@ -7,7 +7,7 @@
 //
 // Gates in CI (the Actions runner image ships Chrome); locally it needs a
 // Chrome/Chromium install — run it with CONFORMANCE_BROWSER=1 just
-// conformance, or directly with `just conformance-jco-browser`.
+// conformance, or directly with `just conformance::jco-browser`.
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 

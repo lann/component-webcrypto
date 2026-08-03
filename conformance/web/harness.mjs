@@ -10,7 +10,7 @@
 // any base path (the local server's repo root, or a GitHub Pages project
 // subpath); the transpiled guests resolve their own relative imports of
 // js/jco/webcrypto.js the same way, so the serving tree must mirror the
-// repository layout (see serve.mjs and the `conformance-web-site` recipe).
+// repository layout (see serve.mjs and the `gha::pages-site` recipe).
 
 export const SUITES = [
   {

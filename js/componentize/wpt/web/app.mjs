@@ -2,7 +2,7 @@
 // twice in *this* browser — directly against its own `crypto.subtle` (the
 // baseline leg) and through the componentized shim transpiled by jco
 // against js/jco/webcrypto.js (the round-trip leg) — and renders the
-// delta. It is the in-browser counterpart of `just wpt-parity` (see
+// delta. It is the in-browser counterpart of `just wpt::parity` (see
 // ../README.md, "The parity gate"): same group table (../groups.js), same
 // record shape, same loss definition. Nothing here gates; the pinned loss
 // ratchet belongs to the Node legs.

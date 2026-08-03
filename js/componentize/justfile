@@ -1,0 +1,56 @@
+# The componentize-js guest library (@lann/webcrypto-componentize): a
+# crypto.subtle subset over the lann:webcrypto imports, for JS guests
+# componentized with componentize-js.
+#
+# The componentize-js CLI (dicej's ComponentizeJS reboot) is used to
+# (re)generate the JS guest components. Building it compiles SpiderMonkey to
+# wasm and needs WASI-SDK 30, so nobody here builds it: the
+# componentize-js-toolchain workflow publishes one build per pinned revision
+# and platform, and `wpt/component.sh toolchain` downloads it into
+# target/toolchains on first use (set COMPONENTIZE_JS to use your own build
+# instead). The pinned revision lives in componentize-js.rev.
+
+import '../../justfile.shared.just'
+
+# Type-check the library against the Web Cryptography API definitions
+# TypeScript ships. Nothing is generated, so nothing can go stale; no
+# component build.
+typecheck:
+    npm run typecheck
+
+# Componentize the JS WebCrypto-subset demo guest (this library +
+# examples/componentize-demo app) into examples/componentize-demo/build/.
+# The base directory is the repository root, so the app's module specifiers
+# (./js/componentize/webcrypto.js) resolve against it.
+build-demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd '{{root}}'
+    mkdir -p examples/componentize-demo/build
+    "$(js/componentize/wpt/component.sh toolchain)" \
+        -q -d examples/componentize-demo/wit -w componentize-demo \
+        --features chacha20-poly1305,sha1-checked \
+        componentize examples/componentize-demo/app.js -p . \
+        -o examples/componentize-demo/build/componentize-demo.component.wasm
+
+# Compose the fully in-guest JS demo (the `demo::compose` recipe with the JS
+# guest in place of the Rust one): the JS guest's lann:webcrypto imports are
+# satisfied by the in-guest provider, then the CLI driver is plugged on top.
+compose-demo: build-demo (_compose "componentize-demo" "examples/componentize-demo/build/componentize-demo.component.wasm" "crypto-demo-driver")
+
+# JS-guest integration test: run the composed JS demo under `wasmtime` — the
+# WebCrypto-subset library's checks execute against RustCrypto running
+# entirely inside wasm. Needs `wasmtime` (v47+) and `wac` on PATH; the
+# componentize-js toolchain is downloaded (see above).
+test: compose-demo
+    timeout 120 wasmtime run -W component-model-async=y -S cli \
+        '{{root}}/target/componentize-demo-composed.wasm'
+
+# Record the digests of the published componentize-js build for the pinned
+# revision, after verifying its build-provenance attestation (needs `gh`).
+# Run this when componentize-js.rev changes and the toolchain workflow has
+# published the new build: until its digests are recorded, every consumer
+# refuses to execute it. Pass a platform to record one you are not running
+# on, e.g. `just componentize::update-toolchain-digest linux-x86_64`.
+update-toolchain-digest platform="":
+    wpt/update-toolchain-digest.sh {{platform}}

@@ -9,9 +9,9 @@
 #   - wasm-tools, used to wrap guest modules into components and validate WIT
 #   - just, the command runner used for development and CI recipes
 #   - wac, the component linker used to compose the crypto-demo guest with the
-#     in-guest provider (`just compose-demo`)
+#     in-guest provider (`just demo::compose`)
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
-#     integration test (`just test-webcrypto-composed`)
+#     integration test (`just demo::test-composed`)
 #   - the npm dependencies of every JS tree in the repository (jco host,
 #     demos, conformance adapter, webcrypto-componentize and its parity harness)
 #
@@ -29,7 +29,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WASM_TOOLS_VERSION="${WASM_TOOLS_VERSION:-1.247.0}"
-JUST_VERSION="${JUST_VERSION:-1.40.0}"
+JUST_VERSION="${JUST_VERSION:-1.54.0}"
 WAC_VERSION="${WAC_VERSION:-0.10.1}"
 WASMTIME_VERSION="${WASMTIME_VERSION:-47.0.1}"
 

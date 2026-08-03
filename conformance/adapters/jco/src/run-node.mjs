@@ -13,7 +13,7 @@
 //
 // jco's async ABI needs JavaScript Promise Integration (JSPI), so this must
 // run under Node 24+ with `--experimental-wasm-jspi` (the npm scripts and
-// the `just conformance-jco-node` recipe supply both; the workers inherit
+// the `just conformance::jco-node` recipe supply both; the workers inherit
 // the flag through `process.execArgv`).
 //
 // Usage: run-node.mjs [--signing] [--only <substring>]

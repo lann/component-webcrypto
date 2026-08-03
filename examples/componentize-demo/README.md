@@ -38,7 +38,7 @@ see ["Toolchain" in the library's README](../../js/componentize/README.md#toolch
 From the repository root:
 
 ```sh
-just test-webcrypto-componentize
+just componentize::test
 ```
 
 which componentizes `app.js` against [`wit/world.wit`](wit/world.wit)
@@ -49,4 +49,4 @@ driver, and runs the result under `wasmtime`. The driver prints the guest's
 self-describing summary, which names every check it ran.
 
 Point the recipe at a non-PATH CLI with
-`COMPONENTIZE_JS=/path/to/componentize-js just test-webcrypto-componentize`.
+`COMPONENTIZE_JS=/path/to/componentize-js just componentize::test`.

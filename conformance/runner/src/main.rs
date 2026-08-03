@@ -13,7 +13,7 @@
 //!   names inside it;
 //! - each results file's case names and feature tags exactly match its
 //!   suite's checked-in lockfile (suite changes land intentionally via
-//!   `just update-conformance-lock`);
+//!   `just conformance::update-lock`);
 //! - each results file's declared `missing` features match the target's
 //!   entry in targets.toml (adapters and the manifest cannot drift apart);
 //! - no case reports `fail`.
@@ -87,7 +87,7 @@ struct Lock {
 }
 
 /// Parse a lockfile (TOML: a `cases` array of `{ name, features? }` inline
-/// tables, as written by `just update-conformance-lock`).
+/// tables, as written by `just conformance::update-lock`).
 fn parse_lock(text: &str) -> anyhow::Result<Lock> {
     let mut cases = IndexMap::new();
     for case in conformance_report::parse_lock(text)? {
@@ -223,12 +223,12 @@ fn validate_file(
         match lock.cases.get(&case.name) {
             None => problems.push(format!(
                 "{at}: case {:?} is not in the suite lockfile (run `just \
-                 update-conformance-lock` if the suite changed intentionally)",
+                 conformance::update-lock` if the suite changed intentionally)",
                 case.name
             )),
             Some(tags) if *tags != case.features => problems.push(format!(
                 "{at}: case {:?} reports feature tags {:?}, but the lockfile has {:?} (run \
-                 `just update-conformance-lock` if the suite changed intentionally)",
+                 `just conformance::update-lock` if the suite changed intentionally)",
                 case.name, case.features, tags
             )),
             Some(_) => {}
@@ -244,7 +244,7 @@ fn validate_file(
         if !seen.contains(name.as_str()) {
             problems.push(format!(
                 "{at}: case {name:?} is in the suite lockfile but produced no result (run \
-                 `just update-conformance-lock` if the suite changed intentionally)"
+                 `just conformance::update-lock` if the suite changed intentionally)"
             ));
         }
     }

@@ -7,7 +7,7 @@ pipeline as `examples/componentize-demo`. Run it from the repository root
 with:
 
 ```sh
-just test-webcrypto-componentize-wpt
+just wpt::test
 ```
 
 This check gates in CI, and nobody — CI or contributor — builds the
@@ -33,7 +33,7 @@ artifacts involved have very different costs, and are handled accordingly:
   later use of the cached copy against
   [`../componentize-js.sha256`](../componentize-js.sha256) and refuses to
   execute anything else. Recording a digest is a separate, manual step
-  (`just update-toolchain-digest`), which verifies the attestation — subject
+  (`just componentize::update-toolchain-digest`), which verifies the attestation — subject
   digest, repository, and workflow — before writing it. So trusting a new
   toolchain is a reviewable diff, and published assets are immutable (the
   workflow uploads without `--clobber`) so a recorded digest cannot be
@@ -64,7 +64,7 @@ that starts *passing*, which is the sign the subset definition has drifted
 from what the library actually serves.
 
 This is the WPT path's equivalent of `conformance/*/tests.lock`. Regenerate
-it with `just update-wpt-expectations` when a change legitimately moves a
+it with `just wpt::update-expectations` when a change legitimately moves a
 number, and review the diff.
 
 The out-of-subset buckets are a to-do list, not a boundary: WPT coverage is
@@ -77,7 +77,7 @@ belongs in the shim header's classified deviations list.
 
 ## The parity gate (jco path)
 
-`just wpt-parity` measures those losses instead of asserting counts. The
+`just wpt::parity` measures those losses instead of asserting counts. The
 same vendored suites run twice, ending at the same platform crypto, with
 only the carrier stack differing:
 
@@ -102,7 +102,7 @@ the stack in the middle, and `parity/compare.mjs` holds the loss set to
 [`parity/losses.js`](parity/losses.js) — a ratchet, maintained like
 `expected.js`: a loss not recorded there fails the run (a regression), a
 recorded loss no longer observed fails it too (progress must land as a
-reviewable diff, via `just update-wpt-parity`). Which *kind* each loss is —
+reviewable diff, via `just wpt::update-losses`). Which *kind* each loss is —
 unserved or WIT-forced — is the shim header's deviations registry's to say.
 Two properties of the comparison follow from how WPT registers tests. Test
 names are outcome-dependent — a failed setup step registers a synthetic
@@ -117,14 +117,14 @@ platform itself is.
 
 ### The browser legs (Firefox, Chromium, WebKit)
 
-`just wpt-parity-firefox` and `just wpt-parity-chromium` run the same two
+`just wpt::parity-firefox` and `just wpt::parity-chromium` run the same two
 legs in a headless browser — Playwright's pinned builds (Firefox launched
 with Gecko's JSPI pref; Chromium ships JSPI), driven by
 `parity/run-browser.mjs` over the same legs module the parity page uses
 (web/legs.mjs) — and hold each round trip to that engine's own ratchet:
 [`parity/losses-firefox.js`](parity/losses-firefox.js) and
 [`parity/losses-chromium.js`](parity/losses-chromium.js), maintained via
-`just update-wpt-parity-firefox` / `-chromium`. A loss set is a fact
+`just wpt::update-losses-firefox` / `-chromium`. A loss set is a fact
 about one engine's baseline, so each engine ratchets separately: the
 engines pass different platform surfaces (AES-192 and P-521 exist on
 Firefox and Node but not Chromium; buffer-copy timing differs on all
@@ -136,16 +136,16 @@ Both gate in CI (the jco job); local runs opt in with
 `WPT_PARITY_FIREFOX=1` / `WPT_PARITY_CHROMIUM=1` after
 `cd parity && npx playwright-core install --with-deps firefox chromium`.
 
-`just wpt-parity-webkit` is the same gate for WebKit, with two venue
+`just wpt::parity-webkit` is the same gate for WebKit, with two venue
 constraints. Its ratchet ([`parity/losses-webkit.js`](parity/losses-webkit.js),
-via `just update-wpt-parity-webkit`) is recorded from Playwright's WebKit
+via `just wpt::update-losses-webkit`) is recorded from Playwright's WebKit
 on *macOS*, where WebCore sits on Apple's crypto backend — the closest
 available proxy for mobile Safari, and the point of the leg; the Linux
 port's libgcrypt backend serves less (no Ed25519/X25519) and its
 WebContent process crashes under this workload, so it can neither gate
 nor record. And no componentize-js toolchain is published for darwin, so
 the CI gate is a two-job handoff: ubuntu builds the page artifacts
-(`just wpt-web-artifacts`), the macOS job downloads them and runs the
+(`just wpt::web-artifacts`), the macOS job downloads them and runs the
 leg. WebKit's baseline is the strongest of the gated engines
 (JavaScriptCore ships JSPI; Apple's backend serves Ed25519, X25519,
 P-521, and AES-192).
@@ -156,7 +156,7 @@ paths, both riding CI's macOS runner as the recording engine:
 
 - **Re-record from CI's records.** The macOS job uploads the
   comparator's two inputs as the `wpt-parity-webkit-records` artifact on
-  every run, pass or fail; `just update-wpt-parity-webkit-from-ci`
+  every run, pass or fail; `just gha::update-webkit-losses-from-ci`
   downloads the branch's latest and runs the update comparison locally.
   On a gate failure the job also writes the proposed `losses-webkit.js`
   diff to its step summary and uploads the rewritten file
@@ -164,7 +164,7 @@ paths, both riding CI's macOS runner as the recording engine:
   review-and-commit with no local tooling.
 - **Predict from the Chromium delta.** A shim change's loss-set movement
   is usually engine-generic (decided in the shim/WIT layers before the
-  engine's crypto is reached), so `just predict-wpt-parity-webkit`
+  engine's crypto is reached), so `just wpt::predict-losses-webkit`
   applies the branch's `losses-chromium.js` delta to the WebKit ratchet
   as set operations — often landing the re-record before any CI run.
   The guess is safe because the gate is two-sided (unlisted losses fail,
@@ -184,7 +184,7 @@ the GitHub Pages site: the baseline against that browser's own
 `crypto.subtle`, the round trip through a web transpile of the same parity
 runner (`transpile:web` in parity/package.json — every import mapped to a
 relative path, wasi included, so the module loads in the page's Web
-Worker with no import map; `just wpt-web-artifacts` vendors the
+Worker with no import map; `just wpt::web-artifacts` vendors the
 preview2-shim browser build those paths resolve to). Both legs run in the
 worker and stream: the round trip's records arrive through the runner's
 reporter import as each test settles, so the page shows live progress
@@ -194,7 +194,7 @@ alone. Nothing on the page gates, and the pinned ratchets do not apply to
 it: loss sets are recorded from pinned engines (`losses.js` from Node,
 `losses-firefox.js`, `losses-chromium.js`, and `losses-webkit.js` from
 Playwright's builds), and a visiting browser's baseline legitimately
-differs. Serve it locally with `just wpt-web`.
+differs. Serve it locally with `just wpt::web`.
 
 Like the conformance viewer, the page's serving tree must mirror the
 repository layout: the transpiled runner imports `js/jco/webcrypto.js` by

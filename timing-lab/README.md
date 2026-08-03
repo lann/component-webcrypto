@@ -5,14 +5,14 @@ in-guest provider: the same component the demos and conformance tests exercise,
 measured entirely in-guest under `wasmtime`.
 
 ```
-just timing-lab                          # compose + run
-TIMING_LAB_SAMPLES=20000 just timing-lab # trade runtime for sensitivity
-just timing-lab-scheduled                # as the scheduled job runs it
+just timing-lab::run                          # compose + run
+TIMING_LAB_SAMPLES=20000 just timing-lab::run # trade runtime for sensitivity
+just gha::timing-lab-scheduled                # as the scheduled job runs it
 ```
 
 ## Automation
 
-`just timing-lab` is deliberately absent from `just ci`: a statistical
+`just timing-lab::run` is deliberately absent from `just ci`: a statistical
 experiment on a shared runner cannot gate pull requests without flaking
 them. But an unautomated lab rots — its runtime behavior (the positive
 controls' sensitivity to clock granularity, say) decays invisibly while only
@@ -126,7 +126,7 @@ not how small a leak it would catch.
   headroom exists above it.
 - **Statistical tests flake.** A LEAK verdict on a real surface warrants
   investigation, starting with a rerun at higher `TIMING_LAB_SAMPLES` — not
-  an immediate conclusion. This is why `just timing-lab` is deliberately not
+  an immediate conclusion. This is why `just timing-lab::run` is deliberately not
   part of `just ci`: shared CI runners add scheduling noise that produces
   both false quiets (noise floor) and false leaks (correlated drift). The
   scheduled job automates exactly that rerun (see Automation).

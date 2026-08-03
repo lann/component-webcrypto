@@ -7,11 +7,11 @@ import { basename } from "node:path";
 
 /**
  * The `just` recipe that re-records the ratchet at `path`: losses.js via
- * `update-wpt-parity`, losses-<engine>.js via `update-wpt-parity-<engine>`.
+ * `wpt::update-losses`, losses-<engine>.js via `wpt::update-losses-<engine>`.
  * @param {string} path
  */
 export function updateRecipe(path) {
-  return `update-wpt-parity${basename(path, ".js").slice("losses".length)}`;
+  return `wpt::update-losses${basename(path, ".js").slice("losses".length)}`;
 }
 
 /**

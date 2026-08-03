@@ -29,7 +29,7 @@
 #   the signing suite is a separate component. A target declaring it
 #   missing drops the suite by declaration, and no probe can contradict
 #   that. What polices it is the negative-composition gate
-#   (`just class-d-composition`), which asserts the in-guest provider does
+#   (`just conformance::class-d`), which asserts the in-guest provider does
 #   not export `ecdsa-sign`.
 #
 # Which suites a target must produce results for is *derived*: every
@@ -67,7 +67,7 @@ missing-features = []
 [targets.composed]
 # The in-guest RustCrypto provider deliberately does not export
 # `ecdsa-sign` (class D — see rust/guest-provider/README.md), which excludes the
-# signing suite structurally. `just class-d-composition` asserts the
+# signing suite structurally. `just conformance::class-d` asserts the
 # absent export, so this line cannot outlive the fact it records.
 missing-features = ["ecdsa-sign"]
 

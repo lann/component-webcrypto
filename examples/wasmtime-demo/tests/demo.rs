@@ -22,7 +22,7 @@ fn run(dir: &Path, program: &str, args: &[&str]) {
     );
 }
 
-/// Build the guest component through `just build-component` — the single
+/// Build the guest component through `just demo::build-component` — the single
 /// definition of that build — and return the component path. The build runs
 /// once per test binary: the tests run in parallel, and a concurrent
 /// rebuild's `wasm-tools component new -o` truncates the component file in
