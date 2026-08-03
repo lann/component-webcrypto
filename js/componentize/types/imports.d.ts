@@ -30,6 +30,7 @@ declare module "lann:webcrypto/pbkdf2-sha2@0.1.0";
 declare module "lann:webcrypto/pbkdf2-sha1@0.1.0";
 declare module "lann:webcrypto/key-agreement@0.1.0";
 declare module "lann:webcrypto/x25519@0.1.0";
+declare module "lann:webcrypto/ecdh@0.1.0";
 declare module "lann:webcrypto/sha2@0.1.0";
 declare module "lann:webcrypto/sha1-checked@0.1.0";
 declare module "lann:webcrypto/digest@0.1.0";
