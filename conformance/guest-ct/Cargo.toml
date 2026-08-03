@@ -1,0 +1,28 @@
+[package]
+name = "conformance-guest-ct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The conformance suite ported onto the lann:component-test guest SDK (M1.5): same corpus and case ids as conformance-guest, exported through the frozen tests contract, with the decline branch restructured into explicit !feature decline cases."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The port target: the component-test guest SDK (path-dep against the
+# component-test checkout during the migration).
+component-test-sdk = { path = "../../../component-test/crates/component-test-sdk" }
+# The #[suite] macro expands a wit_bindgen::generate! naming this crate.
+# 0.60 (what the SDK is developed against); the SUT bindings below keep
+# their own 0.59 via lann-webcrypto-guest — disjoint packages, merged at
+# wasm-component-ld.
+wit-bindgen = { version = "0.60", features = ["async"] }
+
+# Everything below mirrors conformance-guest: the incumbent case bodies
+# are reused wholesale (see src/lib.rs).
+lann-webcrypto-guest = { path = "../../rust/guest", features = ["chacha", "sha1-checked"] }
+conformance-harness = { path = "../harness" }
+futures = { version = "0.3", default-features = false, features = ["async-await", "alloc"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+data-encoding = "2"

@@ -9,6 +9,7 @@ members = [
     "examples/wasmtime-demo",
     "conformance/harness",
     "conformance/guest",
+    "conformance/guest-ct",
     "conformance/signing-guest",
     "conformance/report",
     "conformance/adapters/wasmtime",
