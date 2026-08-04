@@ -41,6 +41,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        run: |
+          git clone https://github.com/lann/component-test ../component-test
+          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
+
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and components are pinned in
         # rust-toolchain.toml; `rustup show` installs exactly those.
@@ -65,7 +74,7 @@ jobs:
           TIMING_LAB_SAMPLES: ${{ inputs.samples || '2000' }}
 
   # Mutation testing: cargo-mutants over lann-webcrypto-core and lann-webcrypto-wasmtime, oracle =
-  # their unit tests + both conformance suites through the wasmtime adapter's
+  # their unit tests + both conformance suites through the ct driver's
   # env-gated oracle test. A missed mutant fails the job: it is a change to
   # the crypto that no suite distinguishes — exactly the assertion-strength
   # gap the lockfiles cannot pin (they pin the case inventory, not what the
@@ -90,6 +99,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        run: |
+          git clone https://github.com/lann/component-test ../component-test
+          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install

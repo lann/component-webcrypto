@@ -1,7 +1,7 @@
 // The RSA-OAEP negative-composition probe world: the minimal consumer of
 // `rsa-oaep-decrypt`, which the in-guest provider deliberately does not
 // export (class D — see rust/guest-provider/README.md). The class-D gate
-// (`just conformance::class-d`) builds a dummy component of this world and
+// (`just conformance-ct::class-d`) builds a dummy component of this world and
 // asserts it does NOT compose with the provider.
 //
 // The signing guest cannot prove this: its composition already fails on

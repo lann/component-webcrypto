@@ -267,7 +267,7 @@ Three categories, and only these three, qualify the promise:
   timing-channel classes forbids an implementation from serving it). The
   gates and their exit conditions are listed under "Stability gates";
   which implementation serves which gated feature is declared in
-  `conformance/targets.toml`. A consumer reaches non-uniform surface only
+  `conformance/driver-ct/targets.toml`. A consumer reaches non-uniform surface only
   by naming the gate.
 - **Structural absence** fails at composition time: an implementation may
   withhold an entire interface for cause (the timing-channel policy

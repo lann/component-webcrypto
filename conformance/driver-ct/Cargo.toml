@@ -1,0 +1,17 @@
+[package]
+name = "conformance-driver-ct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "component-test host-embed driver for the ported conformance suite: wasmtime-impl (RustCrypto) as the SUT, component-test-runner as the harness."
+
+[[bin]]
+name = "ct-driver"
+path = "src/main.rs"
+
+[dependencies]
+component-test-runner = { path = "../../../component-test/crates/component-test-runner" }
+lann-webcrypto-wasmtime = { path = "../../rust/wasmtime" }
+wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "runtime"] }
+wasmtime-wasi = "47"
+anyhow = "1"

@@ -1,14 +1,14 @@
 # Configuration for the weekly mutation run (`just mutants`; scheduled in
 # .github/workflows/timing-lab.yml). Mutated packages are named by the
 # recipe; the test oracle is the unit tests of the mutated crates plus the
-# conformance suites driven through the wasmtime adapter (its env-gated
-# `oracle` test), so a mutant survives only if neither the unit tests nor
-# the cross-implementation cases distinguish it.
+# conformance suites driven through the component-test driver (its
+# env-gated `oracle` test), so a mutant survives only if neither the unit
+# tests nor the cross-implementation cases distinguish it.
 
 test_package = [
     "lann-webcrypto-core",
     "lann-webcrypto-wasmtime",
-    "conformance-adapter-wasmtime",
+    "conformance-driver-ct",
 ]
 
 # Redacting `Debug` impls have their own dedicated tests

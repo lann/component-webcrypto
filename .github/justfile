@@ -12,7 +12,13 @@ rust-checks:
     @just gha::_step clippy
     @just gha::_step test
     @just gha::_step demo::test-composed
-    @just gha::_step conformance::run
+
+# Everything the conformance CI job runs: the cross-implementation
+# conformance matrix (component-test stack, all four targets including
+# jco-browser) and the committed-matrix check.
+conformance-checks:
+    @just gha::_step conformance-ct::all
+    @just gha::_step conformance-ct::matrix-check
 
 # Everything the jco CI job runs. The three WPT parity engines run in
 # parallel over one shared artifact build (wpt::_parity-gates).
@@ -85,26 +91,19 @@ timing-lab-scheduled:
     fi
     exit $status
 
-# Assemble the Pages site in target/conformance-site: the conformance
-# results viewer, the browser WPT parity page, the public crates' API docs,
-# and the landing page linking them (used by the pages workflow; assumes a
-# conformance run already produced results/matrix.json and the transpiled
-# guests, and `wpt::web-artifacts` already produced the WPT page's
-# artifacts). Each page's subtree mirrors the repository layout, which the
-# pages' relative URLs and the transpiled components' relative imports both
-# rely on.
+# Assemble the Pages site in target/conformance-site: the browser WPT
+# parity page, the public crates' API docs, and the landing page linking
+# them (used by the pages workflow; assumes `wpt::web-artifacts` already
+# produced the WPT page's artifacts). The incumbent conformance results
+# viewer was retired with the old harness at the M1.6 cutover (the
+# component-test matrix is a committed markdown artifact,
+# conformance/driver-ct/matrix.md). Each page's subtree mirrors the
+# repository layout, which the pages' relative URLs and the transpiled
+# components' relative imports both rely on.
 pages-site:
     just rust-docs
     rm -rf target/conformance-site
-    mkdir -p target/conformance-site/conformance/results \
-        target/conformance-site/conformance/adapters/jco \
-        target/conformance-site/js/jco
-    cp -r conformance/web target/conformance-site/conformance/web
-    rm target/conformance-site/conformance/web/serve.mjs
-    cp conformance/results/matrix.json target/conformance-site/conformance/results/
-    cp -r conformance/adapters/jco/generated \
-        conformance/adapters/jco/generated-signing \
-        target/conformance-site/conformance/adapters/jco/
+    mkdir -p target/conformance-site/js/jco
     cp js/jco/webcrypto.js target/conformance-site/js/jco/
     mkdir -p target/conformance-site/js/componentize/wpt/build \
         target/conformance-site/js/componentize/wpt/parity

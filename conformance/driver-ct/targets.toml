@@ -1,0 +1,35 @@
+version = "0.1"
+
+[features.sha1-checked]
+kind = "gated"
+[features.ecdsa-sign]
+kind = "structural"
+
+[targets.wasmtime-rustcrypto]
+missing-features = []
+
+[targets.composed]
+# The shared suite plugged with the in-guest RustCrypto provider
+# (rust/guest-provider), run under the generic component-test host
+# runner. The provider serves every gated feature the shared suite
+# exercises (sha1-checked); its one deliberate gap is `ecdsa-sign`
+# (class D — see rust/guest-provider/README.md), which nothing in this
+# suite is tagged with (the exclusion is structural: the signing suite's
+# world imports the interface, so it cannot even link composed —
+# `just class-d` asserts the absent export, so this line cannot outlive
+# the fact it records).
+missing-features = ["ecdsa-sign"]
+
+[targets.jco-node]
+missing-features = ["sha1-checked"]
+
+[targets.jco-browser]
+# The same host module as jco-node, in headless Chromium. Like jco-node it
+# cannot serve `sha1-checked`. The browser also fails the gated RSA
+# private-key mints closed (see targets-signing.toml; nothing in this
+# suite is tagged with them).
+missing-features = ["sha1-checked"]
+# Gates in CI (the Actions runner ships Chrome); locally it needs a
+# Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
+optional = true

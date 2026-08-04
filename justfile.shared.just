@@ -14,7 +14,6 @@ root := `git rev-parse --show-toplevel`
 # opt-in variable is set to 1.
 firefox-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('WPT_PARITY_FIREFOX', '') == '1' { '1' } else { '' }
 chromium-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('WPT_PARITY_CHROMIUM', '') == '1' { '1' } else { '' }
-conformance-browser-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('CONFORMANCE_BROWSER', '') == '1' { '1' } else { '' }
 
 # Build the crypto-demo guest component into examples/crypto-demo/build/.
 # The output is renamed into place: `wasm-tools component new -o` truncates

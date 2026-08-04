@@ -10,14 +10,26 @@ permissions:
   contents: read
 
 jobs:
-  # Native Rust checks: formatting, lints, WIT validation, and the
-  # guest-under-Wasmtime integration test.
+  # Native Rust checks: formatting, lints, WIT validation, the
+  # guest-under-Wasmtime integration test, and the composed demo.
   rust-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
+        run: |
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and rustfmt/clippy components are
@@ -30,6 +42,85 @@ jobs:
           shared-key: rust-checks
           cache-all-crates: true
 
+      - name: Install dependencies
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SKIP_NODE: "1"
+
+      # The whole job body lives in the justfile (`rust-checks`): formatting,
+      # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
+      # integration test), and the composed fully in-guest demo. The
+      # justfile's `_step` wrapper emits ::group::/::error:: annotations per
+      # recipe.
+      - name: Run rust checks
+        run: just gha::rust-checks
+
+  # The cross-implementation conformance matrix (component-test stack):
+  # both suites across all four targets — wasmtime-rustcrypto, composed,
+  # jco-node, and jco-browser (headless Chromium) — plus the aggregates
+  # and the committed-matrix check.
+  conformance:
+    runs-on: ubuntu-latest
+    # Warm runs take a few minutes, but a full cache bootstrap (dependency
+    # cache + component-test tools + the artifact cache, all cold) needs
+    # ~20; a timeout kill skips the cache-save post steps, so too small a
+    # budget here can never bootstrap.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # See the rust-checks job's twin step.
+        run: |
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache conformance artifacts
+        # The exact products of conformance-ct::build/build-provider (the
+        # suite + provider wasms and the ct-driver binary), keyed on the
+        # sources that produce them. rust-cache deliberately excludes
+        # workspace-crate artifacts, so without this every run repays the
+        # guest builds (rkyv corpus generation) and the wasmtime-embedding
+        # driver link (~2 min) even with a warm dependency cache. On a hit
+        # the recipes skip cargo entirely (CONFORMANCE_PREBUILT below) and
+        # the dependency cache restore is skipped too.
+        id: ct-artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/wasm32-wasip2/release/conformance_guest_ct.wasm
+            target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm
+            target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm
+            target/release/ct-driver
+          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'conformance/**', 'rust/**', 'wit/**', '.component-test-rev') }}
+
+      - name: Cache cargo
+        if: steps.ct-artifacts.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: conformance
+          cache-all-crates: true
+
+      - name: Cache component-test tools
+        # The prebuilt component-test CLI + generic runner binaries
+        # (conformance-ct::_ct-tools populates bin/ and reuses it when it
+        # matches the sibling's HEAD). Caching the binaries rather than
+        # the sibling's target dir skips cargo entirely on a hit — a
+        # fresh clone's mtimes otherwise force ~2 min of rebuild/relink
+        # even with a cached target. The binaries are a pure function of
+        # the pinned rev and the toolchain, so the key never needs
+        # invalidating beyond those.
+        uses: actions/cache@v4
+        with:
+          path: .component-test/bin
+          key: component-test-bin-v2-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
+
       - name: Install Node 24
         uses: actions/setup-node@v4
         with:
@@ -40,13 +131,39 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      # The whole job body lives in the justfile (`rust-checks`): formatting,
-      # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
-      # integration test), the composed fully in-guest demo, and the
-      # cross-implementation conformance suite. The justfile's `_step` wrapper
-      # emits ::group::/::error:: annotations per recipe.
-      - name: Run rust checks
-        run: just gha::rust-checks
+      - name: Cache Playwright browsers
+        # For the jco-browser conformance target (it gates in CI —
+        # GITHUB_ACTIONS enables it in conformance/driver-ct/justfile).
+        # The driver prefers the runner image's system Chrome; the
+        # Playwright Chromium below is the fallback that keeps the leg
+        # working if the image stops shipping one. Same caching scheme as
+        # the jco job's browser cache, keyed on the driver package's
+        # lockfile (which pins playwright-core and with it the browser
+        # builds).
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-conformance-${{ runner.os }}-${{ hashFiles('conformance/driver-ct/jco/package-lock.json') }}
+          restore-keys: playwright-conformance-${{ runner.os }}-
+
+      - name: Install Playwright Chromium
+        # On a cache hit the install only verifies the browser is present;
+        # --with-deps (an apt run) is needed only when it was actually
+        # (re)downloaded.
+        run: |
+          cd conformance/driver-ct/jco
+          npm ci --no-audit --no-fund
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright-core install chromium
+          else
+            npx playwright-core install --with-deps chromium
+          fi
+
+      - name: Run the conformance matrix
+        run: just gha::conformance-checks
+        env:
+          CONFORMANCE_PREBUILT: ${{ steps.ct-artifacts.outputs.cache-hit == 'true' && '1' || '' }}
 
   # The webcrypto-componentize JS guest library's gates: the composed demo
   # (the JS guest's checks against the in-guest provider, including the
@@ -62,6 +179,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
+        run: |
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -89,6 +218,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
+        run: |
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -152,6 +293,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+
       - name: Install Node 24
         uses: actions/setup-node@v4
         with:
@@ -188,6 +330,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
 
       - name: Install Node 24
         uses: actions/setup-node@v4

@@ -1,6 +1,5 @@
-// Shared Playwright page driver for the repository's browser gates: the
-// jco browser conformance adapter (conformance/adapters/jco/src/
-// run-browser.mjs) and the WPT parity browser adapter (js/componentize/
+// Shared Playwright page driver for the repository's browser gates,
+// today the WPT parity browser adapter (js/componentize/
 // wpt/parity/run-browser.mjs). It serves the repository root over
 // localhost with a caller-supplied harness page at "/", runs that page in
 // a headless Playwright engine, and resolves with whatever the page

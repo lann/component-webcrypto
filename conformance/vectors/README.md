@@ -183,9 +183,9 @@ Wycheproof describes the *algorithms*; the `lann:webcrypto` WIT is
 deliberately stricter in places, so vector expectations are translated into
 the package's contract before execution. This mapping is versioned
 conformance policy; change it deliberately and in review. The authoritative
-encoding is `conformance/guest/src/translate.rs` (and
-`conformance/signing-guest/src/rsa_sign.rs` for the sig-gen files, plus
-`conformance/signing-guest/src/rsa_oaep.rs` for the RSA-OAEP files, which
+encoding is `conformance/guest-ct/src/translate.rs` (and
+`conformance/signing-guest-ct/src/rsa_sign.rs` for the sig-gen files, plus
+`conformance/signing-guest-ct/src/rsa_oaep.rs` for the RSA-OAEP files, which
 only the host-only signing suite can run); in summary:
 
 | Vector property | Our expectation |
@@ -205,7 +205,7 @@ only the host-only signing suite can run); in summary:
 | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
 | ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |
 | ed25519-speccheck, every other case | rejected at import (`invalid-key`) or verification (`authentication-failed`), per the `ed25519-verify` criterion; where the rejection lands is implementation-defined. |
-| Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing guest (`conformance/signing-guest` — the shared guest cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
+| Ed25519 / ECDSA-P1363, `invalid` | `verify(sig)` fails `authentication-failed` — including malformed and wrong-length signatures; rejection deliberately carries no detail. Signing is covered by probes: Ed25519 round trips in the shared guest, ECDSA in the host-only signing suite (`conformance/signing-guest-ct` — the shared suite cannot import `ecdsa-sign` because the in-guest provider it composes with does not export it). |
 | RSASSA-PKCS1-v1_5 / RSA-PSS, `valid` | import succeeds and `verify(sig)` succeeds. Each valid vector translates **twice** — once importing the group key via SPKI (`tc<id>-spki`), once via the RSA public JWK (`tc<id>-jwk`: the group's own JWK where the file carries one, else a minimal `{kty, n, e}` built from the group's modulus and exponent) — so both import paths carry vector coverage. |
 | RSASSA-PKCS1-v1_5 / RSA-PSS, `invalid` | import succeeds (the same group key, via SPKI only — the rejection under test is the verifier's, not the import path's); `verify(sig)` fails `authentication-failed`. |
 | RSASSA-PKCS1-v1_5, `acceptable` (the `MissingNull` BER-laxity vectors) | `verify(sig)` fails `authentication-failed`: the WIT pins strict verification — the EMSA-PKCS1-v1_5 encoding is compared byte-exact — so upstream's lax-verifier allowances are uniform rejections here. Any target accepting one is a portability finding, not a case to exclude. |

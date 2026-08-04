@@ -14,8 +14,8 @@
 //
 // Module paths resolve relative to this file, so the page works from any
 // base path; the transpiled runner resolves its own relative imports the
-// same way, so the serving tree must mirror the repository layout (like
-// the conformance viewer — see conformance/web/harness.mjs).
+// same way, so the serving tree must mirror the repository layout
+// (scripts/serve-repo-root.mjs and the Pages site both do).
 
 import { GROUPS } from "../groups.js";
 

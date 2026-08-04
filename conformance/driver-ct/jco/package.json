@@ -1,0 +1,17 @@
+{
+  "name": "conformance-driver-ct-jco",
+  "private": true,
+  "type": "module",
+  "description": "jco drivers (Node + headless browser) for the ported conformance suites: transpiles conformance-guest-ct and conformance-signing-guest-ct against the browser-first host (js/jco/webcrypto.js) plus a JS test-context provider, and runs them with mark scheduling under Node (runner.mjs) or headless Chromium (run-browser.mjs).",
+  "scripts": {
+    "transpile": "node ../../../scripts/jco-transpile.mjs transpile ../../../target/wasm32-wasip2/release/conformance_guest_ct.wasm --name conformance-guest-ct --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../js/jco/webcrypto.js#*' --map 'lann:component-test/test-context@0.1.0=../../context.js' --map 'wasi:cli/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/cli.js#*' --map 'wasi:clocks/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/clocks.js#*' --map 'wasi:io/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/io.js#*' --map 'wasi:random/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/random.js#*' --map 'wasi:filesystem/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/filesystem.js#*' -o generated",
+    "transpile:signing": "node ../../../scripts/jco-transpile.mjs transpile ../../../target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm --name conformance-signing-guest-ct --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../js/jco/webcrypto.js#*' --map 'lann:component-test/test-context@0.1.0=../../context.js' --map 'wasi:cli/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/cli.js#*' --map 'wasi:clocks/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/clocks.js#*' --map 'wasi:io/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/io.js#*' --map 'wasi:random/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/random.js#*' --map 'wasi:filesystem/*=../node_modules/@bytecodealliance/preview2-shim/lib/browser/filesystem.js#*' -o generated",
+    "run": "node --experimental-wasm-jspi runner.mjs",
+    "run:browser": "node run-browser.mjs"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco-transpile": "^0.5.2",
+    "@bytecodealliance/preview2-shim": "^0.17.4",
+    "playwright-core": "^1.61.1"
+  }
+}
