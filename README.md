@@ -60,12 +60,18 @@ algorithm:
   would be a recorded ruling, not an accident (the set is currently empty);
   see AGENTS.md, "WPT fidelity is a first-class design constraint".
 
-Current algorithms: **SHA-2 digests**, **HMAC-SHA-2**, **AES-GCM** (the
-full SP 800-38D parameter space),
-**HKDF** and **PBKDF2** (minting `derive-input`s the
-key-minting interfaces consume), and **Ed25519** and **ECDSA** (P-256/SHA-256,
-P-384/SHA-384; the in-guest provider serves ECDSA *verification only* —
-signing is class D). The
+Current algorithms: **SHA-2** digests, **HMAC** (SHA-2 and SHA-1),
+**AES-GCM**, **AES-CBC** and **AES-CTR**, **AES-KW** key wrapping,
+**HKDF** and **PBKDF2** (minting `derive-input`s the key-minting
+interfaces consume), **X25519** and **ECDH** key agreement, **Ed25519**,
+**ECDSA** (P-256 and P-384, each with SHA-256/384/512),
+**RSASSA-PKCS1-v1_5** and **RSA-PSS**, and **RSA-OAEP**. Three surfaces
+are gated `@unstable` (see [`wit/README.md`](wit/README.md), "Stability
+gates"): the collision-detecting `sha1-checked` digest, RSA signing
+(`rsa-sign`), and RSA-OAEP decryption (`rsa-oaep-decrypt`). The in-guest
+provider withholds the timing-unsafe operations — ECDSA and RSA signing,
+both RSA-OAEP halves — while signature *verification* is served
+everywhere (see rust/guest-provider/README.md). The
 AEAD wire format is `ciphertext ‖ tag` (`crypto.subtle`'s, which
 RustCrypto produces identically). The variant enums also declare cases no
 implementation here serves (`aes192`, the truncated SHA-2 variants) — each
@@ -123,6 +129,9 @@ conformance/            # cross-implementation conformance tests: vendored
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
+experiments/            # quarantined exploratory consumers of the package
+                        #   (own workspace, no CI, no stability,
+                        #   delete-at-will — see experiments/README.md)
 ```
 
 Components that name the package in their own WIT pull it in through

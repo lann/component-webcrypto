@@ -25,11 +25,14 @@ rather than relying on a cached summary.
 
 ```
 wit/                    # the lann:webcrypto package, one file per layer:
-                        #   webcrypto.wit holds the stable layer (structural
-                        #   types, the generic primitive kinds);
-                        #   family files (aes/sha2/hmac/ed25519/
-                        #   ecdsa.wit) hold the minting interfaces and grow
-                        #   as algorithms are added
+                        #   webcrypto.wit holds the structural types and
+                        #   the founding generic primitive kinds; later
+                        #   generic kinds live in their own files
+                        #   (agreement/derivation/encryption/wrapping.wit);
+                        #   family files (aes.wit, rsa.wit, …) hold the
+                        #   minting interfaces plus any family-shared
+                        #   parameterization interface, and grow as
+                        #   algorithms are added
 rust/                   # the Rust library surface (directory = crate name
                         # minus the `lann-webcrypto-` family root)
   core/                 # lann-webcrypto-core: the shared RustCrypto core of
@@ -71,11 +74,11 @@ js/                     # the JS library surface (directory = npm name minus
                         #   cannot reach
   componentize/         # @lann/webcrypto-componentize: JS guest library for
                         #   componentize-js (dicej's ComponentizeJS reboot):
-                        #   webcrypto.js exposes a crypto.subtle subset
-                        #   (HMAC-SHA-256, AES-256-GCM, the derive model:
-                        #   HKDF/PBKDF2/X25519 with deriveBits/deriveKey;
-                        #   raw and jwk keys) over the lann:webcrypto
-                        #   imports; the toolchain revision is pinned in
+                        #   webcrypto.js exposes a crypto.subtle subset over
+                        #   the lann:webcrypto imports — its header is the
+                        #   registry of the served algorithm/format sets
+                        #   (SERVED_ALGORITHMS) and of every deviation; the
+                        #   toolchain revision is pinned in
                         #   componentize-js.rev; interface-check.js asserts
                         #   the exported subset against the SubtleCrypto and
                         #   CryptoKey definitions TypeScript ships
@@ -118,6 +121,9 @@ conformance/            # cross-implementation conformance tests — see
                         #     pinned by its tests.lock)
   signing-guest/        #   host-only guest for surfaces the in-guest
                         #     provider does not export (ecdsa-sign)
+  class-d/              #   the class-D gate's negative-composition probe
+                        #     worlds: dedicated dummy consumers of withheld
+                        #     minting interfaces (see conformance/README.md)
   adapters/             #   per-target drivers: wasmtime, composed-driver (for
                         #     the composed target), jco (Node gates everywhere;
                         #     the browser target gates in CI, locally opt-in
@@ -137,6 +143,10 @@ conformance/            # cross-implementation conformance tests — see
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
+experiments/            # quarantined exploratory consumers of the package:
+                        #   own Cargo workspace, wired into no justfile or
+                        #   CI, no stability — delete-at-will (see
+                        #   experiments/README.md)
 scripts/setup.sh        # one-shot dependency setup (idempotent; used by CI)
 ```
 
