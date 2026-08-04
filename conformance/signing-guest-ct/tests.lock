@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_signing_guest_ct"
-artifact_sha256 = "87e87364ebaeb3c497c8215b95ff145e810892073a80c999b66eaecda6a69e1b"
+artifact_sha256 = "733881a382111c87a609a96a9dcfb19658f165f22e4f92d99860de2659739cf5"
 
 [[case]]
 name = "probe/ecdsa-cross-hash-sign-roundtrip"

@@ -329,11 +329,22 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "component-test-core",
+ "component-test-results",
  "serde",
  "serde_json",
  "sha2",
  "toml",
  "wasmparser 0.243.0",
+]
+
+[[package]]
+name = "component-test-results"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "component-test-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

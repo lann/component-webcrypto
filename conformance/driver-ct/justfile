@@ -126,6 +126,7 @@ run-composed: build build-provider _ct-tools
     mkdir -p results
     wac plug {{guest}} --plug {{provider}} -o {{composed}}
     {{ct-runner}} {{composed}} --jobs 8 --jsonl \
+        --suite-artifact {{guest}} \
         --missing ecdsa-sign --target composed > results/composed.jsonl
 
 # The jco-browser target: the same transpiles and the same host module,
