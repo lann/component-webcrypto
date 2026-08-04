@@ -156,19 +156,32 @@ behavior specific to the algorithm needs a hand-written probe. An algorithm
 the in-guest provider deliberately does not export lives in the signing
 suite — that is absence, not failure.
 
-## Results-schema tolerance
+## Results-schema tolerance (ratification pending #302)
 
 The component-test *schema* tolerates unknown result statuses on the
 wire (its additive-evolution policy: a future component-test status
 arrives without a format break) and the aggregate reports them as
-warnings. This looked like a tolerance change against the incumbent
-runner, which treated unknown outcomes as hard failures, and was
-originally flagged here for sign-off. It is not one in effect: the
-fold diverts an unknown-status row out of the parsed results, so the
-case is then *missing* from coverage, and the aggregate's coverage
-check — which this harness always runs with a full-census lockfile —
-fails the run. An unknown status therefore surfaces as a warning
-naming the case and status plus a coverage error, and cannot pass
-silently. Gating parity with the incumbent holds; ratified on that
-basis (upstream's fold/aggregate tests pin the diversion-plus-coverage
-behavior).
+warnings; the incumbent runner treated unknown outcomes as hard
+failures. What actually gates an unknown status here depends on which
+kind of lockfile entry the case falls under:
+
+- **Exact `[[case]]` entries** (the ~59 probe/decline cases): the fold
+  diverts an unknown-status row out of the parsed results, the case is
+  then missing from coverage, and the aggregate fails the run. Cannot
+  pass silently.
+- **`[[generated]]` rows** (~99.7% of the corpus): the coverage check
+  imposes no lower bound on generated leaves, so the diversion leaves
+  only a warning naming the case and status — the aggregate exits 0.
+  Detection falls to the committed matrix's per-row *counts*
+  (`matrix-check`, CI-only), which a same-count substitution would not
+  catch.
+
+An earlier revision of this section ratified the tolerance on the
+first mechanism alone, wrongly generalized to the whole corpus; #303
+records the correction. Practical exposure today is low — every
+status this harness aggregates comes from pinned code paths (ct-driver,
+ct-runner, the committed jco harness) — but the tolerance must not be
+relied on if a foreign runner's stream is ever aggregated. Ratification
+is deferred until #302 restores a real per-case bound for generated
+rows, at which point the first mechanism's guarantee extends to the
+full census.
