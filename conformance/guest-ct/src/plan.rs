@@ -264,6 +264,24 @@ pub const ROWS: &[Row] = &[
     },
 ];
 
+/// Generator rows added after the M1.6 cutover. `ROWS` is frozen with
+/// the incumbent census fixture; every later row lands here instead,
+/// pinned per-case by `census-postcutover.lock` (see `census_test`:
+/// the fixture regenerates via the `#[ignore]`d regen test, and its
+/// diff is the review surface, like a lockfile's). A new `#[case_row]`
+/// prefix that lands in neither table fails the lockfile-partition
+/// test.
+pub const POST_CUTOVER_ROWS: &[Row] = &[
+    Row {
+        prefix: "ecdsa-p256-sha512/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "ecdsa-p384-sha512/wycheproof",
+        tags: NO_TAGS,
+    },
+];
+
 /// The planned cases under one row's prefix.
 pub fn cases_under(prefix: &str) -> Vec<PlanCase> {
     let head = format!("{prefix}/");

@@ -144,7 +144,13 @@ re-fetched and diffed against its source.
 Adding an algorithm interface to the package is not done until its vector
 cases are here: vendor the vectors, extend the translation policy in
 `vectors/README.md` + `guest-ct/src/translate.rs` (they must agree), add
-the algorithm's `#[case_row]` registration in `guest-ct/src/lib.rs`, tag
+the algorithm's `#[case_row]` registration in `guest-ct/src/lib.rs`, its
+row in `guest-ct/src/plan.rs` — post-cutover rows go in
+`plan::POST_CUTOVER_ROWS`, whose per-case population is pinned by the
+growing `census-postcutover.lock` fixture (regenerate with the
+`regen_post_cutover_census` test and commit the diff; the lockfile's
+`[[generated]]` entries pin prefixes only, lann/component-test#49, and
+the census tests fail a registered prefix with no fixture home) — tag
 the new cases with a feature name if any target legitimately cannot serve
 them (declaring it missing in `driver-ct/targets.toml` for those targets,
 and adding the feature's `!feature` decline case), and run
