@@ -77,7 +77,27 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
+      - name: Cache conformance artifacts
+        # The exact products of conformance-ct::build/build-provider (the
+        # suite + provider wasms and the ct-driver binary), keyed on the
+        # sources that produce them. rust-cache deliberately excludes
+        # workspace-crate artifacts, so without this every run repays the
+        # guest builds (rkyv corpus generation) and the wasmtime-embedding
+        # driver link (~2 min) even with a warm dependency cache. On a hit
+        # the recipes skip cargo entirely (CONFORMANCE_PREBUILT below) and
+        # the dependency cache restore is skipped too.
+        id: ct-artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/wasm32-wasip2/release/conformance_guest_ct.wasm
+            target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm
+            target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm
+            target/release/ct-driver
+          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'conformance/**', 'rust/**', 'wit/**', '.component-test-rev') }}
+
       - name: Cache cargo
+        if: steps.ct-artifacts.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: conformance
@@ -138,6 +158,8 @@ jobs:
 
       - name: Run the conformance matrix
         run: just gha::conformance-checks
+        env:
+          CONFORMANCE_PREBUILT: ${{ steps.ct-artifacts.outputs.cache-hit == 'true' && '1' || '' }}
 
   # The webcrypto-componentize JS guest library's gates: the composed demo
   # (the JS guest's checks against the in-guest provider, including the

@@ -26,7 +26,17 @@ composed := root + "/target/conformance-composed-ct.wasm"
 conformance-browser-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('CONFORMANCE_BROWSER', '') == '1' { '1' } else { '' }
 
 # Build both suite components (rkyv corpus) and the host driver.
+# CONFORMANCE_PREBUILT=1 skips cargo when the artifacts are already
+# present — set by CI on an exact-source-hash cache hit (see the
+# conformance job's "Cache conformance artifacts" step), never locally.
 build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${CONFORMANCE_PREBUILT:-}" = "1" ] && [ -f "{{guest}}" ] && [ -f "{{signing}}" ] \
+        && [ -x "{{root}}/target/release/ct-driver" ]; then
+        echo "conformance suite/driver artifacts are prebuilt (CONFORMANCE_PREBUILT=1); skipping cargo"
+        exit 0
+    fi
     cargo build --manifest-path {{root}}/Cargo.toml --target wasm32-wasip2 --release \
         -p conformance-guest-ct -p conformance-signing-guest-ct \
         --features conformance-guest-ct/rkyv-corpus
@@ -87,8 +97,14 @@ run-jco: build
         > ../results/jco-node-signing.jsonl
 
 # Build the in-guest RustCrypto provider (composed target SUT; also the
-# class-D gate's plug).
+# class-D gate's plug). Prebuilt-skip as for `build`.
 build-provider:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${CONFORMANCE_PREBUILT:-}" = "1" ] && [ -f "{{provider}}" ]; then
+        echo "the in-guest provider artifact is prebuilt (CONFORMANCE_PREBUILT=1); skipping cargo"
+        exit 0
+    fi
     cargo build --manifest-path {{root}}/Cargo.toml --release \
         -p lann-webcrypto-guest-provider --target wasm32-wasip2
 
