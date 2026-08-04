@@ -35,9 +35,9 @@ signing-guest-ct/  # the signing suite: cases for the private-key minting
                    #   tests.lock
 class-d/           # the class-D gate's dedicated probe worlds (no Rust:
                    #   `wasm-tools component embed --dummy` builds them):
-                   #   oaep-probe/ imports only rsa-oaep-decrypt, proving
-                   #   the provider's kind-only public-encryption export
-                   #   keeps the decryption mints uncomposable
+                   #   one world per withheld minting interface, each
+                   #   importing only its own, proving the provider's
+                   #   generic-kind exports keep those mints uncomposable
 driver-ct/         # the host driver (ct-driver: wasmtime + RustCrypto as
                    #   the SUT, component-test-runner as the harness), the
                    #   jco/Node runner (jco/), targets.toml (target
@@ -116,6 +116,11 @@ the lockfiles, runs the targets, and aggregates:
   `all`) holds that declaration to the truth: it asserts the signing suite
   does not compose with the in-guest provider, so the provider cannot
   start exporting `ecdsa-sign` while the manifest still says it does not.
+  The same gate asserts every other withheld minting interface with a
+  dedicated minimal probe world (`class-d/*/wit`, one per interface): the
+  signing suite's composition already fails on `ecdsa-sign`, so only a
+  component importing *nothing withheld but* interface X can prove X
+  stays unserved.
 
 Each target writes JSONL results (`driver-ct/results/`); the aggregation
 step (`component-test aggregate`) validates every results file against the

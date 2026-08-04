@@ -1,0 +1,21 @@
+// The RSA-PSS signing negative-composition probe world: the minimal
+// consumer of `rsa-pss-sign`, which the in-guest provider deliberately
+// does not export (class D — see rust/guest-provider/README.md). The
+// class-D gate (`just conformance::class-d`) builds a dummy component of
+// this world and asserts it does NOT compose with the provider.
+//
+// The signing guest cannot prove this: its composition already fails on
+// `ecdsa-sign`. This world imports nothing the provider withholds except
+// `rsa-pss-sign` itself, so its composition failure can only come from
+// that interface — the provider's `signature` export rebinds the key
+// resources and orphans the import (the mechanism is documented on
+// `../oaep-probe/wit/world.wit` and in the `class-d` recipe).
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/lann-webcrypto` symlink.
+package conformance:class-d-pss-sign-probe;
+
+world pss-sign-probe {
+    @unstable(feature = rsa-sign)
+    import lann:webcrypto/rsa-pss-sign@0.1.0;
+}
