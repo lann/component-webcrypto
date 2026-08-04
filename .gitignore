@@ -1,6 +1,10 @@
 # Rust
 target/
 
+# CI's in-workspace clone of the component-test path dependency
+# (symlinked to the sibling location; see .github/workflows/ci.yml)
+.component-test/
+
 # Node
 node_modules/
 

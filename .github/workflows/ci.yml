@@ -27,9 +27,12 @@ jobs:
         # lann/component-test (see conformance/driver-ct/justfile).
         # Pinned via .component-test-rev (bump deliberately; the sibling
         # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
         run: |
-          git clone https://github.com/lann/component-test ../component-test
-          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and rustfmt/clippy components are
@@ -50,7 +53,7 @@ jobs:
         # needs invalidating beyond those.
         uses: actions/cache@v4
         with:
-          path: ../component-test/target
+          path: .component-test/target
           key: component-test-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
 
       - name: Install Node 24
@@ -122,9 +125,12 @@ jobs:
         # lann/component-test (see conformance/driver-ct/justfile).
         # Pinned via .component-test-rev (bump deliberately; the sibling
         # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
         run: |
-          git clone https://github.com/lann/component-test ../component-test
-          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -158,9 +164,12 @@ jobs:
         # lann/component-test (see conformance/driver-ct/justfile).
         # Pinned via .component-test-rev (bump deliberately; the sibling
         # path dependency makes this repo's builds track that rev).
+        # The clone lives *inside* the workspace (actions/cache cannot
+        # save paths outside it) with a symlink providing the sibling path.
         run: |
-          git clone https://github.com/lann/component-test ../component-test
-          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
