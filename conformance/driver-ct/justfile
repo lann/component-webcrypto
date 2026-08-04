@@ -156,31 +156,20 @@ _run-browser-if-enabled:
         echo "skipping the jco-browser conformance target (opt in with CONFORMANCE_BROWSER=1; needs Chrome/Chromium 137+)"
     fi
 
-# The lockfile the aggregates bind against: generated fresh from the
-# just-built suite artifacts, because rustc embeds absolute source
-# paths in the wasm, so a source-identical build hashes differently
-# per checkout location and the *committed* lockfiles' hashes only
-# match the machine that generated them (lann/component-test#44).
-# Inventory drift against the committed lockfiles is still enforced by
-# lock-check (which compares cases and tags, not the hash); this keeps
-# the aggregate's binding check meaningful — results really did come
-# from the inventory being aggregated — without demanding reproducible
-# builds.
-_lock-for-aggregate: build _ct-tools
-    mkdir -p results
-    {{ct}} lock {{guest}} -o results/tests.lock
-    {{ct}} lock {{signing}} -o results/tests-signing.lock
-
 # Aggregate all targets into the matrix; exits nonzero on any failure
-# or validation error. The optional jco-browser results are included
+# or validation error. Binds against the COMMITTED lockfiles: upstream
+# ruled (lann/component-test#44) that artifact hashes are provenance,
+# never a cross-environment gate, so the committed inventory — whose
+# diff is the review surface — is what results aggregate against; no
+# fresh-lock indirection. The optional jco-browser results are included
 # when present (their absence is a declared warning, not an error).
-aggregate: _lock-for-aggregate
+aggregate: _ct-tools
     #!/usr/bin/env bash
     set -euo pipefail
     browser=()
     [ -f results/jco-browser.jsonl ] && browser=(--results jco-browser=results/jco-browser.jsonl)
     {{ct}} aggregate \
-        --lock results/tests.lock \
+        --lock ../guest-ct/tests.lock \
         --manifest targets.toml \
         --results wasmtime-rustcrypto=results/wasmtime-rustcrypto.jsonl \
         --results composed=results/composed.jsonl \
@@ -189,13 +178,13 @@ aggregate: _lock-for-aggregate
         -o results/matrix.md
 
 # The signing suite (host-only: wasmtime, jco-node, and jco-browser).
-aggregate-signing: _lock-for-aggregate
+aggregate-signing: _ct-tools
     #!/usr/bin/env bash
     set -euo pipefail
     browser=()
     [ -f results/jco-browser-signing.jsonl ] && browser=(--results jco-browser=results/jco-browser-signing.jsonl)
     {{ct}} aggregate \
-        --lock results/tests-signing.lock \
+        --lock ../signing-guest-ct/tests.lock \
         --manifest targets-signing.toml \
         --results wasmtime-rustcrypto=results/wasmtime-signing.jsonl \
         --results jco-node=results/jco-node-signing.jsonl \
