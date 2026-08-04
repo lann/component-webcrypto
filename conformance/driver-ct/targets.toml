@@ -27,3 +27,16 @@ missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]
 missing-features = ["xchacha20-poly1305", "sha1-checked"]
+
+[targets.jco-browser]
+# The same host module as jco-node, in headless Chromium — whose WebCrypto
+# serves no ChaCha20-Poly1305 yet (the host feature-detects it per call, so
+# no declaration lives in the module and this line follows the browser's
+# capability). The browser also fails the gated RSA private-key mints
+# closed (see targets-signing.toml; nothing in this suite is tagged with
+# them).
+missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"]
+# Gates in CI (the Actions runner ships Chrome); locally it needs a
+# Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
+optional = true

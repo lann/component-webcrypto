@@ -47,11 +47,41 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: Cache Playwright browsers
+        # For the jco-browser conformance target (it gates in CI —
+        # GITHUB_ACTIONS enables it in conformance/driver-ct/justfile).
+        # The driver prefers the runner image's system Chrome; the
+        # Playwright Chromium below is the fallback that keeps the leg
+        # working if the image stops shipping one. Same caching scheme as
+        # the jco job's browser cache, keyed on the driver package's
+        # lockfile (which pins playwright-core and with it the browser
+        # builds).
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-conformance-${{ runner.os }}-${{ hashFiles('conformance/driver-ct/jco/package-lock.json') }}
+          restore-keys: playwright-conformance-${{ runner.os }}-
+
+      - name: Install Playwright Chromium
+        # On a cache hit the install only verifies the browser is present;
+        # --with-deps (an apt run) is needed only when it was actually
+        # (re)downloaded.
+        run: |
+          cd conformance/driver-ct/jco
+          npm ci --no-audit --no-fund
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright-core install chromium
+          else
+            npx playwright-core install --with-deps chromium
+          fi
+
       # The whole job body lives in the justfile (`rust-checks`): formatting,
       # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
       # integration test), the composed fully in-guest demo, and the
       # cross-implementation conformance suite (`just conformance-ct::all`,
-      # the component-test stack). The justfile's `_step` wrapper
+      # the component-test stack, including the jco-browser leg). The
+      # justfile's `_step` wrapper
       # emits ::group::/::error:: annotations per recipe.
       - name: Run rust checks
         run: just gha::rust-checks

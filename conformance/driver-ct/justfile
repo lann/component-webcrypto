@@ -11,6 +11,12 @@ signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wa
 provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
 composed := root + "/target/conformance-composed-ct.wasm"
 
+# CI/opt-in predicate for the optional jco-browser target: non-empty when
+# it should run — always under GitHub Actions (the runner image ships
+# Chrome), locally only with CONFORMANCE_BROWSER=1 (the incumbent's
+# conformance-browser-enabled convention; see justfile.shared.just).
+conformance-browser-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('CONFORMANCE_BROWSER', '') == '1' { '1' } else { '' }
+
 # Build both suite components (rkyv corpus) and the host driver.
 build:
     cargo build --manifest-path {{root}}/Cargo.toml --target wasm32-wasip2 --release \
@@ -73,28 +79,66 @@ run-composed: build build-provider
     {{ct-runner}} {{composed}} --jobs 8 --jsonl \
         --missing ecdsa-sign --target composed > results/composed.jsonl
 
+# The jco-browser target: the same transpiles and the same host module,
+# with the case loop running inside headless Chromium (browser WebCrypto)
+# via the shared page driver (scripts/browser-page-driver.mjs). The
+# --missing declarations mirror targets.toml / targets-signing.toml's
+# jco-browser entries, which the aggregate cross-checks: Chromium's
+# WebCrypto serves no ChaCha20-Poly1305, and the host fails the gated RSA
+# private-key mints closed outside Node (targets-signing.toml).
+run-browser: build
+    mkdir -p results
+    cd jco && npm install --silent && npm run transpile && npm run transpile:signing
+    cd jco && node run-browser.mjs \
+        --missing chacha20-poly1305,xchacha20-poly1305,sha1-checked \
+        --missing-signing rsa-sign,rsa-oaep-decrypt
+
+# run-browser when enabled (CI, or CONFORMANCE_BROWSER=1); a skip note
+# otherwise — targets.toml marks jco-browser optional, so the aggregates
+# warn on its missing results rather than failing.
+_run-browser-if-enabled:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{conformance-browser-enabled}}" ]; then
+        just run-browser
+    else
+        rm -f results/jco-browser.jsonl results/jco-browser-signing.jsonl
+        echo "skipping the jco-browser conformance target (opt in with CONFORMANCE_BROWSER=1; needs Chrome/Chromium 137+)"
+    fi
+
 # Aggregate all targets into the matrix; exits nonzero on any failure
-# or validation error.
+# or validation error. The optional jco-browser results are included
+# when present (their absence is a declared warning, not an error).
 aggregate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    browser=()
+    [ -f results/jco-browser.jsonl ] && browser=(--results jco-browser=results/jco-browser.jsonl)
     {{ct}} aggregate \
         --lock ../guest-ct/tests.lock \
         --manifest targets.toml \
         --results wasmtime-rustcrypto=results/wasmtime-rustcrypto.jsonl \
         --results composed=results/composed.jsonl \
         --results jco-node=results/jco-node.jsonl \
+        ${browser[@]+"${browser[@]}"} \
         -o matrix.md
 
-# The signing suite (host-only: wasmtime and jco-node targets).
+# The signing suite (host-only: wasmtime, jco-node, and jco-browser).
 aggregate-signing:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    browser=()
+    [ -f results/jco-browser-signing.jsonl ] && browser=(--results jco-browser=results/jco-browser-signing.jsonl)
     {{ct}} aggregate \
         --lock ../signing-guest-ct/tests.lock \
         --manifest targets-signing.toml \
         --results wasmtime-rustcrypto=results/wasmtime-signing.jsonl \
         --results jco-node=results/jco-node-signing.jsonl \
+        ${browser[@]+"${browser[@]}"} \
         -o matrix-signing.md
 
 # Everything: build, lock-check, class-D gate, all targets, aggregates.
-all: lock-check class-d run-wasmtime run-composed run-jco aggregate aggregate-signing
+all: lock-check class-d run-wasmtime run-composed run-jco _run-browser-if-enabled aggregate aggregate-signing
 
 # The class-D negative-composition gate (ported from the incumbent
 # harness), in two halves.

@@ -94,12 +94,25 @@ the lockfiles, runs the targets, and aggregates:
 - **wasmtime-rustcrypto** (`run-wasmtime`): ct-driver embeds
   `lann-webcrypto-wasmtime` with every gated interface enabled — the
   full-support target.
+- **composed** (`run-composed`): the suite plugged with the in-guest
+  RustCrypto provider (`wac plug`), run under the generic component-test
+  host runner; missing only the structural `ecdsa-sign` (class D).
 - **jco-node** (`run-jco`): the suite transpiled with jco (JSPI) and driven
   from Node 24+ against `webcrypto-jco`; missing `xchacha20-poly1305` (no
   platform WebCrypto implements XChaCha) and `sha1-checked` (platform SHA-1
   carries no sha1dc collision detection).
-- The **signing suite** runs under the wasmtime target only: its world
-  imports `ecdsa-sign` structurally, which class D keeps out of the
+- **jco-browser** (`run-browser`): the same transpiles and host module with
+  the case loop running in headless Chromium (`driver-ct/jco/harness.mjs`
+  in-page, driven by `run-browser.mjs` over
+  `scripts/browser-page-driver.mjs`); additionally missing
+  `chacha20-poly1305` (Chromium's WebCrypto does not serve it yet) and,
+  for the signing suite, the fail-closed RSA private-key mints
+  (`rsa-sign`, `rsa-oaep-decrypt`). Optional: it gates in CI (the runner
+  image ships Chrome) and runs locally only with `CONFORMANCE_BROWSER=1`;
+  the aggregates warn, not error, when its results are absent.
+- The **signing suite** runs under the host-backed targets
+  (wasmtime-rustcrypto, jco-node, jco-browser) only: its world imports
+  `ecdsa-sign` structurally, which class D keeps out of the
   in-guest provider (see `rust/guest-provider/README.md`). The
   negative-composition gate (`just conformance-ct::class-d`, part of
   `all`) holds that declaration to the truth: it asserts the signing suite

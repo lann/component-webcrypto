@@ -1,5 +1,5 @@
 # The host-only signing suite: the host-backed targets (wasmtime,
-# jco-node) — the composed target cannot even link its world (ecdsa-sign
+# jco-node, jco-browser) — the composed target cannot even link its world (ecdsa-sign
 # is class D). ecdsa-sign is
 # structural and untagged; the gated RSA features (rsa-sign,
 # rsa-oaep-decrypt) tag the suite's RSA vector cases and probes, with a
@@ -24,3 +24,16 @@ missing-features = []
 # the fail-closed rsa-sign/rsa-oaep-decrypt posture is a browser policy
 # (jco-browser), not Node's.
 missing-features = []
+
+[targets.jco-browser]
+# The same host module as jco-node, in headless Chromium. The host
+# declines the gated RSA private-key mints — the signing interfaces
+# (`rsa-sign`) and the RSA-OAEP decryption mints (`rsa-oaep-decrypt`) —
+# outside Node by default: a browser is an attacker-observable timing
+# domain, so it fails closed unless the deployer opts in with
+# `setRsaPrivateKeyPolicy("serve")` — the driver runs the default.
+missing-features = ["rsa-sign", "rsa-oaep-decrypt"]
+# Gates in CI (the Actions runner ships Chrome); locally it needs a
+# Chrome/Chromium install and runs only when opted in with
+# CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
+optional = true
