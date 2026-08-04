@@ -156,12 +156,19 @@ behavior specific to the algorithm needs a hand-written probe. An algorithm
 the in-guest provider deliberately does not export lives in the signing
 suite — that is absence, not failure.
 
-## Results-schema tolerance (pending explicit sign-off)
+## Results-schema tolerance
 
-The component-test aggregate treats *unknown result statuses* as
-warnings, not errors (the schema's additive-evolution policy: a future
-component-test status arrives without a format break). The incumbent
-runner treated unknown outcomes as hard failures. Coverage checking
-bounds the risk (every census case must still report), but this is a
-deliberate tolerance change inherited from the component-test results
-schema — flagged here for explicit ratification.
+The component-test *schema* tolerates unknown result statuses on the
+wire (its additive-evolution policy: a future component-test status
+arrives without a format break) and the aggregate reports them as
+warnings. This looked like a tolerance change against the incumbent
+runner, which treated unknown outcomes as hard failures, and was
+originally flagged here for sign-off. It is not one in effect: the
+fold diverts an unknown-status row out of the parsed results, so the
+case is then *missing* from coverage, and the aggregate's coverage
+check — which this harness always runs with a full-census lockfile —
+fails the run. An unknown status therefore surfaces as a warning
+naming the case and status plus a coverage error, and cannot pass
+silently. Gating parity with the incumbent holds; ratified on that
+basis (upstream's fold/aggregate tests pin the diversion-plus-coverage
+behavior).
