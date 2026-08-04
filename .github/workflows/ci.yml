@@ -98,7 +98,16 @@ jobs:
             target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm
             target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm
             target/release/ct-driver
-          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'conformance/**', 'rust/**', 'wit/**', '.component-test-rev') }}
+          # Key = enumerated *build inputs* of these artifacts (the crates
+          # that produce them, the vectors/harness they embed, the wit,
+          # the pins), NOT conformance/** wholesale — prose, committed
+          # matrices, lockfiles, target manifests, and the jco driver JS
+          # do not invalidate cargo artifacts, and hashing them made
+          # doc-only commits repay the full build (#307). Enumerate by
+          # inclusion so anything the build newly reads must be added
+          # here deliberately; a new build input outside these globs
+          # means updating this key.
+          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', '.component-test-rev', 'rust/**', 'wit/**', 'conformance/vectors/**', 'conformance/harness/**', 'conformance/guest-ct/Cargo.toml', 'conformance/guest-ct/build.rs', 'conformance/guest-ct/src/**', 'conformance/signing-guest-ct/Cargo.toml', 'conformance/signing-guest-ct/src/**', 'conformance/class-d/**', 'conformance/driver-ct/Cargo.toml', 'conformance/driver-ct/src/**') }}
 
       - name: Cache cargo
         if: steps.ct-artifacts.outputs.cache-hit != 'true'

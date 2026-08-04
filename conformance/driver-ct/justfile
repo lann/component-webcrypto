@@ -85,13 +85,32 @@ run-wasmtime: build
     {{root}}/target/release/ct-driver {{signing}} --jsonl \
         --target wasmtime-rustcrypto > results/wasmtime-signing.jsonl
 
+# The jco npm tree + both transpiles, skipped when up to date: npm
+# install only when package-lock.json is newer than the installed
+# tree's stamp, transpiles only when a guest wasm is newer than its
+# transpiled module. Both run-jco and run-browser depend on this;
+# `all` runs it once before the parallel target phase so the parallel
+# recipes never race on generated/.
+_jco-prepared: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd jco
+    if [ package-lock.json -nt node_modules/.package-lock.json ]; then
+        npm install --silent
+    fi
+    if [ "../{{guest}}" -nt generated/conformance-guest-ct.js ]; then
+        npm run --silent transpile
+    fi
+    if [ "../{{signing}}" -nt generated/conformance-signing-guest-ct.js ]; then
+        npm run --silent transpile:signing
+    fi
+
 # The jco-node target (browser-first host under Node/JSPI), both suites:
 # Node's WebCrypto serves the gated RSA private-key mints by default (the
 # fail-closed policy is a browser posture), so the signing suite declares
 # nothing missing here.
-run-jco: build
+run-jco: build _jco-prepared
     mkdir -p results
-    cd jco && npm install --silent && npm run transpile && npm run transpile:signing
     cd jco && node --experimental-wasm-jspi runner.mjs \
         --missing sha1-checked --jsonl --target jco-node \
         > ../results/jco-node.jsonl
@@ -136,9 +155,8 @@ run-composed: build build-provider _ct-tools
 # jco-browser entries, which the aggregate cross-checks: the browser
 # cannot serve sha1-checked, and the host fails the gated RSA
 # private-key mints closed outside Node (targets-signing.toml).
-run-browser: build
+run-browser: build _jco-prepared
     mkdir -p results
-    cd jco && npm install --silent && npm run transpile && npm run transpile:signing
     cd jco && node run-browser.mjs \
         --missing sha1-checked \
         --missing-signing rsa-sign,rsa-oaep-decrypt
@@ -204,8 +222,19 @@ matrix-check:
     diff -u matrix.md results/matrix.md
     diff -u matrix-signing.md results/matrix-signing.md
 
-# Everything: build, lock-check, class-D gate, all targets, aggregates.
-all: lock-check class-d run-wasmtime run-composed run-jco _run-browser-if-enabled aggregate aggregate-signing
+# Everything: build, then every check and target in parallel (the
+# incumbent gate's topology: wall time is bounded by the slowest
+# target, not the sum). The pre-phase builds everything the parallel
+# recipes share — artifacts, tools, npm tree, transpiles — so they are
+# independent by the parallel-recipes.sh contract; each also names its
+# deps for standalone use, where the guards make the re-runs no-ops.
+# Aggregates run after: they read every target's results.
+all: build build-provider _ct-tools _jco-prepared
+    cd {{root}} && scripts/parallel-recipes.sh target/conformance-ct-logs \
+        conformance-ct::lock-check conformance-ct::class-d \
+        conformance-ct::run-wasmtime conformance-ct::run-composed \
+        conformance-ct::run-jco conformance-ct::_run-browser-if-enabled
+    just aggregate aggregate-signing
 
 # The class-D negative-composition gate (ported from the incumbent
 # harness), in two halves.
