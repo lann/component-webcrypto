@@ -98,15 +98,13 @@ the lockfiles, runs the targets, and aggregates:
   RustCrypto provider (`wac plug`), run under the generic component-test
   host runner; missing only the structural `ecdsa-sign` (class D).
 - **jco-node** (`run-jco`): the suite transpiled with jco (JSPI) and driven
-  from Node 24+ against `webcrypto-jco`; missing `xchacha20-poly1305` (no
-  platform WebCrypto implements XChaCha) and `sha1-checked` (platform SHA-1
-  carries no sha1dc collision detection).
+  from Node 24+ against `webcrypto-jco`; missing `sha1-checked` (platform
+  SHA-1 carries no sha1dc collision detection).
 - **jco-browser** (`run-browser`): the same transpiles and host module with
   the case loop running in headless Chromium (`driver-ct/jco/harness.mjs`
   in-page, driven by `run-browser.mjs` over
-  `scripts/browser-page-driver.mjs`); additionally missing
-  `chacha20-poly1305` (Chromium's WebCrypto does not serve it yet) and,
-  for the signing suite, the fail-closed RSA private-key mints
+  `scripts/browser-page-driver.mjs`); missing `sha1-checked` and, for
+  the signing suite, the fail-closed RSA private-key mints
   (`rsa-sign`, `rsa-oaep-decrypt`). Optional: it gates in CI (the runner
   image ships Chrome) and runs locally only with `CONFORMANCE_BROWSER=1`;
   the aggregates warn, not error, when its results are absent.

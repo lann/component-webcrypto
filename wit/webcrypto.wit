@@ -74,12 +74,6 @@ interface types {
         /// serves the operation; this key refuses it) and never a verdict
         /// on the input.
         not-permitted(string),
-        /// The key's nonce budget (see `README.md`, "Terminology") is
-        /// exhausted: the implementation can no longer guarantee nonce
-        /// uniqueness for this key (for example, an AES-GCM internal-nonce
-        /// key reaching SP 800-38D's 2^32-invocation bound). The key
-        /// remains valid for `open`; mint a fresh key to continue sealing.
-        key-exhausted,
         /// An implementation-specific operational failure: for example, an
         /// external keystore that cannot complete the operation now, or an
         /// input exceeding an implementation's buffering limit. The string
@@ -213,8 +207,8 @@ interface mac {
 /// proportional to the message somewhere in the implementation. The bulk
 /// data paths use streaming transport, but `open` never releases unverified
 /// plaintext, so it buffers the whole message internally before its result
-/// resolves. Content too large for that contract belongs to a future
-/// segmented `stream-aead` primitive kind, not to a relaxation of this one.
+/// resolves. Content too large for that contract is outside this kind's
+/// scope; the contract is never relaxed to stream unverified plaintext.
 ///
 /// `seal` and `open` are stateless per call; the key resource carries the
 /// operations directly.
@@ -369,138 +363,13 @@ interface aead {
         /// The key as an RFC 7517 JSON Web Key, behind the same
         /// extractability gate as `export-key-raw`. See `README.md`,
         /// "JWK contract". Algorithms with no registered JWK form
-        /// (the XChaCha constructions) fail `error.unsupported`.
+        /// fail `error.unsupported`.
         export-key-jwk: async func() -> result<string, error>;
 
         /// This key's raw material as a `wrap-input`, for wrapping
         /// under another key (see the `wrapping` interface). Behind the
         /// same extractability gate as `export-key-raw`; the material
         /// itself never reaches the caller.
-        to-wrap-input-raw: async func() -> result<wrap-input, error>;
-
-        /// The JWK serialization as a `wrap-input`, behind the same
-        /// gate; algorithms with no registered JWK form fail
-        /// `error.unsupported`, as on `export-key-jwk`.
-        to-wrap-input-jwk: async func() -> result<wrap-input, error>;
-    }
-}
-
-/// The `aead-internal-nonce` primitive kind: single-message authenticated
-/// encryption with the nonce generated within the implementation (SP
-/// 800-38D §8's "IV generated within the cryptographic module").
-///
-/// This is the misuse-resistant counterpart of `aead`: the nonce never
-/// appears in the API, so nonce reuse — the most common catastrophic AEAD
-/// failure — is unrepresentable. Each `seal` draws a fresh nonce that is
-/// unique per key and carries it in the sealed output, so every sealed
-/// message is self-contained.
-///
-/// Keys are a distinct resource from `aead.aead-key`, minted by separate
-/// per-algorithm interfaces: the nonce discipline is part of the key
-/// capability, so one key can never mix implementation-chosen and
-/// caller-chosen nonces. Prefer this kind unless interop requires an
-/// externally specified nonce layout; among its algorithms, prefer
-/// XChaCha20-Poly1305 for high-volume keys (see the minting interfaces'
-/// nonce-budget notes).
-///
-/// Like `aead`, this is a single-message primitive: `open` buffers and
-/// verifies before it releases any plaintext. The streaming,
-/// extractability, and getter contracts in `README.md` apply.
-interface aead-internal-nonce {
-    use types.{error};
-    use wrapping.{wrap-input};
-
-    /// Mint-time policy for an `internal-nonce-key`. Grants nothing by
-    /// default; see `README.md`, "Key-options contract". The vocabulary is
-    /// seal/open only: this kind has no WebCrypto mapping, so no platform
-    /// usage vocabulary reaches beyond its own operations.
-    resource internal-nonce-key-options {
-        constructor();
-        /// Whether the minted key may `seal`. Disabled by default.
-        can-seal: func(allowed: bool);
-        /// Whether the minted key may `open`. Disabled by default.
-        can-open: func(allowed: bool);
-        /// Whether the minted key's material may be exported. Disabled by
-        /// default.
-        extractable: func(allowed: bool);
-    }
-
-    /// An internal-nonce AEAD key: an unforgeable capability, bound to one
-    /// algorithm at creation.
-    resource internal-nonce-key {
-        /// Encrypt and authenticate `plaintext` under a fresh
-        /// implementation-generated nonce with the associated data `aad`.
-        ///
-        /// The returned stream is a self-contained sealed message:
-        /// everything `open` needs besides the key and `aad` travels
-        /// in-band. The key's minting interface documents the wire format.
-        /// Drain the returned stream concurrently with feeding `plaintext`
-        /// (see `README.md`, "Streaming contract").
-        ///
-        /// Fails with `error.key-exhausted` once the implementation can no
-        /// longer guarantee nonce uniqueness for this key.
-        seal: async func(aad: list<u8>, plaintext: stream<u8>) -> result<stream<u8>, error>;
-
-        /// Decrypt and verify a sealed message, as produced by `seal` under
-        /// the same algorithm, with the associated data `aad`.
-        ///
-        /// Security:
-        /// - `ok(stream)` resolves only after the sealed stream is fully
-        ///   drained and the tag verified: it *is* the authentication
-        ///   statement, and unverified plaintext is never observable.
-        /// - Any failure — a bad tag, wrong associated data, or input too
-        ///   short to carry the wire format — reports
-        ///   `error.authentication-failed` with no detail.
-        open: async func(aad: list<u8>, sealed: stream<u8>) -> result<stream<u8>, error>;
-
-        /// The registry name of the algorithm family this key is bound to,
-        /// e.g. `"AES-GCM"` (spelled as for `aead-key.algorithm-name`).
-        algorithm-name: func() -> string;
-
-        /// The key length in bits, e.g. `256`.
-        algorithm-length: func() -> u32;
-
-        /// The number of further `seal` invocations this key's nonce budget
-        /// (see `README.md`, "Terminology") permits, or `none` when the
-        /// implementation enforces no budget. A hint for key-rotation
-        /// scheduling: monotonically non-increasing, and `some(0)` means
-        /// the next `seal` fails `error.key-exhausted`. Implementations
-        /// MAY decrement faster than one per seal (a policy or accounting
-        /// choice), so it is not an exact invocation count.
-        ///
-        /// There are deliberately no wire-layout getters here (nonce or tag
-        /// size): the sealed message's layout is the minting interface's
-        /// contract, and a consumer parsing it already knows that
-        /// interface's documented constants.
-        seals-remaining: func() -> option<u64>;
-
-        /// Whether the key material may be exported.
-        extractable: func() -> bool;
-
-        /// Whether this key permits `seal`. A refused operation fails
-        /// `error.not-permitted`.
-        can-seal: func() -> bool;
-
-        /// Whether this key permits `open`. See `can-seal`.
-        can-open: func() -> bool;
-
-        /// The raw key material. Fails with `error.not-extractable` unless
-        /// the key was created with `extractable` true. The nonce budget
-        /// does not travel with the material; see the minting interfaces'
-        /// import docs.
-        export-key-raw: async func() -> result<list<u8>, error>;
-
-        /// The key as an `oct` JWK, behind the same extractability gate
-        /// as `export-key-raw`; algorithms with no registered JWK form
-        /// fail `error.unsupported`, as on `aead-key.export-key-jwk`. The
-        /// nonce budget does not travel with the material.
-        export-key-jwk: async func() -> result<string, error>;
-
-        /// This key's raw material as a `wrap-input`, for wrapping
-        /// under another key (see the `wrapping` interface). Behind the
-        /// same extractability gate as `export-key-raw`; the material
-        /// itself never reaches the caller. As with the exports, the
-        /// nonce budget does not travel with the material.
         to-wrap-input-raw: async func() -> result<wrap-input, error>;
 
         /// The JWK serialization as a `wrap-input`, behind the same
@@ -697,8 +566,9 @@ interface digest {
     /// Security:
     /// - A digest authenticates nothing by itself. There is deliberately
     ///   no `verify` here: checking untrusted data against a known digest
-    ///   is an *integrity* comparison, done with
-    ///   `bytes.constant-time-equal` on `compute`'s result. When
+    ///   is an *integrity* comparison, done by the caller with a
+    ///   constant-time byte comparison (see `README.md`, "Terminology")
+    ///   of `compute`'s result. When
     ///   authenticity is needed, use a `mac-key`.
     resource digest {
         /// Digest an entire byte stream. A success resolves only after the
@@ -713,19 +583,6 @@ interface digest {
         /// `algorithm-hash` getter.
         algorithm-name: func() -> string;
     }
-}
-
-/// Utility operations on byte strings.
-interface bytes {
-    /// Whether `a` and `b` are equal, in time independent of their
-    /// *contents* (necessarily dependent on their lengths). Use this to
-    /// compare a computed digest or tag against an untrusted expected value
-    /// without creating a timing oracle.
-    ///
-    /// Returns a `bool`, not a `result`: unlike `mac-key.verify`, a byte
-    /// comparison is not an authentication statement, and the caller
-    /// decides what equality means.
-    constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
 }
 
 /// The `signature` primitive kind: asymmetric signing and verification.

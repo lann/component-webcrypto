@@ -61,7 +61,7 @@ clippy:
 # Validate WIT packages.
 validate-wit:
     # Each package is validated in both views: the default (the @unstable
-    # ChaCha gates hidden — what a consumer sees without opting in) and
+    # gates hidden — what a consumer sees without opting in) and
     # with every feature enabled.
     wasm-tools component wit wit
     wasm-tools component wit wit --all-features

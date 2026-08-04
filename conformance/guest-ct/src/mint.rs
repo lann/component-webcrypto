@@ -8,9 +8,6 @@
 
 use conformance_harness::b64url;
 use lann_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
-use lann_webcrypto_guest::bindings::aead_internal_nonce::{
-    InternalNonceKey, InternalNonceKeyOptions,
-};
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
 use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
@@ -27,9 +24,8 @@ use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
-    aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw, chacha20_poly1305, ecdh,
-    ed25519_sign, hmac_sha1, hmac_sha2, rsa_pss_verify, rsassa_pkcs1_v15_verify, x25519,
-    xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+    aes_cbc, aes_ctr, aes_gcm, aes_kw, ecdh, ed25519_sign, hmac_sha1, hmac_sha2, rsa_pss_verify,
+    rsassa_pkcs1_v15_verify, x25519,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -48,15 +44,6 @@ pub fn aead_options(extractable: bool) -> AeadKeyOptions {
     options.can_open(true);
     options.can_wrap(true);
     options.can_unwrap(true);
-    options.extractable(extractable);
-    options
-}
-
-/// An `internal-nonce-key-options` granting both usages.
-pub fn internal_nonce_options(extractable: bool) -> InternalNonceKeyOptions {
-    let options = InternalNonceKeyOptions::new();
-    options.can_seal(true);
-    options.can_open(true);
     options.extractable(extractable);
     options
 }
@@ -186,47 +173,6 @@ pub async fn import_aes_key_jwk(
 
 pub async fn generate_key(variant: AesVariant, extractable: bool) -> Result<AeadKey, Error> {
     aes_gcm::generate_key(variant, aead_options(extractable)).await
-}
-
-pub async fn import_internal_nonce_key(
-    variant: AesVariant,
-    raw: Vec<u8>,
-    extractable: bool,
-) -> Result<InternalNonceKey, Error> {
-    aes_gcm_internal_nonce::import_key_raw(variant, raw, internal_nonce_options(extractable)).await
-}
-
-pub async fn generate_internal_nonce_key(
-    variant: AesVariant,
-    extractable: bool,
-) -> Result<InternalNonceKey, Error> {
-    aes_gcm_internal_nonce::generate_key(variant, internal_nonce_options(extractable)).await
-}
-
-pub async fn import_chacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
-    chacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
-}
-
-pub async fn import_chacha_key_jwk(jwk: String, extractable: bool) -> Result<AeadKey, Error> {
-    chacha20_poly1305::import_key_jwk(jwk, aead_options(extractable)).await
-}
-
-pub async fn import_xchacha_key(raw: Vec<u8>, extractable: bool) -> Result<AeadKey, Error> {
-    xchacha20_poly1305::import_key_raw(raw, aead_options(extractable)).await
-}
-
-pub async fn import_xchacha_internal_nonce_key(
-    raw: Vec<u8>,
-    extractable: bool,
-) -> Result<InternalNonceKey, Error> {
-    xchacha20_poly1305_internal_nonce::import_key_raw(raw, internal_nonce_options(extractable))
-        .await
-}
-
-pub async fn generate_xchacha_internal_nonce_key(
-    extractable: bool,
-) -> Result<InternalNonceKey, Error> {
-    xchacha20_poly1305_internal_nonce::generate_key(internal_nonce_options(extractable)).await
 }
 
 pub async fn generate_ed25519_key(extractable: bool) -> Result<(SigningKey, VerifyingKey), Error> {

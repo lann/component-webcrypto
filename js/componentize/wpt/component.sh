@@ -162,13 +162,6 @@ gen_suites() {
     echo 'export { run_test };' >> "$B"/group-generate-key.js
     cat "$V"/helpers.js "$V"/failures.js > "$B"/group-generate-key-failures.js
     echo 'export { run_test };' >> "$B"/group-generate-key-failures.js
-    # chacha20_poly1305.tentative.https.any.js registers its tests at top
-    # level, like digest below: wrap it in a callable, helpers outside the
-    # wrapper.
-    cat "$V"/helpers.js > "$B"/group-chacha20-poly1305.js
-    echo 'function run_chacha20_poly1305_tests() {' >> "$B"/group-chacha20-poly1305.js
-    cat "$V"/chacha20_poly1305.tentative.https.any.js >> "$B"/group-chacha20-poly1305.js
-    printf '}\nexport { run_chacha20_poly1305_tests };\n' >> "$B"/group-chacha20-poly1305.js
     # wrapKey_unwrapKey.https.any.js registers its tests at top level too:
     # the same callable wrapper, its key-data fixtures outside it.
     cat "$V"/helpers.js "$V"/wrapKey_unwrapKey_vectors.js > "$B"/group-wrap-key.js
@@ -279,7 +272,7 @@ build)
     gen_suites
     ensure_toolchain
     "$TOOLCHAIN" -q -d examples/componentize-demo/wit -w componentize-demo \
-        --features chacha20-poly1305,sha1-checked \
+        --features sha1-checked \
         componentize js/componentize/wpt/runner.js -p . \
         -o "$B"/runner.component.wasm
     ;;
@@ -287,7 +280,7 @@ build-parity)
     gen_suites
     ensure_toolchain
     "$TOOLCHAIN" -q -d js/componentize/wpt/wit -w wpt-parity-runner \
-        --features chacha20-poly1305,sha1-checked \
+        --features sha1-checked \
         componentize js/componentize/wpt/parity-runner.js -p . \
         -o "$B"/parity-runner.component.wasm
     ;;

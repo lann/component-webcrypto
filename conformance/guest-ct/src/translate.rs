@@ -11,7 +11,6 @@
 //! degenerate duplicates).
 
 use conformance_harness::stream::Schedule;
-use conformance_harness::{FEATURE_CHACHA, FEATURE_XCHACHA};
 use data_encoding::HEXLOWER_PERMISSIVE;
 use serde::{Deserialize, Serialize};
 
@@ -147,8 +146,6 @@ pub enum AeadExpectation {
 )]
 pub enum AeadAlg {
     AesGcm,
-    ChaCha20Poly1305,
-    XChaCha20Poly1305,
 }
 
 impl AeadAlg {
@@ -156,25 +153,6 @@ impl AeadAlg {
     pub fn name(self) -> &'static str {
         match self {
             AeadAlg::AesGcm => "aes-gcm",
-            AeadAlg::ChaCha20Poly1305 => "chacha20-poly1305",
-            AeadAlg::XChaCha20Poly1305 => "xchacha20-poly1305",
-        }
-    }
-
-    /// The algorithm's nonce length in bits (the vector files' `ivSize`).
-    fn iv_bits(self) -> u32 {
-        match self {
-            AeadAlg::AesGcm | AeadAlg::ChaCha20Poly1305 => 96,
-            AeadAlg::XChaCha20Poly1305 => 192,
-        }
-    }
-
-    /// The features a case of this algorithm exercises.
-    fn features(self) -> &'static [&'static str] {
-        match self {
-            AeadAlg::AesGcm => &[],
-            AeadAlg::ChaCha20Poly1305 => &[FEATURE_CHACHA],
-            AeadAlg::XChaCha20Poly1305 => &[FEATURE_XCHACHA],
         }
     }
 }
@@ -183,8 +161,7 @@ impl AeadAlg {
 #[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AeadCase {
     pub alg: AeadAlg,
-    /// The key size in bits (128 or 256 for AES-GCM; the ChaCha vector
-    /// files are all 256).
+    /// The key size in bits (128 or 256).
     pub key_bits: u32,
     pub tc_id: u64,
     pub schedule: Schedule,
@@ -206,127 +183,6 @@ impl VectorCase for AeadCase {
             Some(self.schedule),
         )
     }
-
-    fn features(&self) -> &'static [&'static str] {
-        self.alg.features()
-    }
-}
-
-/// The algorithm behind an [`InternalNonceCase`], as named in test ids
-/// (the minting interface's name).
-#[derive(
-    Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
-pub enum InternalNonceAlg {
-    AesGcm,
-    XChaCha20Poly1305,
-}
-
-impl InternalNonceAlg {
-    /// The algorithm's name as used in test ids.
-    pub fn name(self) -> &'static str {
-        match self {
-            InternalNonceAlg::AesGcm => "aes-gcm-internal-nonce",
-            InternalNonceAlg::XChaCha20Poly1305 => "xchacha20-poly1305-internal-nonce",
-        }
-    }
-
-    /// The features a case of this algorithm exercises.
-    fn features(self) -> &'static [&'static str] {
-        match self {
-            InternalNonceAlg::AesGcm => &[],
-            InternalNonceAlg::XChaCha20Poly1305 => &[FEATURE_XCHACHA],
-        }
-    }
-}
-
-/// One executed internal-nonce AEAD vector under one schedule: the vector's
-/// `iv || ct || tag` as a sealed message, driven through the `open`
-/// direction (the only deterministic one; `seal` draws a random nonce).
-#[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct InternalNonceCase {
-    pub alg: InternalNonceAlg,
-    /// The AES key size in bits for [`InternalNonceAlg::AesGcm`] (128 or
-    /// 256); always 256 for XChaCha.
-    pub key_bits: u32,
-    pub tc_id: u64,
-    pub schedule: Schedule,
-    pub key: Vec<u8>,
-    pub aad: Vec<u8>,
-    pub msg: Vec<u8>,
-    /// The vector's IV, ciphertext, and tag in the sealed wire format.
-    pub sealed: Vec<u8>,
-    /// `true`: `open` must recover `msg`. `false`: `open` must fail
-    /// `authentication-failed` (an invalid vector, or one whose IV length
-    /// is not the algorithm's — the sealed prefix misparses).
-    pub valid: bool,
-}
-
-impl VectorCase for InternalNonceCase {
-    fn case_id(&self) -> String {
-        vector_case_id(
-            self.alg.name(),
-            "wycheproof",
-            self.tc_id,
-            Some(self.schedule),
-        )
-    }
-
-    fn features(&self) -> &'static [&'static str] {
-        self.alg.features()
-    }
-}
-
-/// The normalized internal-nonce cases, derived from the same AEAD vector
-/// files as the caller-nonce cases: `open(iv || ct || tag)` must recover
-/// `msg` exactly when the vector is valid and its IV is the algorithm's
-/// nonce length; every other case must fail `authentication-failed` (there
-/// is no invalid-nonce case -- the nonce is carried in-band, so a
-/// wrong-length IV is just a malformed sealed message).
-pub fn internal_nonce_cases() -> Vec<InternalNonceCase> {
-    let mut cases = Vec::new();
-    for (aead_alg, text) in AEAD_VECTORS {
-        // Only AES-GCM and XChaCha have internal-nonce minting interfaces
-        // (see the WIT: nothing forces the 12-byte ChaCha construction into
-        // a package-defined wire format).
-        let alg = match aead_alg {
-            AeadAlg::AesGcm => InternalNonceAlg::AesGcm,
-            AeadAlg::ChaCha20Poly1305 => continue,
-            AeadAlg::XChaCha20Poly1305 => InternalNonceAlg::XChaCha20Poly1305,
-        };
-        let file: VectorFile<AeadGroup> = serde_json::from_str(text)
-            .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", aead_alg.name()));
-        for group in &file.test_groups {
-            // AES-192 is declined at minting (probed); 128 and 256 run.
-            if group.key_size == 192 {
-                continue;
-            }
-            for test in &group.tests {
-                let field = format!("{} tc{}", alg.name(), test.tc_id);
-                let key = unhex(&field, &test.key);
-                let aad = unhex(&field, &test.aad);
-                let msg = unhex(&field, &test.msg);
-                let mut sealed = unhex(&field, &test.iv);
-                sealed.extend(unhex(&field, &test.ct));
-                sealed.extend(unhex(&field, &test.tag));
-                let valid = is_valid(&field, &test.result) && group.iv_size == aead_alg.iv_bits();
-                for schedule in schedules(sealed.len(), valid, test.tc_id) {
-                    cases.push(InternalNonceCase {
-                        alg,
-                        key_bits: group.key_size,
-                        tc_id: test.tc_id,
-                        schedule,
-                        key: key.clone(),
-                        aad: aad.clone(),
-                        msg: msg.clone(),
-                        sealed: sealed.clone(),
-                        valid,
-                    });
-                }
-            }
-        }
-    }
-    cases
 }
 
 const HMAC_VECTORS: [(HmacAlg, &str); 4] = [
@@ -347,20 +203,10 @@ const HMAC_VECTORS: [(HmacAlg, &str); 4] = [
         include_str!("../../vectors/hmac_sha512_test.json"),
     ),
 ];
-const AEAD_VECTORS: [(AeadAlg, &str); 3] = [
-    (
-        AeadAlg::AesGcm,
-        include_str!("../../vectors/aes_gcm_test.json"),
-    ),
-    (
-        AeadAlg::ChaCha20Poly1305,
-        include_str!("../../vectors/chacha20_poly1305_test.json"),
-    ),
-    (
-        AeadAlg::XChaCha20Poly1305,
-        include_str!("../../vectors/xchacha20_poly1305_test.json"),
-    ),
-];
+const AEAD_VECTORS: [(AeadAlg, &str); 1] = [(
+    AeadAlg::AesGcm,
+    include_str!("../../vectors/aes_gcm_test.json"),
+)];
 const HKDF_VECTORS: [(HkdfAlg, &str); 4] = [
     (
         HkdfAlg::Sha1,
@@ -1205,24 +1051,16 @@ pub fn hmac_cases() -> Vec<HmacCase> {
 }
 
 /// The normalized caller-nonce AEAD cases: every AES-GCM keySize-128 and
-/// -256 vector (AES-192 is declined at minting, covered by probes) and
-/// every ChaCha20-Poly1305 vector of both variants (those files are all
-/// keySize-256, so nothing is skipped), expanded over their schedule sets.
+/// -256 vector (AES-192 is declined at minting, covered by probes),
+/// expanded over their schedule sets.
 pub fn aead_cases() -> Vec<AeadCase> {
     let mut cases = Vec::new();
     for (alg, text) in AEAD_VECTORS {
         let file: VectorFile<AeadGroup> = serde_json::from_str(text)
             .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
         for group in &file.test_groups {
-            match alg {
-                AeadAlg::AesGcm if group.key_size == 192 => continue,
-                AeadAlg::AesGcm => {}
-                _ => assert_eq!(
-                    group.key_size,
-                    256,
-                    "{} vectors are all 256-bit",
-                    alg.name()
-                ),
+            if group.key_size == 192 {
+                continue;
             }
             for test in &group.tests {
                 let field = format!("{} tc{}", alg.name(), test.tc_id);
@@ -1255,8 +1093,7 @@ pub fn aead_cases() -> Vec<AeadCase> {
 /// group — including `ZeroLengthIv` — fails `invalid-nonce` on seal and
 /// open alike, and its vector's ciphertext is deliberately unreachable;
 /// in-window non-96-bit sizes run the vector's own verdict, exercising the
-/// `J0` derivation), while the ChaCha constructions fail `invalid-nonce`
-/// for any `ivSize` but their own.
+/// `J0` derivation).
 #[allow(clippy::type_complexity)]
 fn translate_aead(
     field: &str,
@@ -1277,7 +1114,6 @@ fn translate_aead(
     let valid = is_valid(field, &test.result);
     let nonce_accepted = match alg {
         AeadAlg::AesGcm => (96..=1024).contains(&group.iv_size),
-        _ => group.iv_size == alg.iv_bits(),
     };
     let (expectation, max_input_len) = if !nonce_accepted {
         (AeadExpectation::InvalidNonce, msg.len().max(ct_tag.len()))

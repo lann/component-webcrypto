@@ -3,13 +3,11 @@
 //! wasm component).
 //!
 //! Everything algorithm-shaped lives here exactly once — cipher and digest
-//! dispatch, key-material validation and generation, error rendering, the
-//! internal-nonce wire format, and signature parsing/verification — so the
+//! dispatch, key-material validation and generation, error rendering, and
+//! signature parsing/verification — so the
 //! two implementations cannot drift apart behaviorally. What stays in each
 //! implementation is only what genuinely differs: bindings glue (each side's
-//! generated types), stream plumbing, resource-table wiring, and the
-//! internal-nonce seal *bookkeeping* (a `u64` behind the host's resource
-//! table vs. a `Cell` in the single-threaded guest).
+//! generated types), stream plumbing, and resource-table wiring.
 //!
 //! Two conventions keep the split honest:
 //!
@@ -92,21 +90,20 @@ pub use kdf::{
 };
 pub use mac::MacKeyMaterial;
 pub use policy::{
-    not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, InternalNoncePolicy,
-    KwPolicy, MacPolicy, SigningPolicy, TransportPolicy,
+    not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, KwPolicy, MacPolicy,
+    SigningPolicy, TransportPolicy,
 };
 pub use sig::{RsaScheme, SigPublic, SigningKeyMaterial};
 #[cfg(not(target_family = "wasm"))]
 pub use transport::{DecryptionKeyMaterial, EncryptionKeyMaterial};
 pub use wrapping::{
-    derive_kw_key, unwrap_aes_gcm_internal_key, unwrap_aes_gcm_internal_key_jwk,
-    unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_chacha_key, unwrap_chacha_key_jwk,
-    unwrap_cipher_key, unwrap_cipher_key_jwk, unwrap_ecdh_secret_key_jwk,
-    unwrap_ecdh_secret_key_pkcs8, unwrap_ed25519_signing_key_jwk, unwrap_ed25519_signing_key_pkcs8,
-    unwrap_ikm, unwrap_kw_key, unwrap_kw_key_jwk, unwrap_mac_key, unwrap_mac_key_jwk,
-    unwrap_mac_key_jwk_sha1, unwrap_mac_key_sha1, unwrap_password, unwrap_x25519_secret_key_jwk,
-    unwrap_x25519_secret_key_pkcs8, unwrap_xchacha_internal_key, unwrap_xchacha_key, KwKeyMaterial,
-    UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
+    derive_kw_key, unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_cipher_key,
+    unwrap_cipher_key_jwk, unwrap_ecdh_secret_key_jwk, unwrap_ecdh_secret_key_pkcs8,
+    unwrap_ed25519_signing_key_jwk, unwrap_ed25519_signing_key_pkcs8, unwrap_ikm, unwrap_kw_key,
+    unwrap_kw_key_jwk, unwrap_mac_key, unwrap_mac_key_jwk, unwrap_mac_key_jwk_sha1,
+    unwrap_mac_key_sha1, unwrap_password, unwrap_x25519_secret_key_jwk,
+    unwrap_x25519_secret_key_pkcs8, KwKeyMaterial, UnwrapInputMaterial, WrapFormat,
+    WrapInputMaterial,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use wrapping::{
@@ -139,8 +136,6 @@ pub enum Error {
     NotPermitted(String),
     /// WIT `unsupported(string)`.
     Unsupported(String),
-    /// WIT `key-exhausted`.
-    KeyExhausted,
     /// WIT `other(string)`.
     Other(String),
     /// WIT `extension(extension-error)`.
@@ -225,7 +220,6 @@ macro_rules! impl_conversions {
                     $crate::Error::NotExtractable => Self::NotExtractable,
                     $crate::Error::NotPermitted(msg) => Self::NotPermitted(msg),
                     $crate::Error::Unsupported(msg) => Self::Unsupported(msg),
-                    $crate::Error::KeyExhausted => Self::KeyExhausted,
                     $crate::Error::Other(msg) => Self::Other(msg),
                     $crate::Error::Extension(ext) => Self::Extension(Extension {
                         origin: ext.origin,
@@ -405,13 +399,6 @@ pub const AES_GCM_NAME: &str = "AES-GCM";
 /// `KeyAlgorithm.name`).
 pub const AES_KW_NAME: &str = "AES-KW";
 
-/// The `algorithm-name` reported by ChaCha20-Poly1305 keys (the spelling of
-/// the WICG WebCrypto proposal; the algorithm is not in the W3C registry).
-pub const CHACHA20_POLY1305_NAME: &str = "ChaCha20-Poly1305";
-
-/// The `algorithm-name` reported by XChaCha20-Poly1305 keys.
-pub const XCHACHA20_POLY1305_NAME: &str = "XChaCha20-Poly1305";
-
 /// The `algorithm-name` reported by Ed25519 keys (WebCrypto's
 /// `KeyAlgorithm.name`, per the Secure Curves registry entry).
 pub const ED25519_NAME: &str = "Ed25519";
@@ -432,16 +419,6 @@ pub const RSA_PSS_NAME: &str = "RSA-PSS";
 /// `KeyAlgorithm.name`).
 pub const RSA_OAEP_NAME: &str = "RSA-OAEP";
 
-/// Whether `a` and `b` are equal, in time independent of their *contents*
-/// (necessarily dependent on their lengths) — the `bytes.constant-time-equal`
-/// contract.
-pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
-    use subtle::ConstantTimeEq as _;
-    // `ct_eq` on slices short-circuits only on length (which is not
-    // secret); the contents are compared in constant time.
-    a.ct_eq(b).into()
-}
-
 /// `len` bytes of fresh randomness. Callers wrap the buffer in its
 /// key-material type promptly.
 pub(crate) fn random_bytes(len: usize) -> Result<Vec<u8>, RngError> {
@@ -459,14 +436,6 @@ pub(crate) fn fill_random(buf: &mut [u8]) -> Result<(), RngError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn constant_time_equal_matches_plain_equality() {
-        assert!(constant_time_equal(b"", b""));
-        assert!(constant_time_equal(b"abc", b"abc"));
-        assert!(!constant_time_equal(b"abc", b"abd"));
-        assert!(!constant_time_equal(b"abc", b"abcd"));
-    }
 
     /// The RNG entry points actually fill their buffers with fresh
     /// randomness: output is nonzero and differs across calls. A 32-byte

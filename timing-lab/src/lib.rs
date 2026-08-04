@@ -32,15 +32,12 @@ mod bindings {
     wit_bindgen::generate!({
         path: "wit",
         world: "lab",
-        features: ["chacha20-poly1305"],
         generate_all,
     });
 }
 
 use bindings::lann::webcrypto::aead::AeadKey;
 use bindings::lann::webcrypto::aes_gcm;
-use bindings::lann::webcrypto::bytes;
-use bindings::lann::webcrypto::chacha20_poly1305 as chacha;
 use bindings::lann::webcrypto::ecdh;
 use bindings::lann::webcrypto::hmac_sha2;
 use bindings::lann::webcrypto::key_agreement::{
@@ -365,7 +362,7 @@ async fn seal_bytes(key: &AeadKey, nonce: &[u8], plaintext: &[u8]) -> Result<Vec
 
 /// Tag-comparison surface over an AEAD algorithm: `open` with the tag byte
 /// corrupted at the start (class 0) vs the end (class 1) of the ciphertext's
-/// final 16 bytes. Both fail authentication; GHASH/Poly1305 recomputation is
+/// final 16 bytes. Both fail authentication; the GHASH recomputation is
 /// identical, so the classes isolate the tag *comparison*.
 async fn measure_open(
     name: &'static str,
@@ -717,31 +714,6 @@ async fn run_lab() -> Result<(), String> {
         );
     }
 
-    // bytes.constant-time-equal across the component boundary.
-    {
-        let expected = expected.clone();
-        reports.push(
-            measure(
-                "bytes/constant-time-equal",
-                false,
-                samples,
-                &mut rng,
-                |class| {
-                    let probe = corrupted(&expected, class);
-                    let expected = expected.clone();
-                    async move {
-                        let (ns, eq) = timed(|| bytes::constant_time_equal(&expected, &probe));
-                        if eq {
-                            return Err("corrupted buffer compared equal".into());
-                        }
-                        Ok(ns)
-                    }
-                },
-            )
-            .await?,
-        );
-    }
-
     // mac-key.verify: corrupted tag, first vs last byte.
     {
         let options = bindings::lann::webcrypto::mac::MacKeyOptions::new();
@@ -781,11 +753,6 @@ async fn run_lab() -> Result<(), String> {
     let gcm_key = aes_gcm::generate_key(aes_gcm::AesVariant::Aes256, seal_open_options())
         .await
         .map_err(|e| format!("aes-gcm generate-key: {e:?}"))?;
-    let chacha_key = chacha::generate_key(seal_open_options())
-        .await
-        .map_err(|e| format!("chacha generate-key: {e:?}"))?;
-    // AES-GCM and the IETF ChaCha20-Poly1305 construction both take a
-    // 12-byte nonce, so one value serves both surfaces.
     let nonce12 = [0x24u8; 12];
     reports.push(
         measure_open(
@@ -798,29 +765,9 @@ async fn run_lab() -> Result<(), String> {
         .await?,
     );
     reports.push(
-        measure_open(
-            "chacha20-poly1305/open tag compare",
-            &chacha_key,
-            &nonce12,
-            samples,
-            &mut rng,
-        )
-        .await?,
-    );
-    reports.push(
         measure_seal(
             "aes-256-gcm/seal fixed-vs-random",
             &gcm_key,
-            &nonce12,
-            samples,
-            &mut rng,
-        )
-        .await?,
-    );
-    reports.push(
-        measure_seal(
-            "chacha20-poly1305/seal fixed-vs-random",
-            &chacha_key,
             &nonce12,
             samples,
             &mut rng,

@@ -65,8 +65,6 @@ pub fn load(
     crate::add_to_linker_with_options(
         &mut linker,
         crate::LinkOptions::default()
-            .chacha20_poly1305(true)
-            .xchacha20_poly1305(true)
             .sha1_checked(true)
             .rsa_sign(true)
             .rsa_oaep_decrypt(true),

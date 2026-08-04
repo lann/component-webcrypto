@@ -136,7 +136,7 @@ not how small a leak it would catch.
 `rust/guest-provider/README.md` classifies each algorithm's timing behavior (classes
 A–D) by *construction* — argument from the code's shape. The lab is the
 *empirical* companion: it can confirm the positive claims are not obviously
-wrong (ChaCha20-Poly1305's class A + B should be the boring, quiet row) and
+wrong and
 catch regressions in the countermeasures (the fixsliced AES backend, the
 masked-multiply GHASH, `subtle` comparisons, and the class-B scalar
 multiplications behind the X25519 and ECDH agree surfaces). It cannot

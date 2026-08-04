@@ -1,19 +1,14 @@
-//! The `aead-key` / `internal-nonce-key` material: an algorithm-bound cipher
-//! plus raw key bytes, with the caller-nonce and internal-nonce seal/open
-//! operations, validation, and the extractability gate.
+//! The `aead-key` material: an algorithm-bound cipher plus raw key bytes,
+//! with the seal/open operations, validation, and the extractability gate.
 
 use aes_gcm::aead::{Aead as _, KeyInit, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
-use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 use zeroize::Zeroizing;
 
 use crate::{
     aes192_unsupported, not_permitted, random_bytes, AeadPolicy, AesVariant, Error, RngError,
-    AES_GCM_NAME, CHACHA20_POLY1305_NAME, XCHACHA20_POLY1305_NAME,
+    AES_GCM_NAME,
 };
-
-/// The length in bytes of a ChaCha20-Poly1305 key (either construction).
-const CHACHA_KEY_LEN: usize = 32;
 
 /// The cipher backing an [`AeadKeyMaterial`], bound to its algorithm at
 /// minting. Only the WIT variant cases the Rust implementations serve
@@ -25,8 +20,6 @@ const CHACHA_KEY_LEN: usize = 32;
 enum AeadCipher {
     Aes128Gcm(Aes128Gcm),
     Aes256Gcm(Aes256Gcm),
-    ChaCha20Poly1305(ChaCha20Poly1305),
-    XChaCha20Poly1305(XChaCha20Poly1305),
 }
 
 impl AeadCipher {
@@ -34,12 +27,6 @@ impl AeadCipher {
         match self {
             Self::Aes128Gcm(c) => c.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
             Self::Aes256Gcm(c) => c.encrypt(aes_gcm::Nonce::from_slice(nonce), payload),
-            Self::ChaCha20Poly1305(c) => {
-                c.encrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
-            }
-            Self::XChaCha20Poly1305(c) => {
-                c.encrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
-            }
         }
     }
 
@@ -47,65 +34,21 @@ impl AeadCipher {
         match self {
             Self::Aes128Gcm(c) => c.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
             Self::Aes256Gcm(c) => c.decrypt(aes_gcm::Nonce::from_slice(nonce), payload),
-            Self::ChaCha20Poly1305(c) => {
-                c.decrypt(chacha20poly1305::Nonce::from_slice(nonce), payload)
-            }
-            Self::XChaCha20Poly1305(c) => {
-                c.decrypt(chacha20poly1305::XNonce::from_slice(nonce), payload)
-            }
         }
     }
 }
 
-/// The material behind an `aead.aead-key` or
-/// `aead-internal-nonce.internal-nonce-key` resource: the ready-to-use
+/// The material behind an `aead.aead-key` resource: the ready-to-use
 /// cipher bound to its algorithm at minting, the raw key bytes (zeroized on
 /// drop), and the key's extractability.
-///
-/// The internal-nonce seal *count* deliberately lives in each
-/// implementation, whose interior-mutability needs differ; the budget
-/// *decisions* over that count ([`check_budget`](Self::check_budget),
-/// [`seals_remaining`](Self::seals_remaining)) live here so the two
-/// implementations cannot diverge on them.
 pub struct AeadKeyMaterial {
     /// The cipher keyed by `raw`, bound to its algorithm at minting.
     cipher: AeadCipher,
     /// The raw key material, retained for `export-key-raw` on extractable keys;
     /// zeroized on drop.
     raw: Zeroizing<Vec<u8>>,
-    /// The mint-time policy: usages and extractability (internal-nonce
-    /// mintings widen their narrower vocabulary into this one).
+    /// The mint-time policy: usages and extractability.
     policy: AeadPolicy,
-}
-
-/// Validate ChaCha key material (32 bytes for either construction),
-/// rendering the WIT `invalid-key` error otherwise.
-fn check_chacha_key(name: &str, raw: &[u8]) -> Result<(), Error> {
-    if raw.len() == CHACHA_KEY_LEN {
-        Ok(())
-    } else {
-        Err(Error::InvalidKey(format!(
-            "{name} requires {CHACHA_KEY_LEN} bytes of key material, got {} bytes",
-            raw.len()
-        )))
-    }
-}
-
-/// Import 32 bytes of key material for either ChaCha construction.
-fn import_chacha_like<C: KeyInit>(
-    name: &'static str,
-    wrap: fn(C) -> AeadCipher,
-    raw: Vec<u8>,
-    policy: AeadPolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    policy.check_useful()?;
-    check_chacha_key(name, &raw)?;
-    let cipher = wrap(C::new_from_slice(&raw).expect("length checked"));
-    Ok(AeadKeyMaterial {
-        cipher,
-        raw: Zeroizing::new(raw),
-        policy,
-    })
 }
 
 impl AeadKeyMaterial {
@@ -162,20 +105,10 @@ impl AeadKeyMaterial {
 
     /// The key as an `oct` JWK (the `aead-key.export-key-jwk` contract):
     /// the same extractability gate as [`export`](Self::export).
-    /// ChaCha20-Poly1305 exports the W3C Modern Algorithms proposal's
-    /// registered `alg`, `"C20P"`; XChaCha, with no registered JWK form,
-    /// is `unsupported`.
     pub fn export_jwk(&self) -> Result<String, Error> {
         let alg = match &self.cipher {
             AeadCipher::Aes128Gcm(_) => "A128GCM",
             AeadCipher::Aes256Gcm(_) => "A256GCM",
-            AeadCipher::ChaCha20Poly1305(_) => "C20P",
-            AeadCipher::XChaCha20Poly1305(_) => {
-                return Err(Error::Unsupported(format!(
-                    "{} has no registered JWK form",
-                    self.name()
-                )))
-            }
         };
         Ok(crate::jwk::build_oct(&self.export()?, alg))
     }
@@ -202,81 +135,16 @@ impl AeadKeyMaterial {
         .expect("generated key material always matches the variant")))
     }
 
-    /// Import raw key material as an IETF ChaCha20-Poly1305 key (exactly 32
-    /// bytes; anything else is `invalid-key`).
-    pub fn import_chacha20_poly1305(raw: Vec<u8>, policy: AeadPolicy) -> Result<Self, Error> {
-        import_chacha_like(
-            CHACHA20_POLY1305_NAME,
-            AeadCipher::ChaCha20Poly1305,
-            raw,
-            policy,
-        )
-    }
-
-    /// Import an RFC 7517 `oct` JWK as an IETF ChaCha20-Poly1305 key, per
-    /// the `chacha20-poly1305.import-key-jwk` contract: `alg`, when
-    /// present, must be the proposal's registered `"C20P"` (any other is
-    /// `invalid-key`), then the decoded material is subject to
-    /// [`import_chacha20_poly1305`](Self::import_chacha20_poly1305)'s
-    /// contract.
-    pub fn import_chacha20_poly1305_jwk(jwk: &str, policy: AeadPolicy) -> Result<Self, Error> {
-        let raw = crate::jwk::parse_oct(jwk, "C20P", policy.extractable)?;
-        Self::import_chacha20_poly1305(raw, policy)
-    }
-
-    /// Generate a fresh random IETF ChaCha20-Poly1305 key.
-    pub fn generate_chacha20_poly1305(policy: AeadPolicy) -> Result<Result<Self, Error>, RngError> {
-        if let Err(err) = policy.check_useful() {
-            return Ok(Err(err));
-        }
-        Ok(Ok(Self::import_chacha20_poly1305(
-            random_bytes(CHACHA_KEY_LEN)?,
-            policy,
-        )
-        .expect("generated key material is always 32 bytes")))
-    }
-
-    /// Import raw key material as an XChaCha20-Poly1305 key (exactly 32
-    /// bytes; anything else is `invalid-key`).
-    pub fn import_xchacha20_poly1305(raw: Vec<u8>, policy: AeadPolicy) -> Result<Self, Error> {
-        import_chacha_like(
-            XCHACHA20_POLY1305_NAME,
-            AeadCipher::XChaCha20Poly1305,
-            raw,
-            policy,
-        )
-    }
-
-    /// Generate a fresh random XChaCha20-Poly1305 key.
-    pub fn generate_xchacha20_poly1305(
-        policy: AeadPolicy,
-    ) -> Result<Result<Self, Error>, RngError> {
-        if let Err(err) = policy.check_useful() {
-            return Ok(Err(err));
-        }
-        Ok(Ok(Self::import_xchacha20_poly1305(
-            random_bytes(CHACHA_KEY_LEN)?,
-            policy,
-        )
-        .expect("generated key material is always 32 bytes")))
-    }
-
-    /// The algorithm name (`algorithm-name` on either key resource).
+    /// The algorithm name (`algorithm-name` on the key resource).
     pub fn name(&self) -> &'static str {
-        match &self.cipher {
-            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => AES_GCM_NAME,
-            AeadCipher::ChaCha20Poly1305(_) => CHACHA20_POLY1305_NAME,
-            AeadCipher::XChaCha20Poly1305(_) => XCHACHA20_POLY1305_NAME,
-        }
+        AES_GCM_NAME
     }
 
     /// The key length in bits (WebCrypto's `AesKeyAlgorithm.length`).
     pub fn length_bits(&self) -> u32 {
         match &self.cipher {
             AeadCipher::Aes128Gcm(_) => 128,
-            AeadCipher::Aes256Gcm(_)
-            | AeadCipher::ChaCha20Poly1305(_)
-            | AeadCipher::XChaCha20Poly1305(_) => 256,
+            AeadCipher::Aes256Gcm(_) => 256,
         }
     }
 
@@ -286,12 +154,9 @@ impl AeadKeyMaterial {
     }
 
     /// The nonce length in bytes this key's algorithm specifies
-    /// (`aead-key.nonce-size`, and the internal-nonce wire prefix).
+    /// (`aead-key.nonce-size`).
     pub fn nonce_len(&self) -> usize {
-        match &self.cipher {
-            AeadCipher::XChaCha20Poly1305(_) => 24,
-            _ => 12,
-        }
+        12
     }
 
     /// The default tag length in bytes every served algorithm trails its
@@ -302,80 +167,23 @@ impl AeadKeyMaterial {
     }
 
     /// Resolve and validate a per-call tag size for this key's algorithm:
-    /// GCM accepts [`crate::gcm::GCM_TAG_SIZES`]; the ChaCha constructions
-    /// fix 16. `None` is the algorithm default.
+    /// GCM accepts [`crate::gcm::GCM_TAG_SIZES`]. `None` is the algorithm
+    /// default.
     fn check_tag_size(&self, tag_size: Option<u8>) -> Result<usize, Error> {
-        match &self.cipher {
-            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => {
-                crate::gcm::check_tag_size(tag_size)
-            }
-            AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => match tag_size {
-                None | Some(16) => Ok(16),
-                Some(size) => Err(Error::Unsupported(format!(
-                    "{} tags are always 16 bytes, got a tag size of {size}",
-                    self.name()
-                ))),
-            },
-        }
-    }
-
-    /// The internal-nonce seal budget for this key's algorithm: the WIT
-    /// contract's 2^32-invocation bound for 12-byte-nonce algorithms (SP
-    /// 800-38D §8.2.2's repeat-probability bound); `none` for 24-byte
-    /// nonces, whose repeat probability is negligible at any realistic
-    /// count.
-    pub fn nonce_budget(&self) -> Option<u64> {
-        match self.nonce_len() {
-            12 => Some(1 << 32),
-            _ => None,
-        }
-    }
-
-    /// Whether a key that has already sealed `sealed` times may seal again,
-    /// per the minting interfaces' SHOULD-enforce contract:
-    /// `key-exhausted` once the algorithm's nonce budget is spent.
-    pub fn check_budget(&self, sealed: u64) -> Result<(), Error> {
-        match self.nonce_budget() {
-            Some(budget) if sealed >= budget => Err(Error::KeyExhausted),
-            _ => Ok(()),
-        }
-    }
-
-    /// The remaining nonce budget after `sealed` seals (the
-    /// `seals-remaining` getter); `none` when no budget is enforced.
-    pub fn seals_remaining(&self, sealed: u64) -> Option<u64> {
-        self.nonce_budget()
-            .map(|budget| budget.saturating_sub(sealed))
+        crate::gcm::check_tag_size(tag_size)
     }
 
     /// Validate a caller nonce's length for this key's algorithm, rendering
     /// the WIT `invalid-nonce` error: GCM accepts 12 to 128 bytes inclusive
-    /// (the `aes-gcm` minting contract's portable window); the ChaCha
-    /// constructions accept exactly their standard length.
+    /// (the `aes-gcm` minting contract's portable window).
     fn check_nonce(&self, nonce: &[u8]) -> Result<(), Error> {
-        match &self.cipher {
-            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_) => {
-                if (12..=128).contains(&nonce.len()) {
-                    Ok(())
-                } else {
-                    Err(Error::InvalidNonce(format!(
-                        "AES-GCM nonces are 12 to 128 bytes inclusive, got {} bytes",
-                        nonce.len()
-                    )))
-                }
-            }
-            AeadCipher::ChaCha20Poly1305(_) | AeadCipher::XChaCha20Poly1305(_) => {
-                if nonce.len() == self.nonce_len() {
-                    Ok(())
-                } else {
-                    Err(Error::InvalidNonce(format!(
-                        "{} requires a {}-byte nonce, got {} bytes",
-                        self.name(),
-                        self.nonce_len(),
-                        nonce.len()
-                    )))
-                }
-            }
+        if (12..=128).contains(&nonce.len()) {
+            Ok(())
+        } else {
+            Err(Error::InvalidNonce(format!(
+                "AES-GCM nonces are 12 to 128 bytes inclusive, got {} bytes",
+                nonce.len()
+            )))
         }
     }
 
@@ -386,15 +194,8 @@ impl AeadKeyMaterial {
         nonce.len() == self.nonce_len() && tag_len == 16
     }
 
-    /// The general-path AES cipher, keyed from this key's material. Only
-    /// reachable for the AES variants: `check_nonce`/`check_tag_size` bound
-    /// the ChaCha constructions to the standard point, which never routes
-    /// here.
+    /// The general-path AES cipher, keyed from this key's material.
     fn general_gcm(&self) -> crate::gcm::GcmAes {
-        debug_assert!(matches!(
-            self.cipher,
-            AeadCipher::Aes128Gcm(_) | AeadCipher::Aes256Gcm(_)
-        ));
         crate::gcm::GcmAes::new(&self.raw).expect("AES key length fixed at minting")
     }
 
@@ -509,61 +310,13 @@ impl AeadKeyMaterial {
             .map(crate::UnwrapInputMaterial::new)
     }
 
-    /// Encrypt and authenticate `msg` under a fresh random nonce with `aad`,
-    /// returning the self-contained `nonce ‖ ciphertext ‖ tag` wire format
-    /// (the SP 800-38D §8.2.2 RBG-based construction; the
-    /// `internal-nonce-key.seal` contract minus the stream transport and
-    /// the budget bookkeeping, which stays with the caller). The inner
-    /// error is `other` on encryption failure; the outer channel is entropy
-    /// failure.
-    pub fn seal_internal(
-        &self,
-        aad: &[u8],
-        msg: &[u8],
-    ) -> Result<Result<Vec<u8>, Error>, RngError> {
-        if !self.policy.seal {
-            return Ok(Err(not_permitted("seal")));
-        }
-        let mut sealed = vec![0u8; self.nonce_len()];
-        getrandom::fill(&mut sealed)?;
-        let body = match self.cipher.encrypt(&sealed, Payload { msg, aad }) {
-            Ok(body) => body,
-            Err(_) => {
-                return Ok(Err(Error::Other(format!(
-                    "{} encryption failed",
-                    self.name()
-                ))))
-            }
-        };
-        sealed.extend(body);
-        Ok(Ok(sealed))
-    }
-
-    /// Decrypt and verify a sealed message (`nonce ‖ ciphertext ‖ tag`)
-    /// under `aad` (the `internal-nonce-key.open` contract minus the stream
-    /// transport). Any failure — input too short to carry the wire format,
-    /// a bad tag, wrong key, wrong associated data — reports
-    /// `authentication-failed` with no detail, per the WIT contract.
-    pub fn open_internal(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, Error> {
-        if !self.policy.open {
-            return Err(not_permitted("open"));
-        }
-        if sealed.len() < self.nonce_len() {
-            return Err(Error::AuthenticationFailed);
-        }
-        let (nonce, body) = sealed.split_at(self.nonce_len());
-        self.cipher
-            .decrypt(nonce, Payload { msg: body, aad })
-            .map_err(|_| Error::AuthenticationFailed)
-    }
-
     /// Whether the key material may be exported (the `extractable` getter
-    /// on either key resource).
+    /// on the key resource).
     pub fn extractable(&self) -> bool {
         self.policy.extractable
     }
 
-    /// Whether the key permits `seal` (`can-seal` on either key resource).
+    /// Whether the key permits `seal` (`can-seal` on the key resource).
     pub fn can_seal(&self) -> bool {
         self.policy.seal
     }
@@ -584,7 +337,7 @@ impl AeadKeyMaterial {
     }
 
     /// The raw material, or `not-extractable` (the `export-key-raw` contract on
-    /// either key resource).
+    /// the key resource).
     ///
     /// The copy returned is *not* protected: see the note on
     /// [`crate`](crate#exported-material).
@@ -687,7 +440,7 @@ mod tests {
     /// The full GCM parameter space on one key: a non-standard nonce
     /// length routes to the general path and round-trips, a truncated tag
     /// round-trips and fails at the wrong declared size, and out-of-set
-    /// sizes are declined. ChaCha keys stay bound to the standard point.
+    /// sizes are declined.
     #[test]
     fn full_parameter_space_on_one_key() {
         let key = AeadKeyMaterial::import_aes_gcm(AesVariant::Aes256, vec![1; 32], ap()).unwrap();
@@ -712,69 +465,16 @@ mod tests {
             key.seal(&[7u8; 12], b"", Some(5), b""),
             Err(Error::Unsupported(_))
         ));
-
-        let chacha = AeadKeyMaterial::generate_chacha20_poly1305(ap())
-            .unwrap()
-            .unwrap();
-        assert!(chacha.seal(&[0u8; 12], b"", Some(16), b"x").is_ok());
-        assert!(matches!(
-            chacha.seal(&[0u8; 12], b"", Some(12), b"x"),
-            Err(Error::Unsupported(_))
-        ));
-        assert!(matches!(
-            chacha.seal(&[0u8; 16], b"", None, b"x"),
-            Err(Error::InvalidNonce(_))
-        ));
     }
 
     #[test]
-    fn internal_nonce_round_trip_and_wire_format() {
-        let key = AeadKeyMaterial::generate_xchacha20_poly1305(xp())
-            .unwrap()
-            .unwrap();
-        assert_eq!(key.nonce_len(), 24);
-        assert_eq!(key.nonce_budget(), None);
-        let sealed = key.seal_internal(b"aad", b"msg").unwrap().unwrap();
-        assert_eq!(sealed.len(), 24 + 3 + 16);
-        assert_eq!(key.open_internal(b"aad", &sealed).unwrap(), b"msg");
-        // Too short to carry the wire format: fails closed.
-        assert_eq!(
-            key.open_internal(b"aad", &sealed[..10]),
-            Err(Error::AuthenticationFailed)
-        );
-    }
-
-    #[test]
-    fn twelve_byte_nonce_algorithms_carry_the_budget() {
-        let key = AeadKeyMaterial::generate_chacha20_poly1305(xp())
-            .unwrap()
-            .unwrap();
-        assert_eq!(key.nonce_budget(), Some(1 << 32));
+    fn generated_key_reports_its_parameters() {
         let key = AeadKeyMaterial::generate_aes_gcm(AesVariant::Aes128, xp())
             .unwrap()
             .unwrap();
-        assert_eq!(key.nonce_budget(), Some(1 << 32));
         assert_eq!(key.length_bits(), 128);
-    }
-
-    /// The budget decision both implementations delegate here: counting
-    /// stays with them, exhaustion and the remaining-budget arithmetic do
-    /// not.
-    #[test]
-    fn budget_decisions_follow_the_seal_count() {
-        let budgeted = AeadKeyMaterial::generate_chacha20_poly1305(xp())
-            .unwrap()
-            .unwrap();
-        assert_eq!(budgeted.check_budget(0), Ok(()));
-        assert_eq!(budgeted.check_budget((1 << 32) - 1), Ok(()));
-        assert_eq!(budgeted.check_budget(1 << 32), Err(Error::KeyExhausted));
-        assert_eq!(budgeted.seals_remaining(1), Some((1 << 32) - 1));
-        assert_eq!(budgeted.seals_remaining(u64::MAX), Some(0));
-
-        let unbudgeted = AeadKeyMaterial::generate_xchacha20_poly1305(xp())
-            .unwrap()
-            .unwrap();
-        assert_eq!(unbudgeted.check_budget(u64::MAX), Ok(()));
-        assert_eq!(unbudgeted.seals_remaining(u64::MAX), None);
+        assert_eq!(key.nonce_len(), 12);
+        assert_eq!(key.tag_len(), 16);
+        assert_eq!(key.name(), AES_GCM_NAME);
     }
 }

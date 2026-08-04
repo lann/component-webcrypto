@@ -27,7 +27,6 @@ fn aead_algorithm(aead: AeadId) -> AeadAlgorithm {
     match aead {
         AeadId::Aes128Gcm => AeadAlgorithm::Aes128Gcm,
         AeadId::Aes256Gcm => AeadAlgorithm::Aes256Gcm,
-        AeadId::Chacha20Poly1305 => AeadAlgorithm::ChaCha20Poly1305,
     }
 }
 

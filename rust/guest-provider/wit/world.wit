@@ -26,9 +26,7 @@ world provider {
     export lann:webcrypto/mac@0.1.0;
     export lann:webcrypto/aead@0.1.0;
     export lann:webcrypto/cipher@0.1.0;
-    export lann:webcrypto/aead-internal-nonce@0.1.0;
     export lann:webcrypto/digest@0.1.0;
-    export lann:webcrypto/bytes@0.1.0;
     export lann:webcrypto/sha2@0.1.0;
     @unstable(feature = sha1-checked)
     export lann:webcrypto/sha1-checked@0.1.0;
@@ -40,13 +38,6 @@ world provider {
     export lann:webcrypto/wrapping@0.1.0;
     export lann:webcrypto/key-wrap@0.1.0;
     export lann:webcrypto/aes-kw@0.1.0;
-    @unstable(feature = chacha20-poly1305)
-    export lann:webcrypto/chacha20-poly1305@0.1.0;
-    @unstable(feature = xchacha20-poly1305)
-    export lann:webcrypto/xchacha20-poly1305@0.1.0;
-    export lann:webcrypto/aes-gcm-internal-nonce@0.1.0;
-    @unstable(feature = xchacha20-poly1305)
-    export lann:webcrypto/xchacha20-poly1305-internal-nonce@0.1.0;
     export lann:webcrypto/derivation@0.1.0;
     export lann:webcrypto/hkdf@0.1.0;
     export lann:webcrypto/hkdf-sha2@0.1.0;

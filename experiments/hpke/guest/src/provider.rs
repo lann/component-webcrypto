@@ -29,9 +29,7 @@ use lann_webcrypto_guest::aes_gcm::AesVariant;
 use lann_webcrypto_guest::bindings::key_agreement::AgreementKeyOptions;
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::x25519;
-use lann_webcrypto_guest::{
-    aes_gcm, chacha20_poly1305, hmac_sha2, sha2, Aead, AeadKeyOptions, MacKeyOptions,
-};
+use lann_webcrypto_guest::{aes_gcm, hmac_sha2, sha2, Aead, AeadKeyOptions, MacKeyOptions};
 use wit_bindgen::block_on;
 use zeroize::Zeroize;
 
@@ -136,8 +134,9 @@ async fn aead_key(alg: AeadAlgorithm, key: &[u8]) -> Result<Aead, Error> {
     match alg {
         AeadAlgorithm::Aes128Gcm => aes_gcm::import_key_raw(AesVariant::Aes128, key, options).await,
         AeadAlgorithm::Aes256Gcm => aes_gcm::import_key_raw(AesVariant::Aes256, key, options).await,
-        AeadAlgorithm::ChaCha20Poly1305 => chacha20_poly1305::import_key_raw(key, options).await,
-        AeadAlgorithm::HpkeExport => return Err(Error::UnknownAeadAlgorithm),
+        AeadAlgorithm::ChaCha20Poly1305 | AeadAlgorithm::HpkeExport => {
+            return Err(Error::UnknownAeadAlgorithm)
+        }
     }
     .map_err(|e| crypto_err("aead key import", e))
 }
@@ -245,10 +244,10 @@ impl HpkeCrypto for WebcryptoProvider {
 
     fn supports_aead(alg: AeadAlgorithm) -> Result<(), Error> {
         match alg {
-            AeadAlgorithm::Aes128Gcm
-            | AeadAlgorithm::Aes256Gcm
-            | AeadAlgorithm::ChaCha20Poly1305 => Ok(()),
-            AeadAlgorithm::HpkeExport => Err(Error::UnknownAeadAlgorithm),
+            AeadAlgorithm::Aes128Gcm | AeadAlgorithm::Aes256Gcm => Ok(()),
+            AeadAlgorithm::ChaCha20Poly1305 | AeadAlgorithm::HpkeExport => {
+                Err(Error::UnknownAeadAlgorithm)
+            }
         }
     }
 

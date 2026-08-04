@@ -11,23 +11,17 @@ bytes = ["dep:bytes"]
 # `DataSource::from_reader`: feed an operation from any
 # `futures_io::AsyncRead`.
 futures-io = ["dep:futures-io"]
-# The `@unstable`-gated ChaCha interfaces (`chacha20-poly1305`,
-# `xchacha20-poly1305`, `xchacha20-poly1305-internal-nonce` — see
-# wit/README.md, "Stability gates"). Off by default: enabling it adds the
-# three imports to the generated world, so every composition of a consumer
-# component must then provide them.
-chacha = []
 # The `@unstable`-gated `sha1-checked` interface (see wit/README.md,
-# "Stability gates"). Off by default, like `chacha`: enabling it adds the
+# "Stability gates"). Off by default: enabling it adds the
 # import to the generated world, and platform-backed providers cannot
 # serve it.
 sha1-checked = []
 # The `@unstable`-gated RSA signing interfaces (`rsassa-pkcs1-v15-sign`,
 # `rsa-pss-sign` — see wit/README.md, "Stability gates"). Off by default,
-# like `chacha`: enabling it adds the two imports to the generated world,
-# and providers in attacker-observable timing domains do not serve them
-# (see wit/README.md, "Timing-channel policy"), so the composed in-guest
-# target cannot run a consumer that enables this.
+# like `sha1-checked`: enabling it adds the two imports to the generated
+# world, and providers in attacker-observable timing domains do not serve
+# them (see wit/README.md, "Timing-channel policy"), so the composed
+# in-guest target cannot run a consumer that enables this.
 rsa-sign = []
 # The `@unstable`-gated `rsa-oaep-decrypt` interface (see wit/README.md,
 # "Stability gates"). Off by default, like `rsa-sign` and for the same

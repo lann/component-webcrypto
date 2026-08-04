@@ -6,7 +6,7 @@
   "description": "Browser-compatible host for lann:webcrypto over the Web Crypto API. No dependencies; map the lann:webcrypto imports to webcrypto.js when transpiling with jco.",
   "exports": "./webcrypto.js",
   "scripts": {
-    "types": "node ../../scripts/jco-transpile.mjs types wit --world-name imports --async-mode jspi -o generated --feature chacha20-poly1305 --feature xchacha20-poly1305 --feature sha1-checked --feature rsa-sign --feature rsa-oaep-decrypt",
+    "types": "node ../../scripts/jco-transpile.mjs types wit --world-name imports --async-mode jspi -o generated --feature sha1-checked --feature rsa-sign --feature rsa-oaep-decrypt",
     "typecheck": "npm run types && tsc --noEmit -p tsconfig.json",
     "test": "node --test 'test/*.test.js'"
   },

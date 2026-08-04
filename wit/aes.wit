@@ -1,7 +1,7 @@
 package lann:webcrypto@0.1.0;
 
 /// The AES family's shared parameterization. Interfaces minting AES-based
-/// keys (`aes-gcm`, `aes-gcm-internal-nonce`, …) declare their variant from
+/// keys (`aes-gcm`, `aes-cbc`, …) declare their variant from
 /// this one closed set (the `sha2` pattern: one definition per family).
 interface aes {
     /// The AES variants, distinguished by key size: AES closes this set, so
@@ -27,9 +27,10 @@ interface aes {
 /// as the Web Cryptography API's `AesGcmParams` defines them, per call.
 ///
 /// Security:
-/// - The caller owns nonce uniqueness. For nonce-misuse resistance,
-///   prefer `aes-gcm-internal-nonce`, which keeps the nonce out of the
-///   API entirely.
+/// - The caller owns nonce uniqueness. Nonce reuse under one key defeats
+///   the algorithm's confidentiality and authenticity guarantees; use a
+///   deterministic per-key uniqueness scheme (SP 800-38D §8), or draw
+///   96-bit nonces at random only within §8.2.2's invocation bounds.
 /// - Short tags weaken the forgery bound (SP 800-38D Appendix C) and are
 ///   opt-in only, behind an explicit `tag-size`.
 /// - 96 bits (12 bytes) is the standard nonce size (the `nonce-size`
@@ -54,10 +55,6 @@ interface aes {
 ///   (~64 GiB) per invocation and an AAD bound of 2^64 − 1 bits.
 ///   Implementations reaching them fail rather than wrap, but their
 ///   buffering limits (`error.other`) are reached far earlier in practice.
-///
-/// A FIPS 140-3 approved-mode provider does not export this interface:
-/// caller-supplied encryption IVs fall outside SP 800-38D §8's approved
-/// envelope. See `aes-gcm-internal-nonce`.
 interface aes-gcm {
     use types.{error};
     use aead.{aead-key, aead-key-options};
@@ -114,66 +111,6 @@ interface aes-gcm {
     /// contract"). `input` is consumed; see `unwrap-key-raw` for the
     /// options model.
     unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: aead-key-options) -> result<aead-key, error>;
-}
-
-/// AES-GCM internal-nonce key minting: `aead-internal-nonce` keys using the
-/// SP 800-38D §8.2.2 RBG-based IV construction (96 random bits per seal).
-///
-/// Sealed messages are `iv ‖ ciphertext ‖ tag` (12-byte IV, 16-byte tag).
-///
-/// Security:
-/// - A key's nonce budget (see `README.md`, "Terminology") is 2^32 `seal`
-///   invocations (§8.2.2's repeat-probability bound). Implementations
-///   SHOULD enforce it with `error.key-exhausted`; a FIPS 140-3 profile
-///   MUST. For workloads that could approach the bound, prefer
-///   `xchacha20-poly1305-internal-nonce`.
-///
-/// This interface is deliberately separate from `aes-gcm` (caller-nonce
-/// minting) so a security profile can serve one nonce discipline without
-/// the other at composition time — e.g. a FIPS 140-3 approved-mode
-/// provider exports this interface but not `aes-gcm`.
-interface aes-gcm-internal-nonce {
-    use types.{error};
-    use aead-internal-nonce.{internal-nonce-key, internal-nonce-key-options};
-    use aes.{aes-variant};
-    use wrapping.{unwrap-input};
-
-    /// Import raw key material as an internal-nonce AES-GCM key of the
-    /// declared variant (see `aes-gcm.import-key-raw` for the
-    /// variant/`raw`-length contract, which applies identically here).
-    ///
-    /// Security:
-    /// - The nonce-uniqueness guarantee is per key *as managed by this
-    ///   implementation*: importing the same material into multiple
-    ///   implementations divides the nonce budget among them blindly.
-    ///   Prefer `generate-key` where interop does not require import.
-    ///
-    /// An implementation MAY reject imported material per its security
-    /// policy (for example, a profile that cannot establish uniqueness for
-    /// externally sourced material) with `error.invalid-key` or
-    /// `error.unsupported`.
-    import-key-raw: async func(%variant: aes-variant, raw: list<u8>, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
-
-    /// Import key material from an `oct` JWK, subject to
-    /// `import-key-raw`'s contract (including the policy-based-rejection
-    /// allowance) and the package-wide JWK contract (see
-    /// `mac-key.export-key-jwk`).
-    import-key-jwk: async func(%variant: aes-variant, jwk: string, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
-
-    /// Generate a fresh random internal-nonce AES-GCM key of the declared
-    /// variant. Fails with `error.unsupported` if this implementation does
-    /// not serve the variant.
-    generate-key: async func(%variant: aes-variant, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
-
-    /// Mint a key from unwrapped key material read as raw bytes, subject
-    /// to `import-key-raw`'s contract — including the shared-material
-    /// caveat and policy-rejection allowance. `input` is consumed; see
-    /// `aes-gcm.unwrap-key-raw` for the options model.
-    unwrap-key-raw: async func(%variant: aes-variant, input: unwrap-input, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
-
-    /// Mint a key from unwrapped key material read as an `oct` JWK,
-    /// subject to `import-key-jwk`'s contract. `input` is consumed.
-    unwrap-key-jwk: async func(%variant: aes-variant, input: unwrap-input, options: internal-nonce-key-options) -> result<internal-nonce-key, error>;
 }
 
 /// AES-CBC key minting (NIST SP 800-38A; PKCS#7 padding, the Web
@@ -293,7 +230,7 @@ interface aes-ctr {
 ///
 /// Input domains:
 /// - `kw-key.wrap`: the serialized input must be a multiple of 8 bytes,
-///   at least 16 (RFC 3394 §2; every AES, HMAC-multiple-of-8, and ChaCha
+///   at least 16 (RFC 3394 §2; every AES and multiple-of-8 HMAC
 ///   raw key qualifies). Anything else fails `error.invalid-key`.
 /// - JWK-formatted wrap input (a `to-wrap-input-jwk` serialization) is
 ///   first padded with ASCII spaces (0x20) to a multiple of 8 — the

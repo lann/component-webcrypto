@@ -51,8 +51,8 @@ JIT), weighted by how **forgiving of failure** the construction is
 
 | Class | Trust required | Examples | In-guest policy |
 | --- | --- | --- | --- |
-| **A — structurally constant-time** | None beyond a correct compiler: no secret-dependent branches or memory indices, only add/xor/rotate. Nothing for a JIT to miscompile into a leak. | SHA-2, SHA-3, BLAKE2/3, HMAC, ChaCha20, HKDF | Export freely. |
-| **B — CT given a constant-time multiplier and benign lowering** | Constant-latency hardware multiply; JIT lowers select/cmov without branches. This is where the two-compiler problem lives. | Poly1305, GHASH, X25519/Ed25519 | Export with the CT-variant implementation; document. |
+| **A — structurally constant-time** | None beyond a correct compiler: no secret-dependent branches or memory indices, only add/xor/rotate. Nothing for a JIT to miscompile into a leak. | SHA-2, SHA-3, BLAKE2/3, HMAC, HKDF | Export freely. |
+| **B — CT given a constant-time multiplier and benign lowering** | Constant-latency hardware multiply; JIT lowers select/cmov without branches. This is where the two-compiler problem lives. | GHASH, X25519/Ed25519 | Export with the CT-variant implementation; document. |
 | **C — CT only via costly variants** | The *fast* implementation leaks (secret-indexed tables); a bitsliced/fixsliced variant is CT at a several-fold cost. | AES | Export **only** the CT variant. |
 | **D — not realistically CT in portable wasm** | Heroic implementation effort with near-zero leak tolerance: bignum branches, secret-dependent allocation, catastrophic small leaks (nonce bits → key recovery; remote-exploitable history). | RSA private-key ops, ECDSA signing, classic DH | **Never exported by this provider.** |
 
@@ -116,21 +116,21 @@ what marks where secrets flow.
 | AES-GCM (128/256) | C + B | `aes-gcm` with the soft **fixsliced** AES backend (bitsliced, table-free) + masked-multiply GHASH | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | AES-CBC / AES-CTR (128/256, the `cipher` kind) | C | The same fixsliced `aes` block cipher; CBC chaining, arbitrary-width wrapping CTR, and the branch-free PKCS#7 unpad are assembled here | As AES-GCM's AES half. The CBC padding *verdict* is API-visible by design (WebCrypto parity; one uniform error) — the unpad accumulates it without early exits, so timing adds nothing beyond the verdict itself. |
 | AES-KW (128/256, the `key-wrap` kind) | C | `aes-kw` (RFC 3394) over the same fixsliced `aes` block cipher | As AES-GCM's AES half. The unwrap *verdict* is API-visible by design (one detail-free `authentication-failed` for malformed lengths and bad ICVs alike); the ICV comparison is a fixed-size compare of non-secret-length data. |
-| ChaCha20-Poly1305 / XChaCha20-Poly1305 | A + B | `chacha20poly1305` (portable software backend: ChaCha20 is pure ARX by construction; Poly1305 is limb-based multiply-accumulate) | Constant-latency integer multiply (Poly1305 only). |
-| AES-GCM / XChaCha20-Poly1305 internal-nonce (`aead-internal-nonce`) | as the underlying AEAD | The same ciphers under implementation-generated nonces (WASI random; SP 800-38D §8.2.2 RBG-based construction), with the 2^32 nonce budget enforced for 12-byte-nonce algorithms | As the underlying AEAD; the nonce is public, so its generation adds no timing surface. |
 | X25519 key agreement | B | `x25519-dalek` (curve25519-dalek's constant-time Montgomery ladder: limb-based multiply-accumulate, no secret-dependent branches or indices; the all-zero contributory check compares in constant time) | Constant-latency integer multiply. |
 | ECDH P-256/P-384 (key agreement) | B | `p256`/`p384` (RustCrypto: complete Renes–Costello–Batina formulas, constant-time field and scalar arithmetic, no secret-dependent branches or indices; strict point validation at import) | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
-| SHA-2 digests (256/384/512) | exempt (secret-free) | `sha2` | The `digest` primitive is unkeyed — hashing public data carries no secret to leak. `bytes.constant-time-equal` (via `subtle`) is exported for callers comparing digests against untrusted values. |
+| SHA-2 digests (256/384/512) | exempt (secret-free) | `sha2` | The `digest` primitive is unkeyed — hashing public data carries no secret to leak. |
 | Checked SHA-1 digests (`sha1-checked`) | exempt (secret-free) | `sha1-checked` (sha1dc counter-cryptanalysis; both postures) | Unkeyed, like SHA-2; the collision detection branches only on the input, which the digest kind treats as public. |
 | Ed25519 (sign + verify) | B | `ed25519-dalek` (complete addition laws, no per-signature secret nonce, constant-time scalar arithmetic) | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | ECDSA P-256/P-384 (**verify only**) | exempt (secret-free) | `p256`/`p384` verification — public keys and public signatures | Signing is class D (per-signature secret nonce; small leaks are key-recovering) and its interface (`ecdsa-sign`) is **not exported**; compositions requiring it fail at `wac plug` time. |
 | RSASSA-PKCS1-v1_5 / RSA-PSS (**verify only**) | exempt (secret-free) | `rsa` crate verification — public keys and public signatures | Signing and decryption are class D (per-message secrets and blinded private-key ops; the `rsa` crate's private-key operations additionally carry RUSTSEC-2023-0071, the Marvin timing sidechannel) — the RSA private-key interfaces (`rsassa-pkcs1-v15-sign`, `rsa-pss-sign`) are **not exported**. |
 | RSA-OAEP (**neither half exported**) | D (decrypt); encrypt has no secret-free half | None — the `public-encryption` kind is exported with uninhabited key resources | Decryption is class D and the attack lineage's prime target (blinded private-key ops; the Marvin sidechannel, RUSTSEC-2023-0071). Encryption is *not* secret-free, unlike signature verification: the plaintext is the secret, and it transits general-purpose bignum arithmetic with no constant-time variant — so the kind has no exportable half at all. Exporting the kind makes compositions requiring `rsa-oaep-encrypt` or `rsa-oaep-decrypt` fail at `wac plug` time. |
 
-ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
-constant time by construction rather than by countermeasure, it is the
-cipher designed for exactly this situation. AES-GCM's class C is a heroic
-implementation working against the algorithm's nature.
+AES-GCM (fixsliced, class C + B) is the package's only AEAD, and in-guest
+it is a heroic implementation working against the algorithm's nature: the
+constant-time property rests on a costly bitsliced countermeasure rather
+than on the cipher's construction. The classification stands — export only
+the CT variant — but the class-C caveat is this provider's AEAD story, not
+an alternative's footnote.
 
 ### Sources
 
