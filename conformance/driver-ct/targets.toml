@@ -12,5 +12,18 @@ kind = "structural"
 [targets.wasmtime-rustcrypto]
 missing-features = []
 
+[targets.composed]
+# The shared suite plugged with the in-guest RustCrypto provider
+# (rust/guest-provider), run under the generic component-test host
+# runner. The provider serves every gated feature the shared suite
+# exercises (chacha20-poly1305, xchacha20-poly1305, sha1-checked); its
+# one deliberate gap is `ecdsa-sign` (class D — see
+# rust/guest-provider/README.md), which nothing in this suite is tagged
+# with (the exclusion is structural: the signing suite's world imports
+# the interface, so it cannot even link composed — `just class-d`
+# asserts the absent export, so this line cannot outlive the fact it
+# records).
+missing-features = ["ecdsa-sign"]
+
 [targets.jco-node]
 missing-features = ["xchacha20-poly1305", "sha1-checked"]

@@ -5,8 +5,11 @@
 
 root := "../.."
 ct := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
+ct-runner := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-runner --bin ct-runner --"
 guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
 signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
+provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
+composed := root + "/target/conformance-composed-ct.wasm"
 
 # Build both suite components (rkyv corpus) and the host driver.
 build:
@@ -47,6 +50,29 @@ run-jco: build
         --suite conformance-signing-guest-ct --jsonl --target jco-node \
         > ../results/jco-node-signing.jsonl
 
+# Build the in-guest RustCrypto provider (composed target SUT; also the
+# class-D gate's plug).
+build-provider:
+    cargo build --manifest-path {{root}}/Cargo.toml --release \
+        -p lann-webcrypto-guest-provider --target wasm32-wasip2
+
+# The composed target: the shared suite plugged with the in-guest
+# RustCrypto provider, run under the GENERIC component-test host runner
+# (ct-runner provides only wasi + test-context — exactly the composed
+# artifact's imports; the leftover lann:webcrypto/{types,aes,rsa} imports
+# are type-only and instantiate trivially). The provider exports every
+# gated interface the suite imports (chacha20-poly1305,
+# xchacha20-poly1305, sha1-checked); its one gap is class D's ecdsa-sign,
+# which nothing in the shared suite is tagged with — declared for the
+# aggregate's cross-check against targets.toml. The signing suite never
+# runs composed: its world imports ecdsa-sign, so it cannot even link
+# against the provider (the class-d recipe asserts exactly that).
+run-composed: build build-provider
+    mkdir -p results
+    wac plug {{guest}} --plug {{provider}} -o {{composed}}
+    {{ct-runner}} {{composed}} --jobs 8 --jsonl \
+        --missing ecdsa-sign --target composed > results/composed.jsonl
+
 # Aggregate all targets into the matrix; exits nonzero on any failure
 # or validation error.
 aggregate:
@@ -54,6 +80,7 @@ aggregate:
         --lock ../guest-ct/tests.lock \
         --manifest targets.toml \
         --results wasmtime-rustcrypto=results/wasmtime-rustcrypto.jsonl \
+        --results composed=results/composed.jsonl \
         --results jco-node=results/jco-node.jsonl \
         -o matrix.md
 
@@ -66,8 +93,8 @@ aggregate-signing:
         --results jco-node=results/jco-node-signing.jsonl \
         -o matrix-signing.md
 
-# Everything: build, lock-check, class-D gate, both targets, aggregates.
-all: lock-check class-d run-wasmtime run-jco aggregate aggregate-signing
+# Everything: build, lock-check, class-D gate, all targets, aggregates.
+all: lock-check class-d run-wasmtime run-composed run-jco aggregate aggregate-signing
 
 # The class-D negative-composition gate (ported from the incumbent
 # harness), in two halves.
@@ -100,11 +127,9 @@ all: lock-check class-d run-wasmtime run-jco aggregate aggregate-signing
 # Matching each message on its interface name is load-bearing: a gate that
 # accepted any nonzero exit would also pass on a missing artifact or a
 # changed `wac` CLI.
-class-d: build
+class-d: build build-provider
     #!/usr/bin/env bash
     set -uo pipefail
-    cargo build --manifest-path '{{root}}/Cargo.toml' --release \
-        -p lann-webcrypto-guest-provider --target wasm32-wasip2
     output=$(wac plug {{signing}} \
         --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
         -o '{{root}}/target/class-d-composition.wasm' 2>&1)
