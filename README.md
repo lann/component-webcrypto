@@ -13,8 +13,8 @@ The package ([`wit/`](wit/), documented in
 [`wit/README.md`](wit/README.md)) is layered by *primitive kind*, not by
 algorithm:
 
-- **Generic primitive interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`; later `stream-aead`, …) each own the
+- **Generic primitive interfaces** (`mac`, `aead`,
+  `digest`, `signature`, `derivation`, …) each own the
   algorithm-agnostic resources. Adding an algorithm never touches them.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `sha2`,
   `ed25519-verify`/`-sign`, …) contain only
@@ -46,9 +46,8 @@ algorithm:
   the authentication statement, and unverified plaintext is never observable.
   The returned stream still lets plaintext live outside the caller's linear
   memory (the practical ceiling moves from wasm32's 4 GiB to host RAM).
-  Truly unbounded content belongs to a future segmented `stream-aead`
-  primitive kind (libsodium-`secretstream`-style), not to a relaxation of
-  `open`.
+  Content beyond that contract is out of scope; `open` is never relaxed to
+  stream unverified plaintext.
 - **Operations are one-shot calls on immutable keys** (`sign`/`verify`,
   `seal`/`open`): there is no stateful computation object to misuse, so the
   `error` variant carries no misuse cases — incrementality comes from the
@@ -62,14 +61,12 @@ algorithm:
   see AGENTS.md, "WPT fidelity is a first-class design constraint".
 
 Current algorithms: **SHA-2 digests**, **HMAC-SHA-2**, **AES-GCM** (the
-full SP 800-38D parameter space, plus an internal-nonce variant),
-**ChaCha20-Poly1305** and **XChaCha20-Poly1305** (the latter also with an
-internal-nonce variant; browsers implement neither construction, so the jco
-host declines them), **HKDF** and **PBKDF2** (minting `derive-input`s the
-key-minting interfaces consume), **Ed25519** and **ECDSA** (P-256/SHA-256,
+full SP 800-38D parameter space),
+**HKDF** and **PBKDF2** (minting `derive-input`s the
+key-minting interfaces consume), and **Ed25519** and **ECDSA** (P-256/SHA-256,
 P-384/SHA-384; the in-guest provider serves ECDSA *verification only* —
-signing is class D), and the `bytes.constant-time-equal` utility. The
-AEADs share the `ciphertext ‖ tag` wire format (`crypto.subtle`'s, which
+signing is class D). The
+AEAD wire format is `ciphertext ‖ tag` (`crypto.subtle`'s, which
 RustCrypto produces identically). The variant enums also declare cases no
 implementation here serves (`aes192`, the truncated SHA-2 variants) — each
 algorithm's spec closes its set — which fail `unsupported`; a composition

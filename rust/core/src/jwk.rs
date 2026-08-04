@@ -590,18 +590,17 @@ mod tests {
 
     #[test]
     fn absent_alg_is_accepted_and_a_wrong_one_rejected() {
-        // JWK `alg` is optional on import (the WPT fixtures for
-        // ChaCha20-Poly1305 omit it)…
+        // JWK `alg` is optional on import…
         let jwk = r#"{"kty":"oct","k":"AQID"}"#;
-        assert_eq!(parse_oct(jwk, "C20P", false).unwrap(), vec![1, 2, 3]);
+        assert_eq!(parse_oct(jwk, "A256GCM", false).unwrap(), vec![1, 2, 3]);
         // …a matching one is accepted…
-        let jwk = build_oct(&[7; 32], "C20P");
-        assert!(jwk.contains(r#""alg":"C20P""#));
-        assert_eq!(parse_oct(&jwk, "C20P", true).unwrap(), vec![7; 32]);
+        let jwk = build_oct(&[7; 32], "A256GCM");
+        assert!(jwk.contains(r#""alg":"A256GCM""#));
+        assert_eq!(parse_oct(&jwk, "A256GCM", true).unwrap(), vec![7; 32]);
         // …and another algorithm's is rejected.
-        let tagged = r#"{"kty":"oct","k":"AQID","alg":"A256GCM"}"#;
+        let tagged = r#"{"kty":"oct","k":"AQID","alg":"HS256"}"#;
         assert!(matches!(
-            parse_oct(tagged, "C20P", false),
+            parse_oct(tagged, "A256GCM", false),
             Err(Error::InvalidKey(_))
         ));
     }

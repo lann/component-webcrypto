@@ -668,7 +668,7 @@ mod tests {
     fn targets() -> Targets {
         toml::from_str(
             r#"
-            [features.chacha20-poly1305]
+            [features.sha1-checked]
             kind = "gated"
 
             [features.ecdsa-sign]
@@ -686,7 +686,7 @@ mod tests {
             missing-features = ["ecdsa-sign"]
 
             [targets.web]
-            missing-features = ["chacha20-poly1305"]
+            missing-features = ["sha1-checked"]
             optional = true
             "#,
         )
@@ -699,7 +699,7 @@ mod tests {
             # comment
             cases = [
                 { name = "alg/src/tc1/whole" },
-                { name = "alg/src/tc2/whole", features = ["chacha20-poly1305"] },
+                { name = "alg/src/tc2/whole", features = ["sha1-checked"] },
                 { name = "probe/check" },
             ]
             "#,
@@ -709,7 +709,7 @@ mod tests {
 
     fn file(target: &str, suite: &str, results: Vec<CaseResult>) -> ResultsFile {
         let missing_features = match target {
-            "web" => vec!["chacha20-poly1305".to_string()],
+            "web" => vec!["sha1-checked".to_string()],
             "composed-like" => vec!["ecdsa-sign".to_string()],
             _ => Vec::new(),
         };
@@ -733,7 +733,7 @@ mod tests {
     fn full_results() -> Vec<CaseResult> {
         vec![
             case("alg/src/tc1/whole", &[], Outcome::Pass),
-            case("alg/src/tc2/whole", &["chacha20-poly1305"], Outcome::Pass),
+            case("alg/src/tc2/whole", &["sha1-checked"], Outcome::Pass),
             case("probe/check", &[], Outcome::Pass),
         ]
     }
@@ -784,10 +784,10 @@ mod tests {
     fn gated_feature_in_requires_is_refused() {
         let problems = declaration_problems(
             r#"
-            [features.chacha20-poly1305]
+            [features.sha1-checked]
             kind = "gated"
             [suites.shared]
-            requires = ["chacha20-poly1305"]
+            requires = ["sha1-checked"]
             [targets.native]
             missing-features = []
             "#,
@@ -807,10 +807,10 @@ mod tests {
             [targets.native]
             missing-features = []
             "#,
-            r#"cases = [{ name = "alg/src/tc1/whole", features = ["chacha20-polly1305"] }]"#,
+            r#"cases = [{ name = "alg/src/tc1/whole", features = ["sha1-cheked"] }]"#,
         );
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems[0].contains("\"chacha20-polly1305\", which is not classified"));
+        assert!(problems[0].contains("\"sha1-cheked\", which is not classified"));
     }
 
     #[test]
@@ -819,7 +819,7 @@ mod tests {
             group_of("aes-gcm/wycheproof/tc42/bytes"),
             "aes-gcm/wycheproof"
         );
-        assert_eq!(group_of("probe/chacha-key-metadata"), "probe");
+        assert_eq!(group_of("probe/sha1-checked-postures"), "probe");
         assert_eq!(
             group_of("sha2/nist-cavp/sha256-len8/whole"),
             "sha2/nist-cavp"
@@ -994,11 +994,7 @@ mod tests {
     #[test]
     fn json_out_aligns_outcomes_with_lock_order() {
         let mut results = full_results();
-        results[1] = case(
-            "alg/src/tc2/whole",
-            &["chacha20-poly1305"],
-            Outcome::Skipped,
-        );
+        results[1] = case("alg/src/tc2/whole", &["sha1-checked"], Outcome::Skipped);
         results[1].detail = "feature declared missing".to_string();
         results[2] = case("probe/check", &[], Outcome::Fail);
         results[2].detail = "boom".to_string();
@@ -1021,7 +1017,7 @@ mod tests {
         );
         assert_eq!(data["cases"][0]["suite"], "shared");
         assert_eq!(data["cases"][0].get("features"), None);
-        assert_eq!(data["cases"][1]["features"][0], "chacha20-poly1305");
+        assert_eq!(data["cases"][1]["features"][0], "sha1-checked");
 
         // Outcome columns align to the case order; targets without results
         // render null cells.
@@ -1042,7 +1038,7 @@ mod tests {
         // Target facts ride along for the viewer.
         assert_eq!(
             data["targets"]["web"]["missing-features"][0],
-            "chacha20-poly1305"
+            "sha1-checked"
         );
         assert_eq!(data["targets"]["web"]["optional"], true);
         assert_eq!(data["suites"]["signing"]["requires"][0], "ecdsa-sign");

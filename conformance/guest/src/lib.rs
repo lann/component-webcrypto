@@ -30,8 +30,8 @@ use std::collections::BTreeSet;
 use conformance_harness::KNOWN_FEATURES;
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use translate::{
-    AeadCase, EcdhCase, HkdfCase, HmacCase, InternalNonceCase, KwCase, Pbkdf2Case, RsaCase,
-    Sha2Case, SigCase, SpeccheckCase, VectorCase, X25519Case,
+    AeadCase, EcdhCase, HkdfCase, HmacCase, KwCase, Pbkdf2Case, RsaCase, Sha2Case, SigCase,
+    SpeccheckCase, VectorCase, X25519Case,
 };
 
 /// Validate a `missing-features` declaration against
@@ -163,8 +163,6 @@ suites! {
         Aead(AeadCase): translate::aead_cases => vectors::run_aead_case;
         Cbc(translate::CbcCase): translate::cbc_cases => vectors::run_cbc_case;
         Kw(KwCase): translate::kw_cases => vectors::run_kw_case;
-        InternalNonce(InternalNonceCase):
-            translate::internal_nonce_cases => vectors::run_internal_nonce_case;
         Sha2(Sha2Case): translate::sha2_cases => vectors::run_sha2_case;
         Sig(SigCase): translate::sig_cases => vectors::run_sig_case;
         Speccheck(SpeccheckCase): translate::speccheck_cases => vectors::run_speccheck_case;
@@ -181,9 +179,6 @@ suites! {
         CipherContract(contract::CipherFamily, contract::CipherArea):
             for family in contract::CIPHER_FAMILIES,
             contract::CipherArea::ALL.iter().copied() => contract::run_cipher;
-        InternalNonceContract(contract::InternalNonceFamily, contract::InternalNonceArea):
-            for family in contract::INTERNAL_NONCE_FAMILIES,
-            family.areas() => contract::run_internal_nonce;
         DeriveContract(contract::DeriveSourceFamily, contract::DeriveArea):
             for family in contract::DERIVE_SOURCE_FAMILIES,
             contract::DeriveArea::ALL.iter().copied() => contract::run_derive;

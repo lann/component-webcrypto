@@ -9,7 +9,7 @@ item; everything shared lives here.
 - The `types` interface holds the shared structural types (the `error`
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
-- **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
+- **Primitive-kind interfaces** (`mac`, `aead`,
   `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`,
   `public-encryption`) own the
   algorithm-agnostic resources.
@@ -18,7 +18,7 @@ item; everything shared lives here.
   intermediates key wrapping trades in (`wrap-input`, `unwrap-input`), as
   `derivation` holds `derive-input`.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
-  `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
+  `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
   `ecdh`, `rsassa-pkcs1-v15-*`, `rsa-pss-*`, `rsa-oaep-*`) only mint
   keys, bound
   to their algorithm at creation. A key can therefore never be used with
@@ -176,14 +176,6 @@ Every `*-jwk` function follows this contract. The minting interfaces'
   private exports) for the OKP and EC forms, which carry no `alg` — and
   nothing else. Metadata this package does not model (`key_ops`, `ext`,
   `use`) is the consumer's to stamp. Member order is not contract.
-- ChaCha20-Poly1305 uses the `oct` form of the [W3C Modern Algorithms
-  proposal](https://wicg.github.io/webcrypto-modern-algos/), whose
-  registered `alg` is `"C20P"` (the proposal carries the JOSE
-  registration): export emits it, and import accepts an absent `alg` or
-  `"C20P"`, rejecting anything else with `error.invalid-key`. `oct`
-  algorithms with no registered JWK form at all (the XChaCha
-  constructions) have no JWK minting, and export fails with
-  `error.unsupported`.
 
 ## Error contract
 
@@ -295,8 +287,8 @@ categories is a defect in an implementation, not latitude.
 
 ## Stability gates
 
-Most of the package is ungated. The ChaCha interfaces and
-`sha1-checked` are marked
+Most of the package is ungated. `sha1-checked`, the RSA signing
+interfaces, and `rsa-oaep-decrypt` are marked
 `@unstable`, so tooling hides them unless a consumer enables the feature
 (for example `wasm-tools ... --features`, wit-bindgen's `features` option,
 componentize-js's `--features`).
@@ -322,19 +314,6 @@ gate's reasons and exit conditions are listed here:
 
 The gates:
 
-- `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305` —
-  shape and linkage. Shape: the algorithm is IETF-standard (RFC 8439), but
-  its browser WebCrypto surface is a proposal (W3C ["Modern Algorithms
-  in the Web Cryptography API"]) this package tracks; the JWK contract
-  has already moved once to follow the proposal's registered `"C20P"`.
-  Exits when the proposal settles *and* optional imports are
-  expressible.
-- `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
-  `xchacha20-poly1305-internal-nonce` — shape and linkage. Shape: the
-  construction is deployed (libsodium lineage) but not
-  IETF-standardized, and no platform WebCrypto serves it. Exits on a
-  standardization-or-durability judgment once optional imports are
-  expressible.
 - `@unstable(feature = sha1-checked)` on `sha1-checked` — linkage only.
   The interface shape is settled (sha1dc is a decade stable, with
   nothing external pending), but platform WebCrypto carries no sha1dc,
@@ -377,11 +356,9 @@ Within this repository, only test builds enable the features by default
 (the conformance and demo guests, the WPT runners, the timing lab, and
 the standalone Wasmtime embedding). The library surfaces keep the gated
 default: the guest SDK's gated wrappers and imports sit behind its
-`chacha` and `sha1-checked` cargo features, and the Wasmtime host's
+`sha1-checked` and RSA cargo features, and the Wasmtime host's
 plain `add_to_linker` serves no gated interface
 (`add_to_linker_with_options` opts in).
-
-["Modern Algorithms in the Web Cryptography API"]: https://wicg.github.io/webcrypto-modern-algos/
 
 ## Design notes
 
@@ -459,10 +436,6 @@ short:
   ungated, which the portability contract forbids. (Contrast P-521,
   whose `ecdsa-variant`/`ecdh-variant` docs leave the door open: every
   platform serves those curves, so a future serving can be uniform.)
-- **Per-algorithm interfaces instead of variant enums** where platform
-  support splits along the algorithm boundary (IETF ChaCha20-Poly1305
-  versus XChaCha20-Poly1305): a composition that needs the missing one
-  fails at composition time rather than at minting.
 - **The SHA-1 HMAC constructions are in, for compatibility.** HMAC-SHA-1,
   HKDF-SHA-1, and PBKDF2-SHA-1 carry deployed systems (TOTP, WPA2-PSK,
   Kerberos string-to-key, WinZip AE-2), and SHA-1's collision breaks do
@@ -584,11 +557,16 @@ short:
     exactly what the pre-existing `decrypt`-then-import sequence
     reveals — decryption success and a separate parse verdict — and no
     more.
-- **FIPS 140-3 stays possible, not implemented.** The internal-nonce kind
-  carries the approved-mode seal; interfaces deliberately permit
-  policy-based rejection (short HMAC keys, imported internal-nonce
-  material) so a FIPS profile is just a provider that exports only approved
-  interfaces.
+- **FIPS 140-3 stays possible, not implemented.** Interfaces deliberately
+  permit policy-based rejection (short HMAC keys, degenerate KDF secrets),
+  and wrapped key export is expressible today (`to-wrap-input-*` behind
+  the extractability gate, with the plaintext exports declined under the
+  policy-rejection allowance), so a FIPS profile is a provider that
+  exports only approved interfaces. The approved-mode AES-GCM *seal* is
+  the missing piece: SP 800-38D forbids caller-supplied encryption IVs in
+  approved mode, and the internal-nonce kind that carried them was cut
+  with the package's narrowing to WebCrypto-standard scope — its design
+  is preserved in issue #272.
 
 ## Terminology
 
@@ -608,13 +586,8 @@ Brief definitions; follow the links for depth.
 - **AEAD** — authenticated encryption with associated data.
   [Wikipedia](https://en.wikipedia.org/wiki/Authenticated_encryption).
 - **nonce** — a number used once; AEAD's per-message input. Reuse with the
-  same key is catastrophic for GCM- and ChaCha-family algorithms.
+  same key is catastrophic for GCM-family algorithms.
   [Wikipedia](https://en.wikipedia.org/wiki/Cryptographic_nonce).
-- **nonce budget** — the number of `seal` invocations an internal-nonce key
-  can serve before the implementation can no longer guarantee that a fresh
-  nonce is unique for that key (for random nonces, a bound on the
-  collision probability, e.g. [SP 800-38D](https://csrc.nist.gov/pubs/sp/800/38/d/final)
-  §8.2.2's 2^32 bound for AES-GCM). Reaching it fails `error.key-exhausted`.
 - **AAD** — associated data: authenticated but not encrypted AEAD input.
 - **tag** — the authentication value a MAC or AEAD produces.
 - **digest** — the output of a cryptographic hash function.

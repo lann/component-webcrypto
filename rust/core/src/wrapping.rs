@@ -30,8 +30,8 @@ use crate::jwk::{check_unwrap_members, UseFamily};
 use crate::{
     not_permitted, random_bytes, AeadKeyMaterial, AeadPolicy, AesVariant, AgreementPolicy,
     AgreementSecretMaterial, CipherKeyMaterial, CipherMode, CipherPolicy, DeriveInputMaterial,
-    DerivePolicy, Error, IkmMaterial, InternalNoncePolicy, KwPolicy, MacKeyMaterial, MacPolicy,
-    PasswordMaterial, RngError, Sha2Variant, SigningKeyMaterial, SigningPolicy, AES_KW_NAME,
+    DerivePolicy, Error, IkmMaterial, KwPolicy, MacKeyMaterial, MacPolicy, PasswordMaterial,
+    RngError, Sha2Variant, SigningKeyMaterial, SigningPolicy, AES_KW_NAME,
 };
 
 /// The serialization a `wrap-input` was constructed with
@@ -496,38 +496,6 @@ pub fn unwrap_aes_gcm_key_jwk(
     )
 }
 
-/// `aes-gcm-internal-nonce.unwrap-key-raw`.
-pub fn unwrap_aes_gcm_internal_key(
-    variant: AesVariant,
-    input: UnwrapInputMaterial,
-    policy: InternalNoncePolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    redact_invalid_key(
-        "AES-GCM key",
-        AeadKeyMaterial::import_aes_gcm(variant, input.into_bytes().to_vec(), policy.into()),
-    )
-}
-
-/// `aes-gcm-internal-nonce.unwrap-key-jwk`.
-pub fn unwrap_aes_gcm_internal_key_jwk(
-    variant: AesVariant,
-    input: UnwrapInputMaterial,
-    policy: InternalNoncePolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    let widened: AeadPolicy = policy.into();
-    let text = unwrap_jwk_prelude(
-        "AES-GCM JWK",
-        widened.check_useful(),
-        input,
-        &widened.webcrypto_usages(),
-        UseFamily::Enc,
-    )?;
-    redact_invalid_key(
-        "AES-GCM JWK",
-        AeadKeyMaterial::import_aes_gcm_jwk(variant, &text, widened),
-    )
-}
-
 /// `aes-cbc.unwrap-key-raw` / `aes-ctr.unwrap-key-raw`.
 pub fn unwrap_cipher_key(
     mode: CipherMode,
@@ -589,57 +557,6 @@ pub fn unwrap_kw_key_jwk(
     redact_invalid_key(
         "AES-KW JWK",
         KwKeyMaterial::import_jwk(variant, &text, policy),
-    )
-}
-
-/// `chacha20-poly1305.unwrap-key-raw`.
-pub fn unwrap_chacha_key(
-    input: UnwrapInputMaterial,
-    policy: AeadPolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    redact_invalid_key(
-        "ChaCha20-Poly1305 key",
-        AeadKeyMaterial::import_chacha20_poly1305(input.into_bytes().to_vec(), policy),
-    )
-}
-
-/// `chacha20-poly1305.unwrap-key-jwk`.
-pub fn unwrap_chacha_key_jwk(
-    input: UnwrapInputMaterial,
-    policy: AeadPolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    let text = unwrap_jwk_prelude(
-        "ChaCha20-Poly1305 JWK",
-        policy.check_useful(),
-        input,
-        &policy.webcrypto_usages(),
-        UseFamily::Enc,
-    )?;
-    redact_invalid_key(
-        "ChaCha20-Poly1305 JWK",
-        AeadKeyMaterial::import_chacha20_poly1305_jwk(&text, policy),
-    )
-}
-
-/// `xchacha20-poly1305.unwrap-key-raw`.
-pub fn unwrap_xchacha_key(
-    input: UnwrapInputMaterial,
-    policy: AeadPolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    redact_invalid_key(
-        "XChaCha20-Poly1305 key",
-        AeadKeyMaterial::import_xchacha20_poly1305(input.into_bytes().to_vec(), policy),
-    )
-}
-
-/// `xchacha20-poly1305-internal-nonce.unwrap-key-raw`.
-pub fn unwrap_xchacha_internal_key(
-    input: UnwrapInputMaterial,
-    policy: InternalNoncePolicy,
-) -> Result<AeadKeyMaterial, Error> {
-    redact_invalid_key(
-        "XChaCha20-Poly1305 key",
-        AeadKeyMaterial::import_xchacha20_poly1305(input.into_bytes().to_vec(), policy.into()),
     )
 }
 

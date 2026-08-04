@@ -25,7 +25,7 @@ use data_encoding_macro::hexlower;
 use exports::demo::webcrypto_demo::demo::Guest;
 use lann_webcrypto_guest::aes_gcm::AesVariant;
 use lann_webcrypto_guest::sha2::Sha2Variant;
-use lann_webcrypto_guest::{constant_time_equal, wit_stream, Error};
+use lann_webcrypto_guest::{wit_stream, Error};
 
 /// Assert that `result` failed with an error matching `pattern` (e.g.
 /// `Error::InvalidKey(_)`). `accepted` says what its wrongly succeeding
@@ -149,10 +149,8 @@ impl Guest for Component {
 
         check("hmac-key-export", hmac_key_export().await).await?;
         check("digest-wrapper", digest_wrapper().await).await?;
-        check("constant-time-equal", bytes_equal().await).await?;
         check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
         check("concurrent-seal-open", concurrent_seal_open().await).await?;
-        check("internal-nonce-wrapper", internal_nonce_wrapper().await).await?;
         check("key-wrap-tour", key_wrap_tour().await).await?;
         check(
             "aes-ctr-wrapper-roundtrip",
@@ -255,7 +253,7 @@ async fn hmac_key_export() -> Result<()> {
     Ok(())
 }
 
-// --- digest & bytes -------------------------------------------------------
+// --- digest -------------------------------------------------------
 
 /// The FIPS 180-2 "abc" SHA-256 example digest.
 const SHA256_ABC: [u8; 32] =
@@ -281,33 +279,9 @@ async fn digest_wrapper() -> Result<()> {
     Ok(())
 }
 
-/// `constant-time-equal` agrees with plain equality.
-async fn bytes_equal() -> Result<()> {
-    let digest = SHA256_ABC;
-    let mut tampered = digest;
-    tampered[0] ^= 0x01;
-    ensure!(
-        constant_time_equal(&digest, &digest),
-        "equal inputs compared unequal"
-    );
-    ensure!(
-        !constant_time_equal(&digest, &tampered),
-        "differing inputs compared equal"
-    );
-    ensure!(
-        !constant_time_equal(&digest, &digest[..31]),
-        "different lengths compared equal"
-    );
-    ensure!(
-        constant_time_equal(&[], &[]),
-        "empty inputs compared unequal"
-    );
-    Ok(())
-}
-
 // --- aead -----------------------------------------------------------------
 
-/// The AEAD tour, and the library's `Aead`/`AeadInternalNonce` wrappers:
+/// The AEAD tour, and the library's `Aead` wrapper:
 /// `seal` is the one operation whose result may arrive before its input is
 /// consumed, so its `Seal` collects concurrently with feeding rather than
 /// awaiting the operation and reading afterwards. The single-shot seal is
@@ -317,7 +291,7 @@ async fn bytes_equal() -> Result<()> {
 /// rule asks for, and the reason `Seal` is a `Future` rather than an
 /// `async fn`'s anonymous one.
 async fn aead_wrapper_seal() -> Result<()> {
-    use lann_webcrypto_guest::{aes_gcm, aes_gcm_internal_nonce};
+    use lann_webcrypto_guest::aes_gcm;
 
     let seal_open = lann_webcrypto_guest::AeadKeyOptions {
         seal: true,
@@ -357,29 +331,6 @@ async fn aead_wrapper_seal() -> Result<()> {
         "sealed length is plaintext plus tag: got {}, want {}",
         first.len(),
         big.len() + 16
-    );
-
-    // The internal-nonce wrapper seals over the same shape; its wire format
-    // carries the nonce, so the sealed message is longer still.
-    let internal = aes_gcm_internal_nonce::generate_key(
-        AesVariant::Aes256,
-        lann_webcrypto_guest::InternalNonceKeyOptions {
-            seal: true,
-            open: true,
-            extractable: false,
-        },
-    )
-    .await
-    .context("generate-key (internal nonce)")?;
-    let sealed = internal
-        .seal(&aad[..], &plaintext[..])
-        .await
-        .context("internal-nonce wrapper seal")?;
-    ensure!(
-        sealed.len() == plaintext.len() + 12 + 16,
-        "internal-nonce sealed length: got {}, want {}",
-        sealed.len(),
-        plaintext.len() + 12 + 16
     );
     Ok(())
 }
@@ -437,30 +388,6 @@ async fn concurrent_seal_open() -> Result<()> {
     );
     let (a, b, c, d, e, f, g, h) = lanes;
     a.and(b).and(c).and(d).and(e).and(f).and(g).and(h)
-}
-
-/// The `AeadInternalNonce` wrapper end to end: generate, seal (a lazy
-/// [`Seal`](lann_webcrypto_guest::Seal)), open, and the budget getter.
-async fn internal_nonce_wrapper() -> Result<()> {
-    use lann_webcrypto_guest::{aes_gcm_internal_nonce, InternalNonceKeyOptions};
-    let key = aes_gcm_internal_nonce::generate_key(
-        aes_gcm_internal_nonce::AesVariant::Aes256,
-        InternalNonceKeyOptions {
-            seal: true,
-            open: true,
-            extractable: false,
-        },
-    )
-    .await?;
-    let plaintext = &b"internal-nonce wrapper payload"[..];
-    let sealed = key.seal(&b"aad"[..], plaintext).await?;
-    let opened = key.open(&b"aad"[..], sealed).await?.collect().await;
-    ensure!(opened == plaintext, "round trip disagreed");
-    ensure!(
-        key.seals_remaining().is_none_or(|left| left > 0),
-        "budget exhausted after one seal"
-    );
-    Ok(())
 }
 
 // --- cipher ----------------------------------------------------------------

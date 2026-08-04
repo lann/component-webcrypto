@@ -146,11 +146,6 @@ function errUnsupported(val) {
   return witError("unsupported", val);
 }
 
-/** `error.key-exhausted`. */
-function errKeyExhausted() {
-  return witError("key-exhausted");
-}
-
 /**
  * `error.not-permitted` with a human-readable detail.
  * @param {string} val
@@ -612,11 +607,10 @@ const aeadKeyGrants = new WeakMap();
 const aeadGrantsOf = stateReader(aeadKeyGrants, "aead-key");
 
 /**
- * The `aead-key` resource: an AES-GCM or ChaCha20-Poly1305 key. Holds a
- * `CryptoKey` whose platform usages cover the operations its mint options
- * granted (see `aeadKeyGrants`) and the options' `extractable` flag;
- * instances are minted only by the `aes-gcm` and `chacha20-poly1305`
- * interface functions below.
+ * The `aead-key` resource: an AES-GCM key. Holds a `CryptoKey` whose
+ * platform usages cover the operations its mint options granted (see
+ * `aeadKeyGrants`) and the options' `extractable` flag; instances are
+ * minted only by the `aes-gcm` interface functions below.
  */
 export class AeadKey extends symmetricKeyTail({}) {
   /**
@@ -643,10 +637,9 @@ export class AeadKey extends symmetricKeyTail({}) {
    * with a `tagSize`-byte authentication tag (`undefined` = the 16-byte
    * default). Returns a `ReadableStream` carrying ciphertext followed by
    * the tag (the `crypto.subtle.encrypt` wire format). Throws
-   * `{ tag: 'invalid-nonce', val }` for an empty nonce (AES-GCM) or a
-   * non-12-byte nonce (ChaCha20-Poly1305), and `{ tag: 'unsupported', val }`
-   * for a tag size outside the GCM set or a non-default ChaCha tag size,
-   * per the WIT contracts. The plaintext stream is drained before any
+   * `{ tag: 'invalid-nonce', val }` for a nonce outside AES-GCM's portable
+   * window, and `{ tag: 'unsupported', val }` for a tag size outside the
+   * GCM set, per the WIT contracts. The plaintext stream is drained before any
    * failure is raised, so the guest's writer always completes rather than
    * blocking on an unread stream.
    * @param {Uint8Array} nonce
@@ -740,9 +733,8 @@ export class AeadKey extends symmetricKeyTail({}) {
   /**
    * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
    * from the mint (see `#lengthBits`), and the size getters report the
-   * standard/default parameters — both AEADs this host serves (AES-GCM and
-   * ChaCha20-Poly1305) use 12-byte nonces and 16-byte tags by default,
-   * with other GCM sizes accepted per call.
+   * standard/default parameters — AES-GCM uses 12-byte nonces and 16-byte
+   * tags by default, with other GCM sizes accepted per call.
    */
   algorithmName() {
     return platformKeyOf(this).algorithm.name;
@@ -796,10 +788,9 @@ export class AeadKey extends symmetricKeyTail({}) {
 
 /**
  * The shared `seal`/`open` body of `aead-key`, over the collected message:
- * validate the per-call nonce and tag size for the key's construction
- * (RFC 8439 fixes ChaCha20-Poly1305's; AES-GCM takes 12–128-byte nonces
- * and the registry tag-size set), run the platform call, and lift its
- * failure by direction — a `seal` failure through `platformCall`'s
+ * validate the per-call nonce and tag size (AES-GCM takes 12–128-byte
+ * nonces and the registry tag-size set), run the platform call, and lift
+ * its failure by direction — a `seal` failure through `platformCall`'s
  * taxonomy, an `open` failure through `decryptFailure` (a failed tag check
  * is `open`'s expected outcome). `wrap`/`unwrap` share
  * the body too, naming themselves through `operation` so their failure
@@ -813,26 +804,14 @@ export class AeadKey extends symmetricKeyTail({}) {
  * @param {string} [operation]
  */
 async function aeadSealOpen(direction, key, nonce, aad, tagSize, message, operation = direction) {
-  const chacha = key.algorithm.name === "ChaCha20-Poly1305";
+  requireGcmNonce(nonce);
   /** @type {AesGcmParams} */
-  let params;
-  if (chacha) {
-    requireChachaNonce(nonce);
-    requireChachaTagSize(tagSize);
-    params = {
-      name: "ChaCha20-Poly1305",
-      iv: asBufferSource(nonce),
-      additionalData: asBufferSource(aad),
-    };
-  } else {
-    requireGcmNonce(nonce);
-    params = {
-      name: "AES-GCM",
-      iv: asBufferSource(nonce),
-      additionalData: asBufferSource(aad),
-      tagLength: gcmTagLengthBits(tagSize),
-    };
-  }
+  const params = {
+    name: "AES-GCM",
+    iv: asBufferSource(nonce),
+    additionalData: asBufferSource(aad),
+    tagLength: gcmTagLengthBits(tagSize),
+  };
   if (direction === "seal") {
     const result = await platformCall(`${params.name} ${operation}`, () =>
       subtle.encrypt(params, key, message),
@@ -2459,7 +2438,7 @@ export const sha2 = { makeDigest };
  * SHA-1 carries no sha1dc collision detection, this host is constrained
  * to `crypto.subtle`, and implementing the counter-cryptanalysis in host
  * JS is against its platform-backed charter — so it declines the
- * interface whole, like ChaCha, and a composition needing it must supply
+ * interface whole, and a composition needing it must supply
  * another provider (the in-guest provider serves both postures).
  * @returns {never}
  */
@@ -2472,26 +2451,6 @@ export const sha1Checked = {
   makeRejectingDigest: () => unsupportedSha1Checked(),
   makeMitigatingDigest: () => unsupportedSha1Checked(),
 };
-
-/**
- * Whether `a` and `b` are equal, in time independent of their contents
- * (necessarily dependent on their lengths). WebCrypto has no comparison
- * primitive and `timingSafeEqual` is Node-only, so this is a hand-rolled
- * accumulate-then-test XOR loop with no data-dependent branches.
- * @param {Uint8Array} a
- * @param {Uint8Array} b
- */
-function constantTimeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a[i] ^ b[i];
-  }
-  return diff === 0;
-}
-
-/** The `lann:webcrypto/bytes` interface. */
-export const bytes = { constantTimeEqual };
 
 /**
  * The raw key length in bytes for each served `aes-variant` enum case (jco
@@ -2517,16 +2476,15 @@ function aesVariantByteLength(variant) {
  * and `unwrap` runs `subtle.decrypt` (see `aeadKeyGrants`), so the
  * platform key carries `encrypt` if (seal or wrap) and `decrypt` if (open
  * or unwrap), and every WIT grant is enforced host-side against the
- * recorded policy. The internal-nonce vocabulary has no wrap usages, so
- * its policies arrive without them.
- * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ * recorded policy.
+ * @param {{ seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }} policy
  * @returns {KeyUsage[]}
  */
 function aeadUsages(policy) {
   /** @type {KeyUsage[]} */
   const usages = [];
-  if (policy.seal || (policy.wrap ?? false)) usages.push("encrypt");
-  if (policy.open || (policy.unwrap ?? false)) usages.push("decrypt");
+  if (policy.seal || policy.wrap) usages.push("encrypt");
+  if (policy.open || policy.unwrap) usages.push("decrypt");
   if (usages.length === 0) {
     throw errNotPermitted("a key with no enabled usage cannot be minted");
   }
@@ -2536,14 +2494,14 @@ function aeadUsages(policy) {
 /**
  * The WIT-level grants of an AEAD mint policy, as recorded on the minted
  * key (see `aeadKeyGrants`).
- * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ * @param {{ seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }} policy
  */
 function aeadGrants(policy) {
   return {
     seal: policy.seal,
     open: policy.open,
-    wrap: policy.wrap ?? false,
-    unwrap: policy.unwrap ?? false,
+    wrap: policy.wrap,
+    unwrap: policy.unwrap,
   };
 }
 
@@ -2553,146 +2511,15 @@ function aeadGrants(policy) {
  * `"encrypt"`, `open` → `"decrypt"`, `wrap`/`unwrap` →
  * `"wrapKey"`/`"unwrapKey"` — unlike `aeadUsages`, whose collapsed pairs
  * serve the platform key.
- * @param {{ seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean }} policy
+ * @param {{ seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }} policy
  */
 function aeadGrantedOps(policy) {
   const ops = [];
   if (policy.seal) ops.push("encrypt");
   if (policy.open) ops.push("decrypt");
-  if (policy.wrap ?? false) ops.push("wrapKey");
-  if (policy.unwrap ?? false) ops.push("unwrapKey");
+  if (policy.wrap) ops.push("wrapKey");
+  if (policy.unwrap) ops.push("unwrapKey");
   return ops;
-}
-
-/**
- * The `aes-gcm` / `aes-gcm-internal-nonce` minting pair over `Ctor`: the
- * two interfaces share the whole import/generate contract and differ only
- * in the resource they mint and the options resource they consume
- * (`readPolicy` is the matching options kind's policy reader).
- * `InternalNonceKey` takes no grants record, so its constructor ignores
- * the third argument.
- * @template T
- * @template O
- * @param {new (key: CryptoKey, lengthBits: number, grants: { seal: boolean, open: boolean, wrap: boolean, unwrap: boolean }) => T} Ctor
- * @param {(options: O) => { seal: boolean, open: boolean, wrap?: boolean, unwrap?: boolean, extractable: boolean }} readPolicy
- */
-function aesMinting(Ctor, readPolicy) {
-  const minting = {
-    /**
-     * Import raw key material as the declared AES variant. A variant this
-     * implementation declines throws `{ tag: 'unsupported', val }`;
-     * material whose length disagrees with `variant` throws
-     * `{ tag: 'invalid-key', val }`.
-     * @param {string} variant
-     * @param {Uint8Array} raw
-     * @param {O} options
-     */
-    async importKeyRaw(variant, raw, options) {
-      const policy = readPolicy(options);
-      const usages = aeadUsages(policy);
-      const expected = aesVariantByteLength(variant);
-      if (raw.length !== expected) {
-        throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
-      }
-      const key = await importPlatformKey(
-        `${variant} key`,
-        "raw",
-        raw,
-        { name: "AES-GCM" },
-        policy.extractable,
-        usages,
-      );
-      return new Ctor(key, expected * 8, aeadGrants(policy));
-    },
-
-    /**
-     * Import an `oct` JWK as the declared AES variant (the
-     * `import-key-jwk` contract of both minting interfaces). The platform
-     * validates the JWK's internal consistency (`kty`, strict base64url
-     * `k`, `alg` against `k`'s length, `ext` against the options'
-     * extractability); the variant check is against the imported key's
-     * platform-computed length, since the platform cannot know the
-     * declared variant.
-     * @param {string} variant
-     * @param {string} jwk
-     * @param {O} options
-     */
-    async importKeyJwk(variant, jwk, options) {
-      const policy = readPolicy(options);
-      const usages = aeadUsages(policy);
-      const lengthBits = aesVariantByteLength(variant) * 8;
-      const material = jwkMaterial(jwk);
-      requireStrictBase64url(material.k);
-      const key = await importPlatformKeyJwk(
-        `${variant} JWK`,
-        material,
-        { name: "AES-GCM" },
-        policy.extractable,
-        usages,
-      );
-      // The variant check derives from `k` (exact once the platform
-      // accepted the encoding), not `key.algorithm.length`, which an
-      // engine may omit for an imported key (see `MacKey`'s field doc).
-      const gotBits = jwkKeyBytes(material.k) * 8;
-      if (gotBits !== lengthBits) {
-        throw errInvalidKey(
-          `JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`,
-        );
-      }
-      return new Ctor(key, lengthBits, aeadGrants(policy));
-    },
-
-    /**
-     * Generate a fresh random AES key of the declared variant. A variant
-     * this implementation declines throws `{ tag: 'unsupported', val }`.
-     * @param {string} variant
-     * @param {O} options
-     */
-    async generateKey(variant, options) {
-      const policy = readPolicy(options);
-      const usages = aeadUsages(policy);
-      const length = aesVariantByteLength(variant) * 8;
-      const key = await platformCall(`${variant} key generation`, () =>
-        subtle.generateKey({ name: "AES-GCM", length }, policy.extractable, usages),
-      );
-      return new Ctor(key, length, aeadGrants(policy));
-    },
-
-    /**
-     * Mint a key from unwrapped material read as raw bytes (see the
-     * `wrapping` interface): the `import-key-raw` path over the consumed
-     * input's bytes, with `invalid-key` details redacted (see
-     * `redactingInvalidKey`).
-     * @param {string} variant
-     * @param {UnwrapInput} input
-     * @param {O} options
-     */
-    async unwrapKeyRaw(variant, input, options) {
-      const { bytes } = consumeUnwrapInput(input);
-      return redactingInvalidKey(`unwrapped ${variant} key material`, () =>
-        minting.importKeyRaw(variant, bytes, options),
-      );
-    },
-
-    /**
-     * Mint a key from unwrapped material read as an `oct` JWK: the
-     * unwrap-path `use`/`key_ops` checks (see `unwrappedJwk`), then the
-     * `import-key-jwk` path, redacted like `unwrapKeyRaw`.
-     * @param {string} variant
-     * @param {UnwrapInput} input
-     * @param {O} options
-     */
-    async unwrapKeyJwk(variant, input, options) {
-      const { bytes } = consumeUnwrapInput(input);
-      const policy = readPolicy(options);
-      aeadUsages(policy);
-      const jwk = unwrappedJwk(bytes, "enc", aeadGrantedOps(policy));
-      return redactingInvalidKey(`unwrapped ${variant} JWK`, () =>
-        minting.importKeyJwk(variant, jwk, options),
-      );
-    },
-  };
-  return minting;
 }
 
 /** The `lann:webcrypto/aead` interface: its resource classes. */
@@ -2700,7 +2527,120 @@ export const aead = { AeadKey, AeadKeyOptions };
 
 /** The `lann:webcrypto/aes-gcm` interface. */
 export const aesGcm = {
-  ...aesMinting(AeadKey, aeadPolicy),
+  /**
+   * Import raw key material as the declared AES variant. A variant this
+   * implementation declines throws `{ tag: 'unsupported', val }`;
+   * material whose length disagrees with `variant` throws
+   * `{ tag: 'invalid-key', val }`.
+   * @param {string} variant
+   * @param {Uint8Array} raw
+   * @param {AeadKeyOptions} options
+   */
+  async importKeyRaw(variant, raw, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const expected = aesVariantByteLength(variant);
+    if (raw.length !== expected) {
+      throw errInvalidKey(`${variant} requires ${expected} key bytes, got ${raw.length}`);
+    }
+    const key = await importPlatformKey(
+      `${variant} key`,
+      "raw",
+      raw,
+      { name: "AES-GCM" },
+      policy.extractable,
+      usages,
+    );
+    return new AeadKey(key, expected * 8, aeadGrants(policy));
+  },
+
+  /**
+   * Import an `oct` JWK as the declared AES variant (the
+   * `import-key-jwk` contract). The platform
+   * validates the JWK's internal consistency (`kty`, strict base64url
+   * `k`, `alg` against `k`'s length, `ext` against the options'
+   * extractability); the variant check is against the imported key's
+   * platform-computed length, since the platform cannot know the
+   * declared variant.
+   * @param {string} variant
+   * @param {string} jwk
+   * @param {AeadKeyOptions} options
+   */
+  async importKeyJwk(variant, jwk, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const lengthBits = aesVariantByteLength(variant) * 8;
+    const material = jwkMaterial(jwk);
+    requireStrictBase64url(material.k);
+    const key = await importPlatformKeyJwk(
+      `${variant} JWK`,
+      material,
+      { name: "AES-GCM" },
+      policy.extractable,
+      usages,
+    );
+    // The variant check derives from `k` (exact once the platform
+    // accepted the encoding), not `key.algorithm.length`, which an
+    // engine may omit for an imported key (see `MacKey`'s field doc).
+    const gotBits = jwkKeyBytes(material.k) * 8;
+    if (gotBits !== lengthBits) {
+      throw errInvalidKey(
+        `JWK carries a ${gotBits}-bit key; ${variant} requires ${lengthBits}`,
+      );
+    }
+    return new AeadKey(key, lengthBits, aeadGrants(policy));
+  },
+
+  /**
+   * Generate a fresh random AES key of the declared variant. A variant
+   * this implementation declines throws `{ tag: 'unsupported', val }`.
+   * @param {string} variant
+   * @param {AeadKeyOptions} options
+   */
+  async generateKey(variant, options) {
+    const policy = aeadPolicy(options);
+    const usages = aeadUsages(policy);
+    const length = aesVariantByteLength(variant) * 8;
+    const key = await platformCall(`${variant} key generation`, () =>
+      subtle.generateKey({ name: "AES-GCM", length }, policy.extractable, usages),
+    );
+    return new AeadKey(key, length, aeadGrants(policy));
+  },
+
+  /**
+   * Mint a key from unwrapped material read as raw bytes (see the
+   * `wrapping` interface): the `import-key-raw` path over the consumed
+   * input's bytes, with `invalid-key` details redacted (see
+   * `redactingInvalidKey`).
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {AeadKeyOptions} options
+   */
+  async unwrapKeyRaw(variant, input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    return redactingInvalidKey(`unwrapped ${variant} key material`, () =>
+      aesGcm.importKeyRaw(variant, bytes, options),
+    );
+  },
+
+  /**
+   * Mint a key from unwrapped material read as an `oct` JWK: the
+   * unwrap-path `use`/`key_ops` checks (see `unwrappedJwk`), then the
+   * `import-key-jwk` path, redacted like `unwrapKeyRaw`.
+   * @param {string} variant
+   * @param {UnwrapInput} input
+   * @param {AeadKeyOptions} options
+   */
+  async unwrapKeyJwk(variant, input, options) {
+    const { bytes } = consumeUnwrapInput(input);
+    const policy = aeadPolicy(options);
+    aeadUsages(policy);
+    const jwk = unwrappedJwk(bytes, "enc", aeadGrantedOps(policy));
+    return redactingInvalidKey(`unwrapped ${variant} JWK`, () =>
+      aesGcm.importKeyJwk(variant, jwk, options),
+    );
+  },
+
   /**
    * Mint an AES-GCM key from a parameterized derivation (the
    * `aes-gcm.derive-key` contract): the platform's `deriveKey` chain, at
@@ -3017,14 +2957,14 @@ export class CipherKey extends symmetricKeyTail({}) {
 /**
  * The `aes-cbc` / `aes-ctr` minting pair over one mode name: the two
  * interfaces share the whole minting contract and differ only in the
- * algorithm the platform keys bind (the `aesMinting` pattern).
+ * algorithm the platform keys bind (the `aesGcm` pattern).
  * @param {"AES-CBC" | "AES-CTR"} name
  */
 function cipherMinting(name) {
   const minting = {
     /**
      * Import raw key material as the declared AES variant (the shared
-     * `import-key-raw` contract; see `aesMinting`'s).
+     * `import-key-raw` contract; see `aesGcm`'s).
      * @param {string} variant
      * @param {Uint8Array} raw
      * @param {CipherKeyOptions} options
@@ -3049,7 +2989,7 @@ function cipherMinting(name) {
 
     /**
      * Import an `oct` JWK as the declared AES variant (the shared
-     * `import-key-jwk` contract; see `aesMinting`'s).
+     * `import-key-jwk` contract; see `aesGcm`'s).
      * @param {string} variant
      * @param {string} jwk
      * @param {CipherKeyOptions} options
@@ -3109,7 +3049,7 @@ function cipherMinting(name) {
 
     /**
      * Mint a key from unwrapped material read as raw bytes (see
-     * `aesMinting.unwrapKeyRaw`).
+     * `aesGcm.unwrapKeyRaw`).
      * @param {string} variant
      * @param {UnwrapInput} input
      * @param {CipherKeyOptions} options
@@ -3123,7 +3063,7 @@ function cipherMinting(name) {
 
     /**
      * Mint a key from unwrapped material read as an `oct` JWK (see
-     * `aesMinting.unwrapKeyJwk`).
+     * `aesGcm.unwrapKeyJwk`).
      * @param {string} variant
      * @param {UnwrapInput} input
      * @param {CipherKeyOptions} options
@@ -3371,13 +3311,13 @@ export class KwKey {
 export const keyWrap = { KwKey, KwKeyOptions };
 
 /**
- * The `lann:webcrypto/aes-kw` interface: the `aesMinting`/`cipherMinting`
+ * The `lann:webcrypto/aes-kw` interface: the `aesGcm`/`cipherMinting`
  * minting contract at `AES-KW`.
  */
 export const aesKw = {
   /**
    * Import raw key material as the declared AES variant (the shared
-   * `import-key-raw` contract; see `aesMinting`'s).
+   * `import-key-raw` contract; see `aesGcm`'s).
    * @param {string} variant
    * @param {Uint8Array} raw
    * @param {KwKeyOptions} options
@@ -3402,7 +3342,7 @@ export const aesKw = {
 
   /**
    * Import an `oct` JWK as the declared AES variant (the shared
-   * `import-key-jwk` contract; see `aesMinting`'s — here the platform
+   * `import-key-jwk` contract; see `aesGcm`'s — here the platform
    * additionally validates `alg`, when present, against the `A___KW`
    * name `k`'s length selects).
    * @param {string} variant
@@ -3463,7 +3403,7 @@ export const aesKw = {
 
   /**
    * Mint a key from unwrapped material read as raw bytes (see
-   * `aesMinting.unwrapKeyRaw`).
+   * `aesGcm.unwrapKeyRaw`).
    * @param {string} variant
    * @param {UnwrapInput} input
    * @param {KwKeyOptions} options
@@ -3477,7 +3417,7 @@ export const aesKw = {
 
   /**
    * Mint a key from unwrapped material read as an `oct` JWK (see
-   * `aesMinting.unwrapKeyJwk`).
+   * `aesGcm.unwrapKeyJwk`).
    * @param {string} variant
    * @param {UnwrapInput} input
    * @param {KwKeyOptions} options
@@ -3494,361 +3434,6 @@ export const aesKw = {
 };
 
 /**
- * Throw `{ tag: 'unsupported', val }` for an XChaCha construction: no
- * platform WebCrypto implements XChaCha20-Poly1305 (it is absent from the
- * Modern Algorithms proposal), so this host declines these interfaces
- * whole and a composition needing them must supply another provider (the
- * in-guest provider serves both).
- *
- * Annotated `never` for the same reason as `invalidKey`: the minting stubs
- * below delegate to it in place of returning a key, so a version that fell
- * through would resolve them with `undefined`.
- * @param {string} name
- * @returns {never}
- */
-function unsupportedChacha(name) {
-  throw errUnsupported(`${name} is not served by this implementation`);
-}
-
-/**
- * Await a ChaCha20-Poly1305 platform *minting* call, reinterpreting any
- * platform failure as `{ tag: 'unsupported', val }`. The request is
- * well-formed by the time the platform is called (key length and usage
- * grants are validated above it), so a failure means the platform does not
- * implement the algorithm — browser WebCrypto today; Node 24.18+ and the
- * Modern Algorithms proposal's implementations serve it. Detection is
- * per-call: the same module serves the interface exactly where its
- * platform does, so no capability declaration lives in the module.
- * @template T
- * @param {string} what
- * @param {() => Promise<T>} run
- * @returns {Promise<T>}
- */
-async function chachaMint(what, run) {
-  try {
-    return await run();
-  } catch (err) {
-    if (isWitError(err)) throw err;
-    const failure = asPlatformError(err);
-    throw errUnsupported(
-      `ChaCha20-Poly1305 is not served by this platform (${what}: ${failure.detail})`,
-    );
-  }
-}
-
-/** The `lann:webcrypto/chacha20-poly1305` interface. */
-export const chacha20Poly1305 = {
-  /**
-   * Import exactly 32 bytes of raw ChaCha20-Poly1305 key material
-   * (`{ tag: 'invalid-key' }` otherwise, before the platform is asked),
-   * through the proposal's `"raw-secret"` format.
-   * @param {Uint8Array} raw
-   * @param {AeadKeyOptions} options
-   */
-  async importKeyRaw(raw, options) {
-    const policy = aeadPolicy(options);
-    const usages = aeadUsages(policy);
-    if (raw.length !== 32) {
-      throw errInvalidKey(`ChaCha20-Poly1305 keys are 32 bytes, got ${raw.length}`);
-    }
-    const key = await chachaMint("import-key-raw", () =>
-      subtle.importKey(
-        // lib.dom's KeyFormat predates the proposal's "raw-secret"; the
-        // non-jwk overload is the one this call means.
-        /** @type {Exclude<KeyFormat, "jwk">} */ ("raw-secret"),
-        asBufferSource(raw),
-        { name: "ChaCha20-Poly1305" },
-        policy.extractable,
-        usages,
-      ),
-    );
-    return new AeadKey(key, 256, aeadGrants(policy));
-  },
-  /**
-   * Generate a fresh random 256-bit ChaCha20-Poly1305 key.
-   * @param {AeadKeyOptions} options
-   */
-  async generateKey(options) {
-    const policy = aeadPolicy(options);
-    const usages = aeadUsages(policy);
-    const key = await chachaMint("generate-key", () =>
-      subtle.generateKey({ name: "ChaCha20-Poly1305" }, policy.extractable, usages),
-    );
-    return new AeadKey(/** @type {CryptoKey} */ (key), 256, aeadGrants(policy));
-  },
-  /**
-   * Import an `oct` JWK as a ChaCha20-Poly1305 key (the
-   * `chacha20-poly1305.import-key-jwk` contract): `kty` must be `"oct"`,
-   * `k` must decode to exactly 32 bytes, and `alg`, when present, must be
-   * the Modern Algorithms proposal's registered `"C20P"` — any other
-   * value fails `{ tag: 'invalid-key' }`. The checks are this host's,
-   * made before the platform is asked, so the contract's answers do not
-   * vary with platform ChaCha support.
-   * @param {string} jwk
-   * @param {AeadKeyOptions} options
-   */
-  async importKeyJwk(jwk, options) {
-    const policy = aeadPolicy(options);
-    const usages = aeadUsages(policy);
-    const material = jwkMaterial(jwk);
-    if (material.kty !== "oct") {
-      throw errInvalidKey(`JWK kty must be "oct" for ChaCha20-Poly1305`);
-    }
-    if (material.alg !== undefined && material.alg !== "C20P") {
-      throw errInvalidKey(
-        `JWK alg is ${JSON.stringify(material.alg)}, not "C20P"`,
-      );
-    }
-    requireStrictBase64url(material.k);
-    const gotBytes = jwkKeyBytes(material.k);
-    if (gotBytes !== 32) {
-      throw errInvalidKey(
-        `JWK carries ${gotBytes} bytes of key material; ChaCha20-Poly1305 requires 32`,
-      );
-    }
-    const key = await chachaMint("import-key-jwk", () =>
-      subtle.importKey(
-        "jwk",
-        material,
-        { name: "ChaCha20-Poly1305" },
-        policy.extractable,
-        usages,
-      ),
-    );
-    return new AeadKey(key, 256, aeadGrants(policy));
-  },
-  /**
-   * Mint a key from unwrapped material read as raw bytes (see
-   * `aesMinting.unwrapKeyRaw`): the `import-key-raw` path over the
-   * consumed input's bytes, with `invalid-key` details redacted.
-   * @param {UnwrapInput} input
-   * @param {AeadKeyOptions} options
-   */
-  async unwrapKeyRaw(input, options) {
-    const { bytes } = consumeUnwrapInput(input);
-    return redactingInvalidKey("unwrapped ChaCha20-Poly1305 key material", () =>
-      chacha20Poly1305.importKeyRaw(bytes, options),
-    );
-  },
-  /**
-   * Mint a key from unwrapped material read as an `oct` JWK (see
-   * `aesMinting.unwrapKeyJwk`).
-   * @param {UnwrapInput} input
-   * @param {AeadKeyOptions} options
-   */
-  async unwrapKeyJwk(input, options) {
-    const { bytes } = consumeUnwrapInput(input);
-    const policy = aeadPolicy(options);
-    aeadUsages(policy);
-    const jwk = unwrappedJwk(bytes, "enc", aeadGrantedOps(policy));
-    return redactingInvalidKey("unwrapped ChaCha20-Poly1305 JWK", () =>
-      chacha20Poly1305.importKeyJwk(jwk, options),
-    );
-  },
-};
-
-/** The `lann:webcrypto/xchacha20-poly1305` interface. */
-export const xchacha20Poly1305 = {
-  importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
-  generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
-  /**
-   * The unwrap mint consumes its input before declining, as the WIT
-   * requires (consumed on failure as on success).
-   * @param {UnwrapInput} input
-   */
-  unwrapKeyRaw: async (input) => {
-    consumeUnwrapInput(input);
-    return unsupportedChacha("XChaCha20-Poly1305");
-  },
-};
-
-/** The `lann:webcrypto/xchacha20-poly1305-internal-nonce` interface. */
-export const xchacha20Poly1305InternalNonce = {
-  importKeyRaw: async () => unsupportedChacha("XChaCha20-Poly1305"),
-  generateKey: async () => unsupportedChacha("XChaCha20-Poly1305"),
-  /**
-   * See `xchacha20Poly1305.unwrapKeyRaw`.
-   * @param {UnwrapInput} input
-   */
-  unwrapKeyRaw: async (input) => {
-    consumeUnwrapInput(input);
-    return unsupportedChacha("XChaCha20-Poly1305");
-  },
-};
-
-/**
- * The `internal-nonce-key-options` resource. See `MacKeyOptions` for the
- * state and same-provider mechanics; the vocabulary is seal/open only
- * (this kind has no WebCrypto usage vocabulary beyond its own operations).
- */
-/** @type {WeakMap<InternalNonceKeyOptions, { seal: boolean, open: boolean, extractable: boolean }>} */
-const internalNoncePolicies = new WeakMap();
-
-const internalNoncePolicy = stateReader(internalNoncePolicies, "internal-nonce-key-options");
-
-export class InternalNonceKeyOptions {
-  constructor() {
-    internalNoncePolicies.set(this, { seal: false, open: false, extractable: false });
-  }
-
-  /** @param {boolean} allowed */
-  canSeal(allowed) {
-    internalNoncePolicy(this).seal = allowed;
-  }
-
-  /** @param {boolean} allowed */
-  canOpen(allowed) {
-    internalNoncePolicy(this).open = allowed;
-  }
-
-  /** @param {boolean} allowed */
-  extractable(allowed) {
-    internalNoncePolicy(this).extractable = allowed;
-  }
-}
-
-/**
- * The `internal-nonce-key` resource: an AES-GCM key whose nonce is generated
- * here per `seal` (the SP 800-38D §8.2.2 RBG-based construction: 96 random
- * bits from `getRandomValues`) and carried as the sealed message's prefix
- * (`iv ‖ ciphertext ‖ tag`, per the `aes-gcm-internal-nonce` interface
- * docs). Only AES-GCM keys exist on this host: browser WebCrypto implements
- * no ChaCha20-Poly1305, so the ChaCha minting interface declines below.
- *
- * The key counts its `seal` invocations against the WIT nonce budget (2^32
- * for 12-byte nonces) and throws `{ tag: 'key-exhausted' }` beyond it.
- */
-export class InternalNonceKey extends symmetricKeyTail({ canSeal: "encrypt", canOpen: "decrypt" }) {
-  /** The key length in bits, fixed at mint. See `AeadKey`. */
-  #lengthBits;
-  #sealed = 0n;
-
-  /** The 12-byte AES-GCM IV length. */
-  static #IV_BYTES = 12;
-
-  /** The WIT nonce budget for 12-byte nonces: 2^32 seal invocations. */
-  static #NONCE_BUDGET = 1n << 32n;
-
-  /**
-   * @param {CryptoKey} key
-   * @param {number} lengthBits
-   */
-  constructor(key, lengthBits) {
-    super(key);
-    this.#lengthBits = lengthBits;
-  }
-
-  /**
-   * Encrypt and authenticate the plaintext stream under a fresh random IV
-   * with `aad`, returning `iv ‖ ciphertext ‖ tag`. The plaintext stream is
-   * drained before any failure is raised (this host drains to completion
-   * rather than exercising the streaming contract's early-close
-   * permission).
-   * @param {Uint8Array} aad
-   * @param {AsyncIterable<unknown> | ReadableStream} plaintext
-   */
-  async seal(aad, plaintext) {
-    return withCollectedInputToStream(plaintext, async (message) => {
-      if (!this.canSeal()) throw notPermitted("seal");
-      if (this.#sealed >= InternalNonceKey.#NONCE_BUDGET) {
-        throw errKeyExhausted();
-      }
-      this.#sealed += 1n;
-      const iv = globalThis.crypto.getRandomValues(new Uint8Array(InternalNonceKey.#IV_BYTES));
-      const body = new Uint8Array(
-        await platformCall("AES-GCM seal", () =>
-          subtle.encrypt(
-            { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-            platformKeyOf(this),
-            message,
-          ),
-        ),
-      );
-      const sealed = new Uint8Array(iv.length + body.length);
-      sealed.set(iv, 0);
-      sealed.set(body, iv.length);
-      return sealed;
-    });
-  }
-
-  /**
-   * Decrypt and verify a sealed message (`iv ‖ ciphertext ‖ tag`) under
-   * `aad`. Any failure — input too short to carry the wire format, a bad
-   * tag, wrong associated data — throws `{ tag: 'authentication-failed' }`
-   * with no detail, per the WIT contract. The input stream is drained
-   * before any failure is raised.
-   * @param {Uint8Array} aad
-   * @param {AsyncIterable<unknown> | ReadableStream} sealed
-   */
-  async open(aad, sealed) {
-    return withCollectedInputToStream(sealed, async (message) => {
-      if (!this.canOpen()) throw notPermitted("open");
-      if (message.length < InternalNonceKey.#IV_BYTES) {
-        throw errAuthenticationFailed();
-      }
-      const iv = message.subarray(0, InternalNonceKey.#IV_BYTES);
-      const body = message.subarray(InternalNonceKey.#IV_BYTES);
-      let opened;
-      try {
-        opened = await subtle.decrypt(
-          { name: "AES-GCM", iv, additionalData: asBufferSource(aad) },
-          platformKeyOf(this),
-          body,
-        );
-      } catch (err) {
-        throw decryptFailure(err);
-      }
-      return new Uint8Array(opened);
-    });
-  }
-
-  /**
-   * The algorithm getters: `name` projects the `CryptoKey`, `length` comes
-   * from the mint (see `#lengthBits`).
-   */
-  algorithmName() {
-    return platformKeyOf(this).algorithm.name;
-  }
-
-  algorithmLength() {
-    return this.#lengthBits;
-  }
-
-  /**
-   * The remaining seal budget (the WIT 2^32 bound for 12-byte nonces minus
-   * seals so far), as a rotation-scheduling hint.
-   */
-  sealsRemaining() {
-    const remaining = InternalNonceKey.#NONCE_BUDGET - this.#sealed;
-    return remaining > 0n ? remaining : 0n;
-  }
-
-  /**
-   * This key's raw material as a `wrap-input` (see the `wrapping`
-   * interface), behind the same extractability gate as `exportKeyRaw`.
-   * As with the exports, the nonce budget does not travel with the
-   * material.
-   */
-  async toWrapInputRaw() {
-    return new WrapInput(MINT, "raw", await exportRawGated(platformKeyOf(this)));
-  }
-
-  /**
-   * The JWK serialization as a `wrap-input`, behind the same gate.
-   */
-  async toWrapInputJwk() {
-    const jwk = await exportJwkGated(platformKeyOf(this));
-    return new WrapInput(MINT, "jwk", utf8Encoder.encode(jwk));
-  }
-}
-
-/** The `lann:webcrypto/aead-internal-nonce` interface: its resource classes. */
-export const aeadInternalNonce = { InternalNonceKey, InternalNonceKeyOptions };
-
-/** The `lann:webcrypto/aes-gcm-internal-nonce` interface. */
-export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePolicy);
-
-/**
  * Throw `{ tag: 'invalid-nonce', val }` unless the nonce is 12 to 128
  * bytes inclusive — the `aes-gcm` minting contract's portable window. The
  * check is this host's, ahead of the platform: platforms differ on what
@@ -3858,31 +3443,6 @@ export const aesGcmInternalNonce = aesMinting(InternalNonceKey, internalNoncePol
 function requireGcmNonce(nonce) {
   if (nonce.length < 12 || nonce.length > 128) {
     throw errInvalidNonce(`AES-GCM nonces are 12 to 128 bytes inclusive, got ${nonce.length}`);
-  }
-}
-
-/**
- * Throw `{ tag: 'invalid-nonce', val }` unless the nonce is exactly 12
- * bytes — the RFC 8439 construction fixes it (the `chacha20-poly1305`
- * minting contract), so the check is this host's, not the platform's.
- * @param {Uint8Array} nonce
- */
-function requireChachaNonce(nonce) {
-  if (nonce.length !== 12) {
-    throw errInvalidNonce(`ChaCha20-Poly1305 nonces are exactly 12 bytes, got ${nonce.length}`);
-  }
-}
-
-/**
- * ChaCha20-Poly1305 fixes 16-byte tags: `undefined` selects the default,
- * an explicit 16 is accepted, and anything else throws
- * `{ tag: 'unsupported', val }` per the minting contract (the parameter
- * exists for GCM's tag-size set).
- * @param {number | undefined} tagSize
- */
-function requireChachaTagSize(tagSize) {
-  if (tagSize !== undefined && tagSize !== 16) {
-    throw errUnsupported(`ChaCha20-Poly1305 tags are 16 bytes; got ${tagSize}`);
   }
 }
 
@@ -4104,20 +3664,13 @@ async function withCollectedInputToStream(stream, op) {
  * The shared raw `export-key-raw` gate: throw `{ tag: 'not-extractable' }`
  * unless `key` was minted extractable (checked on the `CryptoKey` itself
  * rather than relying on the `DOMException` from `exportKeyRaw`), then export
- * the raw material. ChaCha20-Poly1305 keys export through the Modern
- * Algorithms proposal's `"raw-secret"` format name — the platform serves no
- * `"raw"` spelling for them.
+ * the raw material.
  * @param {CryptoKey} key
  */
 async function exportRawGated(key) {
   if (!key.extractable) throw errNotExtractable();
-  // lib.dom's KeyFormat predates the proposal's "raw-secret"; both formats
-  // take the non-jwk overload.
-  const format = /** @type {Exclude<KeyFormat, "jwk">} */ (
-    key.algorithm.name === "ChaCha20-Poly1305" ? "raw-secret" : "raw"
-  );
   return new Uint8Array(
-    await platformCall("raw key export", () => subtle.exportKey(format, key)),
+    await platformCall("raw key export", () => subtle.exportKey("raw", key)),
   );
 }
 
@@ -4125,8 +3678,6 @@ async function exportRawGated(key) {
  * The key as an `oct` JWK, per the WIT contract: exactly the
  * material-bearing members (`kty`, `k`, `alg`) — the platform's `key_ops`/
  * `ext` are the consumer's to stamp, so they are dropped here.
- * ChaCha20-Poly1305 keys carry the Modern Algorithms proposal's registered
- * `alg`, `"C20P"`, which the platform emits.
  * @param {CryptoKey} key
  */
 async function exportJwkGated(key) {

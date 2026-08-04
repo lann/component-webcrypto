@@ -14,8 +14,8 @@ use std::cell::Cell;
 
 use lann_webcrypto_core::{
     served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, CipherKeyMaterial, CipherMode,
-    CipherPolicy, InternalNoncePolicy, KwKeyMaterial, KwPolicy, MacKeyMaterial, MacPolicy,
-    SigPublic, SigningKeyMaterial, SigningPolicy, TransportPolicy, UnwrapInputMaterial, WrapFormat,
+    CipherPolicy, KwKeyMaterial, KwPolicy, MacKeyMaterial, MacPolicy, SigPublic,
+    SigningKeyMaterial, SigningPolicy, TransportPolicy, UnwrapInputMaterial, WrapFormat,
     WrapInputMaterial, HMAC_NAME,
 };
 
@@ -23,18 +23,10 @@ use crate::exports::lann::webcrypto::aead::{
     AeadKey as ExportedAeadKey, AeadKeyOptions as ExportedAeadKeyOptions, Guest as AeadGuest,
     GuestAeadKey, GuestAeadKeyOptions,
 };
-use crate::exports::lann::webcrypto::aead_internal_nonce::{
-    Guest as AeadInternalNonceGuest, GuestInternalNonceKey, GuestInternalNonceKeyOptions,
-    InternalNonceKey as ExportedInternalNonceKey,
-    InternalNonceKeyOptions as ExportedInternalNonceKeyOptions,
-};
 use crate::exports::lann::webcrypto::aes_cbc::Guest as AesCbcGuest;
 use crate::exports::lann::webcrypto::aes_ctr::Guest as AesCtrGuest;
 use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
-use crate::exports::lann::webcrypto::aes_gcm_internal_nonce::Guest as AesGcmInternalNonceGuest;
 use crate::exports::lann::webcrypto::aes_kw::Guest as AesKwGuest;
-use crate::exports::lann::webcrypto::bytes::Guest as BytesGuest;
-use crate::exports::lann::webcrypto::chacha20_poly1305::Guest as ChaChaPoly1305Guest;
 use crate::exports::lann::webcrypto::cipher::{
     CipherKey as ExportedCipherKey, CipherKeyOptions as ExportedCipherKeyOptions,
     Guest as CipherGuest, GuestCipherKey, GuestCipherKeyOptions,
@@ -85,8 +77,6 @@ use crate::exports::lann::webcrypto::wrapping::{
     self as wrapping_iface, Guest as WrappingGuest, GuestUnwrapInput, GuestWrapInput,
 };
 use crate::exports::lann::webcrypto::x25519::Guest as X25519Guest;
-use crate::exports::lann::webcrypto::xchacha20_poly1305::Guest as XChaChaPoly1305Guest;
-use crate::exports::lann::webcrypto::xchacha20_poly1305_internal_nonce::Guest as XChachaInternalNonceGuest;
 use crate::lann::webcrypto::types::Error;
 
 pub struct Component;
@@ -665,14 +655,6 @@ impl GuestDigest for Digest {
 
     fn algorithm_name(&self) -> String {
         self.variant.hash_name().to_string()
-    }
-}
-
-// --- bytes ---------------------------------------------------------------------
-
-impl BytesGuest for Component {
-    fn constant_time_equal(a: Vec<u8>, b: Vec<u8>) -> bool {
-        lann_webcrypto_core::constant_time_equal(&a, &b)
     }
 }
 
@@ -1646,301 +1628,6 @@ macro_rules! cipher_minting {
 
 cipher_minting!(AesCbcGuest, CipherMode::Cbc);
 cipher_minting!(AesCtrGuest, CipherMode::Ctr);
-
-// --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
-
-impl ChaChaPoly1305Guest for Component {
-    async fn import_key_raw(
-        raw: Vec<u8>,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn import_key_jwk(
-        jwk: String,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_chacha20_poly1305_jwk(&jwk, policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = rng_infallible(AeadKeyMaterial::generate_chacha20_poly1305(policy))?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn unwrap_key_raw(
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_chacha_key(UnwrapInput::take(input), policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn unwrap_key_jwk(
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material =
-            lann_webcrypto_core::unwrap_chacha_key_jwk(UnwrapInput::take(input), policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-}
-
-impl XChaChaPoly1305Guest for Component {
-    async fn import_key_raw(
-        raw: Vec<u8>,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn generate_key(options: ExportedAeadKeyOptions) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy))?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-
-    async fn unwrap_key_raw(
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedAeadKeyOptions,
-    ) -> Result<ExportedAeadKey, Error> {
-        let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_xchacha_key(UnwrapInput::take(input), policy)?;
-        Ok(ExportedAeadKey::new(AeadKey { material }))
-    }
-}
-
-// --- aead-internal-nonce -------------------------------------------------------
-
-impl AeadInternalNonceGuest for Component {
-    type InternalNonceKey = InternalNonceKey;
-    type InternalNonceKeyOptions = InternalNonceKeyOptions;
-}
-
-options_resource! {
-    /// An exported `internal-nonce-key-options`. See [`MacKeyOptions`].
-    pub struct InternalNonceKeyOptions(InternalNoncePolicy): GuestInternalNonceKeyOptions {
-        can_seal => seal,
-        can_open => open,
-        extractable => extractable,
-    }
-}
-
-/// An exported `internal-nonce-key`: the shared core's AEAD key material
-/// plus the seal count enforcing the WIT nonce budget
-/// (`error.key-exhausted`) for 12-byte-nonce algorithms.
-pub struct InternalNonceKey {
-    material: AeadKeyMaterial,
-    /// `seal` invocations so far, counted against the nonce budget.
-    /// A `Cell` because exports take `&self` (wasm is single-threaded).
-    sealed: std::cell::Cell<u64>,
-}
-
-impl InternalNonceKey {
-    fn new(material: AeadKeyMaterial) -> Self {
-        Self {
-            material,
-            sealed: std::cell::Cell::new(0),
-        }
-    }
-}
-
-impl GuestInternalNonceKey for InternalNonceKey {
-    fn seals_remaining(&self) -> Option<u64> {
-        self.material.seals_remaining(self.sealed.get())
-    }
-
-    async fn seal(
-        &self,
-        aad: Vec<u8>,
-        plaintext: wit_bindgen::StreamReader<u8>,
-    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
-        let msg = drain_stream(plaintext).await?;
-        // Count this invocation against the algorithm's nonce budget, per
-        // the minting interfaces' SHOULD-enforce contract.
-        self.material.check_budget(self.sealed.get())?;
-        self.sealed.set(self.sealed.get() + 1);
-        let sealed = rng_infallible(self.material.seal_internal(&aad, &msg))?;
-        Ok(stream_of(sealed))
-    }
-
-    async fn open(
-        &self,
-        aad: Vec<u8>,
-        sealed: wit_bindgen::StreamReader<u8>,
-    ) -> Result<wit_bindgen::StreamReader<u8>, Error> {
-        // Like `seal`: fully drain the input first; buffering the whole
-        // message is inherent to `open` (no unverified plaintext may be
-        // observable).
-        let msg = drain_stream(sealed).await?;
-        Ok(stream_of(self.material.open_internal(&aad, &msg)?))
-    }
-
-    fn algorithm_name(&self) -> String {
-        self.material.name().to_string()
-    }
-
-    fn algorithm_length(&self) -> u32 {
-        self.material.length_bits()
-    }
-
-    fn extractable(&self) -> bool {
-        self.material.extractable()
-    }
-
-    fn can_seal(&self) -> bool {
-        self.material.can_seal()
-    }
-
-    fn can_open(&self) -> bool {
-        self.material.can_open()
-    }
-
-    async fn to_wrap_input_raw(&self) -> Result<wrapping_iface::WrapInput, Error> {
-        WrapInput::handle(
-            self.material
-                .export()
-                .map(|raw| WrapInputMaterial::new(WrapFormat::Raw, raw)),
-        )
-    }
-
-    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
-        WrapInput::handle(
-            self.material
-                .export_jwk()
-                .map(|jwk| WrapInputMaterial::new(WrapFormat::Jwk, jwk.into_bytes())),
-        )
-    }
-
-    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
-        Ok(self.material.export()?)
-    }
-
-    async fn export_key_jwk(&self) -> Result<String, Error> {
-        Ok(self.material.export_jwk()?)
-    }
-}
-
-// --- aes-gcm-internal-nonce (key minting) ----------------------------------------
-
-impl AesGcmInternalNonceGuest for Component {
-    async fn import_key_raw(
-        variant: AesVariant,
-        raw: Vec<u8>,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into())?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn import_key_jwk(
-        variant: AesVariant,
-        jwk: String,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy.into())?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn generate_key(
-        variant: AesVariant,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = rng_infallible(AeadKeyMaterial::generate_aes_gcm(
-            variant.into(),
-            policy.into(),
-        ))?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn unwrap_key_raw(
-        variant: AesVariant,
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_aes_gcm_internal_key(
-            variant.into(),
-            UnwrapInput::take(input),
-            policy,
-        )?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn unwrap_key_jwk(
-        variant: AesVariant,
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_aes_gcm_internal_key_jwk(
-            variant.into(),
-            UnwrapInput::take(input),
-            policy,
-        )?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-}
-
-// --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
-
-impl XChachaInternalNonceGuest for Component {
-    async fn import_key_raw(
-        raw: Vec<u8>,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy.into())?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn generate_key(
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material = rng_infallible(AeadKeyMaterial::generate_xchacha20_poly1305(policy.into()))?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-
-    async fn unwrap_key_raw(
-        input: wrapping_iface::UnwrapInput,
-        options: ExportedInternalNonceKeyOptions,
-    ) -> Result<ExportedInternalNonceKey, Error> {
-        let policy = options.get::<InternalNonceKeyOptions>().policy.get();
-        let material =
-            lann_webcrypto_core::unwrap_xchacha_internal_key(UnwrapInput::take(input), policy)?;
-        Ok(ExportedInternalNonceKey::new(InternalNonceKey::new(
-            material,
-        )))
-    }
-}
 
 // --- signature -----------------------------------------------------------------
 

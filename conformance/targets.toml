@@ -17,7 +17,7 @@
 # to record (AGENTS.md, "Portability: divergence is resolved, not
 # accumulated"). What polices an entry differs by kind:
 #
-# - Gated (`chacha20-poly1305`): `@unstable` in the WIT — the consumer
+# - Gated (`sha1-checked`): `@unstable` in the WIT — the consumer
 #   opt-in. The guest imports the interface, so a target that lacks it
 #   must still answer: the feature-tagged probes assert the correct
 #   decline both ways — a target declaring it missing has to prove every
@@ -37,12 +37,6 @@
 # the target is missing. The runner cross-checks each results file's
 # declared missing-features against this table, so a target's adapter and
 # this manifest cannot drift apart silently.
-
-[features.chacha20-poly1305]
-kind = "gated"
-
-[features.xchacha20-poly1305]
-kind = "gated"
 
 [features.sha1-checked]
 kind = "gated"
@@ -83,26 +77,21 @@ missing-features = []
 missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]
-# ChaCha20-Poly1305 is feature-detected: the host serves it through the
-# platform, and Node's WebCrypto implements it (experimental in Node
-# 24.18+), so the target's floor is a Node whose `crypto.subtle` serves
-# it. XChaCha is absent from every platform WebCrypto (and from the Modern
-# Algorithms proposal), and platform SHA-1 carries no sha1dc collision
-# detection (the `sha1-checked` interface). Policy and platform facts, not
-# bugs: a composition needing more must supply another provider.
-missing-features = ["xchacha20-poly1305", "sha1-checked"]
+# Platform SHA-1 carries no sha1dc collision detection, and the jco host
+# is constrained to `crypto.subtle` (the `sha1-checked` interface). A
+# policy and platform fact, not a bug: a composition needing it must
+# supply another provider.
+missing-features = ["sha1-checked"]
 
 [targets.jco-browser]
-# The same host module as jco-node, in headless Chromium — whose WebCrypto
-# serves no ChaCha20-Poly1305 yet (the host feature-detects it per call, so
-# no declaration lives in the module and this line follows the browser's
-# capability). The host also declines the gated RSA private-key mints —
-# the signing interfaces (`rsa-sign`) and the RSA-OAEP decryption mints
-# (`rsa-oaep-decrypt`) — outside Node by default: a browser is an
-# attacker-observable timing domain, so it fails closed unless the
-# deployer opts in with `setRsaPrivateKeyPolicy("serve")` — the adapter
-# runs the default.
-missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign", "rsa-oaep-decrypt"]
+# The same host module as jco-node, in headless Chromium. Like jco-node it
+# cannot serve `sha1-checked`. The host also declines the gated RSA
+# private-key mints — the signing interfaces (`rsa-sign`) and the RSA-OAEP
+# decryption mints (`rsa-oaep-decrypt`) — outside Node by default: a
+# browser is an attacker-observable timing domain, so it fails closed
+# unless the deployer opts in with `setRsaPrivateKeyPolicy("serve")` — the
+# adapter runs the default.
+missing-features = ["sha1-checked", "rsa-sign", "rsa-oaep-decrypt"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.

@@ -1,6 +1,4 @@
-//! `aes-gcm` key creation (caller-nonce; prefer
-//! [`aes_gcm_internal_nonce`](crate::aes_gcm_internal_nonce) — see
-//! [`Aead`]'s nonce warning).
+//! `aes-gcm` key creation (caller-nonce — see [`Aead`]'s nonce warning).
 
 use crate::{bindings, Aead, AeadKeyOptions, Error};
 

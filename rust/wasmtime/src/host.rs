@@ -22,9 +22,6 @@ use wasmtime::component::{Accessor, Resource, StreamReader};
 use wasmtime::Result;
 
 use crate::bindings::webcrypto::aead::{self, HostAeadKey, HostAeadKeyWithStore};
-use crate::bindings::webcrypto::aead_internal_nonce::{
-    self, HostInternalNonceKey, HostInternalNonceKeyWithStore,
-};
 use crate::bindings::webcrypto::cipher::{
     self as cipher_iface, HostCipherKey, HostCipherKeyWithStore,
 };
@@ -55,8 +52,7 @@ use crate::bindings::webcrypto::wrapping::{
 };
 use crate::bindings::webcrypto::{
     aes_cbc as aes_cbc_iface, aes_ctr as aes_ctr_iface, aes_gcm as aes_gcm_iface,
-    aes_gcm_internal_nonce as aes_gcm_in_iface, aes_kw as aes_kw_iface, bytes as bytes_iface,
-    chacha20_poly1305 as chacha_iface, digest as digest_iface, ecdh as ecdh_iface,
+    aes_kw as aes_kw_iface, digest as digest_iface, ecdh as ecdh_iface,
     ecdsa_sign as ecdsa_sign_iface, ecdsa_verify as ecdsa_verify_iface,
     ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
     hkdf_sha1 as hkdf_sha1_iface, hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface,
@@ -66,14 +62,13 @@ use crate::bindings::webcrypto::{
     rsa_pss_verify as rsa_pss_verify_iface, rsassa_pkcs1_v15_sign as rsassa_sign_iface,
     rsassa_pkcs1_v15_verify as rsassa_verify_iface, sha1_checked as sha1_checked_iface,
     sha2 as sha2_iface, signature as signature_iface, x25519 as x25519_iface,
-    xchacha20_poly1305 as xchacha_iface, xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::{admit_input, Reservation};
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
     AeadKey, AgreementPublicKey, AgreementSecretKey, CipherKey, DecryptionKey, DeriveInput, Digest,
-    EncryptionKey, Ikm, InternalNonceKey, KwKey, MacKey, Minted, Password, SigningKey, UnwrapInput,
-    VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView, WrapInput,
+    EncryptionKey, Ikm, KwKey, MacKey, Minted, Password, SigningKey, UnwrapInput, VerifyingKey,
+    WasiWebcrypto, WasiWebcryptoCtxView, WrapInput,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -295,14 +290,6 @@ async fn drain_then_stream<T: Send, R: 'static>(
 // --- types -------------------------------------------------------------------
 
 impl types::Host for WasiWebcryptoCtxView<'_> {}
-
-// --- bytes ---------------------------------------------------------------------
-
-impl bytes_iface::Host for WasiWebcryptoCtxView<'_> {
-    fn constant_time_equal(&mut self, a: Vec<u8>, b: Vec<u8>) -> Result<bool> {
-        Ok(lann_webcrypto_core::constant_time_equal(&a, &b))
-    }
-}
 
 // --- mac ---------------------------------------------------------------------
 
@@ -1949,320 +1936,6 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material = lann_webcrypto_core::unwrap_aes_gcm_key_jwk(variant.into(), input, policy);
-        mint(accessor, material).await
-    }
-}
-
-// --- chacha20-poly1305 / xchacha20-poly1305 (key minting) ---------------------
-
-impl chacha_iface::Host for WasiWebcryptoCtxView<'_> {}
-impl xchacha_iface::Host for WasiWebcryptoCtxView<'_> {}
-
-impl<T: Send> chacha_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key_raw(
-        accessor: &Accessor<T, Self>,
-        raw: Vec<u8>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_chacha20_poly1305(raw, policy);
-        mint(accessor, material).await
-    }
-
-    async fn import_key_jwk(
-        accessor: &Accessor<T, Self>,
-        jwk: String,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_chacha20_poly1305_jwk(&jwk, policy);
-        mint(accessor, material).await
-    }
-
-    async fn generate_key(
-        accessor: &Accessor<T, Self>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::generate_chacha20_poly1305(policy)
-            .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_raw(
-        accessor: &Accessor<T, Self>,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_chacha_key(input, policy);
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_jwk(
-        accessor: &Accessor<T, Self>,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_chacha_key_jwk(input, policy);
-        mint(accessor, material).await
-    }
-}
-
-impl<T: Send> xchacha_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key_raw(
-        accessor: &Accessor<T, Self>,
-        raw: Vec<u8>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy);
-        mint(accessor, material).await
-    }
-
-    async fn generate_key(
-        accessor: &Accessor<T, Self>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::generate_xchacha20_poly1305(policy)
-            .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_raw(
-        accessor: &Accessor<T, Self>,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::AeadKeyOptions>,
-    ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_xchacha_key(input, policy);
-        mint(accessor, material).await
-    }
-}
-
-// --- aead-internal-nonce -------------------------------------------------------
-
-impl aead_internal_nonce::Host for WasiWebcryptoCtxView<'_> {}
-
-impl HostInternalNonceKey for WasiWebcryptoCtxView<'_> {
-    fn algorithm_name(&mut self, self_: Resource<InternalNonceKey>) -> Result<String> {
-        Ok(self.table.get(&self_)?.material.name().to_string())
-    }
-
-    fn algorithm_length(&mut self, self_: Resource<InternalNonceKey>) -> Result<u32> {
-        Ok(self.table.get(&self_)?.material.length_bits())
-    }
-
-    fn seals_remaining(&mut self, self_: Resource<InternalNonceKey>) -> Result<Option<u64>> {
-        let key = self.table.get(&self_)?;
-        Ok(key.material.seals_remaining(key.sealed))
-    }
-
-    fn extractable(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
-        Ok(self.table.get(&self_)?.material.extractable())
-    }
-
-    fn can_seal(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
-        Ok(self.table.get(&self_)?.material.can_seal())
-    }
-
-    fn can_open(&mut self, self_: Resource<InternalNonceKey>) -> Result<bool> {
-        Ok(self.table.get(&self_)?.material.can_open())
-    }
-}
-
-host_options! {
-    aead_internal_nonce::{HostInternalNonceKeyOptions, HostInternalNonceKeyOptionsWithStore}
-    for crate::InternalNonceKeyOptions {
-        can_seal => seal,
-        can_open => open,
-        extractable => extractable,
-    }
-}
-
-impl<T: Send> HostInternalNonceKeyWithStore<T> for WasiWebcrypto {
-    async fn seal(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-        aad: Vec<u8>,
-        plaintext: StreamReader<u8>,
-    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
-        drain_then_stream(accessor, self_, plaintext, |key, msg| {
-            // Count this invocation against the algorithm's nonce budget
-            // before drawing the nonce, per the minting interfaces'
-            // SHOULD-enforce contract.
-            if let Err(err) = key.material.check_budget(key.sealed) {
-                return Ok(Err(err.into()));
-            }
-            key.sealed += 1;
-            key.material
-                .seal_internal(&aad, msg)
-                .map_err(rng_trap("nonce generation"))
-                .map(|sealed| sealed.map_err(Error::from))
-        })
-        .await
-    }
-
-    async fn open(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-        aad: Vec<u8>,
-        sealed: StreamReader<u8>,
-    ) -> Result<std::result::Result<StreamReader<u8>, Error>> {
-        drain_then_stream(accessor, self_, sealed, |key, msg| {
-            Ok(key.material.open_internal(&aad, msg).map_err(Error::from))
-        })
-        .await
-    }
-
-    async fn export_key_raw(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-    ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        with_resource(accessor, self_, |key| {
-            key.material.export().map_err(Error::from)
-        })
-        .await
-    }
-
-    async fn export_key_jwk(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-    ) -> Result<std::result::Result<String, Error>> {
-        with_resource(accessor, self_, |key| {
-            key.material.export_jwk().map_err(Error::from)
-        })
-        .await
-    }
-
-    async fn to_wrap_input_raw(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-    ) -> Result<std::result::Result<Resource<WrapInput>, Error>> {
-        to_wrap_input(accessor, self_, WrapFormat::Raw, |key| {
-            key.material.export()
-        })
-        .await
-    }
-
-    async fn to_wrap_input_jwk(
-        accessor: &Accessor<T, Self>,
-        self_: Resource<InternalNonceKey>,
-    ) -> Result<std::result::Result<Resource<WrapInput>, Error>> {
-        to_wrap_input(accessor, self_, WrapFormat::Jwk, |key| {
-            key.material.export_jwk().map(String::into_bytes)
-        })
-        .await
-    }
-
-    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<InternalNonceKey>) -> Result<()> {
-        drop_resource(accessor, rep).await
-    }
-}
-
-// --- aes-gcm-internal-nonce (key minting) ----------------------------------------
-
-impl aes_gcm_in_iface::Host for WasiWebcryptoCtxView<'_> {}
-
-impl<T: Send> aes_gcm_in_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key_raw(
-        accessor: &Accessor<T, Self>,
-        variant: aes_gcm_iface::AesVariant,
-        raw: Vec<u8>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_aes_gcm(variant.into(), raw, policy.into());
-        mint(accessor, material).await
-    }
-
-    async fn import_key_jwk(
-        accessor: &Accessor<T, Self>,
-        variant: aes_gcm_iface::AesVariant,
-        jwk: String,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_aes_gcm_jwk(variant.into(), &jwk, policy.into());
-        mint(accessor, material).await
-    }
-
-    async fn generate_key(
-        accessor: &Accessor<T, Self>,
-        variant: aes_gcm_iface::AesVariant,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::generate_aes_gcm(variant.into(), policy.into())
-            .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_raw(
-        accessor: &Accessor<T, Self>,
-        variant: aes_gcm_iface::AesVariant,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material =
-            lann_webcrypto_core::unwrap_aes_gcm_internal_key(variant.into(), input, policy);
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_jwk(
-        accessor: &Accessor<T, Self>,
-        variant: aes_gcm_iface::AesVariant,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material =
-            lann_webcrypto_core::unwrap_aes_gcm_internal_key_jwk(variant.into(), input, policy);
-        mint(accessor, material).await
-    }
-}
-
-// --- xchacha20-poly1305-internal-nonce (key minting) ------------------------------
-
-impl xchacha_in_iface::Host for WasiWebcryptoCtxView<'_> {}
-
-impl<T: Send> xchacha_in_iface::HostWithStore<T> for WasiWebcrypto {
-    async fn import_key_raw(
-        accessor: &Accessor<T, Self>,
-        raw: Vec<u8>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::import_xchacha20_poly1305(raw, policy.into());
-        mint(accessor, material).await
-    }
-
-    async fn generate_key(
-        accessor: &Accessor<T, Self>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let material = AeadKeyMaterial::generate_xchacha20_poly1305(policy.into())
-            .map_err(rng_trap("random key generation"))?;
-        mint(accessor, material).await
-    }
-
-    async fn unwrap_key_raw(
-        accessor: &Accessor<T, Self>,
-        input: Resource<UnwrapInput>,
-        options: Resource<crate::InternalNonceKeyOptions>,
-    ) -> Result<std::result::Result<Resource<InternalNonceKey>, Error>> {
-        let policy = take_options(accessor, options).await?.policy;
-        let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_xchacha_internal_key(input, policy);
         mint(accessor, material).await
     }
 }

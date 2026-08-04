@@ -334,13 +334,6 @@ minted_resources! {
         policy: lann_webcrypto_core::CipherPolicy,
     }
 
-    /// An `internal-nonce-key-options` resource. See [`MacKeyOptions`].
-    #[derive(Debug)]
-    pub struct InternalNonceKeyOptions {
-        #[payload]
-        policy: lann_webcrypto_core::InternalNoncePolicy,
-    }
-
     /// A `signing-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct SigningKeyOptions {
@@ -496,21 +489,6 @@ minted_resources! {
         material: lann_webcrypto_core::CipherKeyMaterial,
     }
 
-    /// Backing type for the `aead-internal-nonce.internal-nonce-key` resource.
-    ///
-    /// Like [`AeadKey`], but the nonce is generated here per `seal` (the SP
-    /// 800-38D §8.2.2 RBG-based construction) and carried in the sealed output.
-    /// The key tracks its seal count to enforce the WIT nonce budget
-    /// (`error.key-exhausted`) for 12-byte-nonce algorithms.
-    #[derive(Debug)]
-    pub struct InternalNonceKey {
-        #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::AeadKeyMaterial,
-        /// The number of `seal` invocations so far, counted against the
-        /// algorithm's nonce budget.
-        sealed: u64 = 0,
-    }
-
     /// Backing type for the `digest.digest` resource.
     ///
     /// A digest holds no key material — just the algorithm it is bound to
@@ -553,7 +531,7 @@ minted_resources! {
 // `debug_redacts_key_material` tests here and in the core).
 
 /// Add the `lann:webcrypto` interfaces implemented by this crate — `types`,
-/// `bytes`, the primitive kinds (`mac`, `aead`, `digest`, `signature`), and
+/// the primitive kinds (`mac`, `aead`, `digest`, `signature`), and
 /// the algorithm minting interfaces — to the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebcryptoView`]. The
@@ -589,7 +567,7 @@ minted_resources! {
 /// }
 /// ```
 ///
-/// The `@unstable`-gated interfaces — the ChaCha family, `sha1-checked`,
+/// The `@unstable`-gated interfaces — `sha1-checked`,
 /// the RSA signing pair, and RSA-OAEP decryption-key minting (see
 /// `wit/README.md`, "Stability gates") — are
 /// **not** added: a guest whose world imports them
@@ -607,27 +585,12 @@ where
 /// is embedder policy, not capability.
 #[derive(Clone, Debug, Default)]
 pub struct LinkOptions {
-    chacha20_poly1305: bool,
-    xchacha20_poly1305: bool,
     sha1_checked: bool,
     rsa_sign: bool,
     rsa_oaep_decrypt: bool,
 }
 
 impl LinkOptions {
-    /// Serve `lann:webcrypto/chacha20-poly1305`.
-    pub fn chacha20_poly1305(&mut self, enabled: bool) -> &mut Self {
-        self.chacha20_poly1305 = enabled;
-        self
-    }
-
-    /// Serve `lann:webcrypto/xchacha20-poly1305` and
-    /// `lann:webcrypto/xchacha20-poly1305-internal-nonce`.
-    pub fn xchacha20_poly1305(&mut self, enabled: bool) -> &mut Self {
-        self.xchacha20_poly1305 = enabled;
-        self
-    }
-
     /// Serve `lann:webcrypto/sha1-checked`.
     pub fn sha1_checked(&mut self, enabled: bool) -> &mut Self {
         self.sha1_checked = enabled;
@@ -658,16 +621,11 @@ where
     T: WasiWebcryptoView + 'static,
 {
     bindings::webcrypto::types::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
-    bindings::webcrypto::bytes::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::mac::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aead::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::wrapping::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::key_wrap::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_kw::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
-    bindings::webcrypto::aead_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
-        linker,
-        T::webcrypto,
-    )?;
     bindings::webcrypto::digest::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::derivation::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::key_agreement::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
@@ -685,31 +643,9 @@ where
     bindings::webcrypto::cipher::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_cbc::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::aes_ctr::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     // The generated `add_to_linker`s for the gated interfaces consult
     // their `LinkOptions` and add nothing when the flag is off.
-    bindings::webcrypto::chacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
-        linker,
-        bindings::webcrypto::chacha20_poly1305::LinkOptions::default()
-            .chacha20_poly1305(options.chacha20_poly1305),
-        T::webcrypto,
-    )?;
-    bindings::webcrypto::xchacha20_poly1305::add_to_linker::<_, WasiWebcrypto>(
-        linker,
-        bindings::webcrypto::xchacha20_poly1305::LinkOptions::default()
-            .xchacha20_poly1305(options.xchacha20_poly1305),
-        T::webcrypto,
-    )?;
-    bindings::webcrypto::aes_gcm_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
-        linker,
-        T::webcrypto,
-    )?;
-    bindings::webcrypto::xchacha20_poly1305_internal_nonce::add_to_linker::<_, WasiWebcrypto>(
-        linker,
-        bindings::webcrypto::xchacha20_poly1305_internal_nonce::LinkOptions::default()
-            .xchacha20_poly1305(options.xchacha20_poly1305),
-        T::webcrypto,
-    )?;
-    bindings::webcrypto::sha2::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
     bindings::webcrypto::sha1_checked::add_to_linker::<_, WasiWebcrypto>(
         linker,
         bindings::webcrypto::sha1_checked::LinkOptions::default()

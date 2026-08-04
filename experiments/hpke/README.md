@@ -14,7 +14,9 @@ become a real deliverable it would graduate to its own repository.
 ## What it is
 
 - **Suites**: DHKEM(X25519, HKDF-SHA-256) + HKDF-SHA-256 (fixed), with
-  AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305 per call.
+  AES-128-GCM or AES-256-GCM per call. (A ChaCha20-Poly1305 arm existed
+  until the package cut its ChaCha interfaces with the WebCrypto-scope
+  narrowing — see issue #272; it would return with them.)
 - **Engine**: [`hpke-rs`](https://crates.io/crates/hpke-rs), which is
   generic over a pluggable crypto provider (`hpke_rs_crypto::HpkeCrypto`
   — a flat, synchronous, byte-oriented trait). `guest/src/provider.rs`

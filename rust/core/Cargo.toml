@@ -24,11 +24,12 @@ sha1 = "0.10"
 hmac = "0.12"
 # HKDF (RFC 5869) for the derivation core.
 hkdf = "0.12"
+# Constant-time byte comparison inside the general GCM path's tag check.
 subtle = "2"
 aes-gcm = "0.10"
 # Zeroize the AES round-key schedule on drop (the `aes-gcm` cipher owns an
-# expanded schedule; `chacha20poly1305` and the signature crates already
-# zeroize their key material by default).
+# expanded schedule; the signature crates already zeroize their key
+# material by default).
 aes = { version = "0.8", features = ["zeroize"] }
 # AES-KW (RFC 3394) over the same fixsliced `aes` block cipher, for the
 # `key-wrap` kind.
@@ -47,7 +48,6 @@ ctr = "0.9"
 # trailing bits, per RFC 7515).
 serde_json = "1"
 data-encoding = "2"
-chacha20poly1305 = "0.10"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
 # lann-webcrypto-guest-provider's README timing-channel classification).

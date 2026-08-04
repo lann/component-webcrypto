@@ -65,42 +65,8 @@ function cipherInSubset(name) {
 }
 
 /**
- * encrypt_decrypt/chacha20_poly1305: the whole group — the fixed-vector
- * encryptions and decryptions over "raw-secret" imports, the generated-key
- * round trips, the tamper rejections, and the 12-byte-nonce rule (the
- * WIT's `invalid-nonce` renders the expected `OperationError`).
- */
-function chachaEncryptDecryptInSubset() {
-  return true;
-}
-
-/**
- * import_export/symmetric_importKey (ChaCha20-Poly1305): the "raw-secret"
- * and "jwk" rows (the proposal's oct form, which the package's
- * `chacha20-poly1305.import-key-jwk` serves) are in whole, as are the
- * empty-usages rows for every format (usages are validated before the
- * format is considered).
- * @param {string} name
- */
-function chachaImportKeyInSubset(name) {
-  if (name.startsWith("Empty Usages:")) {
-    return true;
-  }
-  return name.includes("(raw-secret, ") || name.includes("(jwk, ");
-}
-
-/**
- * generateKey/successes (ChaCha20-Poly1305): the whole group — the
- * extractable rows export raw-secret and the oct JWK, both
- * served.
- */
-function chachaGenerateKeyInSubset() {
-  return true;
-}
-
-/**
- * generateKey/failures, in both invocations: the served-algorithms sweep
- * (HMAC, the AES family, Ed25519, X25519) and the ChaCha20-Poly1305 one.
+ * generateKey/failures: the served-algorithms sweep
+ * (HMAC, the AES family, Ed25519, X25519).
  * The whole group is in-subset — the suite asserts the spec's error
  * ordering (algorithm normalization, nested hash included; then usage
  * membership; then algorithm properties; then the empty-usage check),
@@ -427,8 +393,8 @@ function okpImportFailuresInSubset() {
 /**
  * wrapKey_unwrapKey: every combination whose wrapping algorithm and
  * wrapped-key family the library serves — the symmetric families (HMAC,
- * AES-GCM/CBC/CTR/KW, ChaCha20-Poly1305) plus Ed25519, X25519, and ECDH
- * *private* keys, under the AES and ChaCha wrappers. Out of the subset:
+ * AES-GCM/CBC/CTR/KW) plus Ed25519, X25519, and ECDH
+ * *private* keys, under the AES wrappers. Out of the subset:
  * the RSA-OAEP wrapper (unserved algorithm), the RSA and ECDSA wrappee
  * rows (unserved family; class D), and every public-key wrap
  * (the WIT's public-key resources mint no wrap-input; see the library
@@ -479,12 +445,6 @@ export const GROUPS = [
     inSubset: cipherInSubset,
   },
   {
-    name: "encrypt_decrypt/chacha20_poly1305",
-    module: "group-chacha20-poly1305.js",
-    start: (ns) => ns.run_chacha20_poly1305_tests(),
-    inSubset: chachaEncryptDecryptInSubset,
-  },
-  {
     name: "wrapKey_unwrapKey/wrapKey_unwrapKey",
     module: "group-wrap-key.js",
     start: (ns) => ns.run_wrap_tests(),
@@ -500,12 +460,6 @@ export const GROUPS = [
     inSubset: importKeyInSubset,
   },
   {
-    name: "import_export/symmetric_importKey (ChaCha20-Poly1305)",
-    module: "group-import-key.js",
-    start: (ns) => ns.runTests("ChaCha20-Poly1305"),
-    inSubset: chachaImportKeyInSubset,
-  },
-  {
     name: "generateKey/successes (HMAC, AES-GCM)",
     module: "group-generate-key.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM"]),
@@ -515,18 +469,6 @@ export const GROUPS = [
     name: "generateKey/failures (HMAC, AES, Ed25519, X25519)",
     module: "group-generate-key-failures.js",
     start: (ns) => ns.run_test(["HMAC", "AES-GCM", "AES-CBC", "AES-CTR", "Ed25519", "X25519"]),
-    inSubset: generateKeyFailuresInSubset,
-  },
-  {
-    name: "generateKey/successes (ChaCha20-Poly1305)",
-    module: "group-generate-key.js",
-    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
-    inSubset: chachaGenerateKeyInSubset,
-  },
-  {
-    name: "generateKey/failures (ChaCha20-Poly1305)",
-    module: "group-generate-key-failures.js",
-    start: (ns) => ns.run_test(["ChaCha20-Poly1305"]),
     inSubset: generateKeyFailuresInSubset,
   },
   {
