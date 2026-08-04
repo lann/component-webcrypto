@@ -9,9 +9,12 @@ const { values } = parseArgs({
   options: {
     missing: { type: "string", default: "" },
     only: { type: "string" },
+    jsonl: { type: "boolean", default: false },
+    target: { type: "string", default: "jco-node" },
   },
 });
 const missing = values.missing.split(",").filter(Boolean);
+const jsonl = values.jsonl;
 
 // ---- static tag inventory: custom sections from the core modules
 const TAGS_SECTION = "component-test:tags@0.1";
@@ -87,6 +90,16 @@ function applies(tags, missing) {
 
 // ---- run
 const tagsOf = await loadInventory();
+if (jsonl) {
+  console.log(
+    JSON.stringify({
+      "component-test-results": "0.1",
+      target: values.target,
+      suite: { name: "conformance-guest-ct" },
+      run: { segment: 0 },
+    })
+  );
+}
 const { tests } = await import("./generated/conformance-guest-ct.js");
 
 const cases = await tests.all();
@@ -103,33 +116,63 @@ for (const testCase of cases) {
   }
   if (!applies(tags, missing)) {
     na++;
+    if (jsonl) {
+      const excluding = tags.find((t) =>
+        t.startsWith("!") ? !missing.includes(t.slice(1)) : missing.includes(t)
+      );
+      console.log(
+        JSON.stringify({
+          case: name,
+          status: "not-applicable",
+          detail: excluding ?? "",
+        })
+      );
+    }
     continue;
   }
   const diags = [];
   const ctx = new Context((msg) => diags.push(msg));
+  let event;
   try {
     await testCase.run(ctx);
     passed++;
+    event = { case: name, status: "pass", provenance: "returned" };
   } catch (e) {
     const payload = e?.payload ?? e;
     if (payload?.tag === "failed") {
       failed++;
       failures.push({ name, detail: payload.val, diags });
+      event = { case: name, status: "fail", provenance: "returned", detail: payload.val };
     } else if (payload?.tag === "skipped") {
       skipped++;
+      event = { case: name, status: "skipped", provenance: "returned", detail: payload.val };
     } else {
       failed++;
-      failures.push({ name, detail: `trap: ${e?.message ?? e}`, diags });
+      const detail = `trap: ${e?.message ?? e}`;
+      failures.push({ name, detail, diags });
+      event = {
+        case: name,
+        status: "fail",
+        provenance: "trap",
+        detail,
+        "diagnostics-complete": false,
+      };
     }
   }
+  if (jsonl) {
+    if (diags.length > 0) event.diagnostics = diags;
+    console.log(JSON.stringify(event));
+  }
 }
+if (jsonl) console.log('{"segment-end":true}');
 
-for (const f of failures.slice(0, 20)) {
+if (!jsonl) for (const f of failures.slice(0, 20)) {
   console.log(`FAIL: ${f.name}: ${f.detail}`);
   for (const d of f.diags) console.log(`    diag: ${d}`);
 }
 if (failures.length > 20) console.log(`... and ${failures.length - 20} more failures`);
-console.log(
-  `\nresult: ${passed} passed, ${failed} failed, ${skipped} skipped, ${na} not applicable, ${cases.length} total`
-);
+if (!jsonl)
+  console.log(
+    `\nresult: ${passed} passed, ${failed} failed, ${skipped} skipped, ${na} not applicable, ${cases.length} total`
+  );
 process.exit(failed === 0 ? 0 : 1);

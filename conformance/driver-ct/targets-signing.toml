@@ -1,0 +1,9 @@
+# The host-only signing suite: wasmtime target only, no gated features
+# (ecdsa-sign is structural and untagged).
+version = "0.1"
+
+[features.ecdsa-sign]
+kind = "structural"
+
+[targets.wasmtime-rustcrypto]
+missing-features = []

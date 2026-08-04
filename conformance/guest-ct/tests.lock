@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_ct"
-artifact_sha256 = "d35efdbb91d82bf1771bfc9d386982f5ab1a247513e2259ad8b8db8580a5cfca"
+artifact_sha256 = "233119a83f4073fb29489274a60cebd48fba49bb67d464121b5bba3ad59bc4f6"
 
 [[case]]
 name = "chacha20-poly1305/decline/minting"

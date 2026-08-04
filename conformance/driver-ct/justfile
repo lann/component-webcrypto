@@ -1,0 +1,63 @@
+# component-test conformance recipes (M1.6). Module recipes run from
+# this directory (conformance/driver-ct); `root` is the repo root. The
+# component-test checkout is expected as a sibling of the repo during
+# the migration.
+
+root := "../.."
+ct := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
+guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
+signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
+
+# Build both suite components (rkyv corpus) and the host driver.
+build:
+    cargo build --manifest-path {{root}}/Cargo.toml --target wasm32-wasip2 --release \
+        -p conformance-guest-ct -p conformance-signing-guest-ct \
+        --features conformance-guest-ct/rkyv-corpus
+    cargo build --manifest-path {{root}}/Cargo.toml --release -p conformance-driver-ct
+
+# Drift-check the committed lockfiles.
+lock-check: build
+    {{ct}} lock {{guest}} --check ../guest-ct/tests.lock
+    {{ct}} lock {{signing}} --check ../signing-guest-ct/tests.lock
+
+# Regenerate lockfiles after case changes (commit the diff).
+lock-update: build
+    {{ct}} lock {{guest}} -o ../guest-ct/tests.lock
+    {{ct}} lock {{signing}} -o ../signing-guest-ct/tests.lock
+
+# The wasmtime (RustCrypto) target: full support.
+run-wasmtime: build
+    mkdir -p results
+    {{root}}/target/release/ct-driver {{guest}} --jobs 8 --jsonl \
+        --target wasmtime-rustcrypto > results/wasmtime-rustcrypto.jsonl
+    {{root}}/target/release/ct-driver {{signing}} --jsonl \
+        --target wasmtime-rustcrypto > results/wasmtime-signing.jsonl
+
+# The jco-node target (browser-first host under Node/JSPI).
+run-jco: build
+    mkdir -p results
+    cd jco && npm install --silent && npm run transpile
+    cd jco && node --experimental-wasm-jspi runner.mjs \
+        --missing xchacha20-poly1305,sha1-checked --jsonl --target jco-node \
+        > ../results/jco-node.jsonl
+
+# Aggregate all targets into the matrix; exits nonzero on any failure
+# or validation error.
+aggregate:
+    {{ct}} aggregate \
+        --lock ../guest-ct/tests.lock \
+        --manifest targets.toml \
+        --results wasmtime-rustcrypto=results/wasmtime-rustcrypto.jsonl \
+        --results jco-node=results/jco-node.jsonl \
+        -o matrix.md
+
+# The signing suite (host-only; wasmtime target).
+aggregate-signing:
+    {{ct}} aggregate \
+        --lock ../signing-guest-ct/tests.lock \
+        --manifest targets-signing.toml \
+        --results wasmtime-rustcrypto=results/wasmtime-signing.jsonl \
+        -o matrix-signing.md
+
+# Everything: build, lock-check, both targets, aggregates.
+all: lock-check run-wasmtime run-jco aggregate aggregate-signing

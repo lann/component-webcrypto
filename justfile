@@ -10,6 +10,7 @@ mod gha '.github'
 
 # The cross-implementation conformance tests.
 mod conformance
+mod conformance-ct "conformance/driver-ct/justfile"
 
 # The demo guest + drivers (Wasmtime, composed in-guest, jco/Node).
 mod demo 'examples'

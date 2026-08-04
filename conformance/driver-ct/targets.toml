@@ -1,0 +1,16 @@
+version = "0.1"
+
+[features.chacha20-poly1305]
+kind = "gated"
+[features.xchacha20-poly1305]
+kind = "gated"
+[features.sha1-checked]
+kind = "gated"
+[features.ecdsa-sign]
+kind = "structural"
+
+[targets.wasmtime-rustcrypto]
+missing-features = []
+
+[targets.jco-node]
+missing-features = ["xchacha20-poly1305", "sha1-checked"]
