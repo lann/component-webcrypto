@@ -126,6 +126,7 @@ run-composed: build build-provider _ct-tools
     mkdir -p results
     wac plug {{guest}} --plug {{provider}} -o {{composed}}
     {{ct-runner}} {{composed}} --jobs 8 --jsonl \
+        --suite-artifact {{guest}} \
         --missing ecdsa-sign --target composed > results/composed.jsonl
 
 # The jco-browser target: the same transpiles and the same host module,
@@ -156,7 +157,11 @@ _run-browser-if-enabled:
     fi
 
 # Aggregate all targets into the matrix; exits nonzero on any failure
-# or validation error. The optional jco-browser results are included
+# or validation error. Binds against the COMMITTED lockfiles: upstream
+# ruled (lann/component-test#44) that artifact hashes are provenance,
+# never a cross-environment gate, so the committed inventory — whose
+# diff is the review surface — is what results aggregate against; no
+# fresh-lock indirection. The optional jco-browser results are included
 # when present (their absence is a declared warning, not an error).
 aggregate: _ct-tools
     #!/usr/bin/env bash

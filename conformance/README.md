@@ -59,10 +59,13 @@ suites therefore never silently sheds coverage: new cases run everywhere
 until a target consciously opts out.
 
 Each suite's case inventory is pinned by a component-test lockfile
-(`guest-ct/tests.lock`, `signing-guest-ct/tests.lock`), bound to the built
-suite by sha256; `just conformance-ct::lock-check` gates drift and
+(`guest-ct/tests.lock`, `signing-guest-ct/tests.lock`); the inventory is
+the binding — the recorded sha256 is build provenance only, since wasm
+builds are not reproducible across checkouts (lann/component-test#44).
+`just conformance-ct::lock-check` gates drift and
 `just conformance-ct::lock-update` regenerates after intentional case
-changes, landing them as a reviewable diff. The census-parity tests
+changes, landing them as a reviewable diff. The aggregates bind against
+these same committed lockfiles. The census-parity tests
 (`census_test.rs` in each suite crate) additionally anchor the inventory to
 the retired incumbent harness's final census, byte-frozen at the M1.6
 cutover (and re-frozen as the incumbent's suites grew before its

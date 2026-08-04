@@ -81,12 +81,15 @@ export function applies(tags, missing) {
   );
 }
 
-/** The results-JSONL envelope line for one target × suite run. */
+/** The results-JSONL envelope line for one target × suite run. The
+ *  suite is named as its lockfile names it — the suite wasm's file
+ *  stem (underscores) — not by the transpiled module's hyphenated
+ *  name, so the aggregate's identity cross-check stays quiet. */
 export function envelope(target, suite) {
   return {
     "component-test-results": "0.1",
     target,
-    suite: { name: suite },
+    suite: { name: suite.replaceAll("-", "_") },
     run: { segment: 0 },
   };
 }
