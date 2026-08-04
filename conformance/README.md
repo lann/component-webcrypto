@@ -24,9 +24,20 @@ harness/           # world-independent suite infrastructure: probe table
 guest-ct/          # the shared suite: vectors compiled in (translate.rs),
                    #   per-kind contract batteries (contract.rs), API
                    #   probes (probes.rs); tests.lock pins its inventory
-signing-guest-ct/  # the signing suite: probes for interfaces the in-guest
-                   #   provider deliberately does not export (ecdsa-sign);
-                   #   its own tests.lock
+signing-guest-ct/  # the signing suite: cases for the private-key minting
+                   #   surface the in-guest provider deliberately does not
+                   #   export (ecdsa-sign, the gated rsa-sign interfaces,
+                   #   the gated rsa-oaep-decrypt interface) — probes plus
+                   #   the RSASSA-PKCS1-v1_5 sig-gen known-answer vectors
+                   #   (deterministic signing byte-compares) and the
+                   #   RSA-OAEP decryption vectors (deterministic
+                   #   decryption of published ciphertexts); its own
+                   #   tests.lock
+class-d/           # the class-D gate's dedicated probe worlds (no Rust:
+                   #   `wasm-tools component embed --dummy` builds them):
+                   #   oaep-probe/ imports only rsa-oaep-decrypt, proving
+                   #   the provider's kind-only public-encryption export
+                   #   keeps the decryption mints uncomposable
 driver-ct/         # the host driver (ct-driver: wasmtime + RustCrypto as
                    #   the SUT, component-test-runner as the harness), the
                    #   jco/Node runner (jco/), targets.toml (target
@@ -54,7 +65,16 @@ suite by sha256; `just conformance-ct::lock-check` gates drift and
 changes, landing them as a reviewable diff. The census-parity tests
 (`census_test.rs` in each suite crate) additionally anchor the inventory to
 the retired incumbent harness's final census, byte-frozen at the M1.6
-cutover as `src/census-fixture.lock` in each suite crate.
+cutover (and re-frozen as the incumbent's suites grew before its
+retirement landed) as `src/census-fixture.lock` in each suite crate. The
+port diverges from the incumbent ids in exactly two documented ways, both
+of which the parity tests account for: the additive `!feature` decline
+cases (above), and the RSA algorithm segments' modulus words — the
+component-test case-name grammar requires non-leaf segments to be WIT
+labels, whose words may not start with a digit, so the incumbent's
+`rsassa-pkcs1-v15-sha256-2048`, `rsa-pss-…-2048-…`, and `rsa-oaep-…-2048`
+segments carry a `b` ("bits") prefix on the modulus word here:
+`rsassa-pkcs1-v15-sha256-b2048`, and so on.
 
 The lockfiles pin the **inventory**, not the assertions. A case that keeps
 its name while weakening what it checks produces no lockfile diff; that is

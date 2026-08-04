@@ -74,7 +74,51 @@ mod generated {
     // n where this stops being tolerable, the bindings move to a build
     // script that computes the flag list (tracked with the SDK's other
     // cargo-feature debt in #85).
-    #[cfg(all(feature = "chacha", feature = "sha1-checked"))]
+    #[cfg(all(
+        feature = "chacha",
+        feature = "sha1-checked",
+        feature = "rsa-sign",
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        feature = "sha1-checked",
+        feature = "rsa-sign",
+        not(feature = "rsa-oaep-decrypt")
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        feature = "sha1-checked",
+        not(feature = "rsa-sign"),
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        feature = "sha1-checked",
+        not(feature = "rsa-sign"),
+        not(feature = "rsa-oaep-decrypt")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"],
@@ -82,7 +126,51 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(feature = "chacha", not(feature = "sha1-checked")))]
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign",
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-sign", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign",
+        not(feature = "rsa-oaep-decrypt")
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign"),
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        feature = "chacha",
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign"),
+        not(feature = "rsa-oaep-decrypt")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["chacha20-poly1305", "xchacha20-poly1305"],
@@ -90,7 +178,51 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(not(feature = "chacha"), feature = "sha1-checked"))]
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        feature = "rsa-sign",
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["sha1-checked", "rsa-sign", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        feature = "rsa-sign",
+        not(feature = "rsa-oaep-decrypt")
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["sha1-checked", "rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        not(feature = "rsa-sign"),
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["sha1-checked", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        feature = "sha1-checked",
+        not(feature = "rsa-sign"),
+        not(feature = "rsa-oaep-decrypt")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         features: ["sha1-checked"],
@@ -98,7 +230,51 @@ mod generated {
         generate_all,
         pub_export_macro: false,
     });
-    #[cfg(all(not(feature = "chacha"), not(feature = "sha1-checked")))]
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign",
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["rsa-sign", "rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        feature = "rsa-sign",
+        not(feature = "rsa-oaep-decrypt")
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["rsa-sign"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign"),
+        feature = "rsa-oaep-decrypt"
+    ))]
+    wit_bindgen::generate!({
+        path: "wit",
+        features: ["rsa-oaep-decrypt"],
+        world: "imports",
+        generate_all,
+        pub_export_macro: false,
+    });
+    #[cfg(all(
+        not(feature = "chacha"),
+        not(feature = "sha1-checked"),
+        not(feature = "rsa-sign"),
+        not(feature = "rsa-oaep-decrypt")
+    ))]
     wit_bindgen::generate!({
         path: "wit",
         world: "imports",
@@ -113,22 +289,27 @@ mod generated {
 /// for callers driving the streams themselves and for passing resources
 /// through a consumer's own interfaces (via [`Mac::into_raw`] and friends).
 pub mod bindings {
-    // `aes` and `sha2` are here for their *types*: they define
-    // `aes-variant` and `sha2-variant`, which the minting interfaces only
-    // alias, and rustdoc renders an alias into a private module as an empty
-    // enum.
+    // `aes`, `rsa`, and `sha2` are here for their *types*: they define
+    // `aes-variant`, `rsa-variant`, and `sha2-variant`, which the minting
+    // interfaces only alias, and rustdoc renders an alias into a private
+    // module as an empty enum.
+    #[cfg(feature = "rsa-oaep-decrypt")]
+    pub use super::generated::lann::webcrypto::rsa_oaep_decrypt;
     #[cfg(feature = "sha1-checked")]
     pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
         aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw,
         bytes, cipher, derivation, digest, ecdh, ecdsa_sign, ecdsa_verify, ed25519_sign,
         ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap,
-        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, sha2, signature, types, wrapping, x25519,
+        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, public_encryption, rsa, rsa_oaep_encrypt,
+        rsa_pss_verify, rsassa_pkcs1_v15_verify, sha2, signature, types, wrapping, x25519,
     };
     #[cfg(feature = "chacha")]
     pub use super::generated::lann::webcrypto::{
         chacha20_poly1305, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
     };
+    #[cfg(feature = "rsa-sign")]
+    pub use super::generated::lann::webcrypto::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
 }
 
 pub use generated::wit_stream;
@@ -806,6 +987,33 @@ impl AgreementKeyOptions {
     }
 }
 
+/// Mint-time policy for a [`DecryptionKey`]. See [`MacKeyOptions`] for the
+/// options contract. The two grants separate disclosure from minting:
+/// `decrypt` returns plaintext to the caller, while `unwrap` mints keys
+/// whose material the caller never sees, so a key granted only `unwrap`
+/// cannot leak what it transports.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DecryptionKeyOptions {
+    /// Whether the minted key may [`decrypt`](DecryptionKey::decrypt).
+    pub decrypt: bool,
+    /// Whether the minted key may [`unwrap`](DecryptionKey::unwrap).
+    pub unwrap: bool,
+    /// Whether the minted key's material may be exported.
+    pub extractable: bool,
+}
+
+impl DecryptionKeyOptions {
+    /// The WIT options resource carrying this policy.
+    #[cfg_attr(not(feature = "rsa-oaep-decrypt"), allow(dead_code))]
+    pub(crate) fn lower(self) -> bindings::public_encryption::DecryptionKeyOptions {
+        let options = bindings::public_encryption::DecryptionKeyOptions::new();
+        options.can_decrypt(self.decrypt);
+        options.can_unwrap(self.unwrap);
+        options.extractable(self.extractable);
+        options
+    }
+}
+
 // --- newtypes ------------------------------------------------------------------
 
 /// Generate the shared newtype plumbing: constructors, raw accessors, and
@@ -1336,6 +1544,14 @@ impl VerifyingKey {
         self.0.algorithm_hash()
     }
 
+    /// The key's length in bits for algorithms parameterized by one — the
+    /// RSA modulus length (WebCrypto's `RsaKeyAlgorithm.modulusLength`).
+    /// `None` for Ed25519 and ECDSA, whose key size is fixed by the
+    /// algorithm or curve.
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
+    }
+
     /// The public key material, in the minting interface's documented
     /// public format.
     ///
@@ -1379,6 +1595,11 @@ impl SigningKey {
         self.0.algorithm_hash()
     }
 
+    /// See [`VerifyingKey::algorithm_length`].
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
+    }
+
     /// Whether the private key material may be exported. There is
     /// currently no export operation — extractability is mint-time
     /// recorded policy that future format-specific exports and
@@ -1393,6 +1614,207 @@ impl SigningKey {
     /// operation fails [`Error::NotPermitted`].
     pub fn can_sign(&self) -> bool {
         self.0.can_sign()
+    }
+}
+
+/// A `public-encryption.encryption-key`: the public half of asymmetric
+/// encryption — encryption and wrapping, secret-free to hold.
+///
+/// Operations take and return whole byte buffers rather than
+/// [`DataSource`]s: the plaintext is bounded by the key (for RSA-OAEP, the
+/// modulus length minus the padding overhead), so there is nothing
+/// unbounded to stream. Encryption is randomized — encrypting one
+/// plaintext twice yields different ciphertexts, and both decrypt.
+pub struct EncryptionKey(bindings::public_encryption::EncryptionKey);
+newtype_common!(
+    EncryptionKey,
+    bindings::public_encryption::EncryptionKey,
+    "encryption-key"
+);
+
+impl EncryptionKey {
+    /// Encrypt a plaintext bounded by the key. `label` is optional context
+    /// bound into the padding: decryption succeeds only under the same
+    /// label (WebCrypto's `RsaOaepParams.label`). A plaintext above the
+    /// key's bound fails [`Error::Extension`] (origin `"lann:webcrypto"`,
+    /// name `"message-too-long"`) — the signal to switch to hybrid
+    /// wrapping: encrypt a symmetric key, wrap the payload under it.
+    pub async fn encrypt(
+        &self,
+        label: Option<&[u8]>,
+        plaintext: impl Into<Vec<u8>>,
+    ) -> Result<Vec<u8>, Error> {
+        self.0
+            .encrypt(label.map(<[u8]>::to_vec), plaintext.into())
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Wrap key material serialized as a [`WrapInput`]: the material
+    /// transits neither caller. The serialized form must fit the key's
+    /// bound — symmetric-key JWKs do, private-key serializations generally
+    /// do not — else the same `"message-too-long"` extension condition as
+    /// [`encrypt`](Self::encrypt). Consumes the [`WrapInput`].
+    pub async fn wrap(&self, label: Option<&[u8]>, input: WrapInput) -> Result<Vec<u8>, Error> {
+        self.0
+            .wrap(label.map(<[u8]>::to_vec), input.into_raw())
+            .await
+            .map_err(Error::from)
+    }
+
+    /// The registry name of the key's algorithm family, e.g. `"RSA-OAEP"`
+    /// — WebCrypto's `KeyAlgorithm.name`.
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// The registry name of the digest bound at mint, e.g. `"SHA-256"`.
+    pub fn algorithm_hash(&self) -> Option<String> {
+        self.0.algorithm_hash()
+    }
+
+    /// The key's length in bits for algorithms parameterized by one — the
+    /// RSA modulus length (WebCrypto's `RsaKeyAlgorithm.modulusLength`).
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
+    }
+
+    /// The public key material, in the minting interface's documented
+    /// public format. Algorithms without a raw public form (the RSA
+    /// family) fail [`Error::Unsupported`].
+    ///
+    /// There is no extractability gate on public material, so this never
+    /// fails [`Error::NotExtractable`] — but it can fail [`Error::Other`]:
+    /// a provider may hold the key as a handle it can use but not read
+    /// (see [`VerifyingKey::export_key_raw`]).
+    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_raw().await.map_err(Error::from)
+    }
+
+    /// The public key as an X.509 SubjectPublicKeyInfo (DER), with the
+    /// same handle-not-bytes fallibility as
+    /// [`export_key_raw`](Self::export_key_raw).
+    pub async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_spki().await.map_err(Error::from)
+    }
+
+    /// The public key as a JWK (JSON text), with the same fallibility as
+    /// [`export_key_raw`](Self::export_key_raw).
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
+}
+
+/// A `public-encryption.decryption-key`: the private half of asymmetric
+/// encryption. [`decrypt`](Self::decrypt) and [`unwrap`](Self::unwrap) are
+/// one-shot calls on the immutable key, over whole byte buffers (see
+/// [`EncryptionKey`] for why nothing streams here).
+pub struct DecryptionKey(bindings::public_encryption::DecryptionKey);
+newtype_common!(
+    DecryptionKey,
+    bindings::public_encryption::DecryptionKey,
+    "decryption-key"
+);
+
+impl DecryptionKey {
+    /// Decrypt a ciphertext produced by the matching public key under the
+    /// same `label`. Fails [`Error::NotPermitted`] without the
+    /// [`decrypt`](DecryptionKeyOptions::decrypt) grant; every decryption
+    /// failure is the one detail-free [`Error::AuthenticationFailed`] — a
+    /// wrong-length ciphertext, damaged padding, and a mismatched label
+    /// are indistinguishable, as RFC 8017 requires.
+    pub async fn decrypt(
+        &self,
+        label: Option<&[u8]>,
+        ciphertext: impl Into<Vec<u8>>,
+    ) -> Result<Vec<u8>, Error> {
+        self.0
+            .decrypt(label.map(<[u8]>::to_vec), ciphertext.into())
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Decrypt a wrapped key into an [`UnwrapInput`] for a typed unwrap
+    /// mint: the material never reaches the caller. Fails
+    /// [`Error::NotPermitted`] without the
+    /// [`unwrap`](DecryptionKeyOptions::unwrap) grant; failures are
+    /// otherwise as [`decrypt`](Self::decrypt).
+    pub async fn unwrap(
+        &self,
+        label: Option<&[u8]>,
+        ciphertext: impl Into<Vec<u8>>,
+    ) -> Result<UnwrapInput, Error> {
+        self.0
+            .unwrap(label.map(<[u8]>::to_vec), ciphertext.into())
+            .await
+            .map(UnwrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// See [`EncryptionKey::algorithm_name`].
+    pub fn algorithm_name(&self) -> String {
+        self.0.algorithm_name()
+    }
+
+    /// See [`EncryptionKey::algorithm_hash`].
+    pub fn algorithm_hash(&self) -> Option<String> {
+        self.0.algorithm_hash()
+    }
+
+    /// See [`EncryptionKey::algorithm_length`].
+    pub fn algorithm_length(&self) -> Option<u32> {
+        self.0.algorithm_length()
+    }
+
+    /// Whether the key permits [`decrypt`](Self::decrypt) — the usage
+    /// recorded at mint. A refused operation fails
+    /// [`Error::NotPermitted`].
+    pub fn can_decrypt(&self) -> bool {
+        self.0.can_decrypt()
+    }
+
+    /// Whether the key permits [`unwrap`](Self::unwrap). See
+    /// [`can_decrypt`](Self::can_decrypt).
+    pub fn can_unwrap(&self) -> bool {
+        self.0.can_unwrap()
+    }
+
+    /// Whether the export functions may return this key's material (see
+    /// [`Mac::extractable`]).
+    pub fn extractable(&self) -> bool {
+        self.0.extractable()
+    }
+
+    /// The private key as a JWK (JSON text); fails
+    /// [`Error::NotExtractable`] unless the key was minted extractable.
+    pub async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.0.export_key_jwk().await.map_err(Error::from)
+    }
+
+    /// The private key as a PKCS#8 PrivateKeyInfo (DER), behind the same
+    /// extractability gate as [`export_key_jwk`](Self::export_key_jwk).
+    pub async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        self.0.export_key_pkcs8().await.map_err(Error::from)
+    }
+
+    /// The private-key JWK serialization as a [`WrapInput`], for wrapping
+    /// under another key. Behind the same extractability gate as
+    /// [`export_key_jwk`](Self::export_key_jwk).
+    pub async fn to_wrap_input_jwk(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_jwk()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
+    }
+
+    /// The PKCS#8 serialization as a [`WrapInput`], behind the same gate.
+    pub async fn to_wrap_input_pkcs8(&self) -> Result<WrapInput, Error> {
+        self.0
+            .to_wrap_input_pkcs8()
+            .await
+            .map(WrapInput::from_raw)
+            .map_err(Error::from)
     }
 }
 
@@ -1853,6 +2275,9 @@ pub mod hmac_sha2;
 pub mod pbkdf2;
 pub mod pbkdf2_sha1;
 pub mod pbkdf2_sha2;
+pub mod rsa_oaep;
+pub mod rsa_pss;
+pub mod rsassa_pkcs1_v15;
 #[cfg(feature = "sha1-checked")]
 pub mod sha1_checked;
 pub mod sha2;

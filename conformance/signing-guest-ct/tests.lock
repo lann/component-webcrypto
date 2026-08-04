@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_signing_guest_ct"
-artifact_sha256 = "5e27118530615bfe0a1058a76631d822e4ceabbbb3e0643c04828a6cd60142c0"
+artifact_sha256 = "e0ce6b488d19bb86a3912ad3c1292582a8664b7892d19043f987b0d284de4774"
 
 [[case]]
 name = "probe/ecdsa-cross-hash-sign-roundtrip"
@@ -28,3 +28,166 @@ name = "probe/ecdsa-signing-key-exports"
 
 [[case]]
 name = "probe/ecdsa-unwrap-signing-key"
+
+[[case]]
+name = "probe/rsa-oaep-admission"
+tags = ["rsa-oaep-decrypt"]
+
+[[case]]
+name = "probe/rsa-oaep-declined"
+tags = ["rsa-oaep-decrypt"]
+
+[[case]]
+name = "probe/rsa-oaep-encrypt-contract"
+
+[[case]]
+name = "probe/rsa-oaep-round-trip"
+tags = ["rsa-oaep-decrypt"]
+
+[[case]]
+name = "probe/rsa-pss-sign-round-trip"
+tags = ["rsa-sign"]
+
+[[case]]
+name = "probe/rsa-sign-admission"
+tags = ["rsa-sign"]
+
+[[case]]
+name = "probe/rsa-sign-declined"
+tags = ["rsa-sign"]
+
+[[case]]
+name = "probe/rsa-sign-key-contract"
+tags = ["rsa-sign"]
+
+[[case]]
+name = "rsa-oaep-decrypt/decline/minting"
+tags = ["!rsa-oaep-decrypt"]
+
+[[case]]
+name = "rsa-sign/decline/minting"
+tags = ["!rsa-sign"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b2048/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b2048/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b2688/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b3072/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b3072/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b4032/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b4096/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b4096/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha256-b8192/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b2048/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b2048/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b3072/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b3104/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b4096/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha384-b8192/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b2048/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b2048/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b3072/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b3072/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b4096/wycheproof"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b4096/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsa-oaep-sha512-b8192/wycheproof-misc"
+tags = ["rsa-oaep-decrypt"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b2048/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b3072/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b4096/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b2048/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b3072/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b4096/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b2048/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b3072/wycheproof-sig-gen"
+tags = ["rsa-sign"]
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b4096/wycheproof-sig-gen"
+tags = ["rsa-sign"]

@@ -10,7 +10,8 @@ item; everything shared lives here.
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
 - **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`) own the
+  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`,
+  `public-encryption`) own the
   algorithm-agnostic resources.
   Operations hang off key resources. Adding an algorithm does not change
   these interfaces. The `wrapping` interface holds the provider-held
@@ -18,7 +19,8 @@ item; everything shared lives here.
   `derivation` holds `derive-input`.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
   `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
-  `ecdh`) only mint keys, bound
+  `ecdh`, `rsassa-pkcs1-v15-*`, `rsa-pss-*`, `rsa-oaep-*`) only mint
+  keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -312,18 +314,23 @@ gate's reasons and exit conditions are listed here:
   when the toolchains this package rides can express an optional import,
   so consumers never stabilize onto the stopgap as if it were the final
   consumption story.
+- **Consent**: the interface is servable, but serving it is a
+  per-deployment security judgment the package cannot make or verify
+  from inside — the gate is the consumer's explicit assertion of their
+  threat model. Consent gates do not lift on tooling improvements; they
+  lift only if the underlying judgment ever becomes unconditional.
 
 The gates:
 
 - `@unstable(feature = chacha20-poly1305)` on `chacha20-poly1305` —
-  both reasons. Shape: the algorithm is IETF-standard (RFC 8439), but
+  shape and linkage. Shape: the algorithm is IETF-standard (RFC 8439), but
   its browser WebCrypto surface is a proposal (W3C ["Modern Algorithms
   in the Web Cryptography API"]) this package tracks; the JWK contract
   has already moved once to follow the proposal's registered `"C20P"`.
   Exits when the proposal settles *and* optional imports are
   expressible.
 - `@unstable(feature = xchacha20-poly1305)` on `xchacha20-poly1305` and
-  `xchacha20-poly1305-internal-nonce` — both reasons. Shape: the
+  `xchacha20-poly1305-internal-nonce` — shape and linkage. Shape: the
   construction is deployed (libsodium lineage) but not
   IETF-standardized, and no platform WebCrypto serves it. Exits on a
   standardization-or-durability judgment once optional imports are
@@ -333,6 +340,29 @@ The gates:
   nothing external pending), but platform WebCrypto carries no sha1dc,
   so platform-backed providers can never serve it. Exits when optional
   imports are expressible.
+- `@unstable(feature = rsa-oaep-decrypt)` on `rsa-oaep-decrypt` —
+  consent, the same contract as `rsa-sign` below, with the sharpest
+  factual basis in the package: decryption is the operation the RSA
+  timing-attack lineage targets, and the one WebCrypto RSA private-op
+  CVE to date was a browser's OAEP decryption. `rsa-oaep-encrypt` is
+  deliberately ungated: encrypt-side timing has neither a long-lived
+  secret nor a repetition axis (the per-call OAEP seed randomizes the
+  exponentiated operand), the exponent is public, and the mandatory
+  use cases (cloud-KMS key import, TPM credential activation) are
+  encrypt-only. Its in-guest absence is structural, like
+  `ecdsa-sign`'s.
+- `@unstable(feature = rsa-sign)` on `rsassa-pkcs1-v15-sign` and
+  `rsa-pss-sign` — consent, primarily. RSA private-key operations leak
+  key material through timing unless constant-time end to end, the
+  attack lineage is 25 years old and current (the Marvin attack), and
+  whether a deployment's timing is attacker-observable is a fact only
+  the deployer knows — so the gate is the consumer's assertion of that
+  judgment, made under exactly the long-lived, high-value keys
+  (code-forge app credentials, DKIM domain keys, open-banking client
+  keys) the interfaces exist to serve. The in-guest absence is
+  *structural* (the provider's world, like `ecdsa-sign`) and carries no
+  gate; browser-backed hosts additionally decline by default behind
+  their own recorded opt-in. The consent dimension does not exit.
 
 Neither kind of gate speaks to per-call runtime availability: an
 implementation may decline any minting path with `error.unsupported`
@@ -442,7 +472,76 @@ short:
   `sha2-variant`, which SHA-1 cannot join by name; the per-hash prepare
   interfaces share `hkdf.ikm` and `pbkdf2.password`, so one imported
   secret parameterizes either hash family. Bare SHA-1
-  digests remain `sha1-checked`'s alone.
+  digests remain `sha1-checked`'s alone, and **no signature interface
+  pairs with SHA-1** (`ecdsa-variant` and `rsa-variant` carry no SHA-1
+  case, though every platform serves both pairings): collision
+  resistance *is* load-bearing for signature verification — an attacker
+  holding a collision presents the signed document's crafted twin — and
+  the platforms serve the pairing unmitigated (no engine runs sha1dc),
+  a compatibility ratchet this package has no reason to inherit. If
+  legacy demand ever materializes, the exit is a *checked* variant
+  behind the `sha1-checked` gate — verification whose digest runs
+  through sha1dc, byte-identical to the platform on every honest
+  document and rejecting collision-crafted ones — never the unmitigated
+  pairing.
+- **The RSA modulus window is 1024–16384 bits.** A security narrowing,
+  not a portability one: engines uniformly admit far smaller moduli
+  (512-bit imports verified on Chromium, Firefox, and Node alike), but
+  768-bit RSA was publicly factored in 2009 and verification under a
+  factorable key authenticates nothing, so the window floors admission
+  at the deprecated-but-deployed tier SP 800-131A still allows for
+  legacy verification — also the smallest size the platform's own test
+  suite exercises. The ceiling bounds work on absurd moduli. Stricter
+  policy profiles MAY reject more (the HMAC short-key allowance
+  pattern).
+- **PSS binds its salt length at mint**, where WebCrypto's `saltLength`
+  is per-operation: a granted key verifies one PSS parameterization,
+  making salt-length confusion unrepresentable — the same mint-binding
+  as ECDSA's digest, with the same consumer story (JOSE's `PS*` fixes
+  the salt to the digest length, and a caller holding public material
+  can mint one key per parameterization it must serve). Signing goes
+  further: `rsa-pss-sign` keys emit salt = digest length with no
+  parameter at all — the JOSE/FIPS profile, and the only
+  parameterization the verified-lineage backends serve — while
+  verification stays parameterized because foreign signatures are facts
+  a verifier must meet.
+- **RSA signing floors at 2048 bits and generates only standard sizes.**
+  The signing interfaces' admission window (2048–8192) and the
+  verification window (1024–16384) split exactly along NIST SP
+  800-131A's line: sub-2048 signature *generation* has been disallowed
+  since 2013 and no deployed protocol requires new sub-2048 signatures
+  (DKIM, DNSSEC, and the PKI all verify 2048 everywhere), while
+  sub-2048 *verification* remains legacy-use for grandfathered keys.
+  `generate-key` narrows further to an enum of the four standard sizes
+  with the exponent fixed at 65537 — existing keys are facts an import
+  must meet; new keys are choices the API need not offer badly.
+- **RSA-OAEP's windows have no legacy tier, and its failures are
+  deliberately shapeless.** Admission is 2048–8192 bits on both halves:
+  signature verification kept a 1024-bit floor because verifying judges
+  *past* artifacts, but encryption creates *future* ones — encrypting a
+  fresh secret to a weak key is new exposure, not legacy tolerance.
+  Every decryption failure is the one detail-free
+  `error.authentication-failed` (wrong-length ciphertext, damaged
+  padding, mismatched label — indistinguishable, per RFC 8017: a
+  distinguishable verdict is a padding-oracle amplifier), and the
+  encrypt-side plaintext bound fails with the named extension condition
+  `message-too-long`, which callers may branch on to fall back to
+  hybrid wrapping. RSAES-PKCS#1 v1.5 encryption is never a member of
+  this package: it is the padding mode the timing-attack lineage exists
+  about, and the omission WebCrypto itself is credited for.
+- **RSA private-key operations are lineage-pinned where this package
+  controls the implementation.** Only one implementation family has
+  ever passed side-channel verification for RSA private operations
+  (the Marvin methodology's negative result on BoringSSL); the pure-Rust
+  `rsa` crate carries an open key-recovery advisory (RUSTSEC-2023-0071)
+  for exactly these operations. The package's native host therefore
+  backs `rsa-sign` with a BoringSSL-derived implementation and uses the
+  pure-Rust crate for verification only, where no secret exists.
+  Browser-backed hosts decline the signing interfaces by default — a
+  browser is the archetypal attacker-observable timing domain, and the
+  one WebCrypto RSA private-op CVE to date was a browser's — behind a
+  documented module-level opt-in, mirroring the checked-SHA-1 posture
+  export.
 - **Unauthenticated modes are in, for compatibility.** AES-CBC and
   AES-CTR are WebCrypto-committed formats real systems must read and
   write, so the package carries them — quarantined in the `cipher` kind,

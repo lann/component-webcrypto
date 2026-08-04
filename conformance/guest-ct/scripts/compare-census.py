@@ -16,6 +16,19 @@ import os
 import re
 import sys
 
+
+def ported_name(name):
+    """The port's id for a census name: a word of the algorithm (first)
+    segment starting with a digit gains a `b` prefix (`…-sha256-2048` ->
+    `…-sha256-b2048`) — the component-test case-name grammar requires
+    non-leaf segments to be WIT labels, whose words may not start with a
+    digit. The one documented id divergence besides the decline cases."""
+    if "/" not in name:
+        return name
+    alg, rest = name.split("/", 1)
+    alg = "-".join("b" + w if w[:1].isdigit() else w for w in alg.split("-"))
+    return alg + "/" + rest
+
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.normpath(os.path.join(here, "..", "..", ".."))
 new_lock = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "tests.lock")
@@ -25,8 +38,10 @@ with open(os.path.join(here, "..", "src", "census-fixture.lock")) as f:
     for m in re.finditer(
         r'\{ name = "([^"]+)"(?:, features = \[([^\]]*)\])? \}', f.read()
     ):
-        census[m.group(1)] = tuple(sorted(re.findall(r'"([^"]+)"', m.group(2) or "")))
-assert len(census) == 11578, len(census)
+        census[ported_name(m.group(1))] = tuple(
+            sorted(re.findall(r'"([^"]+)"', m.group(2) or ""))
+        )
+assert len(census) == 19303, len(census)
 
 exact, prefixes = {}, {}
 for block in re.split(r"\n(?=\[\[)", open(new_lock).read()):

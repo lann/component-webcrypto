@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_ct"
-artifact_sha256 = "233119a83f4073fb29489274a60cebd48fba49bb67d464121b5bba3ad59bc4f6"
+artifact_sha256 = "baa5bc18e8e48cbec8385bb12dbe0cd59f7b4e2364b3f6cfec31b5b41d414723"
 
 [[case]]
 name = "chacha20-poly1305/decline/minting"
@@ -140,6 +140,15 @@ name = "probe/open-short-input"
 
 [[case]]
 name = "probe/pbkdf2-contract"
+
+[[case]]
+name = "probe/rsa-admission-contract"
+
+[[case]]
+name = "probe/rsa-key-contract"
+
+[[case]]
+name = "probe/rsa-pss-salt-binding"
 
 [[case]]
 name = "probe/seal-input-ends-on-invalid-nonce"
@@ -331,6 +340,63 @@ prefix = "pbkdf2-sha384/wycheproof"
 
 [[generated]]
 prefix = "pbkdf2-sha512/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha256-b2048-salt0/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha256-b2048-salt32/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha256-b2048-salt32/wycheproof-params"
+
+[[generated]]
+prefix = "rsa-pss-sha256-b3072-salt32/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha256-b4096-salt32/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha384-b2048-salt48/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha384-b4096-salt48/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha512-b4096-salt32/wycheproof"
+
+[[generated]]
+prefix = "rsa-pss-sha512-b4096-salt64/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b2048/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b3072/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b4096/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha256-b8192/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b2048/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b3072/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha384-b4096/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b2048/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b3072/wycheproof"
+
+[[generated]]
+prefix = "rsassa-pkcs1-v15-sha512-b4096/wycheproof"
 
 [[generated]]
 prefix = "sha2/nist-cavp"

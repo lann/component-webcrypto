@@ -14,8 +14,9 @@
 //! [`crate::limits`].
 
 use lann_webcrypto_core::{
-    served_sha2, AeadKeyMaterial, DigestKind, KwKeyMaterial, MacKeyMaterial, Sha1Posture,
-    SigPublic, SigningKeyMaterial, WrapFormat, WrapInputMaterial, HMAC_NAME,
+    served_sha2, AeadKeyMaterial, DecryptionKeyMaterial, DigestKind, EncryptionKeyMaterial,
+    KwKeyMaterial, MacKeyMaterial, Sha1Posture, SigPublic, SigningKeyMaterial, WrapFormat,
+    WrapInputMaterial, HMAC_NAME,
 };
 use wasmtime::component::{Accessor, Resource, StreamReader};
 use wasmtime::Result;
@@ -43,6 +44,10 @@ use crate::bindings::webcrypto::mac::{self, HostMacKey, HostMacKeyWithStore};
 use crate::bindings::webcrypto::pbkdf2::{
     self as pbkdf2_iface, HostPassword, HostPasswordWithStore,
 };
+use crate::bindings::webcrypto::public_encryption::{
+    self as public_encryption_iface, HostDecryptionKey, HostDecryptionKeyWithStore,
+    HostEncryptionKey, HostEncryptionKeyWithStore,
+};
 use crate::bindings::webcrypto::types::{self, Error};
 use crate::bindings::webcrypto::wrapping::{
     self as wrapping_iface, HostUnwrapInput, HostUnwrapInputWithStore, HostWrapInput,
@@ -56,16 +61,19 @@ use crate::bindings::webcrypto::{
     ed25519_sign as ed25519_sign_iface, ed25519_verify as ed25519_verify_iface,
     hkdf_sha1 as hkdf_sha1_iface, hkdf_sha2 as hkdf_sha2_iface, hmac_sha1 as hmac_sha1_iface,
     hmac_sha2 as hmac_sha2_iface, pbkdf2_sha1 as pbkdf2_sha1_iface,
-    pbkdf2_sha2 as pbkdf2_sha2_iface, sha1_checked as sha1_checked_iface, sha2 as sha2_iface,
-    signature as signature_iface, x25519 as x25519_iface, xchacha20_poly1305 as xchacha_iface,
-    xchacha20_poly1305_internal_nonce as xchacha_in_iface,
+    pbkdf2_sha2 as pbkdf2_sha2_iface, rsa as rsa_iface, rsa_oaep_decrypt as rsa_oaep_decrypt_iface,
+    rsa_oaep_encrypt as rsa_oaep_encrypt_iface, rsa_pss_sign as rsa_pss_sign_iface,
+    rsa_pss_verify as rsa_pss_verify_iface, rsassa_pkcs1_v15_sign as rsassa_sign_iface,
+    rsassa_pkcs1_v15_verify as rsassa_verify_iface, sha1_checked as sha1_checked_iface,
+    sha2 as sha2_iface, signature as signature_iface, x25519 as x25519_iface,
+    xchacha20_poly1305 as xchacha_iface, xchacha20_poly1305_internal_nonce as xchacha_in_iface,
 };
 use crate::limits::{admit_input, Reservation};
 use crate::streams::{drain_stream, GuardedOutput};
 use crate::{
-    AeadKey, AgreementPublicKey, AgreementSecretKey, CipherKey, DeriveInput, Digest, Ikm,
-    InternalNonceKey, KwKey, MacKey, Minted, Password, SigningKey, UnwrapInput, VerifyingKey,
-    WasiWebcrypto, WasiWebcryptoCtxView, WrapInput,
+    AeadKey, AgreementPublicKey, AgreementSecretKey, CipherKey, DecryptionKey, DeriveInput, Digest,
+    EncryptionKey, Ikm, InternalNonceKey, KwKey, MacKey, Minted, Password, SigningKey, UnwrapInput,
+    VerifyingKey, WasiWebcrypto, WasiWebcryptoCtxView, WrapInput,
 };
 
 // --- bindings glue -------------------------------------------------------------
@@ -77,6 +85,7 @@ lann_webcrypto_core::impl_conversions! {
     aes: aes_gcm_iface::AesVariant,
     ecdsa: ecdsa_verify_iface::EcdsaVariant,
     ecdh: ecdh_iface::EcdhVariant,
+    rsa: rsa_iface::RsaVariant,
 }
 
 /// Render an entropy failure as the trap-shaped host error for key or nonce
@@ -2274,6 +2283,10 @@ impl signature_iface::HostVerifyingKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_hash(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<String>> {
         Ok(self.table.get(&self_)?.public.hash().map(str::to_string))
     }
+
+    fn algorithm_length(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.public.length())
+    }
 }
 
 impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
@@ -2293,10 +2306,10 @@ impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         self_: Resource<VerifyingKey>,
     ) -> Result<std::result::Result<Vec<u8>, Error>> {
-        // The WIT `err` case exists for providers holding the key as an
-        // unreadable handle; this implementation holds the encoding
-        // in-process, so it never errs.
-        with_resource(accessor, self_, |key| Ok(key.public.export())).await
+        with_resource(accessor, self_, |key| {
+            key.public.export().map_err(Error::from)
+        })
+        .await
     }
 
     async fn export_key_spki(
@@ -2329,6 +2342,10 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_hash(&mut self, self_: Resource<SigningKey>) -> Result<Option<String>> {
         Ok(self.table.get(&self_)?.material.hash().map(str::to_string))
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<SigningKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.material.length())
     }
 
     fn extractable(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
@@ -2598,6 +2615,483 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let input = take_options(accessor, input).await?.material;
         let material =
             lann_webcrypto_core::unwrap_ecdsa_signing_key_jwk(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+}
+
+// --- rsa (key minting) -----------------------------------------------------------
+
+impl rsa_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsassa_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsa_pss_verify_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsassa_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsa_pss_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+/// The WIT `rsa.rsa-modulus` cases, converted locally: the type is
+/// deliberately outside the shared core's `impl_conversions!` (see its
+/// doc in the core).
+impl From<rsa_iface::RsaModulus> for lann_webcrypto_core::RsaModulus {
+    fn from(modulus: rsa_iface::RsaModulus) -> Self {
+        match modulus {
+            rsa_iface::RsaModulus::M2048 => Self::M2048,
+            rsa_iface::RsaModulus::M3072 => Self::M3072,
+            rsa_iface::RsaModulus::M4096 => Self::M4096,
+            rsa_iface::RsaModulus::M8192 => Self::M8192,
+        }
+    }
+}
+
+impl<T: Send> rsassa_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_rsassa_spki(variant.into(), &spki);
+        mint(accessor, public).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_rsassa_jwk(variant.into(), &jwk);
+        mint(accessor, public).await
+    }
+}
+
+impl<T: Send> rsa_pss_verify_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_verifying_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        salt_length: u32,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_pss_spki(variant.into(), salt_length, &spki);
+        mint(accessor, public).await
+    }
+
+    async fn import_verifying_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        salt_length: u32,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<VerifyingKey>, Error>> {
+        let public = SigPublic::import_pss_jwk(variant.into(), salt_length, &jwk);
+        mint(accessor, public).await
+    }
+}
+
+impl<T: Send> rsassa_sign_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        modulus: rsa_iface::RsaModulus,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material =
+            match SigningKeyMaterial::generate_rsassa(variant.into(), modulus.into(), policy)
+                .map_err(rng_trap("random key generation"))?
+            {
+                Ok(material) => material,
+                Err(err) => return Ok(Err(err.into())),
+            };
+        mint_signing_pair(accessor, material).await
+    }
+
+    async fn import_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_rsassa_pkcs8(variant.into(), &pkcs8, policy);
+        mint(accessor, material).await
+    }
+
+    async fn import_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_rsassa_jwk(variant.into(), &jwk, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_rsassa_signing_key_pkcs8(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_rsassa_signing_key_jwk(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+}
+
+impl<T: Send> rsa_pss_sign_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        modulus: rsa_iface::RsaModulus,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<(Resource<SigningKey>, Resource<VerifyingKey>), Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material =
+            match SigningKeyMaterial::generate_pss(variant.into(), modulus.into(), policy)
+                .map_err(rng_trap("random key generation"))?
+            {
+                Ok(material) => material,
+                Err(err) => return Ok(Err(err.into())),
+            };
+        mint_signing_pair(accessor, material).await
+    }
+
+    async fn import_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_pss_pkcs8(variant.into(), &pkcs8, policy);
+        mint(accessor, material).await
+    }
+
+    async fn import_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = SigningKeyMaterial::import_pss_jwk(variant.into(), &jwk, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_signing_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_pss_signing_key_pkcs8(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_signing_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::SigningKeyOptions>,
+    ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_pss_signing_key_jwk(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+}
+
+// --- public-encryption -----------------------------------------------------------
+
+impl public_encryption_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+host_options! {
+    public_encryption_iface::{HostDecryptionKeyOptions, HostDecryptionKeyOptionsWithStore}
+    for crate::DecryptionKeyOptions {
+        can_decrypt => decrypt,
+        can_unwrap => unwrap,
+        extractable => extractable,
+    }
+}
+
+impl HostEncryptionKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<EncryptionKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.material.name().to_string())
+    }
+
+    fn algorithm_hash(&mut self, self_: Resource<EncryptionKey>) -> Result<Option<String>> {
+        Ok(self.table.get(&self_)?.material.hash().map(str::to_string))
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<EncryptionKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.material.length())
+    }
+}
+
+impl<T: Send> HostEncryptionKeyWithStore<T> for WasiWebcrypto {
+    async fn encrypt(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<EncryptionKey>,
+        label: Option<Vec<u8>>,
+        plaintext: Vec<u8>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material
+                .encrypt(label.as_deref(), &plaintext)
+                .map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn wrap(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<EncryptionKey>,
+        label: Option<Vec<u8>>,
+        input: Resource<WrapInput>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        let input = take_options(accessor, input).await?.material;
+        with_resource(accessor, self_, |key| {
+            key.material
+                .wrap(label.as_deref(), input)
+                .map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_raw(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<EncryptionKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_spki(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<EncryptionKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.material.export_spki())).await
+    }
+
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<EncryptionKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| Ok(key.material.export_jwk())).await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<EncryptionKey>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+impl HostDecryptionKey for WasiWebcryptoCtxView<'_> {
+    fn algorithm_name(&mut self, self_: Resource<DecryptionKey>) -> Result<String> {
+        Ok(self.table.get(&self_)?.material.name().to_string())
+    }
+
+    fn algorithm_hash(&mut self, self_: Resource<DecryptionKey>) -> Result<Option<String>> {
+        Ok(self.table.get(&self_)?.material.hash().map(str::to_string))
+    }
+
+    fn algorithm_length(&mut self, self_: Resource<DecryptionKey>) -> Result<Option<u32>> {
+        Ok(self.table.get(&self_)?.material.length())
+    }
+
+    fn can_decrypt(&mut self, self_: Resource<DecryptionKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_decrypt())
+    }
+
+    fn can_unwrap(&mut self, self_: Resource<DecryptionKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.can_unwrap())
+    }
+
+    fn extractable(&mut self, self_: Resource<DecryptionKey>) -> Result<bool> {
+        Ok(self.table.get(&self_)?.material.extractable())
+    }
+}
+
+impl<T: Send> HostDecryptionKeyWithStore<T> for WasiWebcrypto {
+    async fn decrypt(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+        label: Option<Vec<u8>>,
+        ciphertext: Vec<u8>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material
+                .decrypt(label.as_deref(), &ciphertext)
+                .map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn unwrap(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+        label: Option<Vec<u8>>,
+        ciphertext: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<UnwrapInput>, Error>> {
+        let material = with_resource(accessor, self_, |key| {
+            key.material.unwrap(label.as_deref(), &ciphertext)
+        })
+        .await?;
+        mint(accessor, material).await
+    }
+
+    async fn export_key_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+    ) -> Result<std::result::Result<String, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_jwk().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn export_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+    ) -> Result<std::result::Result<Vec<u8>, Error>> {
+        with_resource(accessor, self_, |key| {
+            key.material.export_pkcs8().map_err(Error::from)
+        })
+        .await
+    }
+
+    async fn to_wrap_input_jwk(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+    ) -> Result<std::result::Result<Resource<WrapInput>, Error>> {
+        to_wrap_input(accessor, self_, WrapFormat::Jwk, |key| {
+            key.material.export_jwk().map(String::into_bytes)
+        })
+        .await
+    }
+
+    async fn to_wrap_input_pkcs8(
+        accessor: &Accessor<T, Self>,
+        self_: Resource<DecryptionKey>,
+    ) -> Result<std::result::Result<Resource<WrapInput>, Error>> {
+        to_wrap_input(accessor, self_, WrapFormat::Pkcs8, |key| {
+            key.material.export_pkcs8()
+        })
+        .await
+    }
+
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<DecryptionKey>) -> Result<()> {
+        drop_resource(accessor, rep).await
+    }
+}
+
+// --- rsa-oaep (key minting) --------------------------------------------------------
+
+impl rsa_oaep_encrypt_iface::Host for WasiWebcryptoCtxView<'_> {}
+impl rsa_oaep_decrypt_iface::Host for WasiWebcryptoCtxView<'_> {}
+
+impl<T: Send> rsa_oaep_encrypt_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn import_encryption_key_spki(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        spki: Vec<u8>,
+    ) -> Result<std::result::Result<Resource<EncryptionKey>, Error>> {
+        let material = EncryptionKeyMaterial::import_oaep_spki(variant.into(), &spki);
+        mint(accessor, material).await
+    }
+
+    async fn import_encryption_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+    ) -> Result<std::result::Result<Resource<EncryptionKey>, Error>> {
+        let material = EncryptionKeyMaterial::import_oaep_jwk(variant.into(), &jwk);
+        mint(accessor, material).await
+    }
+}
+
+impl<T: Send> rsa_oaep_decrypt_iface::HostWithStore<T> for WasiWebcrypto {
+    async fn generate_key(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        modulus: rsa_iface::RsaModulus,
+        options: Resource<crate::DecryptionKeyOptions>,
+    ) -> Result<std::result::Result<(Resource<DecryptionKey>, Resource<EncryptionKey>), Error>>
+    {
+        let policy = take_options(accessor, options).await?.policy;
+        let material =
+            match DecryptionKeyMaterial::generate_oaep(variant.into(), modulus.into(), policy)
+                .map_err(rng_trap("random key generation"))?
+            {
+                Ok(material) => material,
+                Err(err) => return Ok(Err(err.into())),
+            };
+        let public = material.public();
+        mint_key_pair(accessor, material, public).await
+    }
+
+    async fn import_decryption_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        pkcs8: Vec<u8>,
+        options: Resource<crate::DecryptionKeyOptions>,
+    ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = DecryptionKeyMaterial::import_oaep_pkcs8(variant.into(), &pkcs8, policy);
+        mint(accessor, material).await
+    }
+
+    async fn import_decryption_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        jwk: String,
+        options: Resource<crate::DecryptionKeyOptions>,
+    ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let material = DecryptionKeyMaterial::import_oaep_jwk(variant.into(), &jwk, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_decryption_key_pkcs8(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::DecryptionKeyOptions>,
+    ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_oaep_decryption_key_pkcs8(variant.into(), input, policy);
+        mint(accessor, material).await
+    }
+
+    async fn unwrap_decryption_key_jwk(
+        accessor: &Accessor<T, Self>,
+        variant: rsa_iface::RsaVariant,
+        input: Resource<UnwrapInput>,
+        options: Resource<crate::DecryptionKeyOptions>,
+    ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
+        let policy = take_options(accessor, options).await?.policy;
+        let input = take_options(accessor, input).await?.material;
+        let material =
+            lann_webcrypto_core::unwrap_oaep_decryption_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }

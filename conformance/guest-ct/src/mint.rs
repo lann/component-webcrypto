@@ -22,13 +22,14 @@ use lann_webcrypto_guest::bindings::key_agreement::{
 use lann_webcrypto_guest::bindings::key_wrap::{KwKey, KwKeyOptions};
 use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
 use lann_webcrypto_guest::bindings::pbkdf2::{self, Password};
+use lann_webcrypto_guest::bindings::rsa::RsaVariant;
 use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
 use lann_webcrypto_guest::bindings::{
     aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw, chacha20_poly1305, ecdh,
-    ed25519_sign, hmac_sha1, hmac_sha2, x25519, xchacha20_poly1305,
-    xchacha20_poly1305_internal_nonce,
+    ed25519_sign, hmac_sha1, hmac_sha2, rsa_pss_verify, rsassa_pkcs1_v15_verify, x25519,
+    xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
 };
 
 /// A `mac-key-options` granting both usages.
@@ -339,4 +340,40 @@ pub async fn generate_ecdh_key(
     key: bool,
 ) -> Result<(AgreementSecretKey, AgreementPublicKey), Error> {
     ecdh::generate_key(variant, agreement_options(bits, key, false)).await
+}
+
+/// Import an RSASSA-PKCS1-v1_5 verifying key from a SubjectPublicKeyInfo.
+pub async fn import_rsassa_verifying_key_spki(
+    variant: RsaVariant,
+    spki: Vec<u8>,
+) -> Result<VerifyingKey, Error> {
+    rsassa_pkcs1_v15_verify::import_verifying_key_spki(variant, spki).await
+}
+
+/// Import an RSASSA-PKCS1-v1_5 verifying key from an RSA public JWK.
+pub async fn import_rsassa_verifying_key_jwk(
+    variant: RsaVariant,
+    jwk: String,
+) -> Result<VerifyingKey, Error> {
+    rsassa_pkcs1_v15_verify::import_verifying_key_jwk(variant, jwk).await
+}
+
+/// Import an RSA-PSS verifying key from a SubjectPublicKeyInfo, binding
+/// `salt_length` (bytes) at mint.
+pub async fn import_rsa_pss_verifying_key_spki(
+    variant: RsaVariant,
+    salt_length: u32,
+    spki: Vec<u8>,
+) -> Result<VerifyingKey, Error> {
+    rsa_pss_verify::import_verifying_key_spki(variant, salt_length, spki).await
+}
+
+/// Import an RSA-PSS verifying key from an RSA public JWK, binding
+/// `salt_length` (bytes) at mint.
+pub async fn import_rsa_pss_verifying_key_jwk(
+    variant: RsaVariant,
+    salt_length: u32,
+    jwk: String,
+) -> Result<VerifyingKey, Error> {
+    rsa_pss_verify::import_verifying_key_jwk(variant, salt_length, jwk).await
 }

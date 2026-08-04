@@ -9,7 +9,8 @@
 //     formats; "raw-secret" for ChaCha20-Poly1305, its only raw form)
 //   - `generateKey`
 //   - `sign` / `verify`         (HMAC over SHA-1 and SHA-256/384/512;
-//     Ed25519; ECDSA P-256/P-384 verification)
+//     Ed25519; ECDSA P-256/P-384 verification; RSASSA-PKCS1-v1_5 and
+//     RSA-PSS verification over SHA-256/384/512)
 //   - `encrypt` / `decrypt`     (AES-GCM; ChaCha20-Poly1305 (RFC 8439,
 //     from the Modern Algorithms proposal); and the unauthenticated
 //     AES-CBC/AES-CTR through the package's `cipher` kind — see
@@ -39,8 +40,9 @@
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
 // `key-agreement`, `x25519`, `ecdh`,
 // `sha2`, `sha1-checked`, `digest`, `signature`, `ed25519-verify`,
-// `ed25519-sign`, and
-// `ecdsa-verify` — plus `wasi:random/random@0.2.0` for `getRandomValues`
+// `ed25519-sign`,
+// `ecdsa-verify`, `rsassa-pkcs1-v15-verify`, and `rsa-pss-verify` — plus
+// `wasi:random/random@0.2.0` for `getRandomValues`
 // and `randomUUID`
 // (their `mac`/`aead`/`types` dependencies are pulled in by WIT
 // elaboration). `chacha20-poly1305` and `sha1-checked` are gated
@@ -65,6 +67,26 @@
 //     `encrypt`/`decrypt` and wrapping with an IV outside the window
 //     throw `OperationError` (the WIT's `invalid-nonce`) even where a
 //     platform's own `crypto.subtle` — Chrome's, for one — accepts it.
+//   - Narrowed uniformly: the RSA signature algorithms pair with
+//     SHA-256/384/512 only. The `rsa-variant` enum deliberately omits
+//     SHA-1 (collision resistance is load-bearing for signature
+//     verification — see `wit/rsa.wit`), so `importKey` with
+//     `hash: SHA-1` throws `NotSupportedError` even though every
+//     platform serves the pairing.
+//   - Narrowed uniformly: RSA public keys import only within the `rsa`
+//     family contract's modulus window, 1024–16384 bits inclusive.
+//     An out-of-window key throws `DataError` (the WIT's `invalid-key`)
+//     where a platform's own `crypto.subtle` may admit it.
+//   - Unserved: the RSA private side of the signature algorithms.
+//     Private-key import ("pkcs8" and
+//     JWKs carrying `d`), `sign`, `generateKey`, and unwrapping to an
+//     RSA key throw `NotSupportedError`: the package's RSA signature
+//     surface is verification-only (`rsassa-pkcs1-v15-verify`/
+//     `rsa-pss-verify` mint public keys and nothing else). RSA
+//     private-key operations
+//     are class D, so even an additive signing interface would be
+//     withheld by the in-guest provider this library composes with,
+//     like `ecdsa-sign` below.
 //   - Unserved: beyond the algorithms above, everything throws
 //     `NotSupportedError` — including AES-192 and ECDH P-521 (both of
 //     which every implementation of the package declines).
@@ -96,6 +118,15 @@
 //     composition at `wac plug` time. `NotSupportedError`, with the
 //     reason in the message. `unwrapKey` to an ECDSA private key is the
 //     same case.
+//   - Unserved by composition: the RSA-OAEP family, whole. The
+//     interfaces exist (`rsa-oaep-encrypt`, and the gated
+//     `rsa-oaep-decrypt`), but the in-guest provider this library
+//     composes with withholds both — decryption is class D, and OAEP
+//     encryption has no secret-free half (the plaintext is the secret,
+//     unlike signature verification's inputs) — so the world cannot
+//     import either without failing every composition at `wac plug`
+//     time. `importKey`, `generateKey`, `encrypt`/`decrypt`, and
+//     wrapping or unwrapping with RSA-OAEP throw `NotSupportedError`.
 //   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
 //     served through the package's `sha1-checked` interface (sha1dc
 //     collision detection; the package never serves plain SHA-1), in the
@@ -118,7 +149,11 @@
 // is ECDSA's per-operation `verify` hash: the WIT binds curve and hash at
 // mint, and the `ecdsa-variant` enum carries the SHA-2 cross pairings of
 // the served curves, so this library keeps a verifying key's public point
-// and mints the (curve, hash) binding a `verify` call asks for on demand. The WIT
+// and mints the (curve, hash) binding a `verify` call asks for on demand.
+// RSA-PSS's per-operation `saltLength` is served the same way: the WIT
+// binds the salt length at mint, so this library keeps the key's SPKI and
+// mints the (hash, salt-length) binding a `verify` call asks for on
+// demand. The WIT
 // grants do not ride this library's derive mints: a WIT `derive-input`'s
 // grants gate `derive-bits` and cap extractable `derive-key` mints, while
 // the platform's usage checks live on the *base key* and carry no cap — so
@@ -145,6 +180,8 @@ import * as sha1CheckedIface from "lann:webcrypto/sha1-checked@0.1.0";
 import * as ed25519Verify from "lann:webcrypto/ed25519-verify@0.1.0";
 import * as ed25519Sign from "lann:webcrypto/ed25519-sign@0.1.0";
 import * as ecdsaVerify from "lann:webcrypto/ecdsa-verify@0.1.0";
+import * as rsassaVerify from "lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0";
+import * as rsaPssVerifyIface from "lann:webcrypto/rsa-pss-verify@0.1.0";
 // Imported for evaluation only: `make-digest` returns `digest` resources,
 // whose generated class lives in this module (see the note below).
 import "lann:webcrypto/digest@0.1.0";
@@ -581,6 +618,7 @@ function handleOf(key) {
  *   iterations?: unknown,
  *   public?: unknown,
  *   namedCurve?: unknown,
+ *   saltLength?: unknown,
  * }} NormalizedAlgorithm
  */
 
@@ -598,6 +636,8 @@ const SERVED_ALGORITHMS = [
   "ECDH",
   "Ed25519",
   "ECDSA",
+  "RSASSA-PKCS1-v1_5",
+  "RSA-PSS",
 ];
 
 /**
@@ -617,6 +657,7 @@ const ALGORITHM_MEMBERS = /** @type {const} */ ([
   "iterations",
   "public",
   "namedCurve",
+  "saltLength",
 ]);
 
 /**
@@ -761,6 +802,8 @@ const USAGES = {
   // (public keys verify only) is checked at the import and generate sites.
   Ed25519: ["sign", "verify"],
   ECDSA: ["sign", "verify"],
+  "RSASSA-PKCS1-v1_5": ["sign", "verify"],
+  "RSA-PSS": ["sign", "verify"],
 };
 
 /**
@@ -868,6 +911,105 @@ function hashNameOf(hash) {
     throw new TypeError("a hash algorithm must be named by a string or a { name } object");
   }
   return hash.toUpperCase();
+}
+
+/** True for the two served RSA signature algorithm names (both
+ * verification-only — the private side is unserved; see the header).
+ * @param {string} name a `SERVED_ALGORITHMS` registry spelling
+ */
+function isRsaName(name) {
+  return name === "RSASSA-PKCS1-v1_5" || name === "RSA-PSS";
+}
+
+/**
+ * The WIT `rsa-variant` tag, the JOSE-conventional salt length (the
+ * digest length, used for the RSA-PSS import-time mint), and the JWK
+ * `alg` digest suffix for each served RSA hash. SHA-1 is deliberately
+ * absent: `rsa-variant` omits it, so the pairing is unmintable (the
+ * header's narrowed-uniformly entry).
+ * @type {Readonly<Record<string, { tag: "sha256" | "sha384" | "sha512", saltLength: number, jwkBits: string } | undefined>>}
+ */
+const RSA_VARIANTS = {
+  "SHA-256": { tag: "sha256", saltLength: 32, jwkBits: "256" },
+  "SHA-384": { tag: "sha384", saltLength: 48, jwkBits: "384" },
+  "SHA-512": { tag: "sha512", saltLength: 64, jwkBits: "512" },
+};
+
+/**
+ * Decode an unpadded base64url string (RFC 7515's encoding, the JWK
+ * integer form) to bytes. Used on WIT-exported JWK members, which the
+ * provider encodes canonically.
+ * @param {string} text
+ * @returns {Uint8Array<ArrayBuffer>}
+ */
+function base64UrlDecode(text) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let bits = 0;
+  let bitCount = 0;
+  let offset = 0;
+  for (const char of text) {
+    const value = alphabet.indexOf(char);
+    if (value < 0) {
+      throw new TypeError("invalid base64url in a JWK member");
+    }
+    bits = (bits << 6) | value;
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      out[offset++] = (bits >> bitCount) & 0xff;
+    }
+  }
+  return out;
+}
+
+/**
+ * The per-salt-length reminting state of an RSA-PSS public `CryptoKey`:
+ * the WIT binds the salt length at mint, so serving WebCrypto's
+ * per-operation `saltLength` means holding the key's SPKI and minting the
+ * (hash, salt-length) binding a `verify` call asks for, cached per salt
+ * length — the ECDSA pattern above, with the SPKI as the held form (RSA
+ * has no raw form). `handles` starts with the import-time binding under
+ * the digest-length salt.
+ * @type {WeakMap<CryptoKey, { spki: Uint8Array, variant: string, handles: Map<number, any> }>}
+ */
+const RSA_PSS_STATE = new WeakMap();
+
+/**
+ * The WIT verifying-key handle of an RSA-PSS public key under
+ * `saltLength`, minted from the stored SPKI on first use.
+ * @param {CryptoKey} key
+ * @param {number} saltLength
+ * @returns {Promise<any>}
+ */
+async function rsaPssHandleFor(key, saltLength) {
+  const state = RSA_PSS_STATE.get(key);
+  if (state === undefined) {
+    throw new TypeError("not an RSA-PSS public CryptoKey minted by this library");
+  }
+  let handle = state.handles.get(saltLength);
+  if (handle === undefined) {
+    handle = await callImport(
+      rsaPssVerifyIface.importVerifyingKeySpki(state.variant, saltLength, state.spki),
+    );
+    state.handles.set(saltLength, handle);
+  }
+  return handle;
+}
+
+/**
+ * The `saltLength` member of an RSA-PSS operation's parameters
+ * (`RsaPssParams`): required, an enforced-range u32 (the PBKDF2
+ * `iterations` shape).
+ * @param {NormalizedAlgorithm} alg
+ * @returns {number}
+ */
+function rsaPssSaltLengthOf(alg) {
+  const saltLength = Number(alg.saltLength);
+  if (!Number.isInteger(saltLength) || saltLength < 0 || saltLength > 0xffffffff) {
+    throw new TypeError("RSA-PSS saltLength must be a u32");
+  }
+  return saltLength;
 }
 
 /**
@@ -1196,10 +1338,17 @@ function jwkForImport(keyData, use, usages) {
 function jwkForExport(jwkText, key) {
   const jwk = /** @type {JsonWebKey} */ (JSON.parse(jwkText));
   if (key.algorithm.name === "Ed25519") {
-    // The one algorithm whose JWK export carries `alg` — always the
-    // algorithm name, whatever alg the import carried (w3c/webcrypto#401;
-    // ECDH-family and ECDSA exports set none).
+    // The one non-RSA algorithm whose JWK export carries `alg` — always
+    // the algorithm name, whatever alg the import carried
+    // (w3c/webcrypto#401; ECDH-family and ECDSA exports set none).
     jwk.alg = "Ed25519";
+  }
+  if (isRsaName(key.algorithm.name)) {
+    // The platform stamps the key's JOSE alg onto RSA JWK exports
+    // ("RS256"/"PS256", …); the WIT export carries kty/n/e only. The hash
+    // is mint-bound, so the suffix comes from the projected algorithm.
+    const bits = /** @type {RsaHashedKeyAlgorithm} */ (key.algorithm).hash.name.slice(4);
+    jwk.alg = (key.algorithm.name === "RSA-PSS" ? "PS" : "RS") + bits;
   }
   jwk.key_ops = [...key.usages];
   jwk.ext = key.extractable;
@@ -1584,6 +1733,92 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     return key;
   }
 
+  if (isRsaName(alg.name)) {
+    // RsaHashedImportParams: `hash` is a required member, so its absence
+    // is the dictionary conversion's TypeError (already normalized to a
+    // registry spelling when present).
+    if (alg.hash === undefined) {
+      throw new TypeError(`${alg.name} keys require a hash in the import algorithm`);
+    }
+    const variant = RSA_VARIANTS[/** @type {string} */ (alg.hash)];
+    if (variant === undefined) {
+      // SHA-1: representable by WebCrypto, unmintable through the WIT
+      // (see the header's narrowed-uniformly entry).
+      throw dom(
+        "NotSupportedError",
+        `${alg.name} over ${alg.hash} is not served: the package pairs RSA signatures with SHA-256/384/512 only`,
+      );
+    }
+
+    // A JWK carrying `d` and the PKCS#8 format are private imports —
+    // unserved: the package's RSA signature surface is verification-only (see the
+    // header).
+    /** @type {JsonWebKey | undefined} */
+    let jwk;
+    if (format === "jwk") {
+      if (typeof keyData !== "object" || keyData === null) {
+        throw new TypeError("JWK key data must be an object");
+      }
+      jwk = /** @type {JsonWebKey} */ (keyData);
+    }
+    if (format === "pkcs8" || jwk?.d !== undefined) {
+      throw dom(
+        "NotSupportedError",
+        "RSA private-key import is not served: the package's RSA signature surface is verification-only",
+      );
+    }
+    if (format !== "jwk" && format !== "spki") {
+      // The spec defines no raw form for RSA keys.
+      throw dom("NotSupportedError", `${alg.name} keys do not use the ${format} format`);
+    }
+
+    const usages = verifyOnlyUsages(keyUsages);
+    const handle = await callImport(
+      alg.name === "RSA-PSS"
+        ? format === "jwk"
+          ? rsaPssVerifyIface.importVerifyingKeyJwk(
+              variant.tag,
+              variant.saltLength,
+              jwkForImport(jwk, "sig", usages),
+            )
+          : rsaPssVerifyIface.importVerifyingKeySpki(
+              variant.tag,
+              variant.saltLength,
+              bytesOf(keyData, "keyData"),
+            )
+        : format === "jwk"
+          ? rsassaVerify.importVerifyingKeyJwk(variant.tag, jwkForImport(jwk, "sig", usages))
+          : rsassaVerify.importVerifyingKeySpki(variant.tag, bytesOf(keyData, "keyData")),
+    );
+    // The projected RsaHashedKeyAlgorithm: the modulus length from the
+    // key's own getter; the public exponent from the exported JWK's `e`
+    // (the WIT models no exponent getter — the JWK carries it).
+    const modulusLength = /** @type {number} */ (handle.algorithmLength());
+    const exported = /** @type {{ e: string }} */ (
+      JSON.parse(/** @type {string} */ (await callImport(handle.exportKeyJwk())))
+    );
+    /** @type {RsaHashedKeyAlgorithm} */
+    const projected = {
+      name: alg.name,
+      modulusLength,
+      publicExponent: base64UrlDecode(exported.e),
+      hash: Object.freeze({ name: /** @type {string} */ (alg.hash) }),
+    };
+    const key = mintKey(handle, "public", projected, !!extractable, usages);
+    if (alg.name === "RSA-PSS") {
+      // RSA-PSS public keys keep their SPKI for per-operation-saltLength
+      // reminting (see `RSA_PSS_STATE`); the import-time binding uses the
+      // digest-length salt.
+      const spki = /** @type {Uint8Array} */ (await callImport(handle.exportKeySpki()));
+      RSA_PSS_STATE.set(key, {
+        spki,
+        variant: variant.tag,
+        handles: new Map([[variant.saltLength, handle]]),
+      });
+    }
+    return key;
+  }
+
   if (format === "spki" || format === "pkcs8") {
     throw dom("NotSupportedError", `${alg.name} keys do not use the ${format} format`);
   }
@@ -1756,6 +1991,15 @@ async function generateKey(algorithm, extractable, keyUsages) {
     throw dom("NotSupportedError", "ECDSA key generation is not served: ecdsa-sign is class D");
   }
 
+  if (isRsaName(alg.name)) {
+    // Unserved: generation mints the private half, and the package's RSA
+    // surface is verification-only (see the header).
+    throw dom(
+      "NotSupportedError",
+      `${alg.name} key generation is not served: the package's RSA signature surface is verification-only`,
+    );
+  }
+
   if (alg.name === "ChaCha20-Poly1305") {
     requireNonEmptyUsages(usages);
     // The proposal's generate params carry no length: the key is 256 bits.
@@ -1908,6 +2152,20 @@ async function sign(algorithm, key, data) {
     const sig = await callFed((rx) => handleOf(key).sign(rx), bytesOf(data, "data"));
     return toArrayBuffer(sig);
   }
+  if (isRsaName(alg.name)) {
+    // The key checks run in the spec's order; every RSA key this library
+    // can mint is public and verify-only, so a matching key always fails
+    // the private-key requirement with the platform's own error, and the
+    // unserved-signing refusal below is unreachable today.
+    requireKeyAlgorithm(key, alg.name);
+    if (key.type !== "private") {
+      throw dom("InvalidAccessError", "signing requires a private key");
+    }
+    throw dom(
+      "NotSupportedError",
+      `${alg.name} signing is not served: the package's RSA signature surface is verification-only`,
+    );
+  }
   if (alg.name !== "HMAC") {
     // ECDSA signing is unserved by composition (class D — see the header);
     // the other served algorithms define no sign operation.
@@ -1940,6 +2198,26 @@ async function verify(algorithm, key, signature, data) {
     // key's stored point (see `ecdsaHandleFor`).
     const handle =
       alg.name === "ECDSA" ? await ecdsaHandleFor(key, hashNameOf(alg.hash)) : handleOf(key);
+    const sig = bytesOf(signature, "signature");
+    return verdict(callFed((rx) => handle.verify(rx, sig), bytesOf(data, "data")));
+  }
+  if (isRsaName(alg.name)) {
+    // RsaPssParams conversion (a required, enforced-range saltLength)
+    // precedes the key checks, the spec's normalization order.
+    const saltLength = alg.name === "RSA-PSS" ? rsaPssSaltLengthOf(alg) : undefined;
+    requireKeyAlgorithm(key, alg.name);
+    if (key.type !== "public") {
+      throw dom("InvalidAccessError", "verification requires a public key");
+    }
+    requireUsage(key, "verify");
+    // The WIT binds the PSS salt length at mint, so the per-operation
+    // saltLength is served by minting the requested binding from the
+    // key's stored SPKI (see `rsaPssHandleFor`); RSASSA-PKCS1-v1_5 has no
+    // per-operation parameters and verifies on the import-time handle.
+    const handle =
+      saltLength === undefined
+        ? handleOf(key)
+        : await rsaPssHandleFor(/** @type {CryptoKey} */ (key), saltLength);
     const sig = bytesOf(signature, "signature");
     return verdict(callFed((rx) => handle.verify(rx, sig), bytesOf(data, "data")));
   }
@@ -2417,6 +2695,16 @@ async function mintUnwrapped(target, format, unwrapOnce, extractable, usageSeque
     return mintKey(handle, "private", projected, extractable, usages);
   }
 
+  if (isRsaName(target.name)) {
+    // Unserved either way: the private formats mint the unserved private
+    // side, and the public formats are public-key unwrapping (see the
+    // header's deviations list).
+    throw dom(
+      "NotSupportedError",
+      `unwrapping ${target.name} keys is not served: the package's RSA signature surface is verification-only`,
+    );
+  }
+
   if (target.name === "Ed25519" || target.name === "ECDSA") {
     if (target.name === "ECDSA") {
       // Unserved by composition, like the import (see the header).
@@ -2558,7 +2846,12 @@ async function mintUnwrapped(target, format, unwrapOnce, extractable, usageSeque
  */
 async function deriveBits(algorithm, baseKey, length) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name === "ChaCha20-Poly1305" || alg.name.startsWith("AES-")) {
+  if (
+    alg.name === "HMAC" ||
+    alg.name === "ChaCha20-Poly1305" ||
+    alg.name.startsWith("AES-") ||
+    isRsaName(alg.name)
+  ) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   requireKeyAlgorithm(baseKey, alg.name);
@@ -2606,7 +2899,12 @@ async function deriveBits(algorithm, baseKey, length) {
  */
 async function deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsages) {
   const alg = normalizeAlgorithm(algorithm);
-  if (alg.name === "HMAC" || alg.name === "ChaCha20-Poly1305" || alg.name.startsWith("AES-")) {
+  if (
+    alg.name === "HMAC" ||
+    alg.name === "ChaCha20-Poly1305" ||
+    alg.name.startsWith("AES-") ||
+    isRsaName(alg.name)
+  ) {
     throw dom("NotSupportedError", `${alg.name} supports no derive operation`);
   }
   const target = normalizeAlgorithm(derivedKeyType);

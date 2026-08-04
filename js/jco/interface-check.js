@@ -24,9 +24,11 @@ import {
   AgreementKeyOptions,
   AgreementPublicKey,
   AgreementSecretKey,
+  DecryptionKey,
   DeriveInput,
   DeriveOptions,
   Digest,
+  EncryptionKey,
   Ikm,
   InternalNonceKey,
   KwKey,
@@ -55,6 +57,13 @@ import {
   pbkdf2,
   pbkdf2Sha1,
   pbkdf2Sha2,
+  publicEncryption,
+  rsaOaepDecrypt,
+  rsaOaepEncrypt,
+  rsaPssSign,
+  rsaPssVerify,
+  rsassaPkcs1V15Sign,
+  rsassaPkcs1V15Verify,
   hmacSha1,
   hmacSha2,
   sha2,
@@ -75,6 +84,7 @@ import {
 /** @import * as Pbkdf2 from "./generated/interfaces/lann-webcrypto-pbkdf2.js" */
 /** @import * as KeyAgreement from "./generated/interfaces/lann-webcrypto-key-agreement.js" */
 /** @import * as KeyWrap from "./generated/interfaces/lann-webcrypto-key-wrap.js" */
+/** @import * as PublicEncryption from "./generated/interfaces/lann-webcrypto-public-encryption.js" */
 /** @import * as Wrapping from "./generated/interfaces/lann-webcrypto-wrapping.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
@@ -167,6 +177,12 @@ const wrappingServesUnwrapInput = (input) => input;
 /** @type {(key: KwKey) => KeyWrap.KwKey} */
 const kwKeyServesKeyWrap = (key) => key;
 
+/** @type {(key: EncryptionKey) => PublicEncryption.EncryptionKey} */
+const encryptionKeyServesPublicEncryption = (key) => key;
+
+/** @type {(key: DecryptionKey) => PublicEncryption.DecryptionKey} */
+const decryptionKeyServesPublicEncryption = (key) => key;
+
 // --- minting and utility interfaces ----------------------------------------
 
 /**
@@ -245,6 +261,18 @@ const ecdsaVerifyInterface = ecdsaVerify;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdsa-sign.js")} */
 const ecdsaSignInterface = ecdsaSign;
 
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsassa-pkcs1-v15-verify.js")} */
+const rsassaPkcs1V15VerifyInterface = rsassaPkcs1V15Verify;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-verify.js")} */
+const rsaPssVerifyInterface = rsaPssVerify;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsassa-pkcs1-v15-sign.js")} */
+const rsassaPkcs1V15SignInterface = rsassaPkcs1V15Sign;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-sign.js")} */
+const rsaPssSignInterface = rsaPssSign;
+
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
 const x25519Interface = x25519;
 
@@ -267,6 +295,20 @@ const keyWrapInterface = keyWrap;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-kw.js")} */
 const aesKwInterface = aesKw;
+
+/**
+ * See `wrappingInterface`; `DecryptionKeyOptions` has a public
+ * constructor, so only the key classes are carried by their instance
+ * assertions.
+ * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-public-encryption.js"), "EncryptionKey" | "DecryptionKey">}
+ */
+const publicEncryptionInterface = publicEncryption;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-oaep-encrypt.js")} */
+const rsaOaepEncryptInterface = rsaOaepEncrypt;
+
+/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-oaep-decrypt.js")} */
+const rsaOaepDecryptInterface = rsaOaepDecrypt;
 
 export const checked = {
   macKeyServesMac,
@@ -308,6 +350,15 @@ export const checked = {
   ed25519SignInterface,
   ecdsaVerifyInterface,
   ecdsaSignInterface,
+  rsassaPkcs1V15VerifyInterface,
+  rsaPssVerifyInterface,
+  rsassaPkcs1V15SignInterface,
+  rsaPssSignInterface,
+  encryptionKeyServesPublicEncryption,
+  decryptionKeyServesPublicEncryption,
+  publicEncryptionInterface,
+  rsaOaepEncryptInterface,
+  rsaOaepDecryptInterface,
   x25519Interface,
   ecdhInterface,
 };

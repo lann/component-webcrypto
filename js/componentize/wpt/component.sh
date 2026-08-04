@@ -223,6 +223,22 @@ JS
     echo 'export { run_test };' >> "$B"/group-eddsa-small-order.js
     cat "$V"/helpers.js "$V"/ecdsa_vectors.js "$V"/ecdsa.js > "$B"/group-ecdsa.js
     echo 'export { run_test };' >> "$B"/group-ecdsa.js
+    cat "$V"/helpers.js "$V"/rsa_pss_vectors.js "$V"/rsa.js > "$B"/group-rsa-pss.js
+    echo 'export { run_test };' >> "$B"/group-rsa-pss.js
+    cat "$V"/helpers.js "$V"/rsa_pkcs_vectors.js "$V"/rsa.js > "$B"/group-rsa-pkcs.js
+    echo 'export { run_test };' >> "$B"/group-rsa-pkcs.js
+    # encrypt_decrypt_rsa.js is upstream encrypt_decrypt/rsa.js, vendored
+    # under a disambiguated name (sign_verify/rsa.js above owns the flat
+    # directory's rsa.js).
+    cat "$V"/helpers.js "$V"/rsa_vectors.js "$V"/encrypt_decrypt_rsa.js > "$B"/group-rsa-oaep.js
+    echo 'export { run_test };' >> "$B"/group-rsa-oaep.js
+    # rsa_importKey.https.any.js registers its tests at top level, like
+    # ec_importKey above: wrap it in a callable, helpers outside the
+    # wrapper.
+    cat "$V"/helpers.js > "$B"/group-rsa-import-key.js
+    echo 'function run_rsa_import_tests() {' >> "$B"/group-rsa-import-key.js
+    cat "$V"/rsa_importKey.https.any.js >> "$B"/group-rsa-import-key.js
+    printf '}\nexport { run_rsa_import_tests };\n' >> "$B"/group-rsa-import-key.js
     cat "$V"/helpers.js "$V"/ec_importKey_failures_fixtures.js "$V"/importKey_failures.js > "$B"/group-ec-import-key-failures.js
     echo 'export { run_test };' >> "$B"/group-ec-import-key-failures.js
     cat "$V"/helpers.js > "$B"/group-get-random-values.js

@@ -8,24 +8,44 @@
 //!
 //! Incumbent doc, verbatim:
 //!
-//! Probes the signature-minting surface the in-guest provider deliberately
-//! does not export — `ecdsa-sign` is class D (see rust/guest-provider/README.md) —
-//! which the shared `conformance-guest` therefore cannot import, since it
-//! must compose with that provider. This guest runs only under the
-//! host-backed targets (wasmtime, jco).
+//! Covers the private-key minting surface the in-guest provider
+//! deliberately does not export — `ecdsa-sign`, the gated RSA signing
+//! interfaces, and the gated RSA-OAEP decryption interface are class D
+//! (see rust/guest-provider/README.md) — which the shared
+//! `conformance-guest` therefore cannot import, since it must compose with
+//! that provider. This guest runs only under the host-backed targets
+//! (wasmtime, jco).
 //!
-//! This suite is probes only. Private-key imports are exercised as
-//! sign-then-verify round trips against separately imported public
-//! points, never as known signature bytes: the WIT deliberately leaves
-//! ECDSA signatures nondeterministic across implementations, and no
-//! import ever derives a public half (the w3c/webcrypto#356 gap). The
-//! Rust-side private-import known answers (the RFC 6979 A.2.5
-//! deterministic signature, out-of-range scalar rejection) are pinned by
-//! `lann-webcrypto-core`'s unit tests.
+//! Three case families. The ECDSA coverage is probes only: private-key
+//! imports are exercised as sign-then-verify round trips against
+//! separately imported public points, never as known signature bytes —
+//! the WIT deliberately leaves ECDSA signatures nondeterministic across
+//! implementations, and no import ever derives a public half (the
+//! w3c/webcrypto#356 gap). The Rust-side private-import known answers
+//! (the RFC 6979 A.2.5 deterministic signature, out-of-range scalar
+//! rejection) are pinned by `lann-webcrypto-core`'s unit tests. The RSA
+//! signing coverage ([`rsa_sign`]) additionally carries vector cases:
+//! RSASSA-PKCS1-v1_5 generation is deterministic, so the Wycheproof
+//! `sig_gen` vectors byte-compare here the way verification vectors do in
+//! the shared suite. The RSA-OAEP coverage ([`rsa_oaep`]) carries the
+//! Wycheproof decryption vectors (decryption of a published ciphertext is
+//! deterministic) plus the transport-contract probes; its encrypt-side
+//! probe is untagged (`rsa-oaep-encrypt` is ungated), while the
+//! decryption cases carry the `rsa-oaep-decrypt` tag. `rsa-sign` and
+//! `rsa-oaep-decrypt` are *gated* features (unlike the structural
+//! `ecdsa-sign`), so their cases carry feature tags and their probes
+//! assert the decline on targets declaring them missing.
 
+use crate::rsa_oaep::{
+    rsa_oaep_admission, rsa_oaep_declined, rsa_oaep_encrypt_contract, rsa_oaep_round_trip,
+};
+use crate::rsa_sign::{
+    rsa_pss_sign_round_trip, rsa_sign_admission, rsa_sign_declined, rsa_sign_key_contract,
+};
 use conformance_harness::stream::{sig_sign_ok, sig_verify_ok, sig_verify_op, Schedule};
 use conformance_harness::{
-    b64url, describe, expect, expect_err, probes, ErrKind, P256_A25_X, P256_A25_Y,
+    b64url, describe, expect, expect_err, probes, ErrKind, FEATURE_RSA_OAEP_DECRYPT,
+    FEATURE_RSA_SIGN, P256_A25_X, P256_A25_Y,
 };
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
@@ -44,6 +64,17 @@ async fn generate_key(
     raw_generate_key(variant, options).await
 }
 
+/// The features a bare tag in the `probes!` table stands for. Which
+/// features exist is this suite's business, not the harness's.
+macro_rules! feature_tags {
+    (rsa_sign) => {
+        &[FEATURE_RSA_SIGN]
+    };
+    (rsa_oaep_decrypt) => {
+        &[FEATURE_RSA_OAEP_DECRYPT]
+    };
+}
+
 probes! {
     ecdsa_p256_sign_roundtrip,
     ecdsa_p384_generate_roundtrip,
@@ -53,6 +84,14 @@ probes! {
     ecdsa_signing_key_exports,
     ecdsa_cross_hash_sign_roundtrip,
     ecdsa_unwrap_signing_key,
+    rsa_sign_key_contract(rsa_sign),
+    rsa_pss_sign_round_trip(rsa_sign),
+    rsa_sign_admission(rsa_sign),
+    rsa_sign_declined(rsa_sign),
+    rsa_oaep_encrypt_contract,
+    rsa_oaep_round_trip(rsa_oaep_decrypt),
+    rsa_oaep_admission(rsa_oaep_decrypt),
+    rsa_oaep_declined(rsa_oaep_decrypt),
 }
 
 // --- probes --------------------------------------------------------------------

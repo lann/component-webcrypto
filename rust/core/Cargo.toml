@@ -11,7 +11,9 @@ description = "Shared RustCrypto core for the Rust implementations of the lann:w
 # On wasm targets `aes-gcm` selects the soft (fixsliced, table-free) AES
 # backend — what makes AES-GCM acceptable in-guest; see lann-webcrypto-guest-provider's README
 # timing-channel classification.
-sha2 = "0.10"
+# `oid` gives the digests' AssociatedOid, which names the DigestInfo in
+# RSASSA-PKCS1-v1_5 verification.
+sha2 = { version = "0.10", features = ["oid"] }
 # SHA-1 with sha1dc collision detection (the `sha1-checked` interface).
 sha1-checked = "0.10"
 # Plain SHA-1, used only *inside* the HMAC-family constructions
@@ -55,6 +57,11 @@ ed25519-dalek = { version = "2", features = ["pkcs8"] }
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "ecdh"] }
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8", "ecdh"] }
+# RSA signature verification (the rsassa-pkcs1-v15-verify and rsa-pss-verify
+# interfaces). Only public-key verification is invoked; the Marvin advisory
+# (RUSTSEC-2023-0071) concerns the private-key operations, which this crate
+# never calls.
+rsa = "0.9"
 # The DER carriers for the spki/pkcs8 key formats: the EC paths ride the
 # curve crates' own encoders, while the RFC 8410 forms (Ed25519, X25519)
 # are assembled here — the crates' exports write v2 keypairs, and the
@@ -67,6 +74,15 @@ der = { version = "0.7", features = ["alloc"] }
 getrandom = "0.3"
 # Scrub raw key material on drop.
 zeroize = "1"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+# RSA private-key operations (the rsa-sign gate), native targets only.
+# BoringSSL lineage — the one implementation family with a verified
+# negative result under the Marvin timing methodology; RUSTSEC-2023-0071
+# (key recovery via timing) keeps the pure-Rust `rsa` crate off the
+# signing path, where it remains verification-only. See `wit/README.md`,
+# "Design notes", the lineage-pin ruling.
+aws-lc-rs = "1"
 
 [dev-dependencies]
 # Hex constants in the known-answer tests, decoded at compile time; the

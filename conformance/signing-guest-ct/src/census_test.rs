@@ -1,16 +1,42 @@
 //! Native census-parity test: the port's static inventory must equal the
 //! incumbent census (`src/census-fixture.lock` — the incumbent
 //! `conformance-signing-guest`'s final `tests.lock`, byte-frozen at the
-//! M1.6 cutover; the incumbent itself is deleted) exactly.
-//! The incumbent census carries no feature tags, so there are no
-//! additive decline cases to exclude.
+//! M1.6 cutover; the incumbent itself is deleted) exactly — the
+//! decline cases are additive and deliberately excluded here (they are
+//! new; the lockfile-diff script accounts for them).
 
 use std::collections::BTreeMap;
 
+use crate::plan;
+
 type Inventory = BTreeMap<String, Vec<String>>;
 
-/// Parse the incumbent census: `{ name = "..." }` (no features in this
-/// suite — asserted below).
+/// The port's id for a census name: identical except that a word of the
+/// algorithm (first) segment starting with a digit gains a `b` prefix
+/// (`…-sha256-2048` → `…-sha256-b2048`) — the component-test case-name
+/// grammar requires non-leaf segments to be WIT labels, whose words may
+/// not start with a digit. The one documented id divergence from the
+/// incumbent census (besides the additive decline cases).
+fn ported_name(census_name: &str) -> String {
+    let Some((alg, rest)) = census_name.split_once('/') else {
+        return census_name.to_string();
+    };
+    let alg = alg
+        .split('-')
+        .map(|word| {
+            if word.starts_with(|c: char| c.is_ascii_digit()) {
+                format!("b{word}")
+            } else {
+                word.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+    format!("{alg}/{rest}")
+}
+
+/// Parse the incumbent census (names mapped through [`ported_name`]):
+/// `{ name = "...", features = [...] }`.
 fn census() -> Inventory {
     let text = include_str!("census-fixture.lock");
     let mut out = Inventory::new();
@@ -31,18 +57,42 @@ fn census() -> Inventory {
             None => Vec::new(),
         };
         assert!(
-            out.insert(name.to_string(), features).is_none(),
+            out.insert(ported_name(name), features).is_none(),
             "duplicate census entry {name}"
         );
     }
     out
 }
 
-/// The port's inventory: the probe table (the `#[case]` fns in `lib.rs`
-/// are one-per-row lookups into it by ident, so the table is the
-/// authoritative name source).
+/// Expand the port's inventory: every generator row (asserting each
+/// case's own features equal the row's tags — tags live at the row) plus
+/// the probe table.
 fn ported() -> Inventory {
     let mut out = Inventory::new();
+    for row in plan::ROWS {
+        let cases = plan::cases_under(row.prefix);
+        assert!(
+            !cases.is_empty(),
+            "generator row {} matches no cases",
+            row.prefix
+        );
+        for case in cases {
+            assert_eq!(
+                case.features, row.tags,
+                "case {} disagrees with its row's tags ({})",
+                case.id, row.prefix
+            );
+            assert!(
+                out.insert(
+                    case.id.clone(),
+                    case.features.iter().map(|s| s.to_string()).collect()
+                )
+                .is_none(),
+                "case {} produced by more than one row",
+                case.id
+            );
+        }
+    }
     for probe in crate::probes::PROBES {
         assert!(
             out.insert(
@@ -77,10 +127,6 @@ fn inventory_matches_the_incumbent_census() {
             &ported[name], features,
             "feature tags for {name} diverge from the census"
         );
-        assert!(
-            features.is_empty(),
-            "census grew a feature tag on {name}; the port needs a !feature decline case"
-        );
     }
-    assert_eq!(census.len(), 8, "census size changed under us");
+    assert_eq!(census.len(), 770, "census size changed under us");
 }

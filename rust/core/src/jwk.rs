@@ -301,6 +301,180 @@ pub fn build_ec_private(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
     .to_string()
 }
 
+/// The decoded members of an RSA public JWK (RFC 7518 §6.3.1): the modulus
+/// and public exponent, big-endian.
+#[derive(Debug)]
+pub struct RsaPublicJwk {
+    pub n: Vec<u8>,
+    pub e: Vec<u8>,
+}
+
+/// Parse an RSA *public* JWK (RFC 7518 §6.3.1: `kty`, `n`, `e`; a present
+/// private member — `d`, `p`, or `q` — is rejected: a caller holding
+/// private material meant a private import), validated against
+/// `allowed_algs` (see `check_alg`), returning the decoded pair (every
+/// failure is `invalid-key`). The `"ext": false` rejection matches
+/// `parse_okp_public`, and for the same reason. Value-level admission —
+/// the modulus window, the exponent floor — stays with the caller.
+pub fn parse_rsa_public(jwk: &str, allowed_algs: Option<&[&str]>) -> Result<RsaPublicJwk, Error> {
+    let jwk = parse_object(jwk)?;
+    require_kty(&jwk, "RSA")?;
+    check_alg(&jwk, allowed_algs)?;
+    check_ext(&jwk, true)?;
+    for member in ["d", "p", "q"] {
+        if jwk.get(member).is_some() {
+            return Err(Error::InvalidKey(format!(
+                "JWK carries `{member}`; import it as a private key"
+            )));
+        }
+    }
+    let Some(Value::String(n)) = jwk.get("n") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `n` (base64url modulus)".into(),
+        ));
+    };
+    let Some(Value::String(e)) = jwk.get("e") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `e` (base64url public exponent)".into(),
+        ));
+    };
+    Ok(RsaPublicJwk {
+        n: decode_member("n", n)?,
+        e: decode_member("e", e)?,
+    })
+}
+
+/// Build the RSA public JWK (RFC 7518 §6.3.1): exactly the material-bearing
+/// members, with `n` and `e` minimal big-endian (leading zero octets
+/// stripped, per the section's base64url-of-a-positive-integer rule).
+pub fn build_rsa_public(n: &[u8], e: &[u8]) -> String {
+    serde_json::json!({
+        "kty": "RSA",
+        "n": BASE64URL_NOPAD.encode(strip_leading_zeros(n)),
+        "e": BASE64URL_NOPAD.encode(strip_leading_zeros(e)),
+    })
+    .to_string()
+}
+
+/// The decoded members of an RSA private JWK (RFC 7518 §6.3.2): the public
+/// pair, the private exponent, and the CRT members, which the platforms
+/// require of private RSA JWKs.
+///
+/// Unused on wasm targets: the sole consumer is RSA private import, whose
+/// code is compiled out there (class D — see the crate doc).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub struct RsaPrivateJwk {
+    pub n: Vec<u8>,
+    pub e: Vec<u8>,
+    pub d: zeroize::Zeroizing<Vec<u8>>,
+    pub p: zeroize::Zeroizing<Vec<u8>>,
+    pub q: zeroize::Zeroizing<Vec<u8>>,
+    pub dp: zeroize::Zeroizing<Vec<u8>>,
+    pub dq: zeroize::Zeroizing<Vec<u8>>,
+    pub qi: zeroize::Zeroizing<Vec<u8>>,
+}
+
+/// The fixed message a private RSA JWK missing a CRT member renders: the
+/// platforms serve only the full two-prime CRT form (RFC 7518 §6.3.2's
+/// first-representation members), so `p`, `q`, `dp`, `dq`, and `qi` are
+/// all required.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+const RSA_CRT_REQUIRED: &str = "private RSA JWKs carry the CRT parameters";
+
+/// Parse an RSA *private* JWK (RFC 7518 §6.3.2: `kty`, `n`, `e`, `d`, and
+/// the CRT members `p`/`q`/`dp`/`dq`/`qi`, all required), validated
+/// against `allowed_algs` (see `check_alg`) and the requested
+/// extractability, returning the decoded members (every failure is
+/// `invalid-key`). A present `oth` member — the multi-prime form — is
+/// `unsupported`, as on the platforms. Value-level admission — the
+/// modulus window, the exponent floor, member consistency — stays with
+/// the caller.
+///
+/// Unused on wasm targets, like [`RsaPrivateJwk`].
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub fn parse_rsa_private(
+    jwk: &str,
+    extractable: bool,
+    allowed_algs: Option<&[&str]>,
+) -> Result<RsaPrivateJwk, Error> {
+    let jwk = parse_object(jwk)?;
+    require_kty(&jwk, "RSA")?;
+    check_alg(&jwk, allowed_algs)?;
+    check_ext(&jwk, extractable)?;
+    if jwk.get("oth").is_some() {
+        return Err(Error::Unsupported(
+            "multi-prime RSA JWKs are not supported".into(),
+        ));
+    }
+    let Some(Value::String(n)) = jwk.get("n") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `n` (base64url modulus)".into(),
+        ));
+    };
+    let Some(Value::String(e)) = jwk.get("e") else {
+        return Err(Error::InvalidKey(
+            "RSA JWK must carry `e` (base64url public exponent)".into(),
+        ));
+    };
+    let Some(Value::String(d)) = jwk.get("d") else {
+        return Err(Error::InvalidKey(
+            "RSA private JWK must carry `d` (base64url private exponent)".into(),
+        ));
+    };
+    let crt = |name: &str| -> Result<zeroize::Zeroizing<Vec<u8>>, Error> {
+        let Some(Value::String(member)) = jwk.get(name) else {
+            return Err(Error::InvalidKey(RSA_CRT_REQUIRED.into()));
+        };
+        Ok(zeroize::Zeroizing::new(decode_member(name, member)?))
+    };
+    Ok(RsaPrivateJwk {
+        n: decode_member("n", n)?,
+        e: decode_member("e", e)?,
+        d: zeroize::Zeroizing::new(decode_member("d", d)?),
+        p: crt("p")?,
+        q: crt("q")?,
+        dp: crt("dp")?,
+        dq: crt("dq")?,
+        qi: crt("qi")?,
+    })
+}
+
+/// Build the RSA private JWK (RFC 7518 §6.3.2): the public members plus
+/// the private exponent and the CRT members, all minimal big-endian.
+/// Unused on wasm targets: the sole caller is RSA private export, whose
+/// code is compiled out there (class D — see the crate doc).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+pub fn build_rsa_private(
+    n: &[u8],
+    e: &[u8],
+    d: &[u8],
+    p: &[u8],
+    q: &[u8],
+    dp: &[u8],
+    dq: &[u8],
+    qi: &[u8],
+) -> String {
+    serde_json::json!({
+        "kty": "RSA",
+        "n": BASE64URL_NOPAD.encode(strip_leading_zeros(n)),
+        "e": BASE64URL_NOPAD.encode(strip_leading_zeros(e)),
+        "d": BASE64URL_NOPAD.encode(strip_leading_zeros(d)),
+        "p": BASE64URL_NOPAD.encode(strip_leading_zeros(p)),
+        "q": BASE64URL_NOPAD.encode(strip_leading_zeros(q)),
+        "dp": BASE64URL_NOPAD.encode(strip_leading_zeros(dp)),
+        "dq": BASE64URL_NOPAD.encode(strip_leading_zeros(dq)),
+        "qi": BASE64URL_NOPAD.encode(strip_leading_zeros(qi)),
+    })
+    .to_string()
+}
+
+/// `bytes` without its leading zero octets.
+fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    &bytes[first..]
+}
+
 /// Require the JWK's `crv` member to be exactly `expected`.
 fn require_crv(jwk: &serde_json::Map<String, Value>, expected: &str) -> Result<(), Error> {
     match jwk.get("crv") {
@@ -556,6 +730,55 @@ mod tests {
         let okp = parse_okp_private(&jwk, "X25519", true, None).unwrap();
         assert_eq!(okp.x, vec![1; 32]);
         assert_eq!(okp.d.as_slice(), &[2; 32]);
+    }
+
+    #[test]
+    fn rsa_round_trip_strips_leading_zeros() {
+        // The build side emits minimal big-endian n/e whatever the caller
+        // hands it (RFC 7518 §6.3.1's positive-integer encoding).
+        let jwk = build_rsa_public(&[0, 0, 5, 6], &[0, 1, 0, 1]);
+        let parsed = parse_rsa_public(&jwk, None).unwrap();
+        assert_eq!(parsed.n, vec![5, 6]);
+        assert_eq!(parsed.e, vec![1, 0, 1]);
+    }
+
+    #[test]
+    fn rsa_public_rejects_private_members() {
+        for member in ["d", "p", "q"] {
+            let jwk = format!(r#"{{"kty":"RSA","n":"AQID","e":"AQAB","{member}":"AQID"}}"#);
+            match parse_rsa_public(&jwk, None) {
+                Err(Error::InvalidKey(msg)) => assert_eq!(
+                    msg,
+                    format!("JWK carries `{member}`; import it as a private key")
+                ),
+                other => panic!("expected the private-member diagnostic, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn rsa_public_contract_errors() {
+        // Wrong kty, missing n, missing e, ext:false, alg allowlist.
+        for jwk in [
+            r#"{"kty":"EC","n":"AQID","e":"AQAB"}"#,
+            r#"{"kty":"RSA","e":"AQAB"}"#,
+            r#"{"kty":"RSA","n":"AQID"}"#,
+            r#"{"kty":"RSA","n":"AQID","e":"AQAB","ext":false}"#,
+            r#"{"kty":"RSA","n":"AQID","e":"AQAB","alg":"RS384"}"#,
+        ] {
+            assert!(
+                matches!(
+                    parse_rsa_public(jwk, Some(&["RS256"])),
+                    Err(Error::InvalidKey(_))
+                ),
+                "{jwk} accepted"
+            );
+        }
+        assert!(parse_rsa_public(
+            r#"{"kty":"RSA","n":"AQID","e":"AQAB","alg":"RS256"}"#,
+            Some(&["RS256"])
+        )
+        .is_ok());
     }
 
     #[test]

@@ -20,6 +20,13 @@ wit-bindgen = { version = "0.60", features = ["async"] }
 
 # Everything below mirrors conformance-signing-guest: the incumbent probe
 # bodies are reused wholesale (see src/probes.rs).
-lann-webcrypto-guest = { path = "../../rust/guest" }
+# `rsa-sign` and `rsa-oaep-decrypt` add the gated RSA private-key imports
+# to the generated world — this suite, like the `ecdsa-sign` import it
+# exists for, runs only under the host-backed targets.
+lann-webcrypto-guest = { path = "../../rust/guest", features = ["rsa-sign", "rsa-oaep-decrypt"] }
 conformance-harness = { path = "../harness" }
-futures = { version = "0.3", default-features = false, features = ["async-await"] }
+futures = { version = "0.3", default-features = false, features = ["async-await", "alloc"] }
+# Parsing the vendored Wycheproof sig-gen/OAEP JSON compiled into the guest.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+data-encoding = "2"

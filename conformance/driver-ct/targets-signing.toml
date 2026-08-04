@@ -1,9 +1,18 @@
-# The host-only signing suite: wasmtime target only, no gated features
-# (ecdsa-sign is structural and untagged).
+# The host-only signing suite: wasmtime target only. ecdsa-sign is
+# structural and untagged; the gated RSA features (rsa-sign,
+# rsa-oaep-decrypt) tag the suite's RSA vector cases and probes, with a
+# !feature decline case each proving the refusal on targets declaring
+# them missing.
 version = "0.1"
 
 [features.ecdsa-sign]
 kind = "structural"
+
+[features.rsa-sign]
+kind = "gated"
+
+[features.rsa-oaep-decrypt]
+kind = "gated"
 
 [targets.wasmtime-rustcrypto]
 missing-features = []

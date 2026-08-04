@@ -97,6 +97,7 @@ fn main() {
     write(&out, mode, "sha2", translate::sha2_cases());
     write(&out, mode, "sig", translate::sig_cases());
     write(&out, mode, "speccheck", translate::speccheck_cases());
+    write(&out, mode, "rsa", translate::rsa_cases());
     write(&out, mode, "x25519", translate::x25519_cases());
     write(&out, mode, "ecdh", translate::ecdh_cases());
 }

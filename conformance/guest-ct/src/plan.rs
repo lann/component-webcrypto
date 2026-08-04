@@ -140,6 +140,82 @@ pub const ROWS: &[Row] = &[
         tags: NO_TAGS,
     },
     Row {
+        prefix: "rsassa-pkcs1-v15-sha256-b2048/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha384-b2048/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha512-b2048/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha256-b3072/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha384-b3072/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha512-b3072/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha256-b4096/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha384-b4096/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha512-b4096/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsassa-pkcs1-v15-sha256-b8192/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha256-b2048-salt0/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha256-b2048-salt32/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha384-b2048-salt48/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha256-b3072-salt32/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha256-b4096-salt32/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha384-b4096-salt48/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha512-b4096-salt32/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha512-b4096-salt64/wycheproof",
+        tags: NO_TAGS,
+    },
+    Row {
+        prefix: "rsa-pss-sha256-b2048-salt32/wycheproof-params",
+        tags: NO_TAGS,
+    },
+    Row {
         prefix: "x25519/wycheproof",
         tags: NO_TAGS,
     },
@@ -324,7 +400,7 @@ mod corpus {
     #[cfg(not(feature = "preparsed"))]
     pub use crate::translate::{
         aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases, kw_cases,
-        pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
+        pbkdf2_cases, rsa_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
     };
 
     #[cfg(feature = "preparsed")]
@@ -357,6 +433,7 @@ mod corpus {
             crate::translate::SpeccheckCase,
             "speccheck.bin"
         ),
+        (rsa_cases, crate::translate::RsaCase, "rsa.bin"),
         (x25519_cases, crate::translate::X25519Case, "x25519.bin"),
         (ecdh_cases, crate::translate::EcdhCase, "ecdh.bin"),
     ];
@@ -594,6 +671,139 @@ mod rows {
             |c| Box::pin(async move { vectors::run_sig_case(&c).await })
         ),
         (
+            "rsassa-pkcs1-v15-sha256-b2048/wycheproof",
+            rsassa_pkcs1_v15_sha256_2048_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha256-b2048_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha384-b2048/wycheproof",
+            rsassa_pkcs1_v15_sha384_2048_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha384-b2048_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha512-b2048/wycheproof",
+            rsassa_pkcs1_v15_sha512_2048_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha512-b2048_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha256-b3072/wycheproof",
+            rsassa_pkcs1_v15_sha256_3072_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha256-b3072_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha384-b3072/wycheproof",
+            rsassa_pkcs1_v15_sha384_3072_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha384-b3072_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha512-b3072/wycheproof",
+            rsassa_pkcs1_v15_sha512_3072_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha512-b3072_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha256-b4096/wycheproof",
+            rsassa_pkcs1_v15_sha256_4096_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha256-b4096_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha384-b4096/wycheproof",
+            rsassa_pkcs1_v15_sha384_4096_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha384-b4096_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha512-b4096/wycheproof",
+            rsassa_pkcs1_v15_sha512_4096_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha512-b4096_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsassa-pkcs1-v15-sha256-b8192/wycheproof",
+            rsassa_pkcs1_v15_sha256_8192_wycheproof,
+            crate::translate::RsaCase,
+            "rsassa-pkcs1-v15-sha256-b8192_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha256-b2048-salt0/wycheproof",
+            rsa_pss_sha256_2048_salt0_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha256-b2048-salt0_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha256-b2048-salt32/wycheproof",
+            rsa_pss_sha256_2048_salt32_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha256-b2048-salt32_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha384-b2048-salt48/wycheproof",
+            rsa_pss_sha384_2048_salt48_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha384-b2048-salt48_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha256-b3072-salt32/wycheproof",
+            rsa_pss_sha256_3072_salt32_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha256-b3072-salt32_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha256-b4096-salt32/wycheproof",
+            rsa_pss_sha256_4096_salt32_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha256-b4096-salt32_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha384-b4096-salt48/wycheproof",
+            rsa_pss_sha384_4096_salt48_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha384-b4096-salt48_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha512-b4096-salt32/wycheproof",
+            rsa_pss_sha512_4096_salt32_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha512-b4096-salt32_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha512-b4096-salt64/wycheproof",
+            rsa_pss_sha512_4096_salt64_wycheproof,
+            crate::translate::RsaCase,
+            "rsa-pss-sha512-b4096-salt64_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
+            "rsa-pss-sha256-b2048-salt32/wycheproof-params",
+            rsa_pss_sha256_2048_salt32_wycheproof_params,
+            crate::translate::RsaCase,
+            "rsa-pss-sha256-b2048-salt32_wycheproof-params.rkyv",
+            |c| Box::pin(async move { vectors::run_rsa_case(&c).await })
+        ),
+        (
             "x25519/wycheproof",
             x25519_wycheproof,
             crate::translate::X25519Case,
@@ -749,6 +959,11 @@ fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
         "ed25519/speccheck" => vector_cases(corpus::speccheck_cases(), |c| {
             Box::pin(async move { vectors::run_speccheck_case(&c).await })
         }),
+        p if p.starts_with("rsassa-pkcs1-v15-") || p.starts_with("rsa-pss-") => {
+            vector_cases(corpus::rsa_cases(), |c| {
+                Box::pin(async move { vectors::run_rsa_case(&c).await })
+            })
+        }
         "x25519/wycheproof" => vector_cases(corpus::x25519_cases(), |c| {
             Box::pin(async move { vectors::run_x25519_case(&c).await })
         }),

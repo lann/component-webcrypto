@@ -669,7 +669,8 @@ pub fn pbkdf2_cases() -> Vec<Pbkdf2Case> {
     cases
 }
 
-/// A served SHA-2 algorithm, as named in digest vector ids.
+/// A served SHA-2 algorithm, as named in test ids (the digest vector
+/// cases, and the RSA signature cases' digest parameterization).
 #[derive(
     Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
@@ -1639,6 +1640,372 @@ pub fn sig_cases() -> Vec<SigCase> {
                     push_group(&mut cases, alg, &public, &group.tests);
                 }
             }
+        }
+    }
+    cases
+}
+
+/// The RSASSA-PKCS1-v1_5 verification vector files (one per digest ×
+/// modulus-length parameterization, plus the 8192-bit file pinning
+/// large-modulus admission inside the family's 1024–16384-bit window).
+const RSA_PKCS1_VECTORS: [&str; 10] = [
+    include_str!("../../vectors/rsa_signature_2048_sha256_test.json"),
+    include_str!("../../vectors/rsa_signature_2048_sha384_test.json"),
+    include_str!("../../vectors/rsa_signature_2048_sha512_test.json"),
+    include_str!("../../vectors/rsa_signature_3072_sha256_test.json"),
+    include_str!("../../vectors/rsa_signature_3072_sha384_test.json"),
+    include_str!("../../vectors/rsa_signature_3072_sha512_test.json"),
+    include_str!("../../vectors/rsa_signature_4096_sha256_test.json"),
+    include_str!("../../vectors/rsa_signature_4096_sha384_test.json"),
+    include_str!("../../vectors/rsa_signature_4096_sha512_test.json"),
+    include_str!("../../vectors/rsa_signature_8192_sha256_test.json"),
+];
+
+/// The RSA-PSS verification vector files: the WebCrypto-expressible
+/// parameterizations only (the MGF1 digest equals the message digest,
+/// which the WIT fixes), each group carrying the salt length the WIT
+/// binds at mint. The `sha512_mgf1_32` file pins a salt length that
+/// differs from the digest length.
+const RSA_PSS_VECTORS: [&str; 8] = [
+    include_str!("../../vectors/rsa_pss_2048_sha256_mgf1_0_test.json"),
+    include_str!("../../vectors/rsa_pss_2048_sha256_mgf1_32_test.json"),
+    include_str!("../../vectors/rsa_pss_2048_sha384_mgf1_48_test.json"),
+    include_str!("../../vectors/rsa_pss_3072_sha256_mgf1_32_test.json"),
+    include_str!("../../vectors/rsa_pss_4096_sha256_mgf1_32_test.json"),
+    include_str!("../../vectors/rsa_pss_4096_sha384_mgf1_48_test.json"),
+    include_str!("../../vectors/rsa_pss_4096_sha512_mgf1_32_test.json"),
+    include_str!("../../vectors/rsa_pss_4096_sha512_mgf1_64_test.json"),
+];
+
+/// The id-RSASSA-PSS-parameterized key file: every key carries the
+/// AlgorithmIdentifier the RSA family contract rejects at import, so
+/// every case translates to an SPKI import-must-fail (`invalid-key`).
+const RSA_PSS_PARAMS_VECTORS: &str =
+    include_str!("../../vectors/rsa_pss_2048_sha256_mgf1_32_params_test.json");
+
+/// An RSA signature family, as named in test ids: the verification scheme
+/// plus, for RSA-PSS, the salt length the WIT binds at mint.
+#[derive(
+    Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub enum RsaFamily {
+    Pkcs1V15,
+    Pss { salt_len: u32 },
+}
+
+/// A translated RSA parameterization: the family, the mint-bound digest,
+/// and the group key's modulus length (a property of the imported
+/// material, but part of the test id — each vector file is one
+/// parameterization).
+#[derive(
+    Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct RsaAlg {
+    pub family: RsaFamily,
+    pub sha: Sha2Alg,
+    pub key_bits: u32,
+}
+
+impl RsaAlg {
+    /// The algorithm segment of this parameterization's test ids.
+    pub fn name(self) -> String {
+        match self.family {
+            RsaFamily::Pkcs1V15 => {
+                // `b<bits>`: a bare `2048` word would violate the
+                // component-test case-name grammar (non-leaf segments are
+                // WIT labels; words may not start with a digit) — the one
+                // documented divergence from the incumbent census ids.
+                format!("rsassa-pkcs1-v15-{}-b{}", self.sha.name(), self.key_bits)
+            }
+            RsaFamily::Pss { salt_len } => format!(
+                "rsa-pss-{}-b{}-salt{}",
+                self.sha.name(),
+                self.key_bits,
+                salt_len
+            ),
+        }
+    }
+}
+
+/// A vector's group public key in one of the family's two import
+/// encodings, carrying the dispatch to the matching import function.
+#[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum RsaImport {
+    /// `import-verifying-key-spki` (the group's `publicKeyDer`).
+    Spki(Vec<u8>),
+    /// `import-verifying-key-jwk` (the group's own JWK where the file
+    /// carries one, else a minimal `{kty, n, e}` built from the group's
+    /// modulus and exponent; JSON text).
+    Jwk(String),
+}
+
+/// What the `lann:webcrypto` contract requires of an RSA vector.
+#[derive(
+    Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub enum RsaExpectation {
+    /// Import succeeds and `verify(sig)` succeeds.
+    Valid,
+    /// Import succeeds and `verify(sig)` fails `authentication-failed`.
+    AuthenticationFailed,
+    /// The import itself fails `invalid-key` (the id-RSASSA-PSS file).
+    RejectImport,
+}
+
+/// One executed RSA signature-verification vector: importing the group's
+/// public key per `import` and verifying `sig` over `msg` per
+/// `expectation`.
+#[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct RsaCase {
+    pub alg: RsaAlg,
+    /// The source segment in test ids (`wycheproof`, or
+    /// `wycheproof-params` for the id-RSASSA-PSS file).
+    pub source: String,
+    pub tc_id: u64,
+    pub import: RsaImport,
+    /// `None` only for [`RsaExpectation::RejectImport`] cases, which
+    /// carry no streams.
+    pub schedule: Option<Schedule>,
+    pub msg: Vec<u8>,
+    pub sig: Vec<u8>,
+    pub expectation: RsaExpectation,
+}
+
+impl VectorCase for RsaCase {
+    fn case_id(&self) -> String {
+        // Valid vectors translate once per import path, so those ids name
+        // it; a rejection runs only via SPKI and its id stays plain.
+        let import = match (&self.expectation, &self.import) {
+            (RsaExpectation::Valid, RsaImport::Spki(_)) => "-spki",
+            (RsaExpectation::Valid, RsaImport::Jwk(_)) => "-jwk",
+            _ => "",
+        };
+        let base = format!(
+            "{}/{}/tc{}{import}",
+            self.alg.name(),
+            self.source,
+            self.tc_id
+        );
+        match self.schedule {
+            Some(schedule) => format!("{base}/{}", schedule.name()),
+            None => base,
+        }
+    }
+}
+
+/// The `modulus`/`publicExponent` members of a vector group's `publicKey`
+/// object (big-endian hex, possibly with a leading zero byte).
+#[derive(Deserialize)]
+struct RsaPublicKeyMembers {
+    modulus: String,
+    #[serde(rename = "publicExponent")]
+    public_exponent: String,
+}
+
+#[derive(Deserialize)]
+struct RsaPkcs1Group {
+    #[serde(rename = "keySize")]
+    key_size: u32,
+    sha: String,
+    #[serde(rename = "publicKeyDer")]
+    public_key_der: String,
+    #[serde(rename = "keyJwk")]
+    key_jwk: serde_json::Value,
+    tests: Vec<SigTest>,
+}
+
+#[derive(Deserialize)]
+struct RsaPssGroup {
+    #[serde(rename = "keySize")]
+    key_size: u32,
+    sha: String,
+    #[serde(rename = "mgfSha")]
+    mgf_sha: String,
+    #[serde(rename = "sLen")]
+    salt_len: u32,
+    #[serde(rename = "publicKeyDer")]
+    public_key_der: String,
+    /// Absent from two vendored files (`mgf1_0` and `4096_sha512_mgf1_32`)
+    /// and from the params file.
+    #[serde(rename = "publicKeyJwk")]
+    public_key_jwk: Option<serde_json::Value>,
+    #[serde(rename = "publicKey")]
+    public_key: RsaPublicKeyMembers,
+    tests: Vec<SigTest>,
+}
+
+/// The digest parameterization a vector group's `sha` member declares.
+fn rsa_sha(field: &str, sha: &str) -> Sha2Alg {
+    match sha {
+        "SHA-256" => Sha2Alg::Sha256,
+        "SHA-384" => Sha2Alg::Sha384,
+        "SHA-512" => Sha2Alg::Sha512,
+        other => panic!("vector group {field} has unserved sha {other:?}"),
+    }
+}
+
+/// The minimal RSA public JWK (RFC 7518 §6.3.1: `kty`, `n`, `e`) for a
+/// group's modulus and exponent, with the base64url members stripped of
+/// leading zero bytes as the JWK integer encoding requires.
+fn rsa_public_jwk(n: &[u8], e: &[u8]) -> String {
+    fn strip(bytes: &[u8]) -> &[u8] {
+        match bytes.iter().position(|&b| b != 0) {
+            Some(first) => &bytes[first..],
+            None => &[],
+        }
+    }
+    format!(
+        r#"{{"kty":"RSA","n":"{}","e":"{}"}}"#,
+        conformance_harness::b64url(strip(n)),
+        conformance_harness::b64url(strip(e)),
+    )
+}
+
+/// Translate one file's group of RSA verification vectors:
+///
+/// - `valid` vectors run twice — once importing the group key via SPKI,
+///   once via the RSA public JWK — so both import paths carry vector
+///   coverage; each expands over the acceptance schedule set.
+/// - `invalid` vectors run once, via SPKI (the rejection under test is
+///   the verifier's, not the import path's): `verify(sig)` fails
+///   `authentication-failed`.
+/// - `acceptable` vectors (the `MissingNull` BER-laxity family) also fail
+///   `authentication-failed`: the WIT pins strict verification — the
+///   EMSA-PKCS1-v1_5 encoding is compared byte-exact — so upstream's
+///   lax-verifier allowances are uniform rejections here.
+fn push_rsa_group(
+    cases: &mut Vec<RsaCase>,
+    alg: RsaAlg,
+    spki: &[u8],
+    jwk: &str,
+    tests: &[SigTest],
+) {
+    for test in tests {
+        let field = format!("{} tc{}", alg.name(), test.tc_id);
+        let msg = unhex(&field, &test.msg);
+        let sig = unhex(&field, &test.sig);
+        let valid = match test.result.as_str() {
+            "valid" => true,
+            "invalid" | "acceptable" => false,
+            other => panic!("vector {field} has unknown result {other:?}"),
+        };
+        let imports: &[RsaImport] = if valid {
+            &[
+                RsaImport::Spki(spki.to_vec()),
+                RsaImport::Jwk(jwk.to_string()),
+            ]
+        } else {
+            &[RsaImport::Spki(spki.to_vec())]
+        };
+        for import in imports {
+            for schedule in schedules(msg.len(), valid, test.tc_id) {
+                cases.push(RsaCase {
+                    alg,
+                    source: "wycheproof".to_string(),
+                    tc_id: test.tc_id,
+                    import: match import {
+                        RsaImport::Spki(spki) => RsaImport::Spki(spki.clone()),
+                        RsaImport::Jwk(jwk) => RsaImport::Jwk(jwk.clone()),
+                    },
+                    schedule: Some(schedule),
+                    msg: msg.clone(),
+                    sig: sig.clone(),
+                    expectation: if valid {
+                        RsaExpectation::Valid
+                    } else {
+                        RsaExpectation::AuthenticationFailed
+                    },
+                });
+            }
+        }
+    }
+}
+
+/// The normalized RSA signature-verification cases: the RSASSA-PKCS1-v1_5
+/// and RSA-PSS files translated per [`push_rsa_group`], plus the
+/// id-RSASSA-PSS key file, whose every case expects the SPKI import to
+/// fail `invalid-key` (the family contract admits only `rsaEncryption`
+/// SubjectPublicKeyInfos). That file's coverage is SPKI-only: it carries
+/// no JWKs, and a plain RSA public JWK has no member that could carry the
+/// PSS AlgorithmIdentifier, so no JWK-side counterpart exists.
+pub fn rsa_cases() -> Vec<RsaCase> {
+    let mut cases = Vec::new();
+    for text in RSA_PKCS1_VECTORS {
+        let file: VectorFile<RsaPkcs1Group> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing rsassa-pkcs1-v15 vectors: {err}"));
+        for group in &file.test_groups {
+            let field = format!("rsassa-pkcs1-v15 {}-bit group", group.key_size);
+            let alg = RsaAlg {
+                family: RsaFamily::Pkcs1V15,
+                sha: rsa_sha(&field, &group.sha),
+                key_bits: group.key_size,
+            };
+            push_rsa_group(
+                &mut cases,
+                alg,
+                &unhex(&field, &group.public_key_der),
+                &group.key_jwk.to_string(),
+                &group.tests,
+            );
+        }
+    }
+    for text in RSA_PSS_VECTORS {
+        let file: VectorFile<RsaPssGroup> = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("parsing rsa-pss vectors: {err}"));
+        for group in &file.test_groups {
+            let field = format!("rsa-pss {}-bit group", group.key_size);
+            // The WIT fixes the MGF1 digest to the message digest; only
+            // files within that parameterization are vendored.
+            assert_eq!(
+                group.mgf_sha, group.sha,
+                "{field}: mgfSha differs from sha, outside the WIT parameterization"
+            );
+            let alg = RsaAlg {
+                family: RsaFamily::Pss {
+                    salt_len: group.salt_len,
+                },
+                sha: rsa_sha(&field, &group.sha),
+                key_bits: group.key_size,
+            };
+            let jwk = match &group.public_key_jwk {
+                Some(jwk) => jwk.to_string(),
+                None => rsa_public_jwk(
+                    &unhex(&field, &group.public_key.modulus),
+                    &unhex(&field, &group.public_key.public_exponent),
+                ),
+            };
+            push_rsa_group(
+                &mut cases,
+                alg,
+                &unhex(&field, &group.public_key_der),
+                &jwk,
+                &group.tests,
+            );
+        }
+    }
+    let file: VectorFile<RsaPssGroup> = serde_json::from_str(RSA_PSS_PARAMS_VECTORS)
+        .unwrap_or_else(|err| panic!("parsing rsa-pss params vectors: {err}"));
+    for group in &file.test_groups {
+        let field = format!("rsa-pss-params {}-bit group", group.key_size);
+        let alg = RsaAlg {
+            family: RsaFamily::Pss {
+                salt_len: group.salt_len,
+            },
+            sha: rsa_sha(&field, &group.sha),
+            key_bits: group.key_size,
+        };
+        let spki = unhex(&field, &group.public_key_der);
+        for test in &group.tests {
+            cases.push(RsaCase {
+                alg,
+                source: "wycheproof-params".to_string(),
+                tc_id: test.tc_id,
+                import: RsaImport::Spki(spki.clone()),
+                schedule: None,
+                msg: Vec::new(),
+                sig: Vec::new(),
+                expectation: RsaExpectation::RejectImport,
+            });
         }
     }
     cases

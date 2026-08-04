@@ -117,7 +117,9 @@ fn run() -> Result<ExitCode> {
             options
                 .chacha20_poly1305(true)
                 .xchacha20_poly1305(true)
-                .sha1_checked(true);
+                .sha1_checked(true)
+                .rsa_sign(true)
+                .rsa_oaep_decrypt(true);
             add_to_linker_with_options(linker, &options)
         },
     )

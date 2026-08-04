@@ -24,22 +24,30 @@
 //!   surfaces it as a trap-shaped host error, the guest treats WASI random
 //!   as infallible.
 //!
-//! ## Class-D policy: ECDSA signing is not compiled for wasm
+//! ## Class-D policy: ECDSA signing and the RSA private-key families are not compiled for wasm
 //!
 //! ECDSA signing handles a per-signature secret nonce whose timing leakage
-//! is key-recovering — class D in lann-webcrypto-guest-provider's timing-channel
-//! classification. The load-bearing enforcement is the in-guest provider's
-//! world, which never exports `ecdsa-sign`: a composition that needs it
-//! fails at `wac plug` time. This crate adds a second layer — the ECDSA
-//! arms of the private-key type exist only on non-wasm targets
-//! (`#[cfg(not(target_family = "wasm"))]`), so nothing in a wasm build
-//! *calls* a signing implementation.
+//! is key-recovering, and RSA private-key operations leak key material
+//! through timing unless constant-time end to end — class D in
+//! lann-webcrypto-guest-provider's timing-channel classification. The
+//! load-bearing enforcement is the in-guest provider's world, which never
+//! exports `ecdsa-sign`, the `rsa-sign` interfaces, or (with working
+//! implementations) the RSA-OAEP operations: a composition that
+//! needs them fails at `wac plug` time or at the operation. This crate
+//! adds a second layer — the ECDSA and RSA arms of the private-key type,
+//! and the whole `public-encryption` module (RSA-OAEP *encryption*
+//! processes the secret plaintext through the same big-integer
+//! arithmetic, so the public half is no safer in-guest), exist only on
+//! non-wasm targets (`#[cfg(not(target_family = "wasm"))]`), so nothing
+//! in a wasm build *calls* an RSA private-key or OAEP implementation.
 //!
-//! The signing code is nonetheless *compiled* for wasm: verification needs
-//! `p256`/`p384` with `features = ["ecdsa"]`, and cargo unifies features
-//! across a build, so no target-gated dependency removes it. Its absence
-//! from the final `.wasm` therefore rests on dead-code elimination. The
-//! world is the guarantee; the `cfg` is defence in depth.
+//! The ECDSA signing code is nonetheless *compiled* for wasm: verification
+//! needs `p256`/`p384` with `features = ["ecdsa"]`, and cargo unifies
+//! features across a build, so no target-gated dependency removes it. Its
+//! absence from the final `.wasm` therefore rests on dead-code
+//! elimination. The world is the guarantee; the `cfg` is defence in depth.
+//! RSA signing goes further: its backend (`aws-lc-rs`) is a target-gated
+//! dependency, absent from the wasm dependency graph entirely.
 //!
 //! # Exported material
 //!
@@ -69,6 +77,8 @@ mod kdf;
 mod mac;
 mod policy;
 mod sig;
+#[cfg(not(target_family = "wasm"))]
+mod transport;
 mod wrapping;
 
 pub use aead::AeadKeyMaterial;
@@ -83,9 +93,11 @@ pub use kdf::{
 pub use mac::MacKeyMaterial;
 pub use policy::{
     not_permitted, AeadPolicy, AgreementPolicy, CipherPolicy, DerivePolicy, InternalNoncePolicy,
-    KwPolicy, MacPolicy, SigningPolicy,
+    KwPolicy, MacPolicy, SigningPolicy, TransportPolicy,
 };
-pub use sig::{SigPublic, SigningKeyMaterial};
+pub use sig::{RsaScheme, SigPublic, SigningKeyMaterial};
+#[cfg(not(target_family = "wasm"))]
+pub use transport::{DecryptionKeyMaterial, EncryptionKeyMaterial};
 pub use wrapping::{
     derive_kw_key, unwrap_aes_gcm_internal_key, unwrap_aes_gcm_internal_key_jwk,
     unwrap_aes_gcm_key, unwrap_aes_gcm_key_jwk, unwrap_chacha_key, unwrap_chacha_key_jwk,
@@ -97,7 +109,11 @@ pub use wrapping::{
     UnwrapInputMaterial, WrapFormat, WrapInputMaterial,
 };
 #[cfg(not(target_family = "wasm"))]
-pub use wrapping::{unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8};
+pub use wrapping::{
+    unwrap_ecdsa_signing_key_jwk, unwrap_ecdsa_signing_key_pkcs8, unwrap_oaep_decryption_key_jwk,
+    unwrap_oaep_decryption_key_pkcs8, unwrap_pss_signing_key_jwk, unwrap_pss_signing_key_pkcs8,
+    unwrap_rsassa_signing_key_jwk, unwrap_rsassa_signing_key_pkcs8,
+};
 
 /// A failure of the platform's random source, surfaced separately from WIT
 /// errors so each implementation can decide what it means (the host traps,
@@ -149,6 +165,9 @@ pub const EXTENSION_ORIGIN: &str = "lann:webcrypto";
 /// The `sha1-checked` collision condition's `name`.
 pub const COLLISION_DETECTED: &str = "collision-detected";
 
+/// The `public-encryption` over-bound condition's `name`.
+pub const MESSAGE_TOO_LONG: &str = "message-too-long";
+
 impl Error {
     /// The `sha1-checked` rejecting posture's error: extension condition
     /// `("lann:webcrypto", "collision-detected")`, with the message both
@@ -158,6 +177,19 @@ impl Error {
             origin: EXTENSION_ORIGIN.into(),
             name: COLLISION_DETECTED.into(),
             message: "input carries a SHA-1 collision attack pattern".into(),
+        })
+    }
+
+    /// The `public-encryption` over-bound error on `encrypt`/`wrap`:
+    /// extension condition `("lann:webcrypto", "message-too-long")`, with
+    /// the key's plaintext bound and the rejected length in the message.
+    pub fn message_too_long(bound_bytes: usize, got_bytes: usize) -> Self {
+        Self::Extension(ExtensionError {
+            origin: EXTENSION_ORIGIN.into(),
+            name: MESSAGE_TOO_LONG.into(),
+            message: format!(
+                "this key bounds plaintexts to {bound_bytes} bytes, got {got_bytes} bytes"
+            ),
         })
     }
 }
@@ -178,7 +210,8 @@ macro_rules! impl_conversions {
         sha2: $sha2:path,
         aes: $aes:path,
         ecdsa: $ecdsa:path,
-        ecdh: $ecdh:path $(,)?
+        ecdh: $ecdh:path,
+        rsa: $rsa:path $(,)?
     ) => {
         impl From<$crate::Error> for $error {
             fn from(err: $crate::Error) -> Self {
@@ -246,6 +279,16 @@ macro_rules! impl_conversions {
                     <$ecdh>::P256 => Self::P256,
                     <$ecdh>::P384 => Self::P384,
                     <$ecdh>::P521 => Self::P521,
+                }
+            }
+        }
+
+        impl From<$rsa> for $crate::RsaVariant {
+            fn from(variant: $rsa) -> Self {
+                match variant {
+                    <$rsa>::Sha256 => Self::Sha256,
+                    <$rsa>::Sha384 => Self::Sha384,
+                    <$rsa>::Sha512 => Self::Sha512,
                 }
             }
         }
@@ -328,6 +371,28 @@ pub enum EcdhVariant {
     P521,
 }
 
+/// The WIT `rsa.rsa-variant` cases. Variant names match the generated
+/// bindings' so `{:?}` renders identically in error messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RsaVariant {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+/// The WIT `rsa.rsa-modulus` cases: the standard sizes `generate-key`
+/// serves. Deliberately absent from [`impl_conversions!`]: the type
+/// appears only in the gated `rsa-sign` interfaces, which the in-guest
+/// provider's world never references, so its bindings do not generate
+/// it — the wasmtime host converts locally instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RsaModulus {
+    M2048,
+    M3072,
+    M4096,
+    M8192,
+}
+
 /// The `algorithm-name` reported by HMAC keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub const HMAC_NAME: &str = "HMAC";
@@ -354,6 +419,18 @@ pub const ED25519_NAME: &str = "Ed25519";
 /// The `algorithm-name` reported by ECDSA keys (WebCrypto's
 /// `KeyAlgorithm.name`).
 pub const ECDSA_NAME: &str = "ECDSA";
+
+/// The `algorithm-name` reported by RSASSA-PKCS1-v1_5 keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const RSASSA_PKCS1_V15_NAME: &str = "RSASSA-PKCS1-v1_5";
+
+/// The `algorithm-name` reported by RSA-PSS keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const RSA_PSS_NAME: &str = "RSA-PSS";
+
+/// The `algorithm-name` reported by RSA-OAEP keys (WebCrypto's
+/// `KeyAlgorithm.name`).
+pub const RSA_OAEP_NAME: &str = "RSA-OAEP";
 
 /// Whether `a` and `b` are equal, in time independent of their *contents*
 /// (necessarily dependent on their lengths) — the `bytes.constant-time-equal`
