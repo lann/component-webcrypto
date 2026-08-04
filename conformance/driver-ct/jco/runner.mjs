@@ -11,8 +11,10 @@ const { values } = parseArgs({
     only: { type: "string" },
     jsonl: { type: "boolean", default: false },
     target: { type: "string", default: "jco-node" },
+    suite: { type: "string", default: "conformance-guest-ct" },
   },
 });
+const suite = values.suite;
 const missing = values.missing.split(",").filter(Boolean);
 const jsonl = values.jsonl;
 
@@ -52,7 +54,7 @@ function customSections(bytes, wanted) {
 
 async function loadInventory() {
   const records = [];
-  for (const core of ["conformance-guest-ct.core.wasm", "conformance-guest-ct.core2.wasm"]) {
+  for (const core of [`${suite}.core.wasm`, `${suite}.core2.wasm`]) {
     let bytes;
     try {
       bytes = new Uint8Array(await readFile(new URL(`./generated/${core}`, import.meta.url)));
@@ -95,12 +97,12 @@ if (jsonl) {
     JSON.stringify({
       "component-test-results": "0.1",
       target: values.target,
-      suite: { name: "conformance-guest-ct" },
+      suite: { name: suite },
       run: { segment: 0 },
     })
   );
 }
-const { tests } = await import("./generated/conformance-guest-ct.js");
+const { tests } = await import(`./generated/${suite}.js`);
 
 const cases = await tests.all();
 let passed = 0, failed = 0, skipped = 0, na = 0;

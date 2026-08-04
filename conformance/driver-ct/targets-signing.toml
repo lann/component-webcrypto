@@ -1,4 +1,6 @@
-# The host-only signing suite: wasmtime target only. ecdsa-sign is
+# The host-only signing suite: the host-backed targets (wasmtime,
+# jco-node) — the composed target cannot even link its world (ecdsa-sign
+# is class D). ecdsa-sign is
 # structural and untagged; the gated RSA features (rsa-sign,
 # rsa-oaep-decrypt) tag the suite's RSA vector cases and probes, with a
 # !feature decline case each proving the refusal on targets declaring
@@ -15,4 +17,10 @@ kind = "gated"
 kind = "gated"
 
 [targets.wasmtime-rustcrypto]
+missing-features = []
+
+[targets.jco-node]
+# Node's WebCrypto serves the gated RSA private-key mints by default —
+# the fail-closed rsa-sign/rsa-oaep-decrypt posture is a browser policy
+# (jco-browser), not Node's.
 missing-features = []
