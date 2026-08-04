@@ -5268,8 +5268,8 @@ const RSA_MODULUS_BITS = Object.assign(Object.create(null), {
  * import) — so both rules live here:
  * - the modulus length must be within the caller's admission window (the
  *   family window for verification imports, the tightened 2048–8192
- *   signing window for signing imports; the platform admits either way —
- *   a 1024-bit PKCS#8 imports on Node 24);
+ *   window for the signing and RSA-OAEP imports; the platform admits
+ *   either way — a 1024-bit PKCS#8 imports on Node 24);
  * - the public exponent must be odd and at least 3.
  * @param {CryptoKey} key
  * @param {string} what
@@ -5404,55 +5404,63 @@ export const rsaPssVerify = {
 };
 
 /**
- * The RSA signing posture: whether this host serves the gated
- * `rsassa-pkcs1-v15-sign` / `rsa-pss-sign` minting functions. `undefined`
- * means the environment default, evaluated per minting call (see
- * `requireRsaSigningServed`).
+ * The RSA private-key posture: whether this host serves the gated
+ * RSA private-key minting interfaces (`rsassa-pkcs1-v15-sign`,
+ * `rsa-pss-sign`, `rsa-oaep-decrypt`). `undefined` means the environment
+ * default, evaluated per minting call (see `requireRsaPrivateKeysServed`).
  * @type {"serve" | "decline" | undefined}
  */
-let rsaSigningPolicy;
+let rsaPrivateKeyPolicy;
 
 /**
- * Choose whether the RSA signing interfaces' minting functions are served
- * (`"serve"`), declined with `{ tag: 'unsupported' }` (`"decline"`), or
- * left to the environment default (`undefined`): serve under Node, decline
- * everywhere else — browsers and unknown runtimes fail closed.
+ * Choose whether the gated RSA private-key minting functions — the two
+ * signing interfaces' and `rsa-oaep-decrypt`'s — are served (`"serve"`),
+ * declined with `{ tag: 'unsupported' }` (`"decline"`), or left to the
+ * environment default (`undefined`): serve under Node, decline everywhere
+ * else — browsers and unknown runtimes fail closed.
  *
- * The default encodes the WIT gate's recorded ruling (`wit/rsa.wit`;
+ * The default encodes the WIT gates' recorded ruling (`wit/rsa.wit`;
  * `wit/README.md`, "Stability gates"): RSA private-key operations leak key
  * material through execution timing unless the implementation is
  * constant-time end to end, and a browser is the archetypal
  * attacker-observable timing domain — scripts, workers, and cross-origin
- * frames share the machine and a clock with the signing operation, and the
- * one WebCrypto RSA private-op key-recovery CVE to date was a browser's
+ * frames share the machine and a clock with the private-key operation, and
+ * the one WebCrypto RSA private-op key-recovery CVE to date was a browser's
  * (CVE-2023-5388, Firefox NSS). Node deployments choose their co-tenants,
  * so Node serves by default. Opting a browser in is the deployer's
  * assertion that its timing domain is not attacker-observable.
+ *
+ * One posture governs signing and decryption alike: the timing judgment is
+ * about the RSA private-key operation, not the interface reaching it.
+ * `rsa-oaep-encrypt` is outside the posture — public-key operations are
+ * secret-free, so encryption minting is served everywhere.
  * @param {"serve" | "decline" | undefined} policy
  */
-export function setRsaSigningPolicy(policy) {
+export function setRsaPrivateKeyPolicy(policy) {
   if (policy !== "serve" && policy !== "decline" && policy !== undefined) {
     throw new TypeError(
-      `RSA signing policy must be "serve", "decline", or undefined, got ${policy}`,
+      `RSA private-key policy must be "serve", "decline", or undefined, got ${policy}`,
     );
   }
-  rsaSigningPolicy = policy;
+  rsaPrivateKeyPolicy = policy;
 }
 
 /**
- * The posture check every RSA signing mint runs first. Per minting call
- * rather than at module load, so a `setRsaSigningPolicy` call takes effect
- * immediately, and the environment default reads the environment as the
- * mint sees it. The environment probe goes through a structural cast: this
- * file type-checks against the DOM lib alone (the browser-compatibility
- * charter), which does not declare `process`.
+ * The posture check every RSA private-key mint runs first. Per minting
+ * call rather than at module load, so a `setRsaPrivateKeyPolicy` call
+ * takes effect immediately, and the environment default reads the
+ * environment as the mint sees it. The environment probe goes through a
+ * structural cast: this file type-checks against the DOM lib alone (the
+ * browser-compatibility charter), which does not declare `process`.
  */
-function requireRsaSigningServed() {
+function requireRsaPrivateKeysServed() {
   const environment = /** @type {{ process?: { versions?: { node?: unknown } } }} */ (globalThis);
   const policy =
-    rsaSigningPolicy ?? (environment.process?.versions?.node ? "serve" : "decline");
+    rsaPrivateKeyPolicy ?? (environment.process?.versions?.node ? "serve" : "decline");
   if (policy !== "serve") {
-    throw errUnsupported("RSA signing is declined in this environment; see setRsaSigningPolicy");
+    throw errUnsupported(
+      "RSA private-key operations are declined in this environment; see setRsaPrivateKeyPolicy",
+    );
   }
 }
 
@@ -5485,7 +5493,7 @@ function rsaSigningAlgorithm(name, entry, modulusLength) {
  * @returns {Promise<[SigningKey, VerifyingKey]>}
  */
 async function generateRsaSigningKey(name, variant, modulus, options) {
-  requireRsaSigningServed();
+  requireRsaPrivateKeysServed();
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
   const entry = served(RSA_VARIANTS, variant);
@@ -5519,7 +5527,7 @@ async function generateRsaSigningKey(name, variant, modulus, options) {
  * @param {SigningKeyOptions} options
  */
 async function importRsaSigningKeyPkcs8(name, variant, pkcs8, options) {
-  requireRsaSigningServed();
+  requireRsaPrivateKeysServed();
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
   const entry = served(RSA_VARIANTS, variant);
@@ -5555,7 +5563,7 @@ async function importRsaSigningKeyPkcs8(name, variant, pkcs8, options) {
  * @param {SigningKeyOptions} options
  */
 async function importRsaSigningKeyJwk(name, variant, jwkText, options) {
-  requireRsaSigningServed();
+  requireRsaPrivateKeysServed();
   const policy = signingPolicy(options);
   requireSigningGrant(policy);
   const entry = served(RSA_VARIANTS, variant);
@@ -5691,4 +5699,627 @@ export const rsaPssSign = {
    */
   unwrapSigningKeyJwk: (variant, input, options) =>
     unwrapRsaSigningKeyJwk("RSA-PSS", variant, input, options),
+};
+
+/**
+ * The `decryption-key-options` resource. See `MacKeyOptions` for the state
+ * and same-provider mechanics; the decrypt/unwrap grants separate
+ * disclosure (`decrypt` returns plaintext) from minting (`unwrap` mints
+ * keys whose material the caller never sees) — see the WIT doc.
+ */
+/** @type {WeakMap<DecryptionKeyOptions, { decrypt: boolean, unwrap: boolean, extractable: boolean }>} */
+const decryptionPolicies = new WeakMap();
+
+const decryptionPolicy = stateReader(decryptionPolicies, "decryption-key-options");
+
+export class DecryptionKeyOptions {
+  constructor() {
+    decryptionPolicies.set(this, { decrypt: false, unwrap: false, extractable: false });
+  }
+
+  /** @param {boolean} allowed */
+  canDecrypt(allowed) {
+    decryptionPolicy(this).decrypt = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  canUnwrap(allowed) {
+    decryptionPolicy(this).unwrap = allowed;
+  }
+
+  /** @param {boolean} allowed */
+  extractable(allowed) {
+    decryptionPolicy(this).extractable = allowed;
+  }
+}
+
+/**
+ * The WebCrypto usages for a decryption-key mint policy, throwing
+ * `{ tag: 'not-permitted' }` for a zero-usage grant. As with AEAD keys
+ * (`aeadUsages`), the WIT grants do not map onto the platform's usages
+ * one-to-one: `unwrap` runs `subtle.decrypt` over the wrapped bytes (the
+ * `wrapping` intermediates carry serialized material host-side), so the
+ * platform key carries `decrypt` if (decrypt or unwrap) and both WIT
+ * grants are enforced host-side against the recorded policy
+ * (`decryptionKeyGrants`).
+ * @param {{ decrypt: boolean, unwrap: boolean }} policy
+ * @returns {KeyUsage[]}
+ */
+function oaepPrivateUsages(policy) {
+  return grantedUsages([["decrypt", policy.decrypt || policy.unwrap]]);
+}
+
+/**
+ * The WIT-level grants of a decryption-key mint policy, as recorded on
+ * the minted key (see `decryptionKeyGrants`).
+ * @param {{ decrypt: boolean, unwrap: boolean }} policy
+ */
+function oaepGrants(policy) {
+  return { decrypt: policy.decrypt, unwrap: policy.unwrap };
+}
+
+/**
+ * The granted operations' platform names for a decryption-key mint policy
+ * (the unwrap-path `key_ops` rule): the one-to-one names — `decrypt` →
+ * `"decrypt"`, `unwrap` → `"unwrapKey"` — like `aeadGrantedOps`, unlike
+ * `oaepPrivateUsages`, whose collapsed grant serves the platform key.
+ * @param {{ decrypt: boolean, unwrap: boolean }} policy
+ */
+function oaepGrantedOps(policy) {
+  const ops = [];
+  if (policy.decrypt) ops.push("decrypt");
+  if (policy.unwrap) ops.push("unwrapKey");
+  return ops;
+}
+
+/**
+ * The algorithm record bound to a public-encryption key at mint: the
+ * mint-bound digest, the modulus length in bits, and the RFC 8017 §7.1.1
+ * plaintext bound in bytes (`k − 2·hLen − 2`), which `encrypt`/`wrap`
+ * enforce host-side (the platform's own oversize failure is an
+ * unbranchable `OperationError`; the WIT names the condition).
+ * @typedef {object} OaepAlgorithm
+ * @property {string} hash
+ * @property {number} modulusLength
+ * @property {number} plaintextBound
+ */
+
+/**
+ * The `OaepAlgorithm` for an admitted mint.
+ * @param {{ hash: string, digestBytes: number }} entry the `RSA_VARIANTS` entry
+ * @param {number} modulusLength in bits
+ * @returns {OaepAlgorithm}
+ */
+function oaepAlgorithm(entry, modulusLength) {
+  return {
+    hash: entry.hash,
+    modulusLength,
+    plaintextBound: Math.ceil(modulusLength / 8) - 2 * entry.digestBytes - 2,
+  };
+}
+
+/**
+ * `error.extension` — origin `"lann:webcrypto"`, name `"message-too-long"`
+ * — the public-encryption kind's named plaintext-bound condition (see
+ * `wit/encryption.wit`): the signal to switch to hybrid wrapping.
+ * @param {string} what
+ * @param {number} length in bytes
+ * @param {OaepAlgorithm} algorithm
+ */
+function errMessageTooLong(what, length, algorithm) {
+  return {
+    tag: "extension",
+    val: {
+      origin: "lann:webcrypto",
+      name: "message-too-long",
+      message: `${what} is ${length} bytes; this key's RSA-OAEP bound is ${algorithm.plaintextBound}`,
+    },
+  };
+}
+
+/**
+ * The WebCrypto `RsaOaepParams` for a per-call label (`undefined` = none;
+ * OAEP's default label is the empty string, so an absent label and an
+ * empty one produce interchangeable ciphertexts).
+ * @param {Uint8Array | undefined} label
+ * @returns {RsaOaepParams}
+ */
+function oaepParams(label) {
+  return label === undefined
+    ? { name: "RSA-OAEP" }
+    : { name: "RSA-OAEP", label: asBufferSource(label) };
+}
+
+/**
+ * The shared `decrypt`/`unwrap` body: run `subtle.decrypt` and collapse
+ * *every* platform failure to the detail-free
+ * `{ tag: 'authentication-failed' }`. This is RFC 8017's single-verdict
+ * rule, which the WIT pins (`wit/encryption.wit`): a wrong-length
+ * ciphertext, damaged padding, and a mismatched label must be
+ * indistinguishable — deliberately not the AEAD kinds' `decryptFailure`,
+ * whose classification of non-`OperationError` failures is exactly the
+ * verdict distinction this kind's contract closes off.
+ * @param {CryptoKey} key
+ * @param {Uint8Array | undefined} label
+ * @param {Uint8Array} ciphertext
+ */
+async function oaepDecrypt(key, label, ciphertext) {
+  let result;
+  try {
+    result = await subtle.decrypt(oaepParams(label), key, asBufferSource(ciphertext));
+  } catch {
+    throw errAuthenticationFailed();
+  }
+  return new Uint8Array(result);
+}
+
+/**
+ * The `encryption-key` resource: a public RSA-OAEP `CryptoKey` plus the
+ * algorithm record bound at mint. Secret-free to hold: `encrypt` and
+ * `wrap` are unconditional (no grants), and the exports have no
+ * extractability gate. Instances are minted by the `rsa-oaep-encrypt`
+ * interface functions below, or paired with a `DecryptionKey` by
+ * `generate-key`.
+ */
+export class EncryptionKey {
+  #key;
+  #algorithm;
+
+  /**
+   * @param {CryptoKey} key
+   * @param {OaepAlgorithm} algorithm the mint-bound algorithm record
+   */
+  constructor(key, algorithm) {
+    this.#key = key;
+    this.#algorithm = algorithm;
+  }
+
+  /**
+   * Encrypt `plaintext` under this key, binding `label` into the OAEP
+   * padding (WebCrypto's `RsaOaepParams.label`; `undefined` = none). A
+   * plaintext above the key's bound throws the named
+   * `{ tag: 'extension' }` condition (`errMessageTooLong`) before the
+   * platform is asked.
+   * @param {Uint8Array | undefined} label
+   * @param {Uint8Array} plaintext
+   */
+  async encrypt(label, plaintext) {
+    if (plaintext.length > this.#algorithm.plaintextBound) {
+      throw errMessageTooLong("plaintext", plaintext.length, this.#algorithm);
+    }
+    return new Uint8Array(
+      await platformCall("RSA-OAEP encrypt", () =>
+        subtle.encrypt(oaepParams(label), this.#key, asBufferSource(plaintext)),
+      ),
+    );
+  }
+
+  /**
+   * Encrypt serialized key material, exactly as `encrypt` encrypts a
+   * plaintext: the serialized bytes must fit the key's bound, else the
+   * same named `{ tag: 'extension' }` condition. `input` is consumed
+   * first, on failure as on success (the WIT contract).
+   * @param {Uint8Array | undefined} label
+   * @param {WrapInput} input
+   * @returns {Promise<Uint8Array>}
+   */
+  async wrap(label, input) {
+    const { bytes } = consumeWrapInput(input);
+    if (bytes.length > this.#algorithm.plaintextBound) {
+      throw errMessageTooLong("wrapped key material", bytes.length, this.#algorithm);
+    }
+    return new Uint8Array(
+      await platformCall("RSA-OAEP wrap", () =>
+        subtle.encrypt(oaepParams(label), this.#key, asBufferSource(bytes)),
+      ),
+    );
+  }
+
+  /** Projections of the platform key and the mint-bound record. */
+  algorithmName() {
+    return this.#key.algorithm.name;
+  }
+
+  algorithmHash() {
+    return this.#algorithm.hash;
+  }
+
+  algorithmLength() {
+    return this.#algorithm.modulusLength;
+  }
+
+  /**
+   * RSA public keys have no raw form (see `VerifyingKey.exportKeyRaw`).
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeyRaw() {
+    throw errUnsupported("RSA public keys have no raw form");
+  }
+
+  /**
+   * The SubjectPublicKeyInfo form. No extractability gate (see
+   * `VerifyingKey.exportKeySpki` for the residual fallibility).
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeySpki() {
+    return new Uint8Array(
+      await platformCall("spki key export", () => subtle.exportKey("spki", this.#key)),
+    );
+  }
+
+  /**
+   * The public RSA JWK, material members only (`kty`, `n`, `e`) per the
+   * package-wide JWK contract.
+   */
+  async exportKeyJwk() {
+    const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", this.#key));
+    return JSON.stringify({ kty: jwk.kty, n: jwk.n, e: jwk.e });
+  }
+}
+
+/**
+ * The usage grants recorded at mint for each `decryption-key` (the
+ * `aeadKeyGrants` pattern: both `decrypt` and `unwrap` run
+ * `subtle.decrypt`, so the platform usages cannot carry the WIT grants
+ * one-to-one — see `oaepPrivateUsages` — and they are enforced host-side
+ * against this record).
+ * @type {WeakMap<DecryptionKey, { decrypt: boolean, unwrap: boolean }>}
+ */
+const decryptionKeyGrants = new WeakMap();
+
+const decryptionGrantsOf = stateReader(decryptionKeyGrants, "decryption-key");
+
+/**
+ * The `decryption-key` resource: a private RSA-OAEP `CryptoKey`, the
+ * mint-bound algorithm record, and the recorded WIT grants. The WIT
+ * `extractable` flag is carried by the platform key itself (passed
+ * through at import/generation), so the platform enforces
+ * non-extractability; instances are minted only by the `rsa-oaep-decrypt`
+ * interface functions below.
+ */
+export class DecryptionKey extends keyResourceTail({}) {
+  #algorithm;
+
+  /**
+   * @param {CryptoKey} privateKey
+   * @param {OaepAlgorithm} algorithm the mint-bound algorithm record
+   * @param {{ decrypt: boolean, unwrap: boolean }} grants
+   */
+  constructor(privateKey, algorithm, grants) {
+    super(privateKey);
+    this.#algorithm = algorithm;
+    decryptionKeyGrants.set(this, grants);
+  }
+
+  /**
+   * Decrypt a ciphertext produced by the matching public key under the
+   * same `label`. Throws `{ tag: 'not-permitted' }` without the `decrypt`
+   * grant; every decryption failure is the one detail-free
+   * `{ tag: 'authentication-failed' }` (see `oaepDecrypt`).
+   * @param {Uint8Array | undefined} label
+   * @param {Uint8Array} ciphertext
+   */
+  async decrypt(label, ciphertext) {
+    if (!this.canDecrypt()) throw notPermitted("decrypt");
+    return oaepDecrypt(platformKeyOf(this), label, ciphertext);
+  }
+
+  /**
+   * Decrypt wrapped key material into an `unwrap-input` for a typed
+   * unwrap mint, eagerly (the bytes never reach the guest). Throws
+   * `{ tag: 'not-permitted' }` without the `unwrap` grant; failures are
+   * otherwise `decrypt`'s.
+   * @param {Uint8Array | undefined} label
+   * @param {Uint8Array} ciphertext
+   * @returns {Promise<UnwrapInput>}
+   */
+  async unwrap(label, ciphertext) {
+    if (!this.canUnwrap()) throw notPermitted("unwrap");
+    return new UnwrapInput(MINT, await oaepDecrypt(platformKeyOf(this), label, ciphertext));
+  }
+
+  /** Projections of the platform key and the mint-bound record. */
+  algorithmName() {
+    return platformKeyOf(this).algorithm.name;
+  }
+
+  algorithmHash() {
+    return this.#algorithm.hash;
+  }
+
+  algorithmLength() {
+    return this.#algorithm.modulusLength;
+  }
+
+  /** The usage grants: the mint policy recorded in `decryptionKeyGrants`. */
+  canDecrypt() {
+    return decryptionGrantsOf(this).decrypt;
+  }
+
+  canUnwrap() {
+    return decryptionGrantsOf(this).unwrap;
+  }
+
+  /**
+   * The private key as a full-CRT RSA JWK, material members only, behind
+   * the extractability gate (checked on the `CryptoKey` itself, like
+   * `exportRawGated`).
+   */
+  async exportKeyJwk() {
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
+    const jwk = await platformCall("jwk key export", () => subtle.exportKey("jwk", privateKey));
+    return JSON.stringify({
+      kty: jwk.kty,
+      n: jwk.n,
+      e: jwk.e,
+      d: jwk.d,
+      p: jwk.p,
+      q: jwk.q,
+      dp: jwk.dp,
+      dq: jwk.dq,
+      qi: jwk.qi,
+    });
+  }
+
+  /**
+   * The PKCS#8 form, behind the same gate.
+   * @returns {Promise<Uint8Array>}
+   */
+  async exportKeyPkcs8() {
+    const privateKey = platformKeyOf(this);
+    if (!privateKey.extractable) throw errNotExtractable();
+    return new Uint8Array(
+      await platformCall("pkcs8 key export", () => subtle.exportKey("pkcs8", privateKey)),
+    );
+  }
+
+  /**
+   * The private JWK serialization as a `wrap-input` (see the `wrapping`
+   * interface), behind the same extractability gate as `exportKeyJwk`.
+   */
+  async toWrapInputJwk() {
+    return new WrapInput(MINT, "jwk", utf8Encoder.encode(await this.exportKeyJwk()));
+  }
+
+  /**
+   * The PKCS#8 serialization as a `wrap-input`, behind the same gate.
+   */
+  async toWrapInputPkcs8() {
+    return new WrapInput(MINT, "pkcs8", await this.exportKeyPkcs8());
+  }
+}
+
+/** The `lann:webcrypto/public-encryption` interface: its resource classes. */
+export const publicEncryption = { EncryptionKey, DecryptionKey, DecryptionKeyOptions };
+
+/**
+ * The RSA-OAEP interfaces' modulus admission window, in bits (inclusive),
+ * on both halves: encryption creates *future* artifacts, so unlike
+ * signature verification there is no legacy tier below 2048 (see
+ * `wit/rsa.wit`).
+ */
+const RSA_OAEP_MIN_BITS = 2048;
+const RSA_OAEP_MAX_BITS = 8192;
+
+/**
+ * Import an RSA-OAEP public key of the declared variant from a
+ * SubjectPublicKeyInfo. The AlgorithmIdentifier must be the
+ * `rsaEncryption` form (see `requireRsaEncryptionSpki`); the platform
+ * validates the DER, and the family admission checks run on the imported
+ * key's metadata at the OAEP window (`rsaAdmittedModulusLength`; the
+ * platform admits wider — a 1024-bit SPKI imports on Node 24).
+ * @param {string} variant
+ * @param {Uint8Array} spki
+ */
+async function importOaepEncryptionKeySpki(variant, spki) {
+  const entry = served(RSA_VARIANTS, variant);
+  requireRsaEncryptionSpki(spki);
+  const key = await importPlatformKey(
+    "RSA-OAEP spki",
+    "spki",
+    spki,
+    { name: "RSA-OAEP", hash: entry.hash },
+    true,
+    ["encrypt"],
+  );
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    "RSA-OAEP spki",
+    RSA_OAEP_MIN_BITS,
+    RSA_OAEP_MAX_BITS,
+  );
+  return new EncryptionKey(key, oaepAlgorithm(entry, modulusLength));
+}
+
+/**
+ * Import an RSA-OAEP public key of the declared variant from an RSA
+ * public JWK — a platform pass-through of the material members; the
+ * platform owns the kty/alg/ext validation, including the
+ * alg-against-variant rule the WIT pins (`"RSA-OAEP-256"`/`-384`/`-512`;
+ * an `alg` that disagrees with the requested hash fails the platform
+ * import with `DataError`). Strictness of the base64url members is pinned
+ * host-side, and the OAEP window runs on the imported key's metadata.
+ * @param {string} variant
+ * @param {string} jwkText
+ */
+async function importOaepEncryptionKeyJwk(variant, jwkText) {
+  const entry = served(RSA_VARIANTS, variant);
+  const jwk = jwkMaterial(jwkText);
+  requireStrictBase64url(jwk.n);
+  requireStrictBase64url(jwk.e);
+  const key = await importPlatformKeyJwk(
+    "RSA-OAEP public JWK",
+    jwk,
+    { name: "RSA-OAEP", hash: entry.hash },
+    true,
+    ["encrypt"],
+  );
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    "RSA-OAEP public JWK",
+    RSA_OAEP_MIN_BITS,
+    RSA_OAEP_MAX_BITS,
+  );
+  return new EncryptionKey(key, oaepAlgorithm(entry, modulusLength));
+}
+
+/** The `lann:webcrypto/rsa-oaep-encrypt` interface. */
+export const rsaOaepEncrypt = {
+  importEncryptionKeySpki: importOaepEncryptionKeySpki,
+  importEncryptionKeyJwk: importOaepEncryptionKeyJwk,
+};
+
+/**
+ * Generate a fresh RSA-OAEP key pair of the declared variant and modulus
+ * length, returning `[decryption, encryption]`. The public exponent is
+ * 65537 (the WIT fixes it; not a parameter). The platform pair is
+ * generated with `["encrypt", "decrypt"]` — WebCrypto splits them so the
+ * public key carries `encrypt` and the private key `decrypt` — and the
+ * WIT grants are enforced host-side (see `oaepPrivateUsages`).
+ * @param {string} variant
+ * @param {string} modulus
+ * @param {DecryptionKeyOptions} options
+ * @returns {Promise<[DecryptionKey, EncryptionKey]>}
+ */
+async function generateOaepKey(variant, modulus, options) {
+  requireRsaPrivateKeysServed();
+  const policy = decryptionPolicy(options);
+  oaepPrivateUsages(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const modulusLength = served(RSA_MODULUS_BITS, modulus);
+  const pair = await platformCall("RSA-OAEP key generation", () =>
+    subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        hash: entry.hash,
+        modulusLength,
+        publicExponent: new Uint8Array([1, 0, 1]),
+      },
+      policy.extractable,
+      ["encrypt", "decrypt"],
+    ),
+  );
+  const algorithm = oaepAlgorithm(entry, modulusLength);
+  return [
+    new DecryptionKey(pair.privateKey, algorithm, oaepGrants(policy)),
+    new EncryptionKey(pair.publicKey, algorithm),
+  ];
+}
+
+/**
+ * Import an RSA-OAEP decryption key of the declared variant from a PKCS#8
+ * PrivateKeyInfo. The platform validates the DER — including the
+ * rsaEncryption-only algorithm rule the WebCrypto import steps mandate —
+ * and the OAEP window runs on the imported key's metadata
+ * (`rsaAdmittedModulusLength`; the platform admits wider).
+ * @param {string} variant
+ * @param {Uint8Array} pkcs8
+ * @param {DecryptionKeyOptions} options
+ */
+async function importOaepDecryptionKeyPkcs8(variant, pkcs8, options) {
+  requireRsaPrivateKeysServed();
+  const policy = decryptionPolicy(options);
+  const usages = oaepPrivateUsages(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const key = await importPlatformKey(
+    "RSA-OAEP pkcs8",
+    "pkcs8",
+    pkcs8,
+    { name: "RSA-OAEP", hash: entry.hash },
+    policy.extractable,
+    usages,
+  );
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    "RSA-OAEP pkcs8",
+    RSA_OAEP_MIN_BITS,
+    RSA_OAEP_MAX_BITS,
+  );
+  return new DecryptionKey(key, oaepAlgorithm(entry, modulusLength), oaepGrants(policy));
+}
+
+/**
+ * Import an RSA-OAEP decryption key of the declared variant from an RSA
+ * private JWK — a platform pass-through of the material members. The
+ * platform owns the kty/alg/ext validation (including the
+ * alg-against-variant rule, as on the `-encrypt` path) and the full-CRT
+ * requirement the WIT pins: a `d`-only or partial-CRT private JWK fails
+ * the platform import with `DataError`. Strictness of the base64url
+ * members is pinned host-side, and the OAEP window runs on the imported
+ * key's metadata.
+ * @param {string} variant
+ * @param {string} jwkText
+ * @param {DecryptionKeyOptions} options
+ */
+async function importOaepDecryptionKeyJwk(variant, jwkText, options) {
+  requireRsaPrivateKeysServed();
+  const policy = decryptionPolicy(options);
+  const usages = oaepPrivateUsages(policy);
+  const entry = served(RSA_VARIANTS, variant);
+  const jwk = jwkMaterial(jwkText);
+  for (const member of ["n", "e", "d", "p", "q", "dp", "dq", "qi"]) {
+    requireStrictBase64url(jwk[member]);
+  }
+  const key = await importPlatformKeyJwk(
+    "RSA-OAEP private JWK",
+    jwk,
+    { name: "RSA-OAEP", hash: entry.hash },
+    policy.extractable,
+    usages,
+  );
+  if (key.type !== "private") {
+    throw errInvalidKey("RSA private JWK must carry `d` and the CRT members");
+  }
+  const modulusLength = rsaAdmittedModulusLength(
+    key,
+    "RSA-OAEP private JWK",
+    RSA_OAEP_MIN_BITS,
+    RSA_OAEP_MAX_BITS,
+  );
+  return new DecryptionKey(key, oaepAlgorithm(entry, modulusLength), oaepGrants(policy));
+}
+
+/**
+ * Mint an RSA-OAEP decryption key of the declared variant from unwrapped
+ * key material read as a PKCS#8 PrivateKeyInfo (see
+ * `unwrapEd25519SigningKeyPkcs8` for the consume-first and redaction
+ * mechanics).
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {DecryptionKeyOptions} options
+ */
+async function unwrapOaepDecryptionKeyPkcs8(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  return redactingInvalidKey("unwrapped RSA-OAEP pkcs8", () =>
+    importOaepDecryptionKeyPkcs8(variant, bytes, options),
+  );
+}
+
+/**
+ * Mint an RSA-OAEP decryption key of the declared variant from unwrapped
+ * key material read as an RSA private JWK: the unwrap-path
+ * `use`/`key_ops` checks (see `unwrappedJwk`; the granted operations'
+ * platform names come from `oaepGrantedOps`), then the import path.
+ * @param {string} variant
+ * @param {UnwrapInput} input
+ * @param {DecryptionKeyOptions} options
+ */
+async function unwrapOaepDecryptionKeyJwk(variant, input, options) {
+  const { bytes } = consumeUnwrapInput(input);
+  const policy = decryptionPolicy(options);
+  oaepPrivateUsages(policy);
+  const jwk = unwrappedJwk(bytes, "enc", oaepGrantedOps(policy));
+  return redactingInvalidKey("unwrapped RSA-OAEP private JWK", () =>
+    importOaepDecryptionKeyJwk(variant, jwk, options),
+  );
+}
+
+/** The `lann:webcrypto/rsa-oaep-decrypt` interface. */
+export const rsaOaepDecrypt = {
+  generateKey: generateOaepKey,
+  importDecryptionKeyPkcs8: importOaepDecryptionKeyPkcs8,
+  importDecryptionKeyJwk: importOaepDecryptionKeyJwk,
+  unwrapDecryptionKeyPkcs8: unwrapOaepDecryptionKeyPkcs8,
+  unwrapDecryptionKeyJwk: unwrapOaepDecryptionKeyJwk,
 };

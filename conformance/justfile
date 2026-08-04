@@ -55,12 +55,14 @@ _artifacts: build-guest build-signing-guest build-composed _jco-transpiles
 _jco-transpiles: build-guest build-signing-guest
     cd adapters/jco && npm run transpile && npm run transpile:signing
 
-# The class-D negative-composition gate: composing a consumer whose world
-# imports `ecdsa-sign` (the signing guest) with the in-guest provider must
-# fail. This is what makes "class D is enforced structurally" a fact rather
-# than a claim — without it, the provider could start exporting `ecdsa-sign`
-# and every other check would still report green, because targets.toml
-# excludes the composed target from the signing suite by declaration.
+# The class-D negative-composition gate, in two halves.
+#
+# First: composing a consumer whose world imports `ecdsa-sign` (the signing
+# guest) with the in-guest provider must fail. This is what makes "class D
+# is enforced structurally" a fact rather than a claim — without it, the
+# provider could start exporting `ecdsa-sign` and every other check would
+# still report green, because targets.toml excludes the composed target
+# from the signing suite by declaration.
 #
 # The composition fails on a resource-type mismatch, not on an unsatisfied
 # import: `wac plug` leaves imports it cannot satisfy in place (that is how
@@ -72,15 +74,25 @@ _jco-transpiles: build-guest build-signing-guest
 # interface whose resource the withheld minting interface mints — true of
 # every minting interface in the package today.
 #
-# Matching the message on that interface name is load-bearing: a gate that
+# Second: the same assertion for `rsa-oaep-decrypt`, which the signing
+# guest cannot prove — its composition already fails on `ecdsa-sign`, so a
+# provider that wrongly started exporting the OAEP decryption mints would
+# still fail that composition for an unrelated reason. A dummy component
+# of the minimal world importing only `rsa-oaep-decrypt`
+# (class-d/oaep-probe/wit; no Rust crate — `wasm-tools component embed
+# --dummy` stubs the core) must fail the same way, on the
+# `public-encryption` resources the provider's kind-only export rebinds.
+#
+# Matching each message on its interface name is load-bearing: a gate that
 # accepted any nonzero exit would also pass on a missing artifact or a
 # changed `wac` CLI.
 class-d: build-signing-guest build-guest-provider
     #!/usr/bin/env bash
     set -uo pipefail
+    provider='{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm'
     output=$(wac plug \
         signing-guest/build/conformance-signing-guest.component.wasm \
-        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
+        --plug "$provider" \
         -o '{{root}}/target/class-d-composition.wasm' 2>&1)
     status=$?
     if [ $status -eq 0 ]; then
@@ -94,6 +106,28 @@ class-d: build-signing-guest build-guest-provider
         exit 1
     fi
     echo "class-D gate: the signing guest does not compose with the in-guest provider (ecdsa-sign is not exported)."
+    set -e
+    wasm-tools component embed --dummy --features rsa-oaep-decrypt \
+        -w oaep-probe class-d/oaep-probe/wit \
+        -o '{{root}}/target/class-d-oaep-probe.core.wasm'
+    wasm-tools component new '{{root}}/target/class-d-oaep-probe.core.wasm' \
+        -o '{{root}}/target/class-d-oaep-probe.wasm'
+    set +e
+    output=$(wac plug '{{root}}/target/class-d-oaep-probe.wasm' \
+        --plug "$provider" \
+        -o '{{root}}/target/class-d-oaep-composition.wasm' 2>&1)
+    status=$?
+    if [ $status -eq 0 ]; then
+        echo "class-D gate: composing the rsa-oaep-decrypt probe with the in-guest provider SUCCEEDED." >&2
+        echo "The provider must not export lann:webcrypto/rsa-oaep-decrypt (rust/guest-provider/wit/world.wit)." >&2
+        exit 1
+    fi
+    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/rsa-oaep-decrypt'; then
+        echo "class-D gate: the OAEP probe composition failed, but not on rsa-oaep-decrypt:" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    echo "class-D gate: the rsa-oaep-decrypt probe does not compose with the in-guest provider (the OAEP decryption mints are not exported)."
 
 # Serve the conformance results viewer (a collapsing cross-target matrix
 # plus a live "test this browser" run of the suites) after a full

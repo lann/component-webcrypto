@@ -63,4 +63,12 @@ world provider {
     export lann:webcrypto/ecdsa-verify@0.1.0;
     export lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
     export lann:webcrypto/rsa-pss-verify@0.1.0;
+    // The kind alone: neither RSA-OAEP minting interface is exported —
+    // decryption is class D, and encryption runs secret plaintext through
+    // non-constant-time bignum arithmetic, so the kind has no
+    // in-guest-servable half. The export exists so that compositions
+    // importing `rsa-oaep-encrypt` or `rsa-oaep-decrypt` fail at
+    // `wac plug` time (see the crate README, "What the failure looks
+    // like"); its key resources can never be minted here.
+    export lann:webcrypto/public-encryption@0.1.0;
 }

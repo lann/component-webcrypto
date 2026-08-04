@@ -45,6 +45,7 @@ export const EXPECTED = {
   "sign_verify/ecdsa": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 324 },
   "sign_verify/rsa_pss": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 144 },
   "sign_verify/rsa_pkcs": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 68 },
+  "encrypt_decrypt/rsa_oaep": { inPassed: 0, inFailed: 0, outPassed: 1, outFailed: 180 },
   "import_export/okp_importKey (Ed25519)": { inPassed: 72, inFailed: 0, outPassed: 0, outFailed: 0 },
   "import_export/okp_importKey_failures (Ed25519)": { inPassed: 530, inFailed: 0, outPassed: 0, outFailed: 0 },
   "generateKey/successes (Ed25519)": { inPassed: 36, inFailed: 0, outPassed: 0, outFailed: 0 },

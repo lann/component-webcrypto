@@ -29,6 +29,13 @@ sha1-checked = []
 # (see wit/README.md, "Timing-channel policy"), so the composed in-guest
 # target cannot run a consumer that enables this.
 rsa-sign = []
+# The `@unstable`-gated `rsa-oaep-decrypt` interface (see wit/README.md,
+# "Stability gates"). Off by default, like `rsa-sign` and for the same
+# reason: enabling it adds the import to the generated world, and
+# providers in attacker-observable timing domains do not serve RSA
+# private-key operations (see wit/README.md, "Timing-channel policy"), so
+# the composed in-guest target cannot run a consumer that enables this.
+rsa-oaep-decrypt = []
 
 [dependencies]
 # `async` pulls in the component-model `stream`/`future` runtime support and

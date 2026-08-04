@@ -166,7 +166,7 @@ function classDGatedInSubset() {
  * sign_verify/{rsa_pss,rsa_pkcs}: every subtest — the verification rows
  * included — runs `rsa.js`'s importVectorKeys, which imports the vector's
  * private pkcs8 fixture alongside its public one, and RSA private-key
- * import is unserved (the package's RSA surface is verification-only —
+ * import is unserved (the package's RSA signature surface is verification-only —
  * see the shim header). Every subtest therefore fails at its import step,
  * registering under the synthetic "importVectorKeys step:" name, so the
  * subset stays empty and the groups meter the unserved private side, like
@@ -176,6 +176,24 @@ function classDGatedInSubset() {
  * "setup", pinned as `outPassed`.
  */
 function rsaSignVerifyInSubset() {
+  return false;
+}
+
+/**
+ * encrypt_decrypt/rsa_oaep: every subtest — the encryption rows included —
+ * runs importVectorKeys, which imports both halves of the vector's
+ * RSA-OAEP pair, and the whole family is unserved by composition: the
+ * in-guest provider this shim composes with withholds both minting
+ * interfaces (`rsa-oaep-decrypt` is class D, and OAEP encryption has no
+ * secret-free half — see the shim header), so the world cannot import
+ * either. Every subtest therefore fails at its import step, registering
+ * under the synthetic "importVectorKeys step:" name, so the subset stays
+ * empty and the group meters the unserved family, like sign_verify/ecdsa
+ * above. The decrypt path's behavioral assertions (Wycheproof) live in
+ * the conformance suites. The one passing test is the assertion-free
+ * "setup", pinned as `outPassed`.
+ */
+function rsaOaepInSubset() {
   return false;
 }
 
@@ -606,6 +624,12 @@ export const GROUPS = [
     module: "group-rsa-pkcs.js",
     start: (ns) => ns.run_test(),
     inSubset: rsaSignVerifyInSubset,
+  },
+  {
+    name: "encrypt_decrypt/rsa_oaep",
+    module: "group-rsa-oaep.js",
+    start: (ns) => ns.run_test(),
+    inSubset: rsaOaepInSubset,
   },
   {
     name: "import_export/okp_importKey (Ed25519)",

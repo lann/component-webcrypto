@@ -77,11 +77,13 @@
 //     family contract's modulus window, 1024–16384 bits inclusive.
 //     An out-of-window key throws `DataError` (the WIT's `invalid-key`)
 //     where a platform's own `crypto.subtle` may admit it.
-//   - Unserved: the RSA private side. Private-key import ("pkcs8" and
+//   - Unserved: the RSA private side of the signature algorithms.
+//     Private-key import ("pkcs8" and
 //     JWKs carrying `d`), `sign`, `generateKey`, and unwrapping to an
-//     RSA key throw `NotSupportedError`: the package's RSA surface is
-//     verification-only (`rsassa-pkcs1-v15-verify`/`rsa-pss-verify`
-//     mint public keys and nothing else). RSA private-key operations
+//     RSA key throw `NotSupportedError`: the package's RSA signature
+//     surface is verification-only (`rsassa-pkcs1-v15-verify`/
+//     `rsa-pss-verify` mint public keys and nothing else). RSA
+//     private-key operations
 //     are class D, so even an additive signing interface would be
 //     withheld by the in-guest provider this library composes with,
 //     like `ecdsa-sign` below.
@@ -116,6 +118,15 @@
 //     composition at `wac plug` time. `NotSupportedError`, with the
 //     reason in the message. `unwrapKey` to an ECDSA private key is the
 //     same case.
+//   - Unserved by composition: the RSA-OAEP family, whole. The
+//     interfaces exist (`rsa-oaep-encrypt`, and the gated
+//     `rsa-oaep-decrypt`), but the in-guest provider this library
+//     composes with withholds both — decryption is class D, and OAEP
+//     encryption has no secret-free half (the plaintext is the secret,
+//     unlike signature verification's inputs) — so the world cannot
+//     import either without failing every composition at `wac plug`
+//     time. `importKey`, `generateKey`, `encrypt`/`decrypt`, and
+//     wrapping or unwrapping with RSA-OAEP throw `NotSupportedError`.
 //   - Additive surface, not a deviation: `subtle.digest("SHA-1")` is
 //     served through the package's `sha1-checked` interface (sha1dc
 //     collision detection; the package never serves plain SHA-1), in the
@@ -1740,7 +1751,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     }
 
     // A JWK carrying `d` and the PKCS#8 format are private imports —
-    // unserved: the package's RSA surface is verification-only (see the
+    // unserved: the package's RSA signature surface is verification-only (see the
     // header).
     /** @type {JsonWebKey | undefined} */
     let jwk;
@@ -1753,7 +1764,7 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
     if (format === "pkcs8" || jwk?.d !== undefined) {
       throw dom(
         "NotSupportedError",
-        "RSA private-key import is not served: the package's RSA surface is verification-only",
+        "RSA private-key import is not served: the package's RSA signature surface is verification-only",
       );
     }
     if (format !== "jwk" && format !== "spki") {
@@ -1985,7 +1996,7 @@ async function generateKey(algorithm, extractable, keyUsages) {
     // surface is verification-only (see the header).
     throw dom(
       "NotSupportedError",
-      `${alg.name} key generation is not served: the package's RSA surface is verification-only`,
+      `${alg.name} key generation is not served: the package's RSA signature surface is verification-only`,
     );
   }
 
@@ -2152,7 +2163,7 @@ async function sign(algorithm, key, data) {
     }
     throw dom(
       "NotSupportedError",
-      `${alg.name} signing is not served: the package's RSA surface is verification-only`,
+      `${alg.name} signing is not served: the package's RSA signature surface is verification-only`,
     );
   }
   if (alg.name !== "HMAC") {
@@ -2690,7 +2701,7 @@ async function mintUnwrapped(target, format, unwrapOnce, extractable, usageSeque
     // header's deviations list).
     throw dom(
       "NotSupportedError",
-      `unwrapping ${target.name} keys is not served: the package's RSA surface is verification-only`,
+      `unwrapping ${target.name} keys is not served: the package's RSA signature surface is verification-only`,
     );
   }
 

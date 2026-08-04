@@ -10,7 +10,8 @@ item; everything shared lives here.
   variant). Structural types carry no host-side identity, so one composition
   can share them across components.
 - **Primitive-kind interfaces** (`mac`, `aead`, `aead-internal-nonce`,
-  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`) own the
+  `digest`, `signature`, `derivation`, `key-agreement`, `key-wrap`,
+  `public-encryption`) own the
   algorithm-agnostic resources.
   Operations hang off key resources. Adding an algorithm does not change
   these interfaces. The `wrapping` interface holds the provider-held
@@ -18,7 +19,8 @@ item; everything shared lives here.
   `derivation` holds `derive-input`.
 - **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `aes-kw`,
   `chacha20-poly1305`, `sha2`, `hkdf`, `ed25519-*`, `ecdsa-*`, `x25519`,
-  `ecdh`, `rsassa-pkcs1-v15-*`, `rsa-pss-*`) only mint keys, bound
+  `ecdh`, `rsassa-pkcs1-v15-*`, `rsa-pss-*`, `rsa-oaep-*`) only mint
+  keys, bound
   to their algorithm at creation. A key can therefore never be used with
   the wrong algorithm.
 
@@ -338,6 +340,17 @@ The gates:
   nothing external pending), but platform WebCrypto carries no sha1dc,
   so platform-backed providers can never serve it. Exits when optional
   imports are expressible.
+- `@unstable(feature = rsa-oaep-decrypt)` on `rsa-oaep-decrypt` —
+  consent, the same contract as `rsa-sign` below, with the sharpest
+  factual basis in the package: decryption is the operation the RSA
+  timing-attack lineage targets, and the one WebCrypto RSA private-op
+  CVE to date was a browser's OAEP decryption. `rsa-oaep-encrypt` is
+  deliberately ungated: encrypt-side timing has neither a long-lived
+  secret nor a repetition axis (the per-call OAEP seed randomizes the
+  exponentiated operand), the exponent is public, and the mandatory
+  use cases (cloud-KMS key import, TPM credential activation) are
+  encrypt-only. Its in-guest absence is structural, like
+  `ecdsa-sign`'s.
 - `@unstable(feature = rsa-sign)` on `rsassa-pkcs1-v15-sign` and
   `rsa-pss-sign` — consent, primarily. RSA private-key operations leak
   key material through timing unless constant-time end to end, the
@@ -502,6 +515,20 @@ short:
   `generate-key` narrows further to an enum of the four standard sizes
   with the exponent fixed at 65537 — existing keys are facts an import
   must meet; new keys are choices the API need not offer badly.
+- **RSA-OAEP's windows have no legacy tier, and its failures are
+  deliberately shapeless.** Admission is 2048–8192 bits on both halves:
+  signature verification kept a 1024-bit floor because verifying judges
+  *past* artifacts, but encryption creates *future* ones — encrypting a
+  fresh secret to a weak key is new exposure, not legacy tolerance.
+  Every decryption failure is the one detail-free
+  `error.authentication-failed` (wrong-length ciphertext, damaged
+  padding, mismatched label — indistinguishable, per RFC 8017: a
+  distinguishable verdict is a padding-oracle amplifier), and the
+  encrypt-side plaintext bound fails with the named extension condition
+  `message-too-long`, which callers may branch on to fall back to
+  hybrid wrapping. RSAES-PKCS#1 v1.5 encryption is never a member of
+  this package: it is the padding mode the timing-attack lineage exists
+  about, and the omission WebCrypto itself is credited for.
 - **RSA private-key operations are lineage-pinned where this package
   controls the implementation.** Only one implementation family has
   ever passed side-channel verification for RSA private operations

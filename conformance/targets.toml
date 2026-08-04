@@ -50,6 +50,9 @@ kind = "gated"
 [features.rsa-sign]
 kind = "gated"
 
+[features.rsa-oaep-decrypt]
+kind = "gated"
+
 [features.ecdsa-sign]
 kind = "structural"
 
@@ -93,11 +96,13 @@ missing-features = ["xchacha20-poly1305", "sha1-checked"]
 # The same host module as jco-node, in headless Chromium — whose WebCrypto
 # serves no ChaCha20-Poly1305 yet (the host feature-detects it per call, so
 # no declaration lives in the module and this line follows the browser's
-# capability). The host also declines the gated RSA signing mints outside
-# Node by default (`rsa-sign`): a browser is an attacker-observable timing
-# domain, so it fails closed unless the deployer opts in with
-# `setRsaSigningPolicy("serve")` — the adapter runs the default.
-missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign"]
+# capability). The host also declines the gated RSA private-key mints —
+# the signing interfaces (`rsa-sign`) and the RSA-OAEP decryption mints
+# (`rsa-oaep-decrypt`) — outside Node by default: a browser is an
+# attacker-observable timing domain, so it fails closed unless the
+# deployer opts in with `setRsaPrivateKeyPolicy("serve")` — the adapter
+# runs the default.
+missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign", "rsa-oaep-decrypt"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.

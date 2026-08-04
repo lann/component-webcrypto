@@ -67,6 +67,16 @@ pub const FEATURE_SHA1_CHECKED: &str = "sha1-checked";
 /// `unsupported`.
 pub const FEATURE_RSA_SIGN: &str = "rsa-sign";
 
+/// The `rsa-oaep-decrypt` feature: the gated RSA-OAEP decryption-key
+/// minting interface. Like `rsa-sign`, the declaration is behavioral:
+/// the signing suite's guest imports the interface, and a target that
+/// links the suite but declines the decryption mints (the jco host
+/// outside Node — browsers fail closed) declares this feature missing
+/// and must prove every minting path returns `unsupported`. The
+/// encryption half (`rsa-oaep-encrypt`) is ungated baseline surface and
+/// carries no feature name.
+pub const FEATURE_RSA_OAEP_DECRYPT: &str = "rsa-oaep-decrypt";
+
 /// Every feature name a target may declare missing — shared here so every
 /// guest validates the same names. `all` traps on names outside this set,
 /// so a misspelled declaration is a harness bug rather than a silently
@@ -77,6 +87,7 @@ pub const KNOWN_FEATURES: &[&str] = &[
     FEATURE_ECDSA_SIGN,
     FEATURE_SHA1_CHECKED,
     FEATURE_RSA_SIGN,
+    FEATURE_RSA_OAEP_DECRYPT,
 ];
 
 /// A probe body. Boxed because each `async fn` has its own opaque type.

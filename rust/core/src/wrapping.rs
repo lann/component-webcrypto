@@ -106,6 +106,14 @@ impl UnwrapInputMaterial {
         }
     }
 
+    /// Box already-zeroizing decrypted material for a typed mint (the
+    /// `public-encryption` unwrap path, whose decrypt buffer is
+    /// zeroizing from birth).
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn from_zeroizing(bytes: Zeroizing<Vec<u8>>) -> Self {
+        Self { bytes }
+    }
+
     /// The decrypted material's length in bytes (retention accounting).
     pub fn byte_len(&self) -> usize {
         self.bytes.len()
@@ -763,6 +771,41 @@ pub fn unwrap_pss_signing_key_jwk(
     redact_invalid_key(
         "RSA JWK",
         SigningKeyMaterial::import_pss_jwk(variant, &text, policy),
+    )
+}
+
+/// `rsa-oaep-decrypt.unwrap-decryption-key-pkcs8`. Class D: like the
+/// imports it reuses, compiled only where RSA private-key operations are
+/// (see the crate doc).
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_oaep_decryption_key_pkcs8(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: crate::TransportPolicy,
+) -> Result<crate::DecryptionKeyMaterial, Error> {
+    redact_invalid_key(
+        "RSA PKCS#8 key",
+        crate::DecryptionKeyMaterial::import_oaep_pkcs8(variant, &input.into_bytes(), policy),
+    )
+}
+
+/// `rsa-oaep-decrypt.unwrap-decryption-key-jwk`. Class D, as above.
+#[cfg(not(target_family = "wasm"))]
+pub fn unwrap_oaep_decryption_key_jwk(
+    variant: crate::RsaVariant,
+    input: UnwrapInputMaterial,
+    policy: crate::TransportPolicy,
+) -> Result<crate::DecryptionKeyMaterial, Error> {
+    let text = unwrap_jwk_prelude(
+        "RSA JWK",
+        policy.check_useful(),
+        input,
+        &policy.webcrypto_usages(),
+        UseFamily::Enc,
+    )?;
+    redact_invalid_key(
+        "RSA JWK",
+        crate::DecryptionKeyMaterial::import_oaep_jwk(variant, &text, policy),
     )
 }
 

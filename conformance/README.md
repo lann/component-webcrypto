@@ -37,7 +37,12 @@ signing suite by declaration, and no case can contradict it. What holds
 the composed target's declaration to the truth is the negative-composition
 gate, `just conformance::class-d`: it asserts that the signing guest does
 not compose with the in-guest provider, so the provider cannot start
-exporting `ecdsa-sign` while this manifest still says it does not.
+exporting `ecdsa-sign` while this manifest still says it does not. The
+same gate asserts the OAEP half of the provider's withheld surface with a
+dedicated minimal probe (`class-d/oaep-probe/wit`): the signing guest's
+composition already fails on `ecdsa-sign`, so only a component importing
+*nothing withheld but* `rsa-oaep-decrypt` can prove that interface stays
+unserved.
 
 Each suite's case inventory is pinned by a lockfile (`guest/tests.lock`,
 `signing-guest/tests.lock`; TOML, one case per line with its feature tags,
@@ -75,10 +80,18 @@ guest/             # the shared suite's guest: vectors compiled in (no I/O
 signing-guest/     # the signing suite's host-only guest: probes for
                    #   interfaces the in-guest provider deliberately does
                    #   not export (ecdsa-sign, the gated rsa-sign
-                   #   interfaces), plus the RSASSA-PKCS1-v1_5 sig-gen
-                   #   known-answer cases (deterministic signing
-                   #   byte-compares); runs under the wasmtime and jco
-                   #   targets only, with its own tests.lock
+                   #   interfaces, the gated rsa-oaep-decrypt interface),
+                   #   plus the RSASSA-PKCS1-v1_5 sig-gen known-answer
+                   #   cases (deterministic signing byte-compares) and the
+                   #   RSA-OAEP decryption vectors (deterministic
+                   #   decryption of published ciphertexts); runs under
+                   #   the wasmtime and jco targets only, with its own
+                   #   tests.lock
+class-d/           # the class-D gate's dedicated probe worlds (no Rust:
+                   #   `wasm-tools component embed --dummy` builds them):
+                   #   oaep-probe/ imports only rsa-oaep-decrypt, proving
+                   #   the provider's kind-only public-encryption export
+                   #   keeps the decryption mints uncomposable
 adapters/
   wasmtime/        # native adapter over lann-webcrypto-wasmtime's add_to_linker
   composed-driver/   # CLI driver for the composed in-guest target (guest +
