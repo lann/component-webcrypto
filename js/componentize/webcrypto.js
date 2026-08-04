@@ -2019,6 +2019,11 @@ async function exportKey(format, key) {
   if (!(key instanceof CryptoKey)) {
     throw new TypeError("key must be a CryptoKey");
   }
+  if (key.algorithm.name === "HKDF" || key.algorithm.name === "PBKDF2") {
+    // The spec's export-op existence check, which precedes the
+    // extractability check: neither KDF defines an export operation.
+    throw dom("NotSupportedError", `${key.algorithm.name} keys cannot be exported`);
+  }
   if (!key.extractable) {
     throw dom("InvalidAccessError", "key is not extractable");
   }
