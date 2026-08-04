@@ -53,7 +53,10 @@ _ct-tools:
     set -euo pipefail
     tree="{{ct-tree}}"
     rev=$(git -C "$tree" rev-parse HEAD)
-    dirty=$(git -C "$tree" status --porcelain)
+    # Tracked modifications only (-uno): bin/ itself (and target/) live
+    # untracked inside the checkout and must not count as dirt, or the
+    # reuse check can never pass.
+    dirty=$(git -C "$tree" status --porcelain -uno)
     if [ -z "$dirty" ] && [ -x "$tree/bin/component-test" ] && [ -x "$tree/bin/ct-runner" ] \
         && [ "$(cat "$tree/bin/.rev" 2>/dev/null)" = "$rev" ]; then
         exit 0

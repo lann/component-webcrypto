@@ -119,7 +119,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .component-test/bin
-          key: component-test-bin-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
+          key: component-test-bin-v2-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
 
       - name: Install Node 24
         uses: actions/setup-node@v4
