@@ -143,8 +143,14 @@ crate's bindings instead.
 ## Build & run
 
 Prerequisites: Rust (via rustup; the toolchain and wasm target are pinned in
-`rust-toolchain.toml`), `wasm-tools`, and — for the jco host — Node 24+ (jco's
-async ABI uses JSPI). `./scripts/setup.sh` installs the rest.
+`rust-toolchain.toml`), `wasm-tools`, — for the jco host — Node 24+ (jco's
+async ABI uses JSPI), and a checkout of
+[lann/component-test](https://github.com/lann/component-test) as a **sibling
+of this repository** at (or past) the rev pinned in `.component-test-rev`:
+the conformance crates are workspace members with path dependencies into it,
+so every `cargo` command — including the first `just test` — needs it
+present. `./scripts/setup.sh` installs the rest (including that clone when
+missing).
 
 ```sh
 just test                    # Rust tests, incl. the guest-under-Wasmtime integration test
