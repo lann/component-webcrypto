@@ -44,127 +44,127 @@ const RSA_OAEP_DECRYPT: &[&str] = &[FEATURE_RSA_OAEP_DECRYPT];
 /// then the `wycheproof-misc` groups of the collected misc file).
 pub const ROWS: &[Row] = &[
     Row {
-        prefix: "rsassa-pkcs1-v15-sha256-b2048/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha256-2048/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha384-b2048/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha384-2048/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha512-b2048/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha512-2048/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha256-b3072/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha256-3072/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha384-b3072/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha384-3072/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha512-b3072/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha512-3072/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha256-b4096/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha256-4096/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha384-b4096/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha384-4096/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsassa-pkcs1-v15-sha512-b4096/wycheproof-sig-gen",
+        prefix: "rsassa-pkcs1-v15-sha512-4096/wycheproof-sig-gen",
         tags: RSA_SIGN,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b2048/wycheproof",
+        prefix: "rsa-oaep-sha256-2048/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b2048/wycheproof",
+        prefix: "rsa-oaep-sha384-2048/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b2048/wycheproof",
+        prefix: "rsa-oaep-sha512-2048/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b3072/wycheproof",
+        prefix: "rsa-oaep-sha256-3072/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b3072/wycheproof",
+        prefix: "rsa-oaep-sha512-3072/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b4096/wycheproof",
+        prefix: "rsa-oaep-sha256-4096/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b4096/wycheproof",
+        prefix: "rsa-oaep-sha512-4096/wycheproof",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b2048/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-2048/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b2048/wycheproof-misc",
+        prefix: "rsa-oaep-sha384-2048/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b2048/wycheproof-misc",
+        prefix: "rsa-oaep-sha512-2048/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b3072/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-3072/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b3072/wycheproof-misc",
+        prefix: "rsa-oaep-sha384-3072/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b3072/wycheproof-misc",
+        prefix: "rsa-oaep-sha512-3072/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b4096/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-4096/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b4096/wycheproof-misc",
+        prefix: "rsa-oaep-sha384-4096/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b4096/wycheproof-misc",
+        prefix: "rsa-oaep-sha512-4096/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b8192/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-8192/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b8192/wycheproof-misc",
+        prefix: "rsa-oaep-sha384-8192/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha512-b8192/wycheproof-misc",
+        prefix: "rsa-oaep-sha512-8192/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b2688/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-2688/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha256-b4032/wycheproof-misc",
+        prefix: "rsa-oaep-sha256-4032/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
     Row {
-        prefix: "rsa-oaep-sha384-b3104/wycheproof-misc",
+        prefix: "rsa-oaep-sha384-3104/wycheproof-misc",
         tags: RSA_OAEP_DECRYPT,
     },
 ];

@@ -67,14 +67,12 @@ changes, landing them as a reviewable diff. The census-parity tests
 the retired incumbent harness's final census, byte-frozen at the M1.6
 cutover (and re-frozen as the incumbent's suites grew before its
 retirement landed) as `src/census-fixture.lock` in each suite crate. The
-port diverges from the incumbent ids in exactly two documented ways, both
-of which the parity tests account for: the additive `!feature` decline
-cases (above), and the RSA algorithm segments' modulus words — the
-component-test case-name grammar requires non-leaf segments to be WIT
-labels, whose words may not start with a digit, so the incumbent's
-`rsassa-pkcs1-v15-sha256-2048`, `rsa-pss-…-2048-…`, and `rsa-oaep-…-2048`
-segments carry a `b` ("bits") prefix on the modulus word here:
-`rsassa-pkcs1-v15-sha256-b2048`, and so on.
+port diverges from the incumbent ids in exactly one documented way, which
+the parity tests account for: the additive `!feature` decline cases
+(above). All other ids — including the RSA algorithm segments' modulus
+words (`rsassa-pkcs1-v15-sha256-2048` etc.) — match the incumbent's
+verbatim under the amended component-model label grammar (number-only
+kebab words after the first).
 
 The lockfiles pin the **inventory**, not the assertions. A case that keeps
 its name while weakening what it checks produces no lockfile diff; that is

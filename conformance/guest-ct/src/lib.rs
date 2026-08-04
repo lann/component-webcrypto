@@ -177,8 +177,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-b2048/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha256_b2048_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-2048/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha256_2048_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -186,8 +186,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-b2048/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha384_b2048_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-2048/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha384_2048_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -195,8 +195,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-b2048/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha512_b2048_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-2048/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha512_2048_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -204,8 +204,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-b3072/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha256_b3072_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-3072/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha256_3072_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -213,8 +213,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-b3072/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha384_b3072_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-3072/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha384_3072_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -222,8 +222,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-b3072/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha512_b3072_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-3072/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha512_3072_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -231,8 +231,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-b4096/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha256_b4096_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-4096/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha256_4096_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -240,8 +240,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-b4096/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha384_b4096_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha384-4096/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha384_4096_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -249,8 +249,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-b4096/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha512_b4096_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha512-4096/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha512_4096_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -258,8 +258,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-b8192/wycheproof")]
-    fn row_rsassa_pkcs1_v15_sha256_b8192_wycheproof(
+    #[case_row(prefix = "rsassa-pkcs1-v15-sha256-8192/wycheproof")]
+    fn row_rsassa_pkcs1_v15_sha256_8192_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -267,8 +267,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha256-b2048-salt0/wycheproof")]
-    fn row_rsa_pss_sha256_b2048_salt0_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha256-2048-salt0/wycheproof")]
+    fn row_rsa_pss_sha256_2048_salt0_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -276,8 +276,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha256-b2048-salt32/wycheproof")]
-    fn row_rsa_pss_sha256_b2048_salt32_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha256-2048-salt32/wycheproof")]
+    fn row_rsa_pss_sha256_2048_salt32_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -285,8 +285,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha384-b2048-salt48/wycheproof")]
-    fn row_rsa_pss_sha384_b2048_salt48_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha384-2048-salt48/wycheproof")]
+    fn row_rsa_pss_sha384_2048_salt48_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -294,8 +294,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha256-b3072-salt32/wycheproof")]
-    fn row_rsa_pss_sha256_b3072_salt32_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha256-3072-salt32/wycheproof")]
+    fn row_rsa_pss_sha256_3072_salt32_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -303,8 +303,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha256-b4096-salt32/wycheproof")]
-    fn row_rsa_pss_sha256_b4096_salt32_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha256-4096-salt32/wycheproof")]
+    fn row_rsa_pss_sha256_4096_salt32_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -312,8 +312,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha384-b4096-salt48/wycheproof")]
-    fn row_rsa_pss_sha384_b4096_salt48_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha384-4096-salt48/wycheproof")]
+    fn row_rsa_pss_sha384_4096_salt48_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -321,8 +321,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha512-b4096-salt32/wycheproof")]
-    fn row_rsa_pss_sha512_b4096_salt32_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha512-4096-salt32/wycheproof")]
+    fn row_rsa_pss_sha512_4096_salt32_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -330,8 +330,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha512-b4096-salt64/wycheproof")]
-    fn row_rsa_pss_sha512_b4096_salt64_wycheproof(
+    #[case_row(prefix = "rsa-pss-sha512-4096-salt64/wycheproof")]
+    fn row_rsa_pss_sha512_4096_salt64_wycheproof(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -339,8 +339,8 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-pss-sha256-b2048-salt32/wycheproof-params")]
-    fn row_rsa_pss_sha256_b2048_salt32_wycheproof_params(
+    #[case_row(prefix = "rsa-pss-sha256-2048-salt32/wycheproof-params")]
+    fn row_rsa_pss_sha256_2048_salt32_wycheproof_params(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,

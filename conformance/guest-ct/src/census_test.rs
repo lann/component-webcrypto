@@ -11,32 +11,10 @@ use crate::plan;
 
 type Inventory = BTreeMap<String, Vec<String>>;
 
-/// The port's id for a census name: identical except that a word of the
-/// algorithm (first) segment starting with a digit gains a `b` prefix
-/// (`…-sha256-2048` → `…-sha256-b2048`) — the component-test case-name
-/// grammar requires non-leaf segments to be WIT labels, whose words may
-/// not start with a digit. The one documented id divergence from the
-/// incumbent census (besides the additive decline cases).
-fn ported_name(census_name: &str) -> String {
-    let Some((alg, rest)) = census_name.split_once('/') else {
-        return census_name.to_string();
-    };
-    let alg = alg
-        .split('-')
-        .map(|word| {
-            if word.starts_with(|c: char| c.is_ascii_digit()) {
-                format!("b{word}")
-            } else {
-                word.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("-");
-    format!("{alg}/{rest}")
-}
-
-/// Parse the incumbent census (names mapped through [`ported_name`]):
-/// `{ name = "...", features = [...] }`.
+/// Parse the incumbent census: `{ name = "...", features = [...] }`.
+/// Ids are compared verbatim — the amended component-model label grammar
+/// (number-only kebab words after the first) admits the incumbent's RSA
+/// modulus words (`…-sha256-2048`) directly.
 fn census() -> Inventory {
     let text = include_str!("census-fixture.lock");
     let mut out = Inventory::new();
@@ -57,7 +35,7 @@ fn census() -> Inventory {
             None => Vec::new(),
         };
         assert!(
-            out.insert(ported_name(name), features).is_none(),
+            out.insert(name.to_string(), features).is_none(),
             "duplicate census entry {name}"
         );
     }

@@ -174,15 +174,21 @@ where
     }
 }
 
-/// A WIT label (kebab-case words of `[a-z][a-z0-9]*`) — the constraint
-/// on non-leaf case-name segments, checked natively so the guest's
-/// `CaseName::from_parts` never trips at registry build.
+/// A WIT label (kebab-case; first word `[a-z][a-z0-9]*`, later words may
+/// also be number-only, per the amended component-model grammar) — the
+/// constraint on non-leaf case-name segments, checked natively so the
+/// guest's `CaseName::from_parts` never trips at registry build.
 fn is_label(seg: &str) -> bool {
     !seg.is_empty()
-        && seg.split('-').all(|word| {
-            word.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-                && word
+        && seg.split('-').enumerate().all(|(i, word)| {
+            match word.chars().next() {
+                Some(c) if c.is_ascii_lowercase() => word
                     .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                Some(c) if c.is_ascii_digit() && i > 0 => {
+                    word.chars().all(|c| c.is_ascii_digit())
+                }
+                _ => false,
+            }
         })
 }

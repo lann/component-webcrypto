@@ -1711,14 +1711,10 @@ impl RsaAlg {
     pub fn name(self) -> String {
         match self.family {
             RsaFamily::Pkcs1V15 => {
-                // `b<bits>`: a bare `2048` word would violate the
-                // component-test case-name grammar (non-leaf segments are
-                // WIT labels; words may not start with a digit) — the one
-                // documented divergence from the incumbent census ids.
-                format!("rsassa-pkcs1-v15-{}-b{}", self.sha.name(), self.key_bits)
+                format!("rsassa-pkcs1-v15-{}-{}", self.sha.name(), self.key_bits)
             }
             RsaFamily::Pss { salt_len } => format!(
-                "rsa-pss-{}-b{}-salt{}",
+                "rsa-pss-{}-{}-salt{}",
                 self.sha.name(),
                 self.key_bits,
                 salt_len

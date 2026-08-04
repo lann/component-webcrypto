@@ -36,10 +36,10 @@ mod signing {
     use component_test_sdk::{ArcStr, Registry, Tags};
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha256-b2048/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha256-2048/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha256_b2048_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha256_2048_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -48,10 +48,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha384-b2048/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha384-2048/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha384_b2048_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha384_2048_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -60,10 +60,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha512-b2048/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha512-2048/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha512_b2048_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha512_2048_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -72,10 +72,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha256-b3072/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha256-3072/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha256_b3072_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha256_3072_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -84,10 +84,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha384-b3072/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha384-3072/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha384_b3072_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha384_3072_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -96,10 +96,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha512-b3072/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha512-3072/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha512_b3072_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha512_3072_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -108,10 +108,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha256-b4096/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha256-4096/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha256_b4096_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha256_4096_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -120,10 +120,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha384-b4096/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha384-4096/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha384_b4096_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha384_4096_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -132,10 +132,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsassa-pkcs1-v15-sha512-b4096/wycheproof-sig-gen",
+        prefix = "rsassa-pkcs1-v15-sha512-4096/wycheproof-sig-gen",
         tags("rsa-sign")
     )]
-    fn row_rsassa_pkcs1_v15_sha512_b4096_wycheproof_sig_gen(
+    fn row_rsassa_pkcs1_v15_sha512_4096_wycheproof_sig_gen(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -143,58 +143,46 @@ mod signing {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha256-b2048/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha256_b2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha256-2048/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha256_2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha384-b2048/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha384_b2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha384-2048/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha384_2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha512-b2048/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha512_b2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha512-2048/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha512_2048_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha256-b3072/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha256_b3072_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha256-3072/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha256_3072_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha512-b3072/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha512_b3072_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha512-3072/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha512_3072_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha256-b4096/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha256_b4096_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    #[case_row(prefix = "rsa-oaep-sha256-4096/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha256_4096_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "rsa-oaep-sha512-b4096/wycheproof", tags("rsa-oaep-decrypt"))]
-    fn row_rsa_oaep_sha512_b4096_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(
-        prefix = "rsa-oaep-sha256-b2048/wycheproof-misc",
-        tags("rsa-oaep-decrypt")
-    )]
-    fn row_rsa_oaep_sha256_b2048_wycheproof_misc(
-        registry: &mut Registry,
-        prefix: &ArcStr,
-        tags: &Tags,
-    ) {
+    #[case_row(prefix = "rsa-oaep-sha512-4096/wycheproof", tags("rsa-oaep-decrypt"))]
+    fn row_rsa_oaep_sha512_4096_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha384-b2048/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-2048/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha384_b2048_wycheproof_misc(
+    fn row_rsa_oaep_sha256_2048_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -203,10 +191,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha512-b2048/wycheproof-misc",
+        prefix = "rsa-oaep-sha384-2048/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha512_b2048_wycheproof_misc(
+    fn row_rsa_oaep_sha384_2048_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -215,10 +203,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha256-b3072/wycheproof-misc",
+        prefix = "rsa-oaep-sha512-2048/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha256_b3072_wycheproof_misc(
+    fn row_rsa_oaep_sha512_2048_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -227,10 +215,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha384-b3072/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-3072/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha384_b3072_wycheproof_misc(
+    fn row_rsa_oaep_sha256_3072_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -239,10 +227,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha512-b3072/wycheproof-misc",
+        prefix = "rsa-oaep-sha384-3072/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha512_b3072_wycheproof_misc(
+    fn row_rsa_oaep_sha384_3072_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -251,10 +239,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha256-b4096/wycheproof-misc",
+        prefix = "rsa-oaep-sha512-3072/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha256_b4096_wycheproof_misc(
+    fn row_rsa_oaep_sha512_3072_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -263,10 +251,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha384-b4096/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-4096/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha384_b4096_wycheproof_misc(
+    fn row_rsa_oaep_sha256_4096_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -275,10 +263,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha512-b4096/wycheproof-misc",
+        prefix = "rsa-oaep-sha384-4096/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha512_b4096_wycheproof_misc(
+    fn row_rsa_oaep_sha384_4096_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -287,10 +275,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha256-b8192/wycheproof-misc",
+        prefix = "rsa-oaep-sha512-4096/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha256_b8192_wycheproof_misc(
+    fn row_rsa_oaep_sha512_4096_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -299,10 +287,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha384-b8192/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-8192/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha384_b8192_wycheproof_misc(
+    fn row_rsa_oaep_sha256_8192_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -311,10 +299,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha512-b8192/wycheproof-misc",
+        prefix = "rsa-oaep-sha384-8192/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha512_b8192_wycheproof_misc(
+    fn row_rsa_oaep_sha384_8192_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -323,10 +311,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha256-b2688/wycheproof-misc",
+        prefix = "rsa-oaep-sha512-8192/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha256_b2688_wycheproof_misc(
+    fn row_rsa_oaep_sha512_8192_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -335,10 +323,10 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha256-b4032/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-2688/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha256_b4032_wycheproof_misc(
+    fn row_rsa_oaep_sha256_2688_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,
@@ -347,10 +335,22 @@ mod signing {
     }
 
     #[case_row(
-        prefix = "rsa-oaep-sha384-b3104/wycheproof-misc",
+        prefix = "rsa-oaep-sha256-4032/wycheproof-misc",
         tags("rsa-oaep-decrypt")
     )]
-    fn row_rsa_oaep_sha384_b3104_wycheproof_misc(
+    fn row_rsa_oaep_sha256_4032_wycheproof_misc(
+        registry: &mut Registry,
+        prefix: &ArcStr,
+        tags: &Tags,
+    ) {
+        crate::plan::register(registry, prefix, tags)
+    }
+
+    #[case_row(
+        prefix = "rsa-oaep-sha384-3104/wycheproof-misc",
+        tags("rsa-oaep-decrypt")
+    )]
+    fn row_rsa_oaep_sha384_3104_wycheproof_misc(
         registry: &mut Registry,
         prefix: &ArcStr,
         tags: &Tags,

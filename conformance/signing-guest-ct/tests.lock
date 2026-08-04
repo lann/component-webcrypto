@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_signing_guest_ct"
-artifact_sha256 = "e0ce6b488d19bb86a3912ad3c1292582a8664b7892d19043f987b0d284de4774"
+artifact_sha256 = "a272e6e1277d465abd368fd5311a429c8aae70b75da6084a3c87e419b3aaa51b"
 
 [[case]]
 name = "probe/ecdsa-cross-hash-sign-roundtrip"
@@ -69,125 +69,125 @@ name = "rsa-sign/decline/minting"
 tags = ["!rsa-sign"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b2048/wycheproof"
+prefix = "rsa-oaep-sha256-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b2048/wycheproof-misc"
+prefix = "rsa-oaep-sha256-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b2688/wycheproof-misc"
+prefix = "rsa-oaep-sha256-2688/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b3072/wycheproof"
+prefix = "rsa-oaep-sha256-3072/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b3072/wycheproof-misc"
+prefix = "rsa-oaep-sha256-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b4032/wycheproof-misc"
+prefix = "rsa-oaep-sha256-4032/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b4096/wycheproof"
+prefix = "rsa-oaep-sha256-4096/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b4096/wycheproof-misc"
+prefix = "rsa-oaep-sha256-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha256-b8192/wycheproof-misc"
+prefix = "rsa-oaep-sha256-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b2048/wycheproof"
+prefix = "rsa-oaep-sha384-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b2048/wycheproof-misc"
+prefix = "rsa-oaep-sha384-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b3072/wycheproof-misc"
+prefix = "rsa-oaep-sha384-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b3104/wycheproof-misc"
+prefix = "rsa-oaep-sha384-3104/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b4096/wycheproof-misc"
+prefix = "rsa-oaep-sha384-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha384-b8192/wycheproof-misc"
+prefix = "rsa-oaep-sha384-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b2048/wycheproof"
+prefix = "rsa-oaep-sha512-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b2048/wycheproof-misc"
+prefix = "rsa-oaep-sha512-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b3072/wycheproof"
+prefix = "rsa-oaep-sha512-3072/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b3072/wycheproof-misc"
+prefix = "rsa-oaep-sha512-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b4096/wycheproof"
+prefix = "rsa-oaep-sha512-4096/wycheproof"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b4096/wycheproof-misc"
+prefix = "rsa-oaep-sha512-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsa-oaep-sha512-b8192/wycheproof-misc"
+prefix = "rsa-oaep-sha512-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha256-b2048/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha256-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha256-b3072/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha256-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha256-b4096/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha256-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha384-b2048/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha384-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha384-b3072/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha384-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha384-b4096/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha384-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha512-b2048/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha512-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha512-b3072/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha512-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
 
 [[generated]]
-prefix = "rsassa-pkcs1-v15-sha512-b4096/wycheproof-sig-gen"
+prefix = "rsassa-pkcs1-v15-sha512-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]

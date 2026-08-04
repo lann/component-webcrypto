@@ -125,10 +125,7 @@ impl RsaSignCase {
     /// (`rsassa-pkcs1-v15-<sha>-<bits>/wycheproof-sig-gen/tc<id>-<import>/<schedule>`).
     pub fn case_id(&self) -> String {
         format!(
-            // `b<bits>`: see the shared suite's `RsaAlg::name` — a bare
-            // `2048` word would violate the component-test case-name
-            // grammar (the documented divergence from the incumbent ids).
-            "rsassa-pkcs1-v15-{}-b{}/wycheproof-sig-gen/tc{}-{}/{}",
+            "rsassa-pkcs1-v15-{}-{}/wycheproof-sig-gen/tc{}-{}/{}",
             self.sha_name,
             self.key_bits,
             self.tc_id,

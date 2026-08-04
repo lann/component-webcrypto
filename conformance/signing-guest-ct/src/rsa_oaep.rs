@@ -238,10 +238,7 @@ impl RsaOaepCase {
     /// segment — nothing here streams).
     pub fn case_id(&self) -> String {
         format!(
-            // `b<bits>`: see the shared suite's `RsaAlg::name` — a bare
-            // `2048` word would violate the component-test case-name
-            // grammar (the documented divergence from the incumbent ids).
-            "rsa-oaep-{}-b{}/{}/tc{}-{}",
+            "rsa-oaep-{}-{}/{}/tc{}-{}",
             self.sha_name,
             self.key_bits,
             self.source,
