@@ -44,11 +44,9 @@
 //! - **Implementations may bound input sizes.** Hosts enforce buffering
 //!   limits as recoverable [`Error::Other`] values (see the WIT
 //!   `types.error` docs); nothing here retries or special-cases them.
-//! - **Nonces are the caller's problem only on `aead`.** Prefer
-//!   [`AeadInternalNonce`] (minted by [`aes_gcm_internal_nonce`], or by
-//!   `xchacha20_poly1305_internal_nonce` under the `chacha` cargo
-//!   feature), whose nonces are
-//!   implementation-managed and carried in the sealed message.
+//! - **Nonces are the caller's problem on `aead`.** [`Aead::seal`] leaves
+//!   nonce uniqueness per key entirely to you, and nonce reuse under one
+//!   key defeats the algorithm's guarantees.
 
 #![deny(missing_docs)]
 
@@ -75,111 +73,6 @@ mod generated {
     // script that computes the flag list (tracked with the SDK's other
     // cargo-feature debt in #85).
     #[cfg(all(
-        feature = "chacha",
-        feature = "sha1-checked",
-        feature = "rsa-sign",
-        feature = "rsa-oaep-decrypt"
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign", "rsa-oaep-decrypt"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        feature = "sha1-checked",
-        feature = "rsa-sign",
-        not(feature = "rsa-oaep-decrypt")
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-sign"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        feature = "sha1-checked",
-        not(feature = "rsa-sign"),
-        feature = "rsa-oaep-decrypt"
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked", "rsa-oaep-decrypt"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        feature = "sha1-checked",
-        not(feature = "rsa-sign"),
-        not(feature = "rsa-oaep-decrypt")
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        not(feature = "sha1-checked"),
-        feature = "rsa-sign",
-        feature = "rsa-oaep-decrypt"
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-sign", "rsa-oaep-decrypt"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        not(feature = "sha1-checked"),
-        feature = "rsa-sign",
-        not(feature = "rsa-oaep-decrypt")
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-sign"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        not(feature = "sha1-checked"),
-        not(feature = "rsa-sign"),
-        feature = "rsa-oaep-decrypt"
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305", "rsa-oaep-decrypt"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        feature = "chacha",
-        not(feature = "sha1-checked"),
-        not(feature = "rsa-sign"),
-        not(feature = "rsa-oaep-decrypt")
-    ))]
-    wit_bindgen::generate!({
-        path: "wit",
-        features: ["chacha20-poly1305", "xchacha20-poly1305"],
-        world: "imports",
-        generate_all,
-        pub_export_macro: false,
-    });
-    #[cfg(all(
-        not(feature = "chacha"),
         feature = "sha1-checked",
         feature = "rsa-sign",
         feature = "rsa-oaep-decrypt"
@@ -192,7 +85,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         feature = "sha1-checked",
         feature = "rsa-sign",
         not(feature = "rsa-oaep-decrypt")
@@ -205,7 +97,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         feature = "sha1-checked",
         not(feature = "rsa-sign"),
         feature = "rsa-oaep-decrypt"
@@ -218,7 +109,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         feature = "sha1-checked",
         not(feature = "rsa-sign"),
         not(feature = "rsa-oaep-decrypt")
@@ -231,7 +121,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         not(feature = "sha1-checked"),
         feature = "rsa-sign",
         feature = "rsa-oaep-decrypt"
@@ -244,7 +133,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         not(feature = "sha1-checked"),
         feature = "rsa-sign",
         not(feature = "rsa-oaep-decrypt")
@@ -257,7 +145,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         not(feature = "sha1-checked"),
         not(feature = "rsa-sign"),
         feature = "rsa-oaep-decrypt"
@@ -270,7 +157,6 @@ mod generated {
         pub_export_macro: false,
     });
     #[cfg(all(
-        not(feature = "chacha"),
         not(feature = "sha1-checked"),
         not(feature = "rsa-sign"),
         not(feature = "rsa-oaep-decrypt")
@@ -298,15 +184,11 @@ pub mod bindings {
     #[cfg(feature = "sha1-checked")]
     pub use super::generated::lann::webcrypto::sha1_checked;
     pub use super::generated::lann::webcrypto::{
-        aead, aead_internal_nonce, aes, aes_cbc, aes_ctr, aes_gcm, aes_gcm_internal_nonce, aes_kw,
-        bytes, cipher, derivation, digest, ecdh, ecdsa_sign, ecdsa_verify, ed25519_sign,
-        ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1, hmac_sha2, key_agreement, key_wrap,
-        mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2, public_encryption, rsa, rsa_oaep_encrypt,
-        rsa_pss_verify, rsassa_pkcs1_v15_verify, sha2, signature, types, wrapping, x25519,
-    };
-    #[cfg(feature = "chacha")]
-    pub use super::generated::lann::webcrypto::{
-        chacha20_poly1305, xchacha20_poly1305, xchacha20_poly1305_internal_nonce,
+        aead, aes, aes_cbc, aes_ctr, aes_gcm, aes_kw, cipher, derivation, digest, ecdh, ecdsa_sign,
+        ecdsa_verify, ed25519_sign, ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1,
+        hmac_sha2, key_agreement, key_wrap, mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2,
+        public_encryption, rsa, rsa_oaep_encrypt, rsa_pss_verify, rsassa_pkcs1_v15_verify, sha2,
+        signature, types, wrapping, x25519,
     };
     #[cfg(feature = "rsa-sign")]
     pub use super::generated::lann::webcrypto::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
@@ -354,10 +236,6 @@ pub enum Error {
     /// arrived from a platform keystore) with the operation's usage
     /// disabled. The string names the refused operation.
     NotPermitted(String),
-    /// The key's nonce budget is exhausted: the implementation can no longer
-    /// guarantee nonce uniqueness for this key. The key remains valid for
-    /// `open`; mint a fresh key to continue sealing.
-    KeyExhausted,
     /// An implementation-specific operational failure (an external keystore
     /// that cannot complete the operation, an input exceeding a buffering
     /// limit, …). The string is human-readable.
@@ -401,7 +279,6 @@ impl From<bindings::types::Error> for Error {
             Raw::NotExtractable => Error::NotExtractable,
             Raw::Unsupported(detail) => Error::Unsupported(detail),
             Raw::NotPermitted(detail) => Error::NotPermitted(detail),
-            Raw::KeyExhausted => Error::KeyExhausted,
             Raw::Other(detail) => Error::Other(detail),
             Raw::Extension(ext) => Error::Extension(ext),
         }
@@ -419,7 +296,6 @@ impl fmt::Display for Error {
             Error::NotExtractable => write!(f, "not-extractable"),
             Error::Unsupported(detail) => write!(f, "unsupported: {detail}"),
             Error::NotPermitted(detail) => write!(f, "not-permitted: {detail}"),
-            Error::KeyExhausted => write!(f, "key-exhausted"),
             Error::Other(detail) => write!(f, "other: {detail}"),
             Error::Extension(ext) => write!(
                 f,
@@ -678,11 +554,11 @@ where
 }
 
 /// A pending `seal`, returned by [`Aead::seal`] and
-/// [`AeadInternalNonce::seal`].
+/// [`CipherKey::encrypt`].
 ///
 /// Nothing runs until this is polled: the operation starts on the first
 /// `await`, so a `Seal` that is dropped unused never calls the
-/// implementation — and so never draws from an internal-nonce key's budget.
+/// implementation.
 ///
 /// Awaiting it yields the whole sealed message. It is a [`Future`] rather
 /// than an `async fn`'s anonymous one so that it drops straight into
@@ -884,29 +760,6 @@ impl KwKeyOptions {
         let options = bindings::key_wrap::KwKeyOptions::new();
         options.can_wrap(self.wrap);
         options.can_unwrap(self.unwrap);
-        options.extractable(self.extractable);
-        options
-    }
-}
-
-/// Mint-time policy for an [`AeadInternalNonce`] key. See [`MacKeyOptions`]
-/// for the options contract.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct InternalNonceKeyOptions {
-    /// Whether the minted key may `seal`.
-    pub seal: bool,
-    /// Whether the minted key may `open`.
-    pub open: bool,
-    /// Whether the minted key's material may be exported.
-    pub extractable: bool,
-}
-
-impl InternalNonceKeyOptions {
-    /// The WIT options resource carrying this policy.
-    pub(crate) fn lower(self) -> bindings::aead_internal_nonce::InternalNonceKeyOptions {
-        let options = bindings::aead_internal_nonce::InternalNonceKeyOptions::new();
-        options.can_seal(self.seal);
-        options.can_open(self.open);
         options.extractable(self.extractable);
         options
     }
@@ -1162,9 +1015,9 @@ impl Mac {
 /// An `aead.aead-key`: caller-nonce authenticated encryption with
 /// associated data.
 ///
-/// Prefer [`AeadInternalNonce`] unless interop requires an externally
-/// specified nonce layout: nonce reuse under one key is catastrophic, and
-/// this type's [`seal`](Self::seal) leaves nonce uniqueness entirely to you.
+/// Nonce reuse under one key is catastrophic, and this type's
+/// [`seal`](Self::seal) leaves nonce uniqueness entirely to you: use a
+/// deterministic per-key uniqueness scheme (such as a counter).
 pub struct Aead(bindings::aead::AeadKey);
 newtype_common!(Aead, bindings::aead::AeadKey, "aead-key");
 
@@ -1176,8 +1029,7 @@ impl Aead {
     ///
     /// **The caller is responsible for nonce uniqueness per key.** Reusing a
     /// nonce under one key defeats the algorithm's confidentiality and
-    /// authenticity guarantees; prefer [`AeadInternalNonce`], which makes
-    /// reuse unrepresentable.
+    /// authenticity guarantees.
     pub fn seal<'a>(
         &'a self,
         nonce: impl Into<Cow<'a, [u8]>>,
@@ -1261,8 +1113,7 @@ impl Aead {
     /// The algorithm's standard nonce size in bytes, e.g. `12` for AES-GCM
     /// — always accepted by [`seal`](Self::seal)/[`open`](Self::open).
     /// Whether other lengths are accepted is the algorithm's contract
-    /// (AES-GCM accepts 12 to 128 bytes inclusive; the ChaCha
-    /// constructions accept exactly this size).
+    /// (AES-GCM accepts 12 to 128 bytes inclusive).
     pub fn nonce_size(&self) -> u32 {
         self.0.nonce_size()
     }
@@ -1363,118 +1214,18 @@ impl Aead {
 
     /// The key as an RFC 7517 `oct` JSON Web Key (JSON text), behind the
     /// same extractability gate as [`export_key_raw`](Self::export_key_raw).
-    /// Algorithms with no registered JWK form (the XChaCha
-    /// constructions) fail [`Error::Unsupported`].
+    /// Algorithms with no registered JWK form fail [`Error::Unsupported`].
     pub async fn export_key_jwk(&self) -> Result<String, Error> {
         self.0.export_key_jwk().await.map_err(Error::from)
-    }
-}
-
-/// An `aead-internal-nonce.internal-nonce-key`: misuse-resistant
-/// authenticated encryption — the nonce is implementation-managed and
-/// carried in the sealed message (wire format per the minting interface),
-/// so nonce reuse is unrepresentable rather than merely discouraged.
-pub struct AeadInternalNonce(bindings::aead_internal_nonce::InternalNonceKey);
-newtype_common!(
-    AeadInternalNonce,
-    bindings::aead_internal_nonce::InternalNonceKey,
-    "internal-nonce-key"
-);
-
-impl AeadInternalNonce {
-    /// Encrypt and authenticate `plaintext` under a fresh
-    /// implementation-generated nonce with `aad`, yielding the
-    /// self-contained sealed message.
-    ///
-    /// Returns a [`Seal`], which starts the operation when awaited — so a
-    /// `Seal` dropped unused draws nothing from this key's nonce budget.
-    ///
-    /// Fails with [`Error::KeyExhausted`] once the implementation can no
-    /// longer guarantee nonce uniqueness for this key — mint a fresh key to
-    /// continue sealing.
-    pub fn seal<'a>(
-        &'a self,
-        aad: impl Into<Cow<'a, [u8]>>,
-        plaintext: impl Into<DataSource<'a>>,
-    ) -> Seal<'a> {
-        let aad = aad.into().into_owned();
-        Seal::new(
-            plaintext.into(),
-            Box::new(move |rx| Box::pin(self.0.seal(aad, rx))),
-        )
-    }
-
-    /// Decrypt and verify a sealed message (as produced by
-    /// [`seal`](Self::seal)) under `aad`.
-    ///
-    /// The stream is handed back only after the whole input is consumed and
-    /// the tag verified: `Ok` *is* the authentication statement, and
-    /// unverified plaintext is never observable. Any failure — a bad tag,
-    /// wrong associated data, or input too short to carry the wire format —
-    /// fails closed with [`Error::AuthenticationFailed`], with no detail.
-    pub async fn open(
-        &self,
-        aad: impl Into<Cow<'_, [u8]>>,
-        sealed: impl Into<DataSource<'_>>,
-    ) -> Result<StreamReader<u8>, Error> {
-        let aad = aad.into().into_owned();
-        run_sourced(sealed.into(), |rx| self.0.open(aad, rx)).await
-    }
-
-    /// The name of the key's algorithm family, e.g. `"AES-GCM"` — spelled as
-    /// the [W3C Web Cryptography API algorithm
-    /// registry](https://www.w3.org/TR/WebCryptoAPI/#algorithm-overview)
-    /// spells it.
-    pub fn algorithm_name(&self) -> String {
-        self.0.algorithm_name()
-    }
-
-    /// The key length in bits, e.g. `256`.
-    pub fn algorithm_length(&self) -> u32 {
-        self.0.algorithm_length()
-    }
-
-    /// The remaining nonce budget, as a key-rotation hint; `None` when no
-    /// budget is enforced. Monotonically non-increasing, and `Some(0)` means
-    /// the next [`seal`](Self::seal) fails [`Error::KeyExhausted`] — but not
-    /// an exact invocation count (implementations may decrement faster than
-    /// one per seal).
-    pub fn seals_remaining(&self) -> Option<u64> {
-        self.0.seals_remaining()
-    }
-
-    /// Whether [`export_key_raw`](Self::export_key_raw) may return the key material
-    /// (see [`Mac::extractable`]).
-    pub fn extractable(&self) -> bool {
-        self.0.extractable()
-    }
-
-    /// Whether the key permits [`seal`](Self::seal) — the usage recorded
-    /// at mint. A refused operation fails [`Error::NotPermitted`].
-    pub fn can_seal(&self) -> bool {
-        self.0.can_seal()
-    }
-
-    /// Whether the key permits [`open`](Self::open). See
-    /// [`can_seal`](Self::can_seal).
-    pub fn can_open(&self) -> bool {
-        self.0.can_open()
-    }
-
-    /// The raw key material; fails with [`Error::NotExtractable`] unless the
-    /// key was minted extractable (an API property, not a physical one —
-    /// see [`Mac::export_key_raw`]). The nonce budget does not travel with the
-    /// material.
-    pub async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
-        self.0.export_key_raw().await.map_err(Error::from)
     }
 }
 
 /// A `digest.digest`: a reusable, algorithm-bound hash.
 ///
 /// A digest authenticates nothing by itself: to check untrusted data
-/// against a known digest, compare [`compute`](Self::compute)'s result with
-/// [`constant_time_equal`]; when authenticity is needed, use a [`Mac`].
+/// against a known digest, compare [`compute`](Self::compute)'s result
+/// with a constant-time byte comparison; when authenticity is needed, use
+/// a [`Mac`].
 pub struct Digest(bindings::digest::Digest);
 newtype_common!(Digest, bindings::digest::Digest, "digest");
 
@@ -2260,10 +2011,7 @@ impl KwKey {
 pub mod aes_cbc;
 pub mod aes_ctr;
 pub mod aes_gcm;
-pub mod aes_gcm_internal_nonce;
 pub mod aes_kw;
-#[cfg(feature = "chacha")]
-pub mod chacha20_poly1305;
 pub mod ecdh;
 pub mod ecdsa;
 pub mod ed25519;
@@ -2282,24 +2030,6 @@ pub mod rsassa_pkcs1_v15;
 pub mod sha1_checked;
 pub mod sha2;
 pub mod x25519;
-#[cfg(feature = "chacha")]
-pub mod xchacha20_poly1305;
-#[cfg(feature = "chacha")]
-pub mod xchacha20_poly1305_internal_nonce;
-
-/// `bytes.constant-time-equal`: whether `a` and `b` are equal, in time
-/// independent of their *contents* (necessarily dependent on their
-/// lengths). Use this to compare a computed digest or tag against an
-/// untrusted expected value without creating a timing oracle.
-///
-/// Deliberately a component import rather than an in-guest comparison: the
-/// provider — a native host, for the wasmtime and jco implementations —
-/// performs the comparison, where constant-time properties actually hold,
-/// whereas code compiled *inside* a wasm module keeps them only best-effort
-/// through the engine's own compilation.
-pub fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
-    bindings::bytes::constant_time_equal(a, b)
-}
 
 #[cfg(test)]
 mod tests {
@@ -2354,10 +2084,6 @@ mod tests {
             Error::NotPermitted(_)
         ));
         assert!(matches!(
-            Error::from(Raw::KeyExhausted),
-            Error::KeyExhausted
-        ));
-        assert!(matches!(
             Error::from(Raw::Other("o".into())),
             Error::Other(_)
         ));
@@ -2382,7 +2108,6 @@ mod tests {
             (Error::NotExtractable, "not-extractable"),
             (Error::Unsupported("u".into()), "unsupported: u"),
             (Error::NotPermitted("p".into()), "not-permitted: p"),
-            (Error::KeyExhausted, "key-exhausted"),
             (Error::Other("o".into()), "other: o"),
         ];
         for (error, expected) in renders {

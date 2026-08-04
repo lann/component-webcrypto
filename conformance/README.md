@@ -193,14 +193,11 @@ crypto conformance tests *functions against mathematics*.
   network topology: Wycheproof's negative vectors replace hostile networks,
   chunking schedules replace routing scenarios.
 - **Divergence is declared as missing features, not expected failures**:
-  e.g. the jco targets are missing `xchacha20-poly1305` (no platform
-  WebCrypto implements XChaCha; minting declines `unsupported` — a
-  platform gap a caller routes around with another provider) and
-  `sha1-checked` (platform SHA-1 carries no sha1dc collision detection —
-  the first feature the in-guest provider serves that the platform hosts
-  do not); jco-browser
-  additionally `chacha20-poly1305` (the host feature-detects it, and
-  Node's WebCrypto serves it where browsers do not yet); `targets.toml` is
+  e.g. the jco targets are missing `sha1-checked` (platform SHA-1 carries
+  no sha1dc collision detection — the first feature the in-guest provider
+  serves that the platform hosts do not); jco-browser additionally
+  `rsa-sign` and `rsa-oaep-decrypt` (the host fails the gated RSA
+  private-key mints closed outside Node); `targets.toml` is
   the registry. The anticipated future declarations
   are profile divergence (e.g. a FIPS-profile target missing a
   permissive-key-policy feature). Bugs get fixed, not declared.
@@ -216,13 +213,10 @@ crypto conformance tests *functions against mathematics*.
 ## Deliberately deferred
 
 - **Golden-artifact hand-off** (one target seals to a checked-in file,
-  others open it): still deferred even now that a randomized seal exists
-  (`aead-internal-nonce`), because its cross-target claims are already
-  covered deterministically — every target must `open` the same
-  vector-derived `iv ‖ ct ‖ tag` sealed messages, which pins the wire
-  format, and each target's own `seal` is verified by reopening. A checked-in
-  artifact would add only "target A's randomness works on target B", which
-  the format pin already implies. Revisit if a wire format ever gains
+  others open it): deferred while every seal in the package is
+  deterministic given its inputs — the vector cases already pin the wire
+  format on every target, so a checked-in artifact would add only "target
+  A's randomness works on target B". Revisit if a wire format ever gains
   target-varying degrees of freedom.
 - **The timing lab** (dudect-style statistical tests of the composed in-guest
   provider, targeting the class B/C surfaces in

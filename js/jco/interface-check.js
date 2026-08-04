@@ -30,7 +30,6 @@ import {
   Digest,
   EncryptionKey,
   Ikm,
-  InternalNonceKey,
   KwKey,
   MacKey,
   Password,
@@ -41,10 +40,7 @@ import {
   aesCbc,
   aesCtr,
   aesGcm,
-  aesGcmInternalNonce,
   aesKw,
-  bytes,
-  chacha20Poly1305,
   ecdh,
   ecdsaSign,
   ecdsaVerify,
@@ -70,13 +66,10 @@ import {
   sha1Checked,
   wrapping,
   x25519,
-  xchacha20Poly1305,
-  xchacha20Poly1305InternalNonce,
 } from "./webcrypto.js";
 
 /** @import * as Mac from "./generated/interfaces/lann-webcrypto-mac.js" */
 /** @import * as Aead from "./generated/interfaces/lann-webcrypto-aead.js" */
-/** @import * as AeadInternalNonce from "./generated/interfaces/lann-webcrypto-aead-internal-nonce.js" */
 /** @import * as DigestInterface from "./generated/interfaces/lann-webcrypto-digest.js" */
 /** @import * as Signature from "./generated/interfaces/lann-webcrypto-signature.js" */
 /** @import * as Derivation from "./generated/interfaces/lann-webcrypto-derivation.js" */
@@ -99,9 +92,6 @@ const macKeyServesMac = (key) => key;
 
 /** @type {(key: AeadKey) => Aead.AeadKey} */
 const aeadKeyServesAead = (key) => key;
-
-/** @type {(key: InternalNonceKey) => AeadInternalNonce.InternalNonceKey} */
-const internalNonceKeyServesAeadInternalNonce = (key) => key;
 
 /** @type {(digest: Digest) => DigestInterface.Digest} */
 const digestServesDigest = (digest) => digest;
@@ -225,9 +215,6 @@ const sha2Interface = sha2;
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-sha1-checked.js")} */
 const sha1CheckedInterface = sha1Checked;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-bytes.js")} */
-const bytesInterface = bytes;
-
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-gcm.js")} */
 const aesGcmInterface = aesGcm;
 
@@ -236,18 +223,6 @@ const aesCbcInterface = aesCbc;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-ctr.js")} */
 const aesCtrInterface = aesCtr;
-
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-gcm-internal-nonce.js")} */
-const aesGcmInternalNonceInterface = aesGcmInternalNonce;
-
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-chacha20-poly1305.js")} */
-const chacha20Poly1305Interface = chacha20Poly1305;
-
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-xchacha20-poly1305.js")} */
-const xchacha20Poly1305Interface = xchacha20Poly1305;
-
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-xchacha20-poly1305-internal-nonce.js")} */
-const xchacha20Poly1305InternalNonceInterface = xchacha20Poly1305InternalNonce;
 
 /** @type {typeof import("./generated/interfaces/lann-webcrypto-ed25519-verify.js")} */
 const ed25519VerifyInterface = ed25519Verify;
@@ -313,7 +288,6 @@ const rsaOaepDecryptInterface = rsaOaepDecrypt;
 export const checked = {
   macKeyServesMac,
   aeadKeyServesAead,
-  internalNonceKeyServesAeadInternalNonce,
   digestServesDigest,
   verifyingKeyServesSignature,
   signingKeyServesSignature,
@@ -340,12 +314,7 @@ export const checked = {
   aesKwInterface,
   hmacSha2Interface,
   sha2Interface,
-  bytesInterface,
   aesGcmInterface,
-  aesGcmInternalNonceInterface,
-  chacha20Poly1305Interface,
-  xchacha20Poly1305Interface,
-  xchacha20Poly1305InternalNonceInterface,
   ed25519VerifyInterface,
   ed25519SignInterface,
   ecdsaVerifyInterface,

@@ -17,7 +17,6 @@
 //! under the caller's context, for the plain ok path.
 
 use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::aead_internal_nonce::InternalNonceKey;
 use lann_webcrypto_guest::bindings::cipher::CipherKey;
 use lann_webcrypto_guest::bindings::digest::Digest;
 use lann_webcrypto_guest::bindings::mac::MacKey;
@@ -241,31 +240,6 @@ pub async fn open(
     (collect(opened).await, fed)
 }
 
-/// `internal-nonce-key.seal`, feeding the plaintext per `schedule`
-/// concurrently with the call; same outcome split as [`seal`].
-pub async fn in_seal(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    plaintext: &[u8],
-    schedule: Schedule,
-) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (sealed, fed) =
-        run_split(schedule.chunks(plaintext), |rx| key.seal(aad.to_vec(), rx)).await;
-    (collect(sealed).await, fed)
-}
-
-/// `internal-nonce-key.open`, feeding the sealed message per `schedule`
-/// concurrently with the call; same outcome split as [`seal`].
-pub async fn in_open(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    sealed: &[u8],
-    schedule: Schedule,
-) -> (Result<Vec<u8>, Error>, Result<(), String>) {
-    let (opened, fed) = run_split(schedule.chunks(sealed), |rx| key.open(aad.to_vec(), rx)).await;
-    (collect(opened).await, fed)
-}
-
 /// `signing-key.sign`, feeding `data` per `schedule` concurrently with the
 /// call; same outcome split as [`sign`].
 pub async fn sig_sign(
@@ -457,58 +431,6 @@ pub async fn open_ok(
     what: &str,
 ) -> Result<Vec<u8>, String> {
     open_op(key, nonce, aad, tag_size, ciphertext, schedule)
-        .await?
-        .map_err(|e| describe(what, &e))
-}
-
-/// [`in_seal`], with the feeder's outcome folded into the error path.
-pub async fn in_seal_op(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    plaintext: &[u8],
-    schedule: Schedule,
-) -> Result<Result<Vec<u8>, Error>, String> {
-    folded(
-        in_seal(key, aad, plaintext, schedule).await,
-        "seal plaintext feeder",
-    )
-}
-
-/// [`in_seal_op`], additionally folding the operation's error under `what`.
-pub async fn in_seal_ok(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    plaintext: &[u8],
-    schedule: Schedule,
-    what: &str,
-) -> Result<Vec<u8>, String> {
-    in_seal_op(key, aad, plaintext, schedule)
-        .await?
-        .map_err(|e| describe(what, &e))
-}
-
-/// [`in_open`], with the feeder's outcome folded into the error path.
-pub async fn in_open_op(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    sealed: &[u8],
-    schedule: Schedule,
-) -> Result<Result<Vec<u8>, Error>, String> {
-    folded(
-        in_open(key, aad, sealed, schedule).await,
-        "open sealed feeder",
-    )
-}
-
-/// [`in_open_op`], additionally folding the operation's error under `what`.
-pub async fn in_open_ok(
-    key: &InternalNonceKey,
-    aad: &[u8],
-    sealed: &[u8],
-    schedule: Schedule,
-    what: &str,
-) -> Result<Vec<u8>, String> {
-    in_open_op(key, aad, sealed, schedule)
         .await?
         .map_err(|e| describe(what, &e))
 }

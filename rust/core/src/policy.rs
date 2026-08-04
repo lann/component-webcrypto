@@ -104,31 +104,6 @@ impl KwPolicy {
     }
 }
 
-/// `aead-internal-nonce.internal-nonce-key-options` (seal/open only: the
-/// kind has no WebCrypto usage vocabulary beyond its own operations). The
-/// at-least-one-usage mint check runs on the widened [`AeadPolicy`], which
-/// the `From` impl below produces with the wrap grants disabled.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct InternalNoncePolicy {
-    pub seal: bool,
-    pub open: bool,
-    pub extractable: bool,
-}
-
-impl From<InternalNoncePolicy> for AeadPolicy {
-    /// Widen for the shared AEAD material: the internal-nonce vocabulary
-    /// has no wrap usages, so they arrive disabled.
-    fn from(policy: InternalNoncePolicy) -> Self {
-        Self {
-            seal: policy.seal,
-            open: policy.open,
-            wrap: false,
-            unwrap: false,
-            extractable: policy.extractable,
-        }
-    }
-}
-
 /// `signature.signing-key-options` (degenerate: `sign` is the sole usage).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SigningPolicy {

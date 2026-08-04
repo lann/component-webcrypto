@@ -2,29 +2,25 @@
 //! `lann:webcrypto` interfaces.
 
 use crate::mint::{
-    import_cbc_key, import_chacha_key, import_ecdh_public_key_jwk, import_ecdh_public_key_raw,
+    import_cbc_key, import_ecdh_public_key_jwk, import_ecdh_public_key_raw,
     import_ecdh_public_key_spki, import_ecdh_secret_key, import_hmac_key, import_hmac_sha1_key,
-    import_ikm, import_internal_nonce_key as import_gcm_internal_key, import_key_raw,
-    import_kw_key, import_password, import_rsa_pss_verifying_key_jwk,
+    import_ikm, import_key_raw, import_kw_key, import_password, import_rsa_pss_verifying_key_jwk,
     import_rsa_pss_verifying_key_spki, import_rsassa_verifying_key_jwk,
     import_rsassa_verifying_key_spki, import_x25519_public_key, import_x25519_secret_key,
-    import_xchacha_internal_nonce_key as import_xchacha_internal_key, import_xchacha_key,
     mac_options,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, CbcCase, EcdhCase, EcdhCurve, EcdhPublic, HkdfAlg,
-    HkdfCase, HmacAlg, HmacCase, InternalNonceAlg, InternalNonceCase, KwCase, Pbkdf2Alg,
-    Pbkdf2Case, RsaCase, RsaExpectation, RsaFamily, RsaImport, Sha2Alg, Sha2Case, SigAlg, SigCase,
-    SpeccheckCase, X25519Case,
+    HkdfCase, HmacAlg, HmacCase, KwCase, Pbkdf2Alg, Pbkdf2Case, RsaCase, RsaExpectation, RsaFamily,
+    RsaImport, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase, X25519Case,
 };
 use conformance_harness::stream::{
-    ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, in_open, in_open_op, in_seal_ok,
-    open_ok, open_op, seal_ok, seal_op, sig_verify, sign_ok, verify_ok, verify_op, Schedule,
+    ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, open_ok, open_op, seal_ok, seal_op,
+    sig_verify, sign_ok, verify_ok, verify_op, Schedule,
 };
-use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind};
+use conformance_harness::{describe, expect_bytes, expect_err, ErrKind};
 use lann_webcrypto_guest::bindings::aead::AeadKey;
 use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::bytes::constant_time_equal;
 use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
@@ -56,11 +52,6 @@ pub async fn run_sha2_case(case: &Sha2Case) -> Result<(), String> {
     let digest = make_digest(variant).map_err(|e| describe("make-digest", &e))?;
     let got = compute_ok(&digest, &case.msg, case.schedule, "compute").await?;
     expect_bytes(&got, &case.md, "computed digest")?;
-    // The comparison every caller of a digest vector makes; pins
-    // `constant-time-equal`'s agreement with plain equality on real data.
-    if !constant_time_equal(&got, &case.md) {
-        return Err("constant-time-equal disagreed with byte equality".into());
-    }
     Ok(())
 }
 
@@ -298,14 +289,12 @@ pub async fn run_cbc_case(case: &CbcCase) -> Result<(), String> {
     }
 }
 
-/// Run one caller-nonce AEAD vector (any algorithm) under its schedule.
+/// Run one caller-nonce AEAD vector under its schedule.
 pub async fn run_aead_case(case: &AeadCase) -> Result<(), String> {
     let key = match case.alg {
         AeadAlg::AesGcm => {
             import_key_raw(aes_variant(case.key_bits)?, case.key.clone(), false).await
         }
-        AeadAlg::ChaCha20Poly1305 => import_chacha_key(case.key.clone(), false).await,
-        AeadAlg::XChaCha20Poly1305 => import_xchacha_key(case.key.clone(), false).await,
     }
     .map_err(|e| describe("import-key-raw", &e))?;
     run_aead_expectation(
@@ -364,42 +353,6 @@ async fn run_aead_expectation(
                 "accepted an invalid vector",
             )
         }
-    }
-}
-
-/// Run one internal-nonce AEAD vector under its schedule: `open` the
-/// vector's `iv || ct || tag` (the deterministic direction), and, for valid
-/// vectors, additionally round-trip a fresh `seal` (randomized, so only
-/// self-consistency is checkable).
-pub async fn run_internal_nonce_case(case: &InternalNonceCase) -> Result<(), String> {
-    let key = match case.alg {
-        InternalNonceAlg::AesGcm => {
-            import_gcm_internal_key(aes_variant(case.key_bits)?, case.key.clone(), false)
-                .await
-                .map_err(|e| describe("import-key-raw", &e))?
-        }
-        InternalNonceAlg::XChaCha20Poly1305 => import_xchacha_internal_key(case.key.clone(), false)
-            .await
-            .map_err(|e| describe("import-key-raw", &e))?,
-    };
-    let opened = in_open_op(&key, &case.aad, &case.sealed, case.schedule).await?;
-    if case.valid {
-        let opened = opened.map_err(|e| describe("open", &e))?;
-        expect_bytes(&opened, &case.msg, "opened bytes")?;
-
-        let resealed = in_seal_ok(&key, &case.aad, &case.msg, case.schedule, "seal").await?;
-        expect(resealed.len(), case.sealed.len(), "resealed length")?;
-        let (reopened, fed) = in_open(&key, &case.aad, &resealed, Schedule::Whole).await;
-        fed.map_err(|e| format!("re-open sealed feeder: {e}"))?;
-        let reopened = reopened.map_err(|e| describe("open of fresh seal", &e))?;
-        expect_bytes(&reopened, &case.msg, "round-tripped bytes")
-    } else {
-        expect_err(
-            "open",
-            ErrKind::AuthenticationFailed,
-            opened,
-            "accepted an invalid sealed message",
-        )
     }
 }
 

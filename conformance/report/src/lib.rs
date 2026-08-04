@@ -110,7 +110,7 @@ mod lock {
                 },
                 LockCase {
                     name: "quote\"and\\slash".into(),
-                    features: vec!["chacha20-poly1305".into()],
+                    features: vec!["sha1-checked".into()],
                 },
             ];
             let rendered = render_lock(&cases);

@@ -39,9 +39,9 @@ expansions produce distinct, unconvertible resource types.
   cargo features — `bytes` (`DataSource::from_buf`) and `futures-io`
   (`DataSource::from_reader`).
 - **`seal`/`encrypt` return a lazy `Seal` future**: nothing runs until it
-  is awaited, so a dropped `Seal` never draws from an internal-nonce key's
-  budget, and the output is collected concurrently with the feed, serving
-  incremental producers without deadlock.
+  is awaited, so a dropped `Seal` never calls the implementation, and the
+  output is collected concurrently with the feed, serving incremental
+  producers without deadlock.
 
 ## Errors
 

@@ -28,19 +28,6 @@ use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 
 use lann_webcrypto_guest::bindings::types::Error;
 
-/// The `chacha20-poly1305` feature: the IETF ChaCha20-Poly1305 (RFC 8439)
-/// minting interface. Platform-backed hosts serve it where their platform
-/// does (the Modern Algorithms proposal; Node's WebCrypto serves it,
-/// browser WebCrypto does not yet).
-pub const FEATURE_CHACHA: &str = "chacha20-poly1305";
-
-/// The `xchacha20-poly1305` feature: the XChaCha construction — the
-/// `xchacha20-poly1305` minting interface and the XChaCha internal-nonce
-/// minting interface. No platform WebCrypto implements XChaCha (it is
-/// absent from the Modern Algorithms proposal), so the jco targets declare
-/// it missing.
-pub const FEATURE_XCHACHA: &str = "xchacha20-poly1305";
-
 /// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
 /// No case in the shared suite is tagged with it — the signing suite's
 /// world *imports* the interface, so a target missing the feature (the
@@ -82,8 +69,6 @@ pub const FEATURE_RSA_OAEP_DECRYPT: &str = "rsa-oaep-decrypt";
 /// so a misspelled declaration is a harness bug rather than a silently
 /// inert one.
 pub const KNOWN_FEATURES: &[&str] = &[
-    FEATURE_CHACHA,
-    FEATURE_XCHACHA,
     FEATURE_ECDSA_SIGN,
     FEATURE_SHA1_CHECKED,
     FEATURE_RSA_SIGN,
@@ -147,7 +132,7 @@ pub async fn run_probe(probes: &[Probe], index: usize) -> Result<(), String> {
 /// ```ignore
 /// probes! {
 ///     hmac_import_empty_key,
-///     chacha_key_metadata(chacha),
+///     sha1_checked_postures(sha1_checked),
 /// }
 /// ```
 ///
@@ -205,7 +190,6 @@ pub fn describe(context: &str, error: &Error) -> String {
         Error::NotExtractable => "not-extractable".to_string(),
         Error::Unsupported(detail) => format!("unsupported: {detail}"),
         Error::NotPermitted(detail) => format!("not-permitted: {detail}"),
-        Error::KeyExhausted => "key-exhausted".to_string(),
         Error::Other(detail) => format!("other: {detail}"),
         Error::Extension(ext) => format!(
             "extension({origin}, {name}): {message}",
@@ -233,8 +217,6 @@ pub enum ErrKind {
     Unsupported,
     /// `not-permitted`.
     NotPermitted,
-    /// `key-exhausted`.
-    KeyExhausted,
     /// `other`.
     Other,
     /// `extension` (any condition; probes pinning a specific
@@ -252,7 +234,6 @@ impl ErrKind {
             ErrKind::NotExtractable => "not-extractable",
             ErrKind::Unsupported => "unsupported",
             ErrKind::NotPermitted => "not-permitted",
-            ErrKind::KeyExhausted => "key-exhausted",
             ErrKind::Other => "other",
             ErrKind::Extension => "extension",
         }
@@ -268,7 +249,6 @@ impl ErrKind {
                 | (ErrKind::NotExtractable, Error::NotExtractable)
                 | (ErrKind::Unsupported, Error::Unsupported(_))
                 | (ErrKind::NotPermitted, Error::NotPermitted(_))
-                | (ErrKind::KeyExhausted, Error::KeyExhausted)
                 | (ErrKind::Other, Error::Other(_))
                 | (ErrKind::Extension, Error::Extension(_))
         )
@@ -375,17 +355,17 @@ mod tests {
     #[test]
     fn a_probe_is_provided_unless_one_of_its_features_is_missing() {
         let tagged = Probe {
-            ident: "chacha_key_metadata",
-            features: &["chacha20-poly1305"],
+            ident: "sha1_checked_postures",
+            features: &["sha1-checked"],
             run: || Box::pin(some_probe_body()),
         };
         assert!(tagged.provided_by(&BTreeSet::new()));
-        assert!(!tagged.provided_by(&BTreeSet::from(["chacha20-poly1305"])));
+        assert!(!tagged.provided_by(&BTreeSet::from(["sha1-checked"])));
     }
 
     #[test]
     fn declared_features_are_validated_against_the_known_set() {
-        let known = ["chacha20-poly1305", "ecdsa-sign"];
+        let known = ["sha1-checked", "ecdsa-sign"];
         let declared = vec!["ecdsa-sign".to_string()];
         assert_eq!(
             missing_features(&declared, &known),
@@ -396,7 +376,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "unknown feature")]
     fn a_misspelled_feature_traps_rather_than_meaning_nothing() {
-        missing_features(&["chacha20-poly".to_string()], &["chacha20-poly1305"]);
+        missing_features(&["sha1-check".to_string()], &["sha1-checked"]);
     }
 
     /// The three arms of the assertion `expect_err` stands for: the wanted
@@ -442,7 +422,6 @@ mod tests {
             Error::AuthenticationFailed,
             Error::NotExtractable,
             Error::Unsupported(String::new()),
-            Error::KeyExhausted,
             Error::Other(String::new()),
         ];
         let kinds = [
@@ -451,7 +430,6 @@ mod tests {
             ErrKind::AuthenticationFailed,
             ErrKind::NotExtractable,
             ErrKind::Unsupported,
-            ErrKind::KeyExhausted,
             ErrKind::Other,
         ];
         for (i, kind) in kinds.iter().enumerate() {

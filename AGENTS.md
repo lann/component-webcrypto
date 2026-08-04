@@ -11,6 +11,9 @@ and a jco host (browser Web Crypto API). It is a sibling of
 clarity and correctness over features, and keep the implementations
 behaviourally in sync (the conformance tests and the `crypto-demo` guest's
 checks are the cross-implementation gate).
+The package tracks the WebCrypto standard: extensions to it do not enter
+this package, however shaped — they belong in a sibling package if
+anywhere.
 See [`README.md`](README.md) for the design.
 
 Before designing WIT or touching async/stream plumbing, consult
@@ -23,8 +26,8 @@ rather than relying on a cached summary.
 ```
 wit/                    # the lann:webcrypto package, one file per layer:
                         #   webcrypto.wit holds the stable layer (structural
-                        #   types, the generic primitive kinds, bytes);
-                        #   family files (aes/chacha/sha2/hmac/ed25519/
+                        #   types, the generic primitive kinds);
+                        #   family files (aes/sha2/hmac/ed25519/
                         #   ecdsa.wit) hold the minting interfaces and grow
                         #   as algorithms are added
 rust/                   # the Rust library surface (directory = crate name
@@ -32,7 +35,7 @@ rust/                   # the Rust library surface (directory = crate name
   core/                 # lann-webcrypto-core: the shared RustCrypto core of
                         #   both Rust implementations: cipher/digest
                         #   dispatch, key validation and generation, error
-                        #   rendering, the internal-nonce wire format,
+                        #   rendering,
                         #   signature keys (ECDSA signing is compiled out of
                         #   wasm builds — class D)
   wasmtime/             # lann-webcrypto-wasmtime: Wasmtime host crate,
@@ -148,7 +151,7 @@ The layering is a design invariant, not a convention:
 
 - **Generic primitive-kind interfaces** (`mac`, `aead`) own the
   algorithm-agnostic resources. Adding an algorithm must not change them.
-- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`, `chacha20-poly1305`,
+- **Algorithm interfaces** (`hmac-sha2`, `aes-gcm`,
   `sha2`, `ed25519-verify`/`-sign`, `ecdsa-verify`/`-sign`) contain only minting;
   operations hang off the key resources, which are capabilities (see the WIT
   doc comments for the exact contracts, including extractability and the
@@ -191,20 +194,22 @@ the wart without buying the compatibility. What ends this regime is
 publishing the package for consumption; the change that does so should say
 it does.
 
-The ChaCha interfaces and `sha1-checked` are additionally gated
-`@unstable` (features `chacha20-poly1305`, `xchacha20-poly1305`, and
-`sha1-checked` — see `wit/README.md`,
+`sha1-checked`, `rsassa-pkcs1-v15-sign`/`rsa-pss-sign`, and
+`rsa-oaep-decrypt` are additionally gated
+`@unstable` (features `sha1-checked`, `rsa-sign`, and
+`rsa-oaep-decrypt` — see `wit/README.md`,
 "Stability gates"): tooling hides them unless the feature is enabled, and
 only test builds enable them by default. The conformance guest, the demo
 and WPT componentize-js builds (`--features`), the jco `types` script
-(`--feature`), the timing lab, and the standalone Wasmtime embedding all
+(`--feature`), and the standalone Wasmtime embedding all
 opt in; the library surfaces default off — the guest SDK behind its
-`chacha` and `sha1-checked` cargo features, the Wasmtime host behind
+`sha1-checked`, `rsa-sign`, and `rsa-oaep-decrypt` cargo features, the
+Wasmtime host behind
 `add_to_linker_with_options`'s `LinkOptions` (plain `add_to_linker` serves
 no gated interface). A world line importing or exporting a gated interface
 carries the same gate. Adding a WIT-resolving build without the flags
 silently drops the interfaces rather than erroring, so a "missing
-import/export" for a ChaCha interface usually means a missing feature
+import/export" for a gated interface usually means a missing feature
 flag.
 
 Changing an interface identifier means updating everyone who names it as a
@@ -313,8 +318,8 @@ strategy's artifact. A divergence with no artifact is a bug.
    WIT clause plus the conformance exclusion's recorded rationale.
 5. **Isolate behind a gate or a withheld export** when a whole
    capability cannot be uniform: `@unstable` plus a
-   `conformance/targets.toml` declaration (the ChaCha family,
-   `sha1-checked`), or world-level absence failing at `wac plug` (class
+   `conformance/targets.toml` declaration (`sha1-checked`), or
+   world-level absence failing at `wac plug` (class
    D). Artifact: the gate and the targets.toml line. Every
    `missing-features` entry must name a gated or structural feature —
    an ungated runtime divergence is strategy 1–4's job, not a
@@ -559,16 +564,6 @@ closed numbers remain stable references.
   proxy).
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
-- `stream-aead`: a segmented AEAD primitive kind (libsodium
-  `secretstream`-style) for unbounded content with O(segment) memory;
-  single-message `aead.open` deliberately buffers-and-verifies and must not be
-  relaxed to stream unverified plaintext. Design decisions already settled:
-  prefer libsodium's `secretstream_xchacha20poly1305` as the first wire
-  format (well-specified, vectors exist, per-segment WebCrypto calls give the
-  browser host a path) with an AES-GCM-segmented variant later; segment size
-  is a constructor parameter with a sane default (it is on-the-wire — both
-  peers must agree); `open` releases each segment only after its tag
-  verifies, and truncation/tampering ends the stream with an error.
 - More `signature` algorithms (RSA-PSS/RSASSA-PKCS1-v1_5 need an
   `algorithm-length` getter — semver-minor; see the evolution rules in the
   WIT section — and SPKI/PKCS#8 formats); the
@@ -591,17 +586,16 @@ closed numbers remain stable references.
   algorithm coverage — jco has IndexedDB, the in-guest provider has no store
   at all and would decline the interface at `wac plug` time — so expect an
   optional target capability in `conformance/targets.toml`.
-- A FIPS 140-3 profile, kept *possible* (not implemented): everything needed
-  is additive — the `aead-internal-nonce` primitive kind carries the
-  approved-mode seal (SP 800-38D forbids externally supplied GCM encryption
-  IVs in approved mode, so a FIPS provider exports `aes-gcm-internal-nonce`
-  but not `aes-gcm`, and offers caller-nonce sealing only as a non-approved
-  service), a `module` interface for ISO 19790's mandatory services (show
-  version, show status, self-test, zeroization) plus approved-service
-  indication, and wrapped key export. Do not reintroduce WIT contracts that
-  *mandate* non-approved behavior (the HMAC import doc deliberately permits
-  policy-based rejection of short keys, and the internal-nonce import docs
-  permit policy-based rejection of imported material, for this reason); a
-  FIPS profile is then just a provider exporting only approved algorithm
-  interfaces — enforced at `wac plug` time like the timing-channel class D
-  policy.
+- A FIPS 140-3 profile, kept *possible* though weakened (not implemented):
+  the remaining pieces are additive — a `module` interface for ISO 19790's
+  mandatory services (show version, show status, self-test, zeroization)
+  plus approved-service indication, and wrapped key export. The
+  approved-mode AES-GCM *seal* is no longer expressible: SP 800-38D forbids
+  externally supplied GCM encryption IVs in approved mode, and the
+  `aead-internal-nonce` kind that carried the module-internal-IV seal was
+  cut with the scope narrowing — its design is preserved in issue #272. Do
+  not reintroduce WIT contracts that *mandate* non-approved behavior (the
+  HMAC import doc deliberately permits policy-based rejection of short
+  keys, for this reason); a FIPS profile is then a provider exporting only
+  approved algorithm interfaces — enforced at `wac plug` time like the
+  timing-channel class D policy.

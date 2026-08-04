@@ -38,8 +38,6 @@ commit
   absent padding) must fail `decrypt` with the kind's one uniform error.
   There is no upstream CTR file; AES-CTR is pinned by probes (NIST SP
   800-38A F.5 known answers plus the wrapping-counter contract).
-- `chacha20_poly1305_test.json`, `xchacha20_poly1305_test.json` —
-  ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD vectors.
 - `ed25519_test.json` — Ed25519 signature-verification vectors.
 - `ecdsa_secp256r1_sha256_p1363_test.json`,
   `ecdsa_secp384r1_sha384_p1363_test.json` — ECDSA verification vectors
@@ -192,15 +190,10 @@ only the host-only signing suite can run); in summary:
 
 | Vector property | Our expectation |
 | --- | --- |
-| GCM, keySize 192 | **Skipped** — no implementation serves AES-192 (`import-key` declines it `unsupported`; probed). keySize 128 and 256 both run, in the caller-nonce *and* internal-nonce cases. |
+| GCM, keySize 192 | **Skipped** — no implementation serves AES-192 (`import-key` declines it `unsupported`; probed). keySize 128 and 256 both run. |
 | GCM, ivSize outside 96–1024 bits (12–128 bytes) | `seal`/`open` fail `invalid-nonce` — the `aes-gcm` contract's uniform nonce window, so the vectors' expected ciphertexts (and the `ZeroLengthIv` groups' invalid verdicts) are deliberately unreachable; the tc identities stay. |
 | GCM, in-window ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. The non-96-bit sizes — including every `CounterWrap` vector — exercise the §7.1 `J0` GHASH derivation. |
 | GCM, in-window ivSize, `invalid` | `open` fails `authentication-failed` (open direction only — an invalid vector has nothing to seal). |
-| ChaCha20-Poly1305 (either variant), ivSize ≠ the variant's (96, or 192 for XChaCha) | `seal`/`open` fail `invalid-nonce` — the declared `chacha-variant` selects the accepted nonce length. Nothing is skipped: both files are all-keySize-256. |
-| ChaCha20-Poly1305, variant ivSize, `valid` | `seal` produces exactly `ct ‖ tag`; `open` recovers `msg`. |
-| ChaCha20-Poly1305, variant ivSize, `invalid` | `open` fails `authentication-failed` (open direction only). |
-| Internal-nonce AEAD (same AEAD files, `aes-gcm-internal-nonce`/`*-internal-nonce` cases), keySize 256, variant ivSize, `valid` | `open(iv ‖ ct ‖ tag)` recovers `msg` — the only deterministic direction; a fresh `seal` is additionally round-tripped for self-consistency (its nonce is random, so only shape and reopening are checkable). |
-| Internal-nonce AEAD, anything else (`invalid` result, or ivSize ≠ the algorithm's) | `open(iv ‖ ct ‖ tag)` fails `authentication-failed` — the nonce is carried in-band, so there is no invalid-nonce case: a wrong-length IV just misparses as a malformed sealed message. |
 | HMAC, truncated tagSize | **Skipped** — the WIT's `sign`/`verify` operate on full-length tags; truncated-tag policy is an application concern. |
 | AES-KW, keySize 192 | **Skipped** — as GCM's keySize-192 rule (declined at minting; probed). |
 | AES-KW, `valid` | `kw-key.wrap` (over a `to-wrap-input-raw` of the key data) produces exactly `ct`; `unwrap` + `hmac-sha2.unwrap-key-raw` recovers `msg`. No chunking schedules: wrapping trades in `list<u8>`. |
@@ -208,7 +201,7 @@ only the host-only signing suite can run); in summary:
 | AES-KW, `invalid` | A `msg` outside the wrap domain fails `wrap` with `invalid-key` (an in-domain `msg` on a modified-`ct` vector wraps successfully and must not reproduce the tampered bytes); a present `ct` fails `unwrap` with `authentication-failed` — bad ICVs and malformed lengths are deliberately indistinguishable. |
 | HMAC, full-length tagSize, `valid` | `sign` equals `tag`; `verify(tag)` succeeds. |
 | HMAC, full-length tagSize, `invalid` | `verify(tag)` fails with `authentication-failed`. |
-| SHA-2 ShortMsg case | `compute` equals `MD`, and `bytes.constant-time-equal` agrees (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison, probed separately). |
+| SHA-2 ShortMsg case | `compute` equals `MD` (a digest corpus has no invalid cases — wrong-digest behavior is the caller's comparison). |
 | Ed25519 / ECDSA-P1363, `valid` | `verify(sig)` succeeds. |
 | ed25519-speccheck case 3 (mixed-order `A`/`R`, cofactorless-valid) | import and `verify(sig)` both succeed — the pinned criterion does not reject torsion components it cannot cheaply detect. |
 | ed25519-speccheck, every other case | rejected at import (`invalid-key`) or verification (`authentication-failed`), per the `ed25519-verify` criterion; where the rejection lands is implementation-defined. |
