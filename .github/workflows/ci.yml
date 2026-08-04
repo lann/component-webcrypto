@@ -14,7 +14,10 @@ jobs:
   # guest-under-Wasmtime integration test.
   rust-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The full conformance matrix (conformance-ct::all, four targets incl.
+    # the composed leg and jco-browser) runs here; ~9 min warm locally,
+    # plus a cold-cache release build on CI runners.
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
