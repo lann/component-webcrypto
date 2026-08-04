@@ -40,10 +40,17 @@ commit
   800-38A F.5 known answers plus the wrapping-counter contract).
 - `ed25519_test.json` — Ed25519 signature-verification vectors.
 - `ecdsa_secp256r1_sha256_p1363_test.json`,
-  `ecdsa_secp384r1_sha384_p1363_test.json` — ECDSA verification vectors
+  `ecdsa_secp256r1_sha512_p1363_test.json`,
+  `ecdsa_secp384r1_sha384_p1363_test.json`,
+  `ecdsa_secp384r1_sha512_p1363_test.json` — ECDSA verification vectors
   with fixed-width `r ‖ s` (IEEE P1363) signatures, this package's wire
   format (the ASN.1-DER variants of these files are deliberately not
-  vendored: DER signatures are unrepresentable in the WIT contract).
+  vendored: DER signatures are unrepresentable in the WIT contract). The
+  SHA-512 files pin the cross-hash pairings — on P-256 they exercise the
+  digest-truncation path (the leftmost-n-bits reduction of a digest wider
+  than the curve order). Upstream publishes no file for the other two
+  served pairings (P-256/SHA-384, P-384/SHA-256); those are pinned by
+  probes only.
 - `rsa_signature_{2048,3072,4096}_{sha256,sha384,sha512}_test.json`,
   `rsa_signature_8192_sha256_test.json` — RSASSA-PKCS1-v1_5 verification
   vectors for every served digest, with heavy invalid coverage (padding

@@ -258,7 +258,7 @@ const SHA2_VECTORS: [(Sha2Alg, &str); 3] = [
     ),
 ];
 
-const SIG_VECTORS: [(SigAlg, &str); 3] = [
+const SIG_VECTORS: [(SigAlg, &str); 5] = [
     (
         SigAlg::Ed25519,
         include_str!("../../vectors/ed25519_test.json"),
@@ -268,8 +268,16 @@ const SIG_VECTORS: [(SigAlg, &str); 3] = [
         include_str!("../../vectors/ecdsa_secp256r1_sha256_p1363_test.json"),
     ),
     (
+        SigAlg::EcdsaP256Sha512,
+        include_str!("../../vectors/ecdsa_secp256r1_sha512_p1363_test.json"),
+    ),
+    (
         SigAlg::EcdsaP384Sha384,
         include_str!("../../vectors/ecdsa_secp384r1_sha384_p1363_test.json"),
+    ),
+    (
+        SigAlg::EcdsaP384Sha512,
+        include_str!("../../vectors/ecdsa_secp384r1_sha512_p1363_test.json"),
     ),
 ];
 
@@ -1297,7 +1305,9 @@ pub fn sha2_cases() -> Vec<Sha2Case> {
 pub enum SigAlg {
     Ed25519,
     EcdsaP256Sha256,
+    EcdsaP256Sha512,
     EcdsaP384Sha384,
+    EcdsaP384Sha512,
 }
 
 impl SigAlg {
@@ -1306,7 +1316,9 @@ impl SigAlg {
         match self {
             SigAlg::Ed25519 => "ed25519",
             SigAlg::EcdsaP256Sha256 => "ecdsa-p256-sha256",
+            SigAlg::EcdsaP256Sha512 => "ecdsa-p256-sha512",
             SigAlg::EcdsaP384Sha384 => "ecdsa-p384-sha384",
+            SigAlg::EcdsaP384Sha512 => "ecdsa-p384-sha512",
         }
     }
 }
@@ -1468,7 +1480,10 @@ pub fn sig_cases() -> Vec<SigCase> {
                     push_group(&mut cases, alg, &public, &group.tests);
                 }
             }
-            SigAlg::EcdsaP256Sha256 | SigAlg::EcdsaP384Sha384 => {
+            SigAlg::EcdsaP256Sha256
+            | SigAlg::EcdsaP256Sha512
+            | SigAlg::EcdsaP384Sha384
+            | SigAlg::EcdsaP384Sha512 => {
                 let file: VectorFile<EcdsaGroup> = serde_json::from_str(text)
                     .unwrap_or_else(|err| panic!("parsing {} vectors: {err}", alg.name()));
                 for group in &file.test_groups {
