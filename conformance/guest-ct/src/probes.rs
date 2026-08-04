@@ -2285,7 +2285,12 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
 
 /// The cross pairings of curve and hash are real variants: each mints a
 /// verifying key whose getters report its own binding (never the curve's
-/// default hash).
+/// default hash), and each executes verification under that binding — a
+/// well-formed wrong signature (in-range `r ‖ s`) fails
+/// `authentication-failed` through the pairing's own digest. Upstream
+/// publishes no vector file for P-256/SHA-384 or P-384/SHA-256, so this
+/// is their only verify execution on targets the signing suite does not
+/// reach.
 async fn ecdsa_cross_hash_variants() -> Result<(), String> {
     let mut p256 = vec![0x04];
     p256.extend(unhex(P256_A25_X));
@@ -2310,6 +2315,17 @@ async fn ecdsa_cross_hash_variants() -> Result<(), String> {
             key.algorithm_hash(),
             Some(hash.to_string()),
             "cross-variant algorithm-hash",
+        )?;
+        // 0x0101…01 is in range (below both curve orders) and nonzero for
+        // both halves, so rejection can only come from verification.
+        let sig = vec![0x01u8; if curve == "P-256" { 64 } else { 96 }];
+        let verified =
+            sig_verify_op(&key, b"cross-hash digest binding", &sig, Schedule::Whole).await?;
+        expect_err(
+            &format!("verify ({curve}/{hash})"),
+            ErrKind::AuthenticationFailed,
+            verified,
+            "a fabricated signature verified",
         )?;
     }
     Ok(())

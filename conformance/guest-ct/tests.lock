@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_ct"
-artifact_sha256 = "52c79ee95c46a7ab6f0cd1f2c829dc00c33af335860544f778ad1d2a781bccf8"
+artifact_sha256 = "31020a8b1035256cb70f0c5e10ab9982068283b7cf8361e08fb4234de0dccb0a"
 
 [[case]]
 name = "probe/aead-wrap-grants"
@@ -227,7 +227,13 @@ prefix = "ecdh/contract"
 prefix = "ecdsa-p256-sha256/wycheproof"
 
 [[generated]]
+prefix = "ecdsa-p256-sha512/wycheproof"
+
+[[generated]]
 prefix = "ecdsa-p384-sha384/wycheproof"
+
+[[generated]]
+prefix = "ecdsa-p384-sha512/wycheproof"
 
 [[generated]]
 prefix = "ed25519/speccheck"

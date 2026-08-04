@@ -597,10 +597,24 @@ mod rows {
             |c| Box::pin(async move { vectors::run_sig_case(&c).await })
         ),
         (
+            "ecdsa-p256-sha512/wycheproof",
+            ecdsa_p256_sha512_wycheproof,
+            crate::translate::SigCase,
+            "ecdsa-p256-sha512_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_sig_case(&c).await })
+        ),
+        (
             "ecdsa-p384-sha384/wycheproof",
             ecdsa_p384_sha384_wycheproof,
             crate::translate::SigCase,
             "ecdsa-p384-sha384_wycheproof.rkyv",
+            |c| Box::pin(async move { vectors::run_sig_case(&c).await })
+        ),
+        (
+            "ecdsa-p384-sha512/wycheproof",
+            ecdsa_p384_sha512_wycheproof,
+            crate::translate::SigCase,
+            "ecdsa-p384-sha512_wycheproof.rkyv",
             |c| Box::pin(async move { vectors::run_sig_case(&c).await })
         ),
         (
@@ -866,11 +880,13 @@ fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
         "sha2/nist-cavp" => vector_cases(corpus::sha2_cases(), |c| {
             Box::pin(async move { vectors::run_sha2_case(&c).await })
         }),
-        "ed25519/wycheproof" | "ecdsa-p256-sha256/wycheproof" | "ecdsa-p384-sha384/wycheproof" => {
-            vector_cases(corpus::sig_cases(), |c| {
-                Box::pin(async move { vectors::run_sig_case(&c).await })
-            })
-        }
+        "ed25519/wycheproof"
+        | "ecdsa-p256-sha256/wycheproof"
+        | "ecdsa-p256-sha512/wycheproof"
+        | "ecdsa-p384-sha384/wycheproof"
+        | "ecdsa-p384-sha512/wycheproof" => vector_cases(corpus::sig_cases(), |c| {
+            Box::pin(async move { vectors::run_sig_case(&c).await })
+        }),
         "ed25519/speccheck" => vector_cases(corpus::speccheck_cases(), |c| {
             Box::pin(async move { vectors::run_speccheck_case(&c).await })
         }),

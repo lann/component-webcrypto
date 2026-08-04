@@ -237,14 +237,18 @@ all: lock-check class-d run-wasmtime run-composed run-jco _run-browser-if-enable
 # exports the generic interface whose resource the withheld minting
 # interface mints — true of every minting interface in the package today.
 #
-# Second: the same assertion for `rsa-oaep-decrypt`, which the signing
-# suite cannot prove — its composition already fails on `ecdsa-sign`, so a
-# provider that wrongly started exporting the OAEP decryption mints would
-# still fail that composition for an unrelated reason. A dummy component
-# of the minimal world importing only `rsa-oaep-decrypt`
-# (../class-d/oaep-probe/wit; no Rust crate — `wasm-tools component embed
-# --dummy` stubs the core) must fail the same way, on the
-# `public-encryption` resources the provider's kind-only export rebinds.
+# Second: the same assertion for each other withheld minting interface —
+# `rsa-oaep-decrypt`, `rsassa-pkcs1-v15-sign`, `rsa-pss-sign`, and
+# `rsa-oaep-encrypt` — which the signing suite cannot prove: its
+# composition already fails on `ecdsa-sign`, so a provider that wrongly
+# started exporting one of the others would still fail that composition
+# for an unrelated reason. Each withheld interface has a dedicated minimal
+# probe world under ../class-d/ importing nothing withheld but that
+# interface (no Rust crates — `wasm-tools component embed --dummy` stubs
+# each core). Every probe must fail to compose, on the resources its own
+# interface `use`s from the generic interface the provider exports
+# (`signature` for the sign probes, kind-only `public-encryption` for the
+# OAEP ones).
 #
 # Matching each message on its interface name is load-bearing: a gate that
 # accepted any nonzero exit would also pass on a missing artifact or a
@@ -267,25 +271,35 @@ class-d: build build-provider
         exit 1
     fi
     echo "class-D gate: the signing suite does not compose with the in-guest provider (ecdsa-sign is not exported)."
-    set -e
-    wasm-tools component embed --dummy --features rsa-oaep-decrypt \
-        -w oaep-probe ../class-d/oaep-probe/wit \
-        -o '{{root}}/target/class-d-oaep-probe.core.wasm'
-    wasm-tools component new '{{root}}/target/class-d-oaep-probe.core.wasm' \
-        -o '{{root}}/target/class-d-oaep-probe.wasm'
-    set +e
-    output=$(wac plug '{{root}}/target/class-d-oaep-probe.wasm' \
-        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
-        -o '{{root}}/target/class-d-oaep-composition.wasm' 2>&1)
-    status=$?
-    if [ $status -eq 0 ]; then
-        echo "class-D gate: composing the rsa-oaep-decrypt probe with the in-guest provider SUCCEEDED." >&2
-        echo "The provider must not export lann:webcrypto/rsa-oaep-decrypt (rust/guest-provider/wit/world.wit)." >&2
-        exit 1
-    fi
-    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/rsa-oaep-decrypt'; then
-        echo "class-D gate: the OAEP probe composition failed, but not on rsa-oaep-decrypt:" >&2
-        printf '%s\n' "$output" >&2
-        exit 1
-    fi
-    echo "class-D gate: the rsa-oaep-decrypt probe does not compose with the in-guest provider (the OAEP decryption mints are not exported)."
+    provider='{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm'
+    probes=(
+        'oaep-probe|rsa-oaep-decrypt|--features rsa-oaep-decrypt'
+        'rsassa-sign-probe|rsassa-pkcs1-v15-sign|--features rsa-sign'
+        'pss-sign-probe|rsa-pss-sign|--features rsa-sign'
+        'oaep-encrypt-probe|rsa-oaep-encrypt|'
+    )
+    for probe in "${probes[@]}"; do
+        IFS='|' read -r world iface features <<< "$probe"
+        set -e
+        wasm-tools component embed --dummy $features \
+            -w "$world" "../class-d/$world/wit" \
+            -o "{{root}}/target/class-d-$world.core.wasm"
+        wasm-tools component new "{{root}}/target/class-d-$world.core.wasm" \
+            -o "{{root}}/target/class-d-$world.wasm"
+        set +e
+        output=$(wac plug "{{root}}/target/class-d-$world.wasm" \
+            --plug "$provider" \
+            -o "{{root}}/target/class-d-$world-composition.wasm" 2>&1)
+        status=$?
+        if [ $status -eq 0 ]; then
+            echo "class-D gate: composing the $iface probe with the in-guest provider SUCCEEDED." >&2
+            echo "The provider must not export lann:webcrypto/$iface (rust/guest-provider/wit/world.wit)." >&2
+            exit 1
+        fi
+        if ! printf '%s' "$output" | grep -q "lann:webcrypto/$iface"; then
+            echo "class-D gate: the $iface probe composition failed, but not on $iface:" >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+        fi
+        echo "class-D gate: the $iface probe does not compose with the in-guest provider ($iface is not exported)."
+    done
