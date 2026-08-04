@@ -560,6 +560,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "conformance-signing-guest-ct"
+version = "0.1.0"
+dependencies = [
+ "component-test-sdk",
+ "conformance-harness",
+ "futures",
+ "lann-webcrypto-guest",
+ "wit-bindgen 0.60.0",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
