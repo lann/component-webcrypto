@@ -3507,7 +3507,9 @@ const bufferLimits = { perCall: undefined, total: undefined };
  *
  * A partial update: an absent member leaves that limit as it was. Passing an
  * explicit `undefined` restores that limit's default, which is why the
- * members are tested for presence rather than for being defined.
+ * members are tested for presence rather than for being defined. A limit is
+ * a byte count: any other present value must be a non-negative finite
+ * number, or the call throws `TypeError` with neither limit updated.
  *
  * Raising the pool admits whatever now fits: waiters are judged against the
  * ceiling in force, so without this the new capacity would go unused until
@@ -3515,9 +3517,35 @@ const bufferLimits = { perCall: undefined, total: undefined };
  * @param {{ perCallBufferLimit?: number, totalBufferLimit?: number }} options
  */
 export function configure(options = {}) {
-  if ("perCallBufferLimit" in options) bufferLimits.perCall = options.perCallBufferLimit;
-  if ("totalBufferLimit" in options) bufferLimits.total = options.totalBufferLimit;
+  const perCall =
+    "perCallBufferLimit" in options
+      ? requireLimit("perCallBufferLimit", options.perCallBufferLimit)
+      : bufferLimits.perCall;
+  const total =
+    "totalBufferLimit" in options
+      ? requireLimit("totalBufferLimit", options.totalBufferLimit)
+      : bufferLimits.total;
+  bufferLimits.perCall = perCall;
+  bufferLimits.total = total;
   admitFromFront();
+}
+
+/**
+ * Validate one configured limit. The pool's arithmetic (reserve, compare,
+ * release) is only sound over non-negative finite numbers — a `NaN` or
+ * `Infinity` reaching `reservedBytes` sticks there and disables every later
+ * comparison — so the states a `u64` budget cannot represent are rejected
+ * at the boundary. Fractions floor: a reservation is a whole number of
+ * bytes.
+ * @param {string} name
+ * @param {number | undefined} value
+ */
+function requireLimit(name, value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative finite number of bytes`);
+  }
+  return Math.floor(value);
 }
 
 /** The effective `(perCall, total)` limits, clamped like the wasmtime host. */
@@ -3529,10 +3557,11 @@ function effectiveBufferLimits() {
 
 let reservedBytes = 0;
 /**
- * Waiters, in arrival order. An entry carries only what it reserves: the
- * ceiling it is judged against is read at admission time, so a `configure`
- * between queueing and admission governs the whole queue rather than
- * splitting it into entries judged against different totals.
+ * Waiters, in arrival order. An entry's `amount` is set under the limits at
+ * queue time and only ever clamps down: the ceiling it is judged against is
+ * read at admission time, so a `configure` between queueing and admission
+ * governs the whole queue rather than splitting it into entries judged
+ * against different totals.
  * @type {{ amount: number, resolve: () => void }[]}
  */
 const admitQueue = [];
@@ -3542,7 +3571,12 @@ function admitFromFront() {
   for (;;) {
     const head = admitQueue[0];
     if (head === undefined) return;
-    const { total } = effectiveBufferLimits();
+    const { perCall, total } = effectiveBufferLimits();
+    // The amount was clamped under the limits at queue time; admission
+    // judges against the limits in force, and an amount above a since-
+    // lowered total could never fit it — wedging the FIFO queue — so it
+    // clamps again here.
+    head.amount = Math.min(head.amount, perCall, total);
     if (reservedBytes + head.amount > total) return;
     admitQueue.shift();
     reservedBytes += head.amount;
@@ -3557,13 +3591,17 @@ function admitFromFront() {
  */
 async function admitInput() {
   const { perCall, total } = effectiveBufferLimits();
-  const amount = Math.min(perCall, total);
+  const entry = { amount: Math.min(perCall, total), resolve: () => {} };
   await /** @type {Promise<void>} */ (
     new Promise((resolve) => {
-      admitQueue.push({ amount, resolve });
+      entry.resolve = resolve;
+      admitQueue.push(entry);
       admitFromFront();
     })
   );
+  // Admission may have clamped the entry under limits lowered since queue
+  // time; what was reserved is what the release must return.
+  const amount = entry.amount;
   let released = false;
   return {
     cap: amount,
