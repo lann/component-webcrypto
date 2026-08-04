@@ -62,7 +62,11 @@ jobs:
   # and the committed-matrix check.
   conformance:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Warm runs take a few minutes, but a full cache bootstrap (dependency
+    # cache + component-test tools + the artifact cache, all cold) needs
+    # ~20; a timeout kill skips the cache-save post steps, so too small a
+    # budget here can never bootstrap.
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
