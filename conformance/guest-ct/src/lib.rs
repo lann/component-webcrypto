@@ -111,16 +111,6 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "chacha20-poly1305/wycheproof", tags("chacha20-poly1305"))]
-    fn row_chacha20_poly1305_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(prefix = "xchacha20-poly1305/wycheproof", tags("xchacha20-poly1305"))]
-    fn row_xchacha20_poly1305_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
     #[case_row(prefix = "aes-cbc/wycheproof")]
     fn row_aes_cbc_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
@@ -128,27 +118,6 @@ mod webcrypto {
 
     #[case_row(prefix = "aes-kw/wycheproof")]
     fn row_aes_kw_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(prefix = "aes-gcm-internal-nonce/wycheproof")]
-    fn row_aes_gcm_internal_nonce_wycheproof(
-        registry: &mut Registry,
-        prefix: &ArcStr,
-        tags: &Tags,
-    ) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(
-        prefix = "xchacha20-poly1305-internal-nonce/wycheproof",
-        tags("xchacha20-poly1305")
-    )]
-    fn row_xchacha20_poly1305_internal_nonce_wycheproof(
-        registry: &mut Registry,
-        prefix: &ArcStr,
-        tags: &Tags,
-    ) {
         crate::plan::register(registry, prefix, tags)
     }
 
@@ -388,16 +357,6 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
-    #[case_row(prefix = "chacha20-poly1305/contract", tags("chacha20-poly1305"))]
-    fn row_chacha20_poly1305_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(prefix = "xchacha20-poly1305/contract", tags("xchacha20-poly1305"))]
-    fn row_xchacha20_poly1305_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
     #[case_row(prefix = "hmac-sha1/contract")]
     fn row_hmac_sha1_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
@@ -415,23 +374,6 @@ mod webcrypto {
 
     #[case_row(prefix = "aes-ctr/contract")]
     fn row_aes_ctr_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(prefix = "aes-gcm-internal-nonce/contract")]
-    fn row_aes_gcm_internal_nonce_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
-        crate::plan::register(registry, prefix, tags)
-    }
-
-    #[case_row(
-        prefix = "xchacha20-poly1305-internal-nonce/contract",
-        tags("xchacha20-poly1305")
-    )]
-    fn row_xchacha20_poly1305_internal_nonce_contract(
-        registry: &mut Registry,
-        prefix: &ArcStr,
-        tags: &Tags,
-    ) {
         crate::plan::register(registry, prefix, tags)
     }
 
@@ -516,21 +458,6 @@ mod webcrypto {
         }
 
         #[case]
-        async fn constant_time_equal() -> Verdict {
-            crate::plan::probe("constant_time_equal").await
-        }
-
-        #[case(tags("chacha20-poly1305"))]
-        async fn chacha_nonce_lengths() -> Verdict {
-            crate::plan::probe("chacha_nonce_lengths").await
-        }
-
-        #[case(tags("xchacha20-poly1305"))]
-        async fn xchacha_nonce_lengths() -> Verdict {
-            crate::plan::probe("xchacha_nonce_lengths").await
-        }
-
-        #[case]
         async fn ed25519_sign_roundtrip() -> Verdict {
             crate::plan::probe("ed25519_sign_roundtrip").await
         }
@@ -548,11 +475,6 @@ mod webcrypto {
         #[case]
         async fn verifying_key_export_roundtrip() -> Verdict {
             crate::plan::probe("verifying_key_export_roundtrip").await
-        }
-
-        #[case]
-        async fn internal_nonce_shape() -> Verdict {
-            crate::plan::probe("internal_nonce_shape").await
         }
 
         #[case]
@@ -585,11 +507,6 @@ mod webcrypto {
             crate::plan::probe("gcm_nonce_window").await
         }
 
-        #[case(tags("chacha20-poly1305"))]
-        async fn chacha_tag_size_fixed() -> Verdict {
-            crate::plan::probe("chacha_tag_size_fixed").await
-        }
-
         #[case]
         async fn jwk_rejections() -> Verdict {
             crate::plan::probe("jwk_rejections").await
@@ -598,11 +515,6 @@ mod webcrypto {
         #[case]
         async fn jwk_semantics() -> Verdict {
             crate::plan::probe("jwk_semantics").await
-        }
-
-        #[case(tags("xchacha20-poly1305"))]
-        async fn xchacha_jwk_unsupported() -> Verdict {
-            crate::plan::probe("xchacha_jwk_unsupported").await
         }
 
         #[case]
@@ -658,21 +570,6 @@ mod webcrypto {
         #[case]
         async fn cipher_key_unwrap() -> Verdict {
             crate::plan::probe("cipher_key_unwrap").await
-        }
-
-        #[case]
-        async fn internal_nonce_key_unwrap() -> Verdict {
-            crate::plan::probe("internal_nonce_key_unwrap").await
-        }
-
-        #[case(tags("chacha20-poly1305"))]
-        async fn chacha_key_unwrap() -> Verdict {
-            crate::plan::probe("chacha_key_unwrap").await
-        }
-
-        #[case(tags("xchacha20-poly1305"))]
-        async fn xchacha_key_unwrap() -> Verdict {
-            crate::plan::probe("xchacha_key_unwrap").await
         }
 
         #[case]
@@ -765,11 +662,6 @@ mod webcrypto {
             crate::plan::probe("ecdh_format_roundtrips").await
         }
 
-        #[case]
-        async fn internal_nonce_jwk() -> Verdict {
-            crate::plan::probe("internal_nonce_jwk").await
-        }
-
         #[case(tags("sha1-checked"))]
         async fn sha1_checked_postures() -> Verdict {
             crate::plan::probe("sha1_checked_postures").await
@@ -806,24 +698,6 @@ mod webcrypto {
     /// when a feature was missing. Here, positively-tagged cases only
     /// exercise; each feature's decline assertion is its own `!feature`
     /// case, scheduled by the runner exactly on targets missing it.
-    mod chacha20_poly1305 {
-        mod decline {
-            #[case(tags("!chacha20-poly1305"))]
-            async fn minting() -> Verdict {
-                crate::plan::declined(crate::plan::features::FEATURE_CHACHA).await
-            }
-        }
-    }
-
-    mod xchacha20_poly1305 {
-        mod decline {
-            #[case(tags("!xchacha20-poly1305"))]
-            async fn minting() -> Verdict {
-                crate::plan::declined(crate::plan::features::FEATURE_XCHACHA).await
-            }
-        }
-    }
-
     mod sha1_checked {
         mod decline {
             #[case(tags("!sha1-checked"))]

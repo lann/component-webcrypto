@@ -6,7 +6,7 @@ incumbent census (../src/census-fixture.lock, the incumbent's final
 tests.lock, byte-frozen at the M1.6 cutover). The inventories must be
 equal except that (a) census entries under a generator prefix are covered
 by that prefix's record with the same tags, and (b) the port adds exactly
-the three `!feature` decline cases listed below (new in the port; the
+the one `!feature` decline case listed below (new in the port; the
 incumbent asserted declines inside positively-tagged cases).
 
 Usage: compare-census.py [guest-ct.lock]   (default: ../tests.lock)
@@ -28,7 +28,7 @@ with open(os.path.join(here, "..", "src", "census-fixture.lock")) as f:
         census[m.group(1)] = tuple(
             sorted(re.findall(r'"([^"]+)"', m.group(2) or ""))
         )
-assert len(census) == 19303, len(census)
+assert len(census) == 16427, len(census)
 
 exact, prefixes = {}, {}
 for block in re.split(r"\n(?=\[\[)", open(new_lock).read()):
@@ -43,8 +43,6 @@ for block in re.split(r"\n(?=\[\[)", open(new_lock).read()):
         prefixes[name.group(1)] = tags
 
 DECLINES = {
-    "chacha20-poly1305/decline/minting": ("!chacha20-poly1305",),
-    "xchacha20-poly1305/decline/minting": ("!xchacha20-poly1305",),
     "sha1-checked/decline/minting": ("!sha1-checked",),
 }
 

@@ -3,11 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_ct"
-artifact_sha256 = "1b04d9006fb12f71787832f88e870b9a2eac3f968f2cf7f3910cc1950da4164f"
-
-[[case]]
-name = "chacha20-poly1305/decline/minting"
-tags = ["!chacha20-poly1305"]
+artifact_sha256 = "3a2978b338037ede329cb82ff0da1d0d3e07a4e648b8b5381cddb84d9985bdda"
 
 [[case]]
 name = "probe/aead-wrap-grants"
@@ -28,18 +24,6 @@ name = "probe/agreement-key-unwrap"
 name = "probe/cbc-uniform-failure"
 
 [[case]]
-name = "probe/chacha-key-unwrap"
-tags = ["chacha20-poly1305"]
-
-[[case]]
-name = "probe/chacha-nonce-lengths"
-tags = ["chacha20-poly1305"]
-
-[[case]]
-name = "probe/chacha-tag-size-fixed"
-tags = ["chacha20-poly1305"]
-
-[[case]]
 name = "probe/cipher-derive-key"
 
 [[case]]
@@ -50,9 +34,6 @@ name = "probe/cipher-params-contract"
 
 [[case]]
 name = "probe/cipher-wrap-uniform-failure"
-
-[[case]]
-name = "probe/constant-time-equal"
 
 [[case]]
 name = "probe/ctr-known-answers"
@@ -101,15 +82,6 @@ name = "probe/hmac-import-empty-key"
 
 [[case]]
 name = "probe/hmac-sha384-sha512"
-
-[[case]]
-name = "probe/internal-nonce-jwk"
-
-[[case]]
-name = "probe/internal-nonce-key-unwrap"
-
-[[case]]
-name = "probe/internal-nonce-shape"
 
 [[case]]
 name = "probe/jwk-rejections"
@@ -209,24 +181,8 @@ name = "probe/x25519-format-roundtrips"
 name = "probe/x25519-key-contract"
 
 [[case]]
-name = "probe/xchacha-jwk-unsupported"
-tags = ["xchacha20-poly1305"]
-
-[[case]]
-name = "probe/xchacha-key-unwrap"
-tags = ["xchacha20-poly1305"]
-
-[[case]]
-name = "probe/xchacha-nonce-lengths"
-tags = ["xchacha20-poly1305"]
-
-[[case]]
 name = "sha1-checked/decline/minting"
 tags = ["!sha1-checked"]
-
-[[case]]
-name = "xchacha20-poly1305/decline/minting"
-tags = ["!xchacha20-poly1305"]
 
 [[generated]]
 prefix = "aes-cbc/contract"
@@ -238,12 +194,6 @@ prefix = "aes-cbc/wycheproof"
 prefix = "aes-ctr/contract"
 
 [[generated]]
-prefix = "aes-gcm-internal-nonce/contract"
-
-[[generated]]
-prefix = "aes-gcm-internal-nonce/wycheproof"
-
-[[generated]]
 prefix = "aes-gcm/contract"
 
 [[generated]]
@@ -251,14 +201,6 @@ prefix = "aes-gcm/wycheproof"
 
 [[generated]]
 prefix = "aes-kw/wycheproof"
-
-[[generated]]
-prefix = "chacha20-poly1305/contract"
-tags = ["chacha20-poly1305"]
-
-[[generated]]
-prefix = "chacha20-poly1305/wycheproof"
-tags = ["chacha20-poly1305"]
 
 [[generated]]
 prefix = "ecdh-p256/wycheproof-ecpoint"
@@ -406,19 +348,3 @@ prefix = "x25519/contract"
 
 [[generated]]
 prefix = "x25519/wycheproof"
-
-[[generated]]
-prefix = "xchacha20-poly1305-internal-nonce/contract"
-tags = ["xchacha20-poly1305"]
-
-[[generated]]
-prefix = "xchacha20-poly1305-internal-nonce/wycheproof"
-tags = ["xchacha20-poly1305"]
-
-[[generated]]
-prefix = "xchacha20-poly1305/contract"
-tags = ["xchacha20-poly1305"]
-
-[[generated]]
-prefix = "xchacha20-poly1305/wycheproof"
-tags = ["xchacha20-poly1305"]

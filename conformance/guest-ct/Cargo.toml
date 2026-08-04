@@ -33,7 +33,7 @@ wit-bindgen = { version = "0.60", features = ["async"] }
 
 # Everything below mirrors conformance-guest: the incumbent case bodies
 # are reused wholesale (see src/lib.rs).
-lann-webcrypto-guest = { path = "../../rust/guest", features = ["chacha", "sha1-checked"] }
+lann-webcrypto-guest = { path = "../../rust/guest", features = ["sha1-checked"] }
 conformance-harness = { path = "../harness" }
 futures = { version = "0.3", default-features = false, features = ["async-await", "alloc"] }
 serde = { version = "1", features = ["derive"] }

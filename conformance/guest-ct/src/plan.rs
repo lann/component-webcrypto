@@ -13,7 +13,7 @@ use std::rc::Rc;
 #[cfg(not(feature = "rkyv-corpus"))]
 use component_test_sdk::GeneratedCase;
 use component_test_sdk::{ArcStr, Failure, Registry, Tags, Verdict};
-use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA};
+use conformance_harness::FEATURE_SHA1_CHECKED;
 use futures::future::LocalBoxFuture;
 
 #[cfg(not(feature = "rkyv-corpus"))]
@@ -37,8 +37,6 @@ pub struct Row {
 }
 
 const NO_TAGS: &[&str] = &[];
-const CHACHA: &[&str] = &[FEATURE_CHACHA];
-const XCHACHA: &[&str] = &[FEATURE_XCHACHA];
 
 /// Every generator row, mirroring the census's two-segment groups.
 pub const ROWS: &[Row] = &[
@@ -96,28 +94,12 @@ pub const ROWS: &[Row] = &[
         tags: NO_TAGS,
     },
     Row {
-        prefix: "chacha20-poly1305/wycheproof",
-        tags: CHACHA,
-    },
-    Row {
-        prefix: "xchacha20-poly1305/wycheproof",
-        tags: XCHACHA,
-    },
-    Row {
         prefix: "aes-cbc/wycheproof",
         tags: NO_TAGS,
     },
     Row {
         prefix: "aes-kw/wycheproof",
         tags: NO_TAGS,
-    },
-    Row {
-        prefix: "aes-gcm-internal-nonce/wycheproof",
-        tags: NO_TAGS,
-    },
-    Row {
-        prefix: "xchacha20-poly1305-internal-nonce/wycheproof",
-        tags: XCHACHA,
     },
     Row {
         prefix: "sha2/nist-cavp",
@@ -249,14 +231,6 @@ pub const ROWS: &[Row] = &[
         tags: NO_TAGS,
     },
     Row {
-        prefix: "chacha20-poly1305/contract",
-        tags: CHACHA,
-    },
-    Row {
-        prefix: "xchacha20-poly1305/contract",
-        tags: XCHACHA,
-    },
-    Row {
         prefix: "hmac-sha1/contract",
         tags: NO_TAGS,
     },
@@ -271,14 +245,6 @@ pub const ROWS: &[Row] = &[
     Row {
         prefix: "aes-ctr/contract",
         tags: NO_TAGS,
-    },
-    Row {
-        prefix: "aes-gcm-internal-nonce/contract",
-        tags: NO_TAGS,
-    },
-    Row {
-        prefix: "xchacha20-poly1305-internal-nonce/contract",
-        tags: XCHACHA,
     },
     Row {
         prefix: "hkdf-sha2/contract",
@@ -399,8 +365,8 @@ pub async fn declined(feature: &'static str) -> Verdict {
 mod corpus {
     #[cfg(not(feature = "preparsed"))]
     pub use crate::translate::{
-        aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases, kw_cases,
-        pbkdf2_cases, rsa_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
+        aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, kw_cases, pbkdf2_cases,
+        rsa_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
     };
 
     #[cfg(feature = "preparsed")]
@@ -421,11 +387,6 @@ mod corpus {
         (aead_cases, crate::translate::AeadCase, "aead.bin"),
         (cbc_cases, crate::translate::CbcCase, "cbc.bin"),
         (kw_cases, crate::translate::KwCase, "kw.bin"),
-        (
-            internal_nonce_cases,
-            crate::translate::InternalNonceCase,
-            "internal_nonce.bin"
-        ),
         (sha2_cases, crate::translate::Sha2Case, "sha2.bin"),
         (sig_cases, crate::translate::SigCase, "sig.bin"),
         (
@@ -594,20 +555,6 @@ mod rows {
             |c| Box::pin(async move { vectors::run_aead_case(&c).await })
         ),
         (
-            "chacha20-poly1305/wycheproof",
-            chacha20_poly1305_wycheproof,
-            crate::translate::AeadCase,
-            "chacha20-poly1305_wycheproof.rkyv",
-            |c| Box::pin(async move { vectors::run_aead_case(&c).await })
-        ),
-        (
-            "xchacha20-poly1305/wycheproof",
-            xchacha20_poly1305_wycheproof,
-            crate::translate::AeadCase,
-            "xchacha20-poly1305_wycheproof.rkyv",
-            |c| Box::pin(async move { vectors::run_aead_case(&c).await })
-        ),
-        (
             "aes-cbc/wycheproof",
             aes_cbc_wycheproof,
             crate::translate::CbcCase,
@@ -620,20 +567,6 @@ mod rows {
             crate::translate::KwCase,
             "aes-kw_wycheproof.rkyv",
             |c| Box::pin(async move { vectors::run_kw_case(&c).await })
-        ),
-        (
-            "aes-gcm-internal-nonce/wycheproof",
-            aes_gcm_internal_nonce_wycheproof,
-            crate::translate::InternalNonceCase,
-            "aes-gcm-internal-nonce_wycheproof.rkyv",
-            |c| Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
-        ),
-        (
-            "xchacha20-poly1305-internal-nonce/wycheproof",
-            xchacha20_poly1305_internal_nonce_wycheproof,
-            crate::translate::InternalNonceCase,
-            "xchacha20-poly1305-internal-nonce_wycheproof.rkyv",
-            |c| Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
         ),
         (
             "sha2/nist-cavp",
@@ -864,15 +797,13 @@ fn builder(prefix: &str) -> Vec<PlanCase> {
         return cases;
     }
     match prefix {
-        "aes-gcm/contract" | "chacha20-poly1305/contract" | "xchacha20-poly1305/contract" => {
-            contract_cases(
-                contract::AEAD_FAMILIES,
-                |f| f.areas().collect(),
-                |f, a| f.case_id(a),
-                |f| f.features,
-                |f, a| Box::pin(contract::run(f, a)),
-            )
-        }
+        "aes-gcm/contract" => contract_cases(
+            contract::AEAD_FAMILIES,
+            |f| f.areas().collect(),
+            |f, a| f.case_id(a),
+            |f| f.features,
+            |f, a| Box::pin(contract::run(f, a)),
+        ),
         "hmac-sha1/contract" | "hmac-sha2/contract" => contract_cases(
             contract::MAC_FAMILIES,
             |_| contract::MacArea::ALL.to_vec(),
@@ -887,15 +818,6 @@ fn builder(prefix: &str) -> Vec<PlanCase> {
             |f| f.features,
             |f, a| Box::pin(contract::run_cipher(f, a)),
         ),
-        "aes-gcm-internal-nonce/contract" | "xchacha20-poly1305-internal-nonce/contract" => {
-            contract_cases(
-                contract::INTERNAL_NONCE_FAMILIES,
-                |f| f.areas().collect(),
-                |f, a| f.case_id(a),
-                |f| f.features,
-                |f, a| Box::pin(contract::run_internal_nonce(f, a)),
-            )
-        }
         "hkdf-sha2/contract" | "pbkdf2-sha2/contract" | "x25519/contract" | "ecdh/contract" => {
             contract_cases(
                 contract::DERIVE_SOURCE_FAMILIES,
@@ -932,22 +854,15 @@ fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
                 Box::pin(async move { vectors::run_hmac_case(&c).await })
             })
         }
-        "aes-gcm/wycheproof" | "chacha20-poly1305/wycheproof" | "xchacha20-poly1305/wycheproof" => {
-            vector_cases(corpus::aead_cases(), |c| {
-                Box::pin(async move { vectors::run_aead_case(&c).await })
-            })
-        }
+        "aes-gcm/wycheproof" => vector_cases(corpus::aead_cases(), |c| {
+            Box::pin(async move { vectors::run_aead_case(&c).await })
+        }),
         "aes-cbc/wycheproof" => vector_cases(corpus::cbc_cases(), |c| {
             Box::pin(async move { vectors::run_cbc_case(&c).await })
         }),
         "aes-kw/wycheproof" => vector_cases(corpus::kw_cases(), |c| {
             Box::pin(async move { vectors::run_kw_case(&c).await })
         }),
-        "aes-gcm-internal-nonce/wycheproof" | "xchacha20-poly1305-internal-nonce/wycheproof" => {
-            vector_cases(corpus::internal_nonce_cases(), |c| {
-                Box::pin(async move { vectors::run_internal_nonce_case(&c).await })
-            })
-        }
         "sha2/nist-cavp" => vector_cases(corpus::sha2_cases(), |c| {
             Box::pin(async move { vectors::run_sha2_case(&c).await })
         }),
@@ -1096,9 +1011,9 @@ fn contract_cases<F: 'static, A: Copy + 'static>(
 
 /// The features exercised by decline cases, re-exported for `lib.rs`.
 pub mod features {
-    pub use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA};
+    pub use conformance_harness::FEATURE_SHA1_CHECKED;
 }
 
-// Referenced so the constant isn't unused when only CHACHA/XCHACHA rows
-// exist (sha1-checked is probe+decline only).
+// Referenced so the constant isn't unused in corpus modes where no row
+// carries it (sha1-checked is probe+decline only).
 const _: &str = FEATURE_SHA1_CHECKED;

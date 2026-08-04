@@ -5,9 +5,7 @@
 | aes-cbc (254 cases) | pass | pass | pass | pass |
 | aes-ctr (10 cases) | pass | pass | pass | pass |
 | aes-gcm (485 cases) | pass | pass | pass | pass |
-| aes-gcm-internal-nonce (390 cases) | pass | pass | pass | pass |
 | aes-kw (110 cases) | pass | pass | pass | pass |
-| chacha20-poly1305 (847 cases) | 1 N/A, 846 pass | 846 N/A, 1 pass | 1 N/A, 846 pass | 1 N/A, 846 pass |
 | ecdh/contract/grants | pass | pass | pass | pass |
 | ecdh-p256 (1097 cases) | pass | pass | pass | pass |
 | ecdh-p384 (2408 cases) | pass | pass | pass | pass |
@@ -29,7 +27,7 @@
 | pbkdf2-sha256 (60 cases) | pass | pass | pass | pass |
 | pbkdf2-sha384 (58 cases) | pass | pass | pass | pass |
 | pbkdf2-sha512 (58 cases) | pass | pass | pass | pass |
-| probe (68 cases) | pass | 7 N/A, 61 pass | 4 N/A, 64 pass | pass |
+| probe (58 cases) | pass | 1 N/A, 57 pass | 1 N/A, 57 pass | pass |
 | rsa-pss-sha256-2048-salt0 (406 cases) | pass | pass | pass | pass |
 | rsa-pss-sha256-2048-salt32 (529 cases) | pass | pass | pass | pass |
 | rsa-pss-sha256-3072-salt32 (421 cases) | pass | pass | pass | pass |
@@ -51,8 +49,6 @@
 | sha1-checked/decline/minting | N/A | pass | pass | N/A |
 | sha2 (963 cases) | pass | pass | pass | pass |
 | x25519 (519 cases) | pass | pass | pass | pass |
-| xchacha20-poly1305 (816 cases) | 1 N/A, 815 pass | 815 N/A, 1 pass | 815 N/A, 1 pass | 1 N/A, 815 pass |
-| xchacha20-poly1305-internal-nonce (815 cases) | pass | N/A | N/A | pass |
 
 ## Failures
 
@@ -60,7 +56,7 @@ None.
 
 ## Summary
 
-- `composed`: 3 N/A, 19303 pass (19306 total)
-- `jco-browser`: 2483 N/A, 16823 pass (19306 total)
-- `jco-node`: 1635 N/A, 17671 pass (19306 total)
-- `wasmtime-rustcrypto`: 3 N/A, 19303 pass (19306 total)
+- `composed`: 1 N/A, 16427 pass (16428 total)
+- `jco-browser`: 1 N/A, 16427 pass (16428 total)
+- `jco-node`: 1 N/A, 16427 pass (16428 total)
+- `wasmtime-rustcrypto`: 1 N/A, 16427 pass (16428 total)

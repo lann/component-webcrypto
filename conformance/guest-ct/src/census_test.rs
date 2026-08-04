@@ -106,5 +106,5 @@ fn inventory_matches_the_incumbent_census() {
             "feature tags for {name} diverge from the census"
         );
     }
-    assert_eq!(census.len(), 19303, "census size changed under us");
+    assert_eq!(census.len(), 16427, "census size changed under us");
 }

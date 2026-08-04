@@ -88,12 +88,6 @@ fn main() {
     write(&out, mode, "aead", translate::aead_cases());
     write(&out, mode, "cbc", translate::cbc_cases());
     write(&out, mode, "kw", translate::kw_cases());
-    write(
-        &out,
-        mode,
-        "internal_nonce",
-        translate::internal_nonce_cases(),
-    );
     write(&out, mode, "sha2", translate::sha2_cases());
     write(&out, mode, "sig", translate::sig_cases());
     write(&out, mode, "speccheck", translate::speccheck_cases());

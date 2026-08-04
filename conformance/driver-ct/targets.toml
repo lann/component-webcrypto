@@ -1,9 +1,5 @@
 version = "0.1"
 
-[features.chacha20-poly1305]
-kind = "gated"
-[features.xchacha20-poly1305]
-kind = "gated"
 [features.sha1-checked]
 kind = "gated"
 [features.ecdsa-sign]
@@ -16,26 +12,23 @@ missing-features = []
 # The shared suite plugged with the in-guest RustCrypto provider
 # (rust/guest-provider), run under the generic component-test host
 # runner. The provider serves every gated feature the shared suite
-# exercises (chacha20-poly1305, xchacha20-poly1305, sha1-checked); its
-# one deliberate gap is `ecdsa-sign` (class D — see
-# rust/guest-provider/README.md), which nothing in this suite is tagged
-# with (the exclusion is structural: the signing suite's world imports
-# the interface, so it cannot even link composed — `just class-d`
-# asserts the absent export, so this line cannot outlive the fact it
-# records).
+# exercises (sha1-checked); its one deliberate gap is `ecdsa-sign`
+# (class D — see rust/guest-provider/README.md), which nothing in this
+# suite is tagged with (the exclusion is structural: the signing suite's
+# world imports the interface, so it cannot even link composed —
+# `just class-d` asserts the absent export, so this line cannot outlive
+# the fact it records).
 missing-features = ["ecdsa-sign"]
 
 [targets.jco-node]
-missing-features = ["xchacha20-poly1305", "sha1-checked"]
+missing-features = ["sha1-checked"]
 
 [targets.jco-browser]
-# The same host module as jco-node, in headless Chromium — whose WebCrypto
-# serves no ChaCha20-Poly1305 yet (the host feature-detects it per call, so
-# no declaration lives in the module and this line follows the browser's
-# capability). The browser also fails the gated RSA private-key mints
-# closed (see targets-signing.toml; nothing in this suite is tagged with
-# them).
-missing-features = ["chacha20-poly1305", "xchacha20-poly1305", "sha1-checked"]
+# The same host module as jco-node, in headless Chromium. Like jco-node it
+# cannot serve `sha1-checked`. The browser also fails the gated RSA
+# private-key mints closed (see targets-signing.toml; nothing in this
+# suite is tagged with them).
+missing-features = ["sha1-checked"]
 # Gates in CI (the Actions runner ships Chrome); locally it needs a
 # Chrome/Chromium install and runs only when opted in with
 # CONFORMANCE_BROWSER=1, so missing results files are warnings, not errors.
