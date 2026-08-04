@@ -217,3 +217,57 @@ test("a raised total admits a waiter queued against the old one", async () => {
   first.feed();
   await ops[0].then(drain);
 });
+
+test("a lowered total admits a waiter queued against the old one, clamped", async () => {
+  // The shrink counterpart: the entry's amount was set under the old, larger
+  // limits, and a fixed amount above the new total could never fit it — the
+  // whole FIFO queue would sit behind it forever. Admission re-clamps the
+  // front entry against the limits in force instead.
+  configure({ perCallBufferLimit: 1024, totalBufferLimit: 1024 });
+  const aead = await key();
+  const first = heldStream();
+  const second = heldStream();
+  const ops = [
+    aead.seal(NONCE, NO_AAD, undefined, first.stream),
+    aead.seal(NONCE, NO_AAD, undefined, second.stream),
+  ];
+  ops.forEach((op) => op.catch(() => {}));
+
+  second.feed(new Uint8Array(16));
+  assert.equal(await settledWithin(ops[1], 50), "pending", "the pool holds one operation");
+
+  configure({ totalBufferLimit: 256 });
+  // The first operation still holds its 1024-byte reservation; the waiter
+  // admits once that releases, at an amount the lowered pool can hold.
+  first.feed();
+  await ops[0].then(drain);
+  assert.equal(
+    await settledWithin(ops[1], 100),
+    "resolved",
+    "the waiter must admit clamped to the lowered limits, not strand",
+  );
+  await ops[1].then(drain);
+});
+
+test("configure rejects a limit that is not a non-negative finite number", async () => {
+  // The wasmtime host's budgets are u64s, which have no NaN, Infinity,
+  // negative, or string states; this host mirrors that domain by throwing.
+  // A non-finite value reaching the pool's arithmetic would stick in
+  // `reservedBytes` and disable every later comparison, silently.
+  configure({ perCallBufferLimit: 64, totalBufferLimit: 4096 });
+  for (const bad of [NaN, Infinity, -Infinity, -1, "4096", null, 64n]) {
+    assert.throws(() => configure({ totalBufferLimit: bad }), TypeError);
+    assert.throws(() => configure({ perCallBufferLimit: bad }), TypeError);
+  }
+  // The rejection is atomic: a valid member in the same call is not applied.
+  assert.throws(() => configure({ perCallBufferLimit: 1024, totalBufferLimit: NaN }), TypeError);
+
+  const aead = await key();
+  await assert.rejects(
+    () => aead.seal(NONCE, NO_AAD, undefined, streamOf(new Uint8Array(1024))),
+    (err) => err.tag === "other",
+    "the 64-byte per-call limit set before the rejected calls must still be in force",
+  );
+  // And the pool still admits within those limits.
+  await sealAndDrain(aead, streamOf(new Uint8Array(64)));
+});
