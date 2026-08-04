@@ -391,8 +391,18 @@ pub async fn run_sig_case(case: &SigCase) -> Result<(), String> {
                 .await
                 .map_err(|e| describe("import-verifying-key-raw", &e))?
         }
+        SigAlg::EcdsaP256Sha512 => {
+            import_ecdsa_verifying_key(EcdsaVariant::P256Sha512, case.public.clone())
+                .await
+                .map_err(|e| describe("import-verifying-key-raw", &e))?
+        }
         SigAlg::EcdsaP384Sha384 => {
             import_ecdsa_verifying_key(EcdsaVariant::P384Sha384, case.public.clone())
+                .await
+                .map_err(|e| describe("import-verifying-key-raw", &e))?
+        }
+        SigAlg::EcdsaP384Sha512 => {
+            import_ecdsa_verifying_key(EcdsaVariant::P384Sha512, case.public.clone())
                 .await
                 .map_err(|e| describe("import-verifying-key-raw", &e))?
         }

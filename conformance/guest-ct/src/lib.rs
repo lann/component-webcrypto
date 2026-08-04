@@ -141,8 +141,18 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
+    #[case_row(prefix = "ecdsa-p256-sha512/wycheproof")]
+    fn row_ecdsa_p256_sha512_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
+    }
+
     #[case_row(prefix = "ecdsa-p384-sha384/wycheproof")]
     fn row_ecdsa_p384_sha384_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
+    }
+
+    #[case_row(prefix = "ecdsa-p384-sha512/wycheproof")]
+    fn row_ecdsa_p384_sha512_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
     }
 

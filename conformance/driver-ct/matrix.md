@@ -10,7 +10,9 @@
 | ecdh-p256 (1097 cases) | pass | pass | pass | pass |
 | ecdh-p384 (2408 cases) | pass | pass | pass | pass |
 | ecdsa-p256-sha256 (609 cases) | pass | pass | pass | pass |
+| ecdsa-p256-sha512 (816 cases) | pass | pass | pass | pass |
 | ecdsa-p384-sha384 (666 cases) | pass | pass | pass | pass |
+| ecdsa-p384-sha512 (778 cases) | pass | pass | pass | pass |
 | ed25519 (336 cases) | pass | pass | pass | pass |
 | hkdf-sha1 (87 cases) | pass | pass | pass | pass |
 | hkdf-sha2/contract/grants | pass | pass | pass | pass |
@@ -56,7 +58,7 @@ None.
 
 ## Summary
 
-- `composed`: 1 N/A, 16427 pass (16428 total)
-- `jco-browser`: 1 N/A, 16427 pass (16428 total)
-- `jco-node`: 1 N/A, 16427 pass (16428 total)
-- `wasmtime-rustcrypto`: 1 N/A, 16427 pass (16428 total)
+- `composed`: 1 N/A, 18021 pass (18022 total)
+- `jco-browser`: 1 N/A, 18021 pass (18022 total)
+- `jco-node`: 1 N/A, 18021 pass (18022 total)
+- `wasmtime-rustcrypto`: 1 N/A, 18021 pass (18022 total)
