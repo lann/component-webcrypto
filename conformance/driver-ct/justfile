@@ -6,11 +6,14 @@
 # registries replaces this arrangement eventually.
 
 root := "../.."
-ct := "cargo run -q --release --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
-# --release is load-bearing: the generic runner embeds wasmtime, and a
-# dev-profile Cranelift + host runs the composed corpus ~16x slower
-# (~5 min vs ~19 s), which blew CI's job timeout.
-ct-runner := "cargo run -q --release --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-runner --bin ct-runner --"
+ct-tree := root + "/../component-test"
+# The component-test CLI and generic runner are invoked as prebuilt
+# binaries from the sibling checkout's bin/ (populated by _ct-tools;
+# CI caches that directory keyed on .component-test-rev, so runs skip
+# both the build and the ~2 min of rebuild/relink cargo pays on a
+# fresh clone even with a cached target dir).
+ct := ct-tree + "/bin/component-test"
+ct-runner := ct-tree + "/bin/ct-runner"
 guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
 signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
 provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
@@ -29,13 +32,35 @@ build:
         --features conformance-guest-ct/rkyv-corpus
     cargo build --manifest-path {{root}}/Cargo.toml --release -p conformance-driver-ct
 
+# Populate the sibling checkout's bin/ with the component-test CLI and
+# the generic runner. Reused when the binaries exist and match the
+# sibling's HEAD; a dirty sibling tree always rebuilds (local iteration
+# on component-test itself). --release is load-bearing: the runner
+# embeds wasmtime, and a dev-profile Cranelift + host runs the composed
+# corpus ~16x slower (~5 min vs ~19 s), which blew CI's job timeout.
+_ct-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tree="{{ct-tree}}"
+    rev=$(git -C "$tree" rev-parse HEAD)
+    dirty=$(git -C "$tree" status --porcelain)
+    if [ -z "$dirty" ] && [ -x "$tree/bin/component-test" ] && [ -x "$tree/bin/ct-runner" ] \
+        && [ "$(cat "$tree/bin/.rev" 2>/dev/null)" = "$rev" ]; then
+        exit 0
+    fi
+    cargo build -q --release --manifest-path "$tree/Cargo.toml" \
+        -p component-test-cli -p component-test-runner
+    mkdir -p "$tree/bin"
+    cp "$tree/target/release/component-test" "$tree/target/release/ct-runner" "$tree/bin/"
+    if [ -z "$dirty" ]; then printf '%s' "$rev" > "$tree/bin/.rev"; else rm -f "$tree/bin/.rev"; fi
+
 # Drift-check the committed lockfiles.
-lock-check: build
+lock-check: build _ct-tools
     {{ct}} lock {{guest}} --check ../guest-ct/tests.lock
     {{ct}} lock {{signing}} --check ../signing-guest-ct/tests.lock
 
 # Regenerate lockfiles after case changes (commit the diff).
-lock-update: build
+lock-update: build _ct-tools
     {{ct}} lock {{guest}} -o ../guest-ct/tests.lock
     {{ct}} lock {{signing}} -o ../signing-guest-ct/tests.lock
 
@@ -78,7 +103,7 @@ build-provider:
 # aggregate's cross-check against targets.toml. The signing suite never
 # runs composed: its world imports ecdsa-sign, so it cannot even link
 # against the provider (the class-d recipe asserts exactly that).
-run-composed: build build-provider
+run-composed: build build-provider _ct-tools
     mkdir -p results
     wac plug {{guest}} --plug {{provider}} -o {{composed}}
     {{ct-runner}} {{composed}} --jobs 8 --jsonl \
@@ -114,7 +139,7 @@ _run-browser-if-enabled:
 # Aggregate all targets into the matrix; exits nonzero on any failure
 # or validation error. The optional jco-browser results are included
 # when present (their absence is a declared warning, not an error).
-aggregate:
+aggregate: _ct-tools
     #!/usr/bin/env bash
     set -euo pipefail
     browser=()
@@ -129,7 +154,7 @@ aggregate:
         -o results/matrix.md
 
 # The signing suite (host-only: wasmtime, jco-node, and jco-browser).
-aggregate-signing:
+aggregate-signing: _ct-tools
     #!/usr/bin/env bash
     set -euo pipefail
     browser=()

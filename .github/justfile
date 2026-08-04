@@ -12,6 +12,11 @@ rust-checks:
     @just gha::_step clippy
     @just gha::_step test
     @just gha::_step demo::test-composed
+
+# Everything the conformance CI job runs: the cross-implementation
+# conformance matrix (component-test stack, all four targets including
+# jco-browser) and the committed-matrix check.
+conformance-checks:
     @just gha::_step conformance-ct::all
     @just gha::_step conformance-ct::matrix-check
 

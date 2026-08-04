@@ -10,14 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  # Native Rust checks: formatting, lints, WIT validation, and the
-  # guest-under-Wasmtime integration test.
+  # Native Rust checks: formatting, lints, WIT validation, the
+  # guest-under-Wasmtime integration test, and the composed demo.
   rust-checks:
     runs-on: ubuntu-latest
-    # The full conformance matrix (conformance-ct::all, four targets incl.
-    # the composed leg and jco-browser) runs here; ~9 min warm locally,
-    # plus a cold-cache release build on CI runners.
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -45,16 +42,60 @@ jobs:
           shared-key: rust-checks
           cache-all-crates: true
 
-      - name: Cache component-test build
-        # rust-cache above covers only this repo's workspace; the sibling
-        # checkout's target dir would otherwise rebuild release wasmtime
-        # every run (~10 min on the hosted runners). The build is a pure
-        # function of the pinned rev and the toolchain, so the key never
-        # needs invalidating beyond those.
+      - name: Install dependencies
+        run: ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SKIP_NODE: "1"
+
+      # The whole job body lives in the justfile (`rust-checks`): formatting,
+      # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
+      # integration test), and the composed fully in-guest demo. The
+      # justfile's `_step` wrapper emits ::group::/::error:: annotations per
+      # recipe.
+      - name: Run rust checks
+        run: just gha::rust-checks
+
+  # The cross-implementation conformance matrix (component-test stack):
+  # both suites across all four targets — wasmtime-rustcrypto, composed,
+  # jco-node, and jco-browser (headless Chromium) — plus the aggregates
+  # and the committed-matrix check.
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # See the rust-checks job's twin step.
+        run: |
+          git clone https://github.com/lann/component-test .component-test
+          git -C .component-test checkout --detach "$(cat .component-test-rev)"
+          ln -s "$PWD/.component-test" ../component-test
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: conformance
+          cache-all-crates: true
+
+      - name: Cache component-test tools
+        # The prebuilt component-test CLI + generic runner binaries
+        # (conformance-ct::_ct-tools populates bin/ and reuses it when it
+        # matches the sibling's HEAD). Caching the binaries rather than
+        # the sibling's target dir skips cargo entirely on a hit — a
+        # fresh clone's mtimes otherwise force ~2 min of rebuild/relink
+        # even with a cached target. The binaries are a pure function of
+        # the pinned rev and the toolchain, so the key never needs
+        # invalidating beyond those.
         uses: actions/cache@v4
         with:
-          path: .component-test/target
-          key: component-test-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
+          path: .component-test/bin
+          key: component-test-bin-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
 
       - name: Install Node 24
         uses: actions/setup-node@v4
@@ -95,15 +136,8 @@ jobs:
             npx playwright-core install --with-deps chromium
           fi
 
-      # The whole job body lives in the justfile (`rust-checks`): formatting,
-      # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
-      # integration test), the composed fully in-guest demo, and the
-      # cross-implementation conformance suite (`just conformance-ct::all`,
-      # the component-test stack, including the jco-browser leg). The
-      # justfile's `_step` wrapper
-      # emits ::group::/::error:: annotations per recipe.
-      - name: Run rust checks
-        run: just gha::rust-checks
+      - name: Run the conformance matrix
+        run: just gha::conformance-checks
 
   # The webcrypto-componentize JS guest library's gates: the composed demo
   # (the JS guest's checks against the in-guest provider, including the

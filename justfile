@@ -31,7 +31,7 @@ default:
     @just --list
 
 # Run every CI check locally: each CI job runs exactly one gha:: job recipe.
-ci: gha::rust-checks gha::jco-checks gha::componentize-checks
+ci: gha::rust-checks gha::conformance-checks gha::jco-checks gha::componentize-checks
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests).
 check: fmt-check clippy validate-wit test
