@@ -627,6 +627,26 @@ async function unwrapEnforcesJwkMetadata() {
   );
 }
 
+/**
+ * The spec's export-op existence check precedes its extractability check:
+ * a KDF key — always non-extractable — reports `NotSupportedError` (no
+ * export operation exists to be denied access to), never
+ * `InvalidAccessError`. The vendored WPT groups export only keys *derived
+ * from* KDF keys, so this precedence is observable only here.
+ */
+async function kdfExportPrecedence() {
+  const secret = encoder.encode("kdf export precedence");
+  for (const name of ["HKDF", "PBKDF2"]) {
+    const key = await subtle.importKey("raw", secret, { name }, false, ["deriveBits"]);
+    await expectDomException("NotSupportedError", `${name} raw export`, () =>
+      subtle.exportKey("raw", key),
+    );
+    await expectDomException("NotSupportedError", `${name} jwk export`, () =>
+      subtle.exportKey("jwk", key),
+    );
+  }
+}
+
 const CHECKS = [
   ["hmac-known-answer", hmacKnownAnswer],
   ["hmac-verify", hmacVerify],
@@ -642,6 +662,7 @@ const CHECKS = [
   ["unwrap-enforces-jwk-metadata", unwrapEnforcesJwkMetadata],
   ["jwk-roundtrip", jwkRoundtrip],
   ["jwk-rejects-malformed", jwkRejectsMalformed],
+  ["kdf-export-precedence", kdfExportPrecedence],
   ["ed25519-sign-verify", ed25519SignVerify],
   ["get-random-values", getRandomValuesCheck],
   ["sha1-collision-policy", sha1CollisionPolicy],

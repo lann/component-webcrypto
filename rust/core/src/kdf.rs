@@ -92,6 +92,19 @@ enum Prk {
     Sha512(Hkdf<Sha512>),
 }
 
+impl Prk {
+    /// RFC 5869's HashLen: the hash's output length in bytes.
+    fn hash_len(&self) -> usize {
+        use sha2::digest::OutputSizeUser as _;
+        match self {
+            Prk::Sha1(_) => Sha1::output_size(),
+            Prk::Sha256(_) => Sha256::output_size(),
+            Prk::Sha384(_) => Sha384::output_size(),
+            Prk::Sha512(_) => Sha512::output_size(),
+        }
+    }
+}
+
 impl std::fmt::Debug for Prk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let hash = match self {
@@ -354,9 +367,12 @@ impl DeriveInputMaterial {
 
     /// HKDF-Expand or PBKDF2 at `bits` — or, for an agreed input, the
     /// shared secret truncated to `bits` — enforcing the byte-multiple
-    /// rule, RFC 5869's 255·HashLen bound (which `expand` reports), and
-    /// the agreed secret's own length as its upper bound (the platform's
-    /// `OperationError` for an over-long agreement `deriveBits`).
+    /// rule, RFC 5869's 255·HashLen bound, and the agreed secret's own
+    /// length as its upper bound (the platform's `OperationError` for an
+    /// over-long agreement `deriveBits`). The output buffer is sized by
+    /// the caller's `bits`, so each arm checks its length bound before
+    /// allocating it: an oversized request is a rejection, never an
+    /// aborted allocation.
     fn output(&self, bits: u32) -> Result<Zeroizing<Vec<u8>>, Error> {
         if bits == 0 || !bits.is_multiple_of(8) {
             return Err(Error::Other(format!(
@@ -364,7 +380,6 @@ impl DeriveInputMaterial {
             )));
         }
         let len = (bits / 8) as usize;
-        let mut okm = Zeroizing::new(vec![0u8; len]);
         match &self.realized {
             Realized::Agreed { secret } => {
                 if len > secret.len() {
@@ -373,34 +388,44 @@ impl DeriveInputMaterial {
                         secret.len()
                     )));
                 }
+                let mut okm = Zeroizing::new(vec![0u8; len]);
                 okm.copy_from_slice(&secret[..len]);
+                Ok(okm)
             }
             Realized::Hkdf { prk, info } => {
+                let too_long = || {
+                    Error::Other(format!(
+                        "HKDF output length {len} exceeds RFC 5869's 255 blocks of the hash"
+                    ))
+                };
+                if len > 255 * prk.hash_len() {
+                    return Err(too_long());
+                }
+                let mut okm = Zeroizing::new(vec![0u8; len]);
                 let expanded = match prk {
                     Prk::Sha1(hk) => hk.expand(info, &mut okm),
                     Prk::Sha256(hk) => hk.expand(info, &mut okm),
                     Prk::Sha384(hk) => hk.expand(info, &mut okm),
                     Prk::Sha512(hk) => hk.expand(info, &mut okm),
                 };
-                expanded.map_err(|_| {
-                    Error::Other(format!(
-                        "HKDF output length {} exceeds RFC 5869's 255 blocks of the hash",
-                        bits / 8
-                    ))
-                })?;
+                expanded.map_err(|_| too_long())?;
+                Ok(okm)
             }
             Realized::Pbkdf2 {
                 prf,
                 salt,
                 iterations,
-            } => match prf {
-                PbkdfPrf::Sha1(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
-                PbkdfPrf::Sha256(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
-                PbkdfPrf::Sha384(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
-                PbkdfPrf::Sha512(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
-            },
+            } => {
+                let mut okm = Zeroizing::new(vec![0u8; len]);
+                match prf {
+                    PbkdfPrf::Sha1(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                    PbkdfPrf::Sha256(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                    PbkdfPrf::Sha384(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                    PbkdfPrf::Sha512(mac) => pbkdf2_blocks(mac, salt, *iterations, &mut okm),
+                }
+                Ok(okm)
+            }
         }
-        Ok(okm)
     }
 
     /// The source's natural output — the full shared secret for an agreed
@@ -753,6 +778,12 @@ mod tests {
             Err(Error::Other(_))
         ));
         assert!(input.derive_bits(Some(255 * 32 * 8)).is_ok());
+        // The maximal representable request rejects on the same bound,
+        // before a buffer of that size exists.
+        assert!(matches!(
+            input.derive_bits(Some(u32::MAX - 7)),
+            Err(Error::Other(_))
+        ));
 
         assert!(matches!(
             DeriveInputMaterial::prepare_from(Sha2Variant::Sha256, &input, &[], Vec::new()),
@@ -762,6 +793,24 @@ mod tests {
         assert!(matches!(
             DeriveInputMaterial::prepare(Sha2Variant::Sha224, &ikm, &[], Vec::new()),
             Err(Error::Unsupported(_))
+        ));
+    }
+
+    /// An agreed input's derive length is bounded by the shared secret's
+    /// own length: the full secret and every prefix serve; one byte past
+    /// and the maximal representable request reject on the same bound.
+    #[test]
+    fn agreed_length_is_bounded_by_the_secret() {
+        let input = DeriveInputMaterial::agreed(Zeroizing::new(vec![7; 32]), policy_both());
+        assert_eq!(input.derive_bits(Some(32 * 8)).unwrap().len(), 32);
+        assert_eq!(input.derive_bits(Some(8)).unwrap().len(), 1);
+        assert!(matches!(
+            input.derive_bits(Some(32 * 8 + 8)),
+            Err(Error::Other(_))
+        ));
+        assert!(matches!(
+            input.derive_bits(Some(u32::MAX - 7)),
+            Err(Error::Other(_))
         ));
     }
 }

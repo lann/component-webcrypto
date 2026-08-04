@@ -9,8 +9,9 @@
 // reference is `lib.dom.d.ts` — so there is no staleness question.
 //
 // What this does *not* check is the library's documented deviations, which
-// are runtime restrictions on values, not on shapes: HMAC-SHA-256 and
-// AES-256-GCM only, `"raw"`/`"jwk"` formats only, the `tagLength` rules. Those are
+// are runtime restrictions on values, not on shapes: the served algorithm
+// and format sets (the `SERVED_ALGORITHMS` registry in webcrypto.js's
+// header) and parameter rules like `tagLength`. Those are
 // the WPT suite's job (`just wpt::test`). The split is
 // deliberate: types pin the shape, the vendored web-platform-tests pin the
 // behaviour, and both describe the same surface.
