@@ -6,8 +6,11 @@
 # registries replaces this arrangement eventually.
 
 root := "../.."
-ct := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
-ct-runner := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-runner --bin ct-runner --"
+ct := "cargo run -q --release --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
+# --release is load-bearing: the generic runner embeds wasmtime, and a
+# dev-profile Cranelift + host runs the composed corpus ~16x slower
+# (~5 min vs ~19 s), which blew CI's job timeout.
+ct-runner := "cargo run -q --release --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-runner --bin ct-runner --"
 guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
 signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
 provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
