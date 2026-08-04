@@ -1,7 +1,9 @@
-# component-test conformance recipes (M1.6). Module recipes run from
-# this directory (conformance/driver-ct); `root` is the repo root. The
-# component-test checkout is expected as a sibling of the repo during
-# the migration.
+# component-test conformance recipes. Module recipes run from this
+# directory (conformance/driver-ct); `root` is the repo root. The
+# component-test checkout lives as a sibling of the repo, pinned by
+# .component-test-rev (CI clones and checks out that rev; locally,
+# keep the sibling at or past the pin). Publishing component-test to
+# registries replaces this arrangement eventually.
 
 root := "../.."
 ct := "cargo run -q --manifest-path " + root + "/../component-test/Cargo.toml -p component-test-cli --"
@@ -121,7 +123,7 @@ aggregate:
         --results composed=results/composed.jsonl \
         --results jco-node=results/jco-node.jsonl \
         ${browser[@]+"${browser[@]}"} \
-        -o matrix.md
+        -o results/matrix.md
 
 # The signing suite (host-only: wasmtime, jco-node, and jco-browser).
 aggregate-signing:
@@ -135,7 +137,20 @@ aggregate-signing:
         --results wasmtime-rustcrypto=results/wasmtime-signing.jsonl \
         --results jco-node=results/jco-node-signing.jsonl \
         ${browser[@]+"${browser[@]}"} \
-        -o matrix-signing.md
+        -o results/matrix-signing.md
+
+# Refresh the committed matrices from a FULL run (all targets incl.
+# browser: CONFORMANCE_BROWSER=1 just conformance-ct::all first).
+# Commit the diff - like lockfiles, the diff is the review surface.
+matrix-update:
+    cp results/matrix.md matrix.md
+    cp results/matrix-signing.md matrix-signing.md
+
+# CI (which always runs the browser leg) verifies the committed
+# matrices match the run.
+matrix-check:
+    diff -u matrix.md results/matrix.md
+    diff -u matrix-signing.md results/matrix-signing.md
 
 # Everything: build, lock-check, class-D gate, all targets, aggregates.
 all: lock-check class-d run-wasmtime run-composed run-jco _run-browser-if-enabled aggregate aggregate-signing

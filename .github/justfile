@@ -13,6 +13,7 @@ rust-checks:
     @just gha::_step test
     @just gha::_step demo::test-composed
     @just gha::_step conformance-ct::all
+    @just gha::_step conformance-ct::matrix-check
 
 # Everything the jco CI job runs. The three WPT parity engines run in
 # parallel over one shared artifact build (wpt::_parity-gates).

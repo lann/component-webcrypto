@@ -35,9 +35,11 @@ jobs:
       - name: Checkout component-test (path dependency)
         # The conformance ct crates path-depend on a sibling checkout of
         # lann/component-test (see conformance/driver-ct/justfile).
-        # TODO: pin to a released component-test ref instead of the
-        # default branch.
-        run: git clone --depth 1 https://github.com/lann/component-test ../component-test
+        # Pinned via .component-test-rev (bump deliberately; the sibling
+        # path dependency makes this repo's builds track that rev).
+        run: |
+          git clone https://github.com/lann/component-test ../component-test
+          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install

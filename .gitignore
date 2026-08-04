@@ -14,6 +14,5 @@ conformance/results/
 conformance/matrix.md
 /mutants.out*
 conformance/driver-ct/results/
-conformance/driver-ct/matrix*.md
 conformance/driver-ct/jco/generated*/
 conformance/driver-ct/jco/node_modules/

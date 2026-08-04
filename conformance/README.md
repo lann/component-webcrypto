@@ -149,3 +149,13 @@ kind's standard cases as `<interface>/contract/…` lockfile entries; only
 behavior specific to the algorithm needs a hand-written probe. An algorithm
 the in-guest provider deliberately does not export lives in the signing
 suite — that is absence, not failure.
+
+## Results-schema tolerance (pending explicit sign-off)
+
+The component-test aggregate treats *unknown result statuses* as
+warnings, not errors (the schema's additive-evolution policy: a future
+component-test status arrives without a format break). The incumbent
+runner treated unknown outcomes as hard failures. Coverage checking
+bounds the risk (every census case must still report), but this is a
+deliberate tolerance change inherited from the component-test results
+schema — flagged here for explicit ratification.
