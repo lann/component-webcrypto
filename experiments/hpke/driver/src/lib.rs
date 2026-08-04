@@ -83,7 +83,6 @@ async fn smoke() -> Result<(), String> {
     for (name, aead) in [
         ("aes-128-gcm", hpke::AeadId::Aes128Gcm),
         ("aes-256-gcm", hpke::AeadId::Aes256Gcm),
-        ("chacha20-poly1305", hpke::AeadId::Chacha20Poly1305),
     ] {
         round_trip(aead).await.map_err(|e| format!("{name}: {e}"))?;
         println!("{name}: round trip, tamper, and wrong-aad checks passed");

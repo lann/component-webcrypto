@@ -125,11 +125,6 @@ async fn round_trip_aes_256_gcm() {
     round_trip(AeadId::Aes256Gcm).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn round_trip_chacha20_poly1305() {
-    round_trip(AeadId::Chacha20Poly1305).await;
-}
-
 /// One RFC 9180 base-mode test vector: DeriveKeyPair known answers for
 /// both parties, deterministic single-shot seal (ephemeral from `ikmE`)
 /// against the vector's `enc` and first ciphertext, and open.
@@ -211,26 +206,6 @@ async fn rfc9180_a1_base() {
         ct: &hexlower!(
             "f938558b5d72f1a23810b4be2ab4f84331acc02fc97babc53a52ae8218a355a9\
              6d8770ac83d07bea87e13c512a"
-        ),
-    })
-    .await;
-}
-
-/// RFC 9180 A.2: DHKEM(X25519, HKDF-SHA256), HKDF-SHA256,
-/// ChaCha20-Poly1305.
-#[tokio::test(flavor = "multi_thread")]
-async fn rfc9180_a2_base() {
-    known_answer(Rfc9180Vector {
-        aead: AeadId::Chacha20Poly1305,
-        ikm_e: &hexlower!("909a9b35d3dc4713a5e72a4da274b55d3d3821a37e5d099e74a647db583a904b"),
-        pk_em: &hexlower!("1afa08d3dec047a643885163f1180476fa7ddb54c6a8029ea33f95796bf2ac4a"),
-        sk_em: &hexlower!("f4ec9b33b792c372c1d2c2063507b684ef925b8c75a42dbcbf57d63ccd381600"),
-        ikm_r: &hexlower!("1ac01f181fdf9f352797655161c58b75c656a6cc2716dcb66372da835542e1df"),
-        pk_rm: &hexlower!("4310ee97d88cc1f088a5576c77ab0cf5c3ac797f3d95139c6c84b5429c59662a"),
-        sk_rm: &hexlower!("8057991eef8f1f1af18f4a9491d16a1ce333f695d4db8e38da75975c4478e0fb"),
-        ct: &hexlower!(
-            "1c5250d8034ec2b784ba2cfd69dbdb8af406cfe3ff938e131f0def8c8b60b4db\
-             21993c62ce81883d2dd1b51a28"
         ),
     })
     .await;

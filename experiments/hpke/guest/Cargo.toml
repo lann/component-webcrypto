@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 wit-bindgen = { version = "0.59", features = ["async"] }
 # The lann:webcrypto bindings and wrappers; carries the imports, so this
 # component's own world declares only its export.
-lann-webcrypto-guest = { path = "../../../rust/guest", features = ["chacha"] }
+lann-webcrypto-guest = { path = "../../../rust/guest" }
 # The HPKE engine, generic over its crypto provider. `hpke-test` +
 # `hpke-test-prng` expose PRNG seeding for the RFC 9180 known-answer tests;
 # `hazmat` exposes private-key bytes, which the byte-oriented export needs.
