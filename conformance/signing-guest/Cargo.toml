@@ -10,11 +10,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # The lann:webcrypto bindings and stream helpers; carries the imports, so
-# this component's own world declares only its export. `rsa-sign` adds the
-# gated RSA signing imports to the generated world — this guest, like the
-# `ecdsa-sign` import it exists for, runs only under the host-backed
-# targets, so the composed target's linking is not implicated.
-lann-webcrypto-guest = { path = "../../rust/guest", features = ["rsa-sign"] }
+# this component's own world declares only its export. `rsa-sign` and
+# `rsa-oaep-decrypt` add the gated RSA private-key imports to the
+# generated world — this guest, like the `ecdsa-sign` import it exists
+# for, runs only under the host-backed targets, so the composed target's
+# linking is not implicated.
+lann-webcrypto-guest = { path = "../../rust/guest", features = ["rsa-sign", "rsa-oaep-decrypt"] }
 # The world-independent half of the guest, shared with the shared-suite
 # guest: probe table, error rendering, missing-feature validation.
 conformance-harness = { path = "../harness" }

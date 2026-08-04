@@ -295,8 +295,9 @@ fn sample_key() -> (Vec<u8>, String) {
 /// vectors came from; the file itself is not vendored — its keys sit below
 /// this package's signing window), SHA-256 group `privateKeyPkcs8`: a
 /// valid 1024-bit key — inside the family's verification window — that
-/// every signing import must reject.
-const RSA_1024_SIG_GEN_PKCS8: &str =
+/// every signing import must reject. The OAEP admission probe
+/// (`rsa_oaep`) shares it: the OAEP window has the same 2048-bit floor.
+pub(crate) const RSA_1024_SIG_GEN_PKCS8: &str =
     "30820276020100300d06092a864886f70d0101010500048202603082025c0201\
      0002818100ac9048a7a4f560af91b4fcaf62a14595cb9ca9ec12000fc845e485\
      72113cab2890adb011a919575a40760d1f23fe92509c8a5810b6d05990b909dd\
@@ -637,8 +638,9 @@ pub async fn rsa_sign_declined() -> Result<(), String> {
 /// HMAC key (the raw wrap form of a MAC key is its bytes — there is no
 /// direct bytes path to a `wrap-input`), wrapped under a fresh AES-GCM
 /// KEK, then unwrapped. Everything here is feature-independent baseline
-/// surface.
-async fn unwrap_input_of(payload: Vec<u8>) -> Result<UnwrapInput, String> {
+/// surface, so the decline probes (this module's and `rsa_oaep`'s) share
+/// it.
+pub(crate) async fn unwrap_input_of(payload: Vec<u8>) -> Result<UnwrapInput, String> {
     use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
     use lann_webcrypto_guest::bindings::hmac_sha2;
     use lann_webcrypto_guest::bindings::mac::MacKeyOptions;

@@ -1,0 +1,24 @@
+// The RSA-OAEP negative-composition probe world: the minimal consumer of
+// `rsa-oaep-decrypt`, which the in-guest provider deliberately does not
+// export (class D — see rust/guest-provider/README.md). The class-D gate
+// (`just conformance::class-d`) builds a dummy component of this world and
+// asserts it does NOT compose with the provider.
+//
+// The signing guest cannot prove this: its composition already fails on
+// `ecdsa-sign`, so a provider that wrongly started exporting the OAEP
+// decryption mints would still fail that composition for an unrelated
+// reason. This world imports nothing the provider withholds except
+// `rsa-oaep-decrypt` itself, so its composition failure can only come
+// from the OAEP kind-export mechanics: the provider exports the generic
+// `public-encryption` interface, so `wac plug` rebinds its resources to
+// the provider's exports and orphans the `rsa-oaep-decrypt` import that
+// still names the imported ones.
+//
+// The `lann:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/lann-webcrypto` symlink.
+package conformance:class-d-oaep-probe;
+
+world oaep-probe {
+    @unstable(feature = rsa-oaep-decrypt)
+    import lann:webcrypto/rsa-oaep-decrypt@0.1.0;
+}

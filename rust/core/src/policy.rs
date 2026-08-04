@@ -148,6 +148,29 @@ impl SigningPolicy {
     }
 }
 
+/// `public-encryption.decryption-key-options`: the disclosure/minting
+/// grant pair (`decrypt` returns plaintext, `unwrap` mints keys the
+/// caller never reads) plus mint-time recorded extractability.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TransportPolicy {
+    pub decrypt: bool,
+    pub unwrap: bool,
+    pub extractable: bool,
+}
+
+impl TransportPolicy {
+    /// The at-least-one-usage mint check (the options contract).
+    pub fn check_useful(&self) -> Result<(), Error> {
+        useful(self.decrypt || self.unwrap)
+    }
+
+    /// The granted usages under their W3C Web Cryptography API names (the
+    /// unwrap-path JWK `key_ops` check's reference set).
+    pub fn webcrypto_usages(&self) -> Vec<&'static str> {
+        granted(&[(self.decrypt, "decrypt"), (self.unwrap, "unwrapKey")])
+    }
+}
+
 /// `key-agreement.agreement-key-options`: the derive pair that flows to
 /// every `derive-input` the key's `agree` mints, plus mint-time recorded
 /// extractability.

@@ -15,7 +15,7 @@ use std::cell::Cell;
 use lann_webcrypto_core::{
     served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, CipherKeyMaterial, CipherMode,
     CipherPolicy, InternalNoncePolicy, KwKeyMaterial, KwPolicy, MacKeyMaterial, MacPolicy,
-    SigPublic, SigningKeyMaterial, SigningPolicy, UnwrapInputMaterial, WrapFormat,
+    SigPublic, SigningKeyMaterial, SigningPolicy, TransportPolicy, UnwrapInputMaterial, WrapFormat,
     WrapInputMaterial, HMAC_NAME,
 };
 
@@ -67,6 +67,10 @@ use crate::exports::lann::webcrypto::pbkdf2::{
 };
 use crate::exports::lann::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
 use crate::exports::lann::webcrypto::pbkdf2_sha2::Guest as Pbkdf2Sha2Guest;
+use crate::exports::lann::webcrypto::public_encryption::{
+    Guest as PublicEncryptionGuest, GuestDecryptionKey, GuestDecryptionKeyOptions,
+    GuestEncryptionKey,
+};
 use crate::exports::lann::webcrypto::rsa_pss_verify::Guest as RsaPssVerifyGuest;
 use crate::exports::lann::webcrypto::rsassa_pkcs1_v15_verify::{
     Guest as RsassaVerifyGuest, RsaVariant,
@@ -1959,8 +1963,9 @@ options_resource! {
 /// The ECDSA and RSA arms exist for *verification only* — secret-free, so
 /// exempt from the timing-channel classes; ECDSA signing is class D, its
 /// interface is not exported, and the shared core compiles no ECDSA
-/// signing code for wasm targets. The package defines no RSA private-key
-/// interface at all.
+/// signing code for wasm targets. The RSA private-key interfaces
+/// (`rsassa-pkcs1-v15-sign`, `rsa-pss-sign`, `rsa-oaep-decrypt`) are
+/// likewise class D and not exported.
 pub struct VerifyingKey {
     public: SigPublic,
 }
@@ -2206,5 +2211,154 @@ impl RsaPssVerifyGuest for Component {
     ) -> Result<signature_iface::VerifyingKey, Error> {
         let public = SigPublic::import_pss_jwk(variant.into(), salt_length, &jwk)?;
         Ok(signature_iface::VerifyingKey::new(VerifyingKey { public }))
+    }
+}
+
+// --- public-encryption (the kind alone; no RSA-OAEP minting is exported) ---------
+
+impl PublicEncryptionGuest for Component {
+    type DecryptionKeyOptions = DecryptionKeyOptions;
+    type EncryptionKey = EncryptionKey;
+    type DecryptionKey = DecryptionKey;
+}
+
+options_resource! {
+    /// An exported `decryption-key-options`. See [`MacKeyOptions`].
+    pub struct DecryptionKeyOptions(TransportPolicy): GuestDecryptionKeyOptions {
+        can_decrypt => decrypt,
+        can_unwrap => unwrap,
+        extractable => extractable,
+    }
+}
+
+/// An exported `encryption-key` that cannot exist: the `public-encryption`
+/// kind is exported so that compositions importing a withheld RSA-OAEP
+/// minting interface fail at `wac plug` time (see the crate README, "What
+/// the failure looks like"), but neither minting interface is exported —
+/// decryption is class D, and encryption runs secret plaintext through
+/// non-constant-time bignum arithmetic — so no minting path exists
+/// in-guest and no instance of this resource can ever be constructed. The
+/// type is uninhabited: every method dispatches on the impossible value,
+/// making the no-instances invariant a type-checked fact rather than a
+/// runtime panic.
+pub enum EncryptionKey {}
+
+impl EncryptionKey {
+    /// Dispatch on the uninhabited value: no arm exists, so no method
+    /// body is reachable.
+    fn never<T>(&self) -> T {
+        match *self {}
+    }
+}
+
+impl GuestEncryptionKey for EncryptionKey {
+    async fn encrypt(
+        &self,
+        _label: Option<Vec<u8>>,
+        _plaintext: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    async fn wrap(
+        &self,
+        _label: Option<Vec<u8>>,
+        _input: wrapping_iface::WrapInput,
+    ) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.never()
+    }
+
+    fn algorithm_hash(&self) -> Option<String> {
+        self.never()
+    }
+
+    fn algorithm_length(&self) -> Option<u32> {
+        self.never()
+    }
+
+    async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    async fn export_key_spki(&self) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.never()
+    }
+}
+
+/// An exported `decryption-key` that cannot exist: uninhabited exactly as
+/// [`EncryptionKey`] — `rsa-oaep-decrypt` (class D) is not exported, so
+/// nothing mints one.
+pub enum DecryptionKey {}
+
+impl DecryptionKey {
+    /// Dispatch on the uninhabited value. See [`EncryptionKey::never`].
+    fn never<T>(&self) -> T {
+        match *self {}
+    }
+}
+
+impl GuestDecryptionKey for DecryptionKey {
+    async fn decrypt(
+        &self,
+        _label: Option<Vec<u8>>,
+        _ciphertext: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    async fn unwrap(
+        &self,
+        _label: Option<Vec<u8>>,
+        _ciphertext: Vec<u8>,
+    ) -> Result<wrapping_iface::UnwrapInput, Error> {
+        self.never()
+    }
+
+    fn algorithm_name(&self) -> String {
+        self.never()
+    }
+
+    fn algorithm_hash(&self) -> Option<String> {
+        self.never()
+    }
+
+    fn algorithm_length(&self) -> Option<u32> {
+        self.never()
+    }
+
+    fn can_decrypt(&self) -> bool {
+        self.never()
+    }
+
+    fn can_unwrap(&self) -> bool {
+        self.never()
+    }
+
+    fn extractable(&self) -> bool {
+        self.never()
+    }
+
+    async fn export_key_jwk(&self) -> Result<String, Error> {
+        self.never()
+    }
+
+    async fn export_key_pkcs8(&self) -> Result<Vec<u8>, Error> {
+        self.never()
+    }
+
+    async fn to_wrap_input_jwk(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        self.never()
+    }
+
+    async fn to_wrap_input_pkcs8(&self) -> Result<wrapping_iface::WrapInput, Error> {
+        self.never()
     }
 }

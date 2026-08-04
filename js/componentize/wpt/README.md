@@ -228,6 +228,7 @@ reaches this harness as a re-vendor with a census diff.
 | `sign_verify/ecdsa` | `ecdsa.https.any.js` (reference), `ecdsa.js`, `ecdsa_vectors.js` |
 | `sign_verify/rsa_pss` | `rsa_pss.https.any.js` (reference), `rsa.js`, `rsa_pss_vectors.js` |
 | `sign_verify/rsa_pkcs` | `rsa_pkcs.https.any.js` (reference; the shared `rsa.js` runner), `rsa_pkcs_vectors.js` |
+| `encrypt_decrypt/rsa_oaep` | `rsa_oaep.https.any.js` (reference), `encrypt_decrypt_rsa.js` (upstream `encrypt_decrypt/rsa.js`, vendored under a disambiguated name — `sign_verify/rsa.js` owns the flat directory's `rsa.js`), `rsa_vectors.js` |
 | `import_export/okp_importKey` (Ed25519) | `okp_importKey_Ed25519.https.any.js`, `okp_importKey_failures_Ed25519.https.any.js` (references; helpers shared with the X25519 rows) |
 | `import_export/ec_importKey` | `ec_importKey.https.any.js` (wrapped callable), `ec_importKey_failures_ECDSA.https.any.js` (reference), `ec_importKey_failures_fixtures.js` |
 | `import_export/rsa_importKey` | `rsa_importKey.https.any.js` (wrapped callable) |
@@ -256,8 +257,13 @@ signing or a generated pair, which is class D and unserved by composition
 (see the shim header's deviations list), so it meters that gap. The
 `sign_verify/rsa_pss` and `sign_verify/rsa_pkcs` groups stay empty-subset
 too: every subtest's fixture import includes the vector's private pkcs8
-half, and the package's RSA surface is verification-only, so they meter
-the unserved private side.
+half, and the package's RSA signature surface is verification-only, so they meter
+the unserved private side. `encrypt_decrypt/rsa_oaep` stays empty-subset
+for the composition's reason: every subtest imports both halves of an
+RSA-OAEP pair, and the in-guest provider withholds both minting
+interfaces (decryption is class D; OAEP encryption has no secret-free
+half — see the shim header's deviations list), so the group meters the
+unserved family.
 
 ## How it runs
 

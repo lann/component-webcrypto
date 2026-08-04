@@ -82,6 +82,30 @@ commit
   which the RSA family contract rejects at import: the file exists as
   coverage for that rule, and every case translates to an SPKI
   import-must-fail (see the translation policy below).
+- `rsa_oaep_2048_{sha256_mgf1sha256,sha384_mgf1sha384,sha512_mgf1sha512}_test.json`,
+  `rsa_oaep_3072_{sha256_mgf1sha256,sha512_mgf1sha512}_test.json`,
+  `rsa_oaep_4096_{sha256_mgf1sha256,sha512_mgf1sha512}_test.json` —
+  RSA-OAEP decryption vectors, restricted to the WebCrypto-expressible
+  parameterizations (the MGF1 digest equals the message digest, as the
+  WIT fixes it — these are the only such dedicated files upstream
+  publishes; the SHA-384 pairings beyond 2048 bits come from the misc
+  file below). Decrypting a published ciphertext is deterministic, so
+  the vectors pin `decryption-key.decrypt` in the host-only signing
+  suite (`conformance/signing-guest`), tagged `rsa-oaep-decrypt` — the
+  decryption interface is gated and class D, so the shared guest cannot
+  import it. Only the SHA-256 files carry a `privateKeyJwk`; the other
+  groups' JWK-path cases use a full-CRT private JWK built from the
+  group's published `privateKey` components. There are no encryption
+  vectors: OAEP encryption is randomized, so the encrypt side is covered
+  by round-trip and contract probes instead.
+- `rsa_oaep_misc_test.json` — RSA-OAEP decryption vectors at
+  miscellaneous parameterizations. Most of the file is untranslatable
+  (MGF1 digests differing from the message digest, which WebCrypto
+  cannot express, and sub-window 1024/1536-bit keys); the expressible
+  groups add the SHA-384 pairings at 3072/4096/8192 bits, the 8192-bit
+  OAEP window top, and non-power-of-two modulus lengths
+  (2688/3104/4032). Its 1024-bit SHA-256 group also feeds the
+  encrypt-side window probe as the below-window must-reject key.
 - `x25519_test.json` — X25519 key-agreement vectors, including the twist,
   non-canonical, and small-order public keys that discriminate agreement
   policies. The vectors carry each private key as a raw scalar, but the
@@ -162,7 +186,8 @@ deliberately stricter in places, so vector expectations are translated into
 the package's contract before execution. This mapping is versioned
 conformance policy; change it deliberately and in review. The authoritative
 encoding is `conformance/guest/src/translate.rs` (and
-`conformance/signing-guest/src/rsa_sign.rs` for the sig-gen files, which
+`conformance/signing-guest/src/rsa_sign.rs` for the sig-gen files, plus
+`conformance/signing-guest/src/rsa_oaep.rs` for the RSA-OAEP files, which
 only the host-only signing suite can run); in summary:
 
 | Vector property | Our expectation |
@@ -194,6 +219,10 @@ only the host-only signing suite can run); in summary:
 | `rsa_pss_2048_sha256_mgf1_32_params_test.json` (id-RSASSA-PSS keys), every case | the SPKI import fails `invalid-key` — the RSA family contract admits only `rsaEncryption` SubjectPublicKeyInfos. Coverage is SPKI-only: the file carries no JWKs, and a plain RSA public JWK has no member that could carry the PSS AlgorithmIdentifier, so no JWK-side counterpart exists. No chunking schedules: import carries no streams. |
 | RSASSA-PKCS1-v1_5 sig-gen, SHA-1 or SHA-224 group | **Skipped** — the `rsa-variant` set has no SHA-1 or SHA-224 case (SHA-1's collision resistance is broken, and no platform WebCrypto serves SHA-224), so the keys cannot mint. |
 | RSASSA-PKCS1-v1_5 sig-gen, SHA-256/384/512 group, `valid` or `acceptable` | signing `msg` under the group's private key produces exactly `sig` (deterministic EMSA-PKCS1-v1_5). Each vector translates **twice** — once importing the key via PKCS#8 (`tc<id>-pkcs8`, message delivered whole), once via the group's own full-CRT private JWK (`tc<id>-jwk`, one-byte writes) — so both signing-import paths and two chunking schedules carry vector coverage. `acceptable` translates identically to `valid`: every such vector is flagged `SmallPublicKey` (e = 3), inside the family's guaranteed-import exponent floor, and generation is deterministic regardless of the exponent. Tagged `rsa-sign` (the gated feature), so targets declaring it missing skip these and prove the decline through the signing suite's probes. |
+| RSA-OAEP, group with MGF1 digest ≠ message digest, a digest outside SHA-256/384/512, or a modulus outside 2048–8192 bits | **Skipped** — WebCrypto fixes the MGF1 digest to the message digest and the `rsa-variant` set has no SHA-1 or SHA-224 case, so the parameterization cannot mint; out-of-window keys fail the OAEP admission window (probed, with the misc file's 1024-bit group as the must-reject key). |
+| RSA-OAEP, expressible group, `valid` | importing the group's private key and `decrypt(label, ct)` recovers exactly `msg` (upstream's empty label is the WIT's no-label call). Each vector translates **twice** — once importing via PKCS#8 (`tc<id>-pkcs8`), once via the group's full-CRT private JWK (`tc<id>-jwk`: the group's own JWK where the file carries one, else one built from the group's published `privateKey` components) — so both decryption-import paths carry vector coverage. Tagged `rsa-oaep-decrypt` (the gated feature), so targets declaring it missing skip these and prove the decline through the signing suite's probes. No chunking schedules: the `public-encryption` kind trades in whole byte lists. |
+| RSA-OAEP, expressible group, `invalid` | `decrypt(label, ct)` fails `authentication-failed` — wrong lengths, damaged padding, and mismatched labels are deliberately indistinguishable (the RFC 8017 anti-padding-oracle rule the WIT pins; rejection carries no detail). |
+| RSA-OAEP, `acceptable` (the `SmallIntegerCiphertext` vectors: a ciphertext that is a numerically small integer) | **Excluded** — acceptance is legitimately policy-divergent across implementations: platform WebCrypto decrypts them, while aws-lc-rs rejects them as RNG-failure/attack artifacts, and RFC 8017 tolerates either, so no single expectation holds across targets (the ECDH `acceptable` exclusions' reasoning). |
 | X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
 | X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
 | ECDH (any file), `valid` | the public import (per the file's encoding: raw / SPKI / JWK) and `import-secret-key-jwk` (the webcrypto files' own private JWK, or one built from the normalized scalar plus the derived `x`/`y` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. Scalars are normalized to the curve's field size (the files' big-endian hex may carry a leading zero byte or be short). No chunking schedules: agreement carries no streams. |

@@ -68,11 +68,13 @@ world conformance-guest {
     export tests;
 }
 
-/// The host-only signing guest: probes for signature-minting interfaces the
-/// in-guest provider deliberately does not export (`ecdsa-sign` is class D),
-/// which the shared `conformance-guest` therefore cannot import — it must
-/// compose with that provider. This world runs only under the host-backed
-/// targets (wasmtime, jco); the composed target has no results for it.
+/// The host-only signing guest: cases for private-key minting interfaces
+/// the in-guest provider deliberately does not export (`ecdsa-sign`, the
+/// gated RSA signing interfaces, and the gated `rsa-oaep-decrypt` are
+/// class D), which the shared `conformance-guest` therefore cannot import
+/// — it must compose with that provider. This world runs only under the
+/// host-backed targets (wasmtime, jco); the composed target has no
+/// results for it.
 world signing-guest {
 
     export tests;

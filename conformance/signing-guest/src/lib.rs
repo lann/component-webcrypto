@@ -1,13 +1,14 @@
 //! `conformance-signing-guest`: the host-only conformance component.
 //!
-//! Covers the signature-minting surface the in-guest provider deliberately
-//! does not export — `ecdsa-sign` and the gated RSA signing interfaces are
-//! class D (see rust/guest-provider/README.md) — which the shared
+//! Covers the private-key minting surface the in-guest provider
+//! deliberately does not export — `ecdsa-sign`, the gated RSA signing
+//! interfaces, and the gated RSA-OAEP decryption interface are class D
+//! (see rust/guest-provider/README.md) — which the shared
 //! `conformance-guest` therefore cannot import, since it must compose with
 //! that provider. This guest runs only under the host-backed targets
 //! (wasmtime, jco).
 //!
-//! Two case families. The ECDSA coverage is probes only: private-key
+//! Three case families. The ECDSA coverage is probes only: private-key
 //! imports are exercised as sign-then-verify round trips against
 //! separately imported public points, never as known signature bytes —
 //! the WIT deliberately leaves ECDSA signatures nondeterministic across
@@ -18,9 +19,14 @@
 //! signing coverage ([`rsa_sign`]) additionally carries vector cases:
 //! RSASSA-PKCS1-v1_5 generation is deterministic, so the Wycheproof
 //! `sig_gen` vectors byte-compare here the way verification vectors do in
-//! the shared suite. `rsa-sign` is a *gated* feature (unlike the
-//! structural `ecdsa-sign`), so its cases carry the feature tag and its
-//! probes assert the decline on targets declaring it missing.
+//! the shared suite. The RSA-OAEP coverage ([`rsa_oaep`]) carries the
+//! Wycheproof decryption vectors (decryption of a published ciphertext is
+//! deterministic) plus the transport-contract probes; its encrypt-side
+//! probe is untagged (`rsa-oaep-encrypt` is ungated), while the
+//! decryption cases carry the `rsa-oaep-decrypt` tag. `rsa-sign` and
+//! `rsa-oaep-decrypt` are *gated* features (unlike the structural
+//! `ecdsa-sign`), so their cases carry feature tags and their probes
+//! assert the decline on targets declaring them missing.
 
 wit_bindgen::generate!({
     path: "../guest/wit",
@@ -28,20 +34,24 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+mod rsa_oaep;
 mod rsa_sign;
 
 use std::collections::BTreeSet;
 
 use conformance_harness::stream::{sig_sign_ok, sig_verify_ok, sig_verify_op, Schedule};
 use conformance_harness::{
-    b64url, describe, expect, expect_err, probes, ErrKind, FEATURE_RSA_SIGN, KNOWN_FEATURES,
-    P256_A25_X, P256_A25_Y,
+    b64url, describe, expect, expect_err, probes, ErrKind, FEATURE_RSA_OAEP_DECRYPT,
+    FEATURE_RSA_SIGN, KNOWN_FEATURES, P256_A25_X, P256_A25_Y,
 };
 use exports::conformance::webcrypto::tests::{Guest, GuestTestCase, Outcome, TestCase};
 use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
 use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
 use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
 use lann_webcrypto_guest::bindings::types::Error;
+use rsa_oaep::{
+    rsa_oaep_admission, rsa_oaep_declined, rsa_oaep_encrypt_contract, rsa_oaep_round_trip,
+};
 use rsa_sign::{
     rsa_pss_sign_round_trip, rsa_sign_admission, rsa_sign_declined, rsa_sign_key_contract,
 };
@@ -64,6 +74,9 @@ macro_rules! feature_tags {
     (rsa_sign) => {
         &[FEATURE_RSA_SIGN]
     };
+    (rsa_oaep_decrypt) => {
+        &[FEATURE_RSA_OAEP_DECRYPT]
+    };
 }
 
 probes! {
@@ -79,6 +92,10 @@ probes! {
     rsa_pss_sign_round_trip(rsa_sign),
     rsa_sign_admission(rsa_sign),
     rsa_sign_declined(rsa_sign),
+    rsa_oaep_encrypt_contract,
+    rsa_oaep_round_trip(rsa_oaep_decrypt),
+    rsa_oaep_admission(rsa_oaep_decrypt),
+    rsa_oaep_declined(rsa_oaep_decrypt),
 }
 
 /// Run the probe case whose `features` a target declares missing: assert
@@ -89,6 +106,8 @@ probes! {
 async fn run_declined(features: &[&str]) -> Result<String, String> {
     if features == [FEATURE_RSA_SIGN] {
         rsa_sign::minting_declined().await
+    } else if features == [FEATURE_RSA_OAEP_DECRYPT] {
+        rsa_oaep::minting_declined().await
     } else {
         Err("probe has no decline assertion for its features".into())
     }
@@ -100,6 +119,8 @@ struct Component;
 enum CaseKind {
     /// One RSASSA-PKCS1-v1_5 signature-generation vector.
     RsaSign(rsa_sign::RsaSignCase),
+    /// One RSA-OAEP decryption vector.
+    RsaOaep(rsa_oaep::RsaOaepCase),
     /// An index into [`PROBES`].
     Probe(usize),
 }
@@ -110,6 +131,7 @@ impl CaseKind {
     async fn execute(&self) -> Result<(), String> {
         match self {
             CaseKind::RsaSign(case) => rsa_sign::run_case(case).await,
+            CaseKind::RsaOaep(case) => rsa_oaep::run_case(case).await,
             CaseKind::Probe(index) => conformance_harness::run_probe(PROBES, *index).await,
         }
     }
@@ -133,7 +155,7 @@ pub struct Case {
 }
 
 /// Materialize the suite for a target missing `missing`, in census order:
-/// the vector cases, then the probes.
+/// the vector cases (signing, then OAEP), then the probes.
 fn all_cases(missing: &BTreeSet<&str>) -> Vec<TestCase> {
     let mut cases = Vec::new();
     for case in rsa_sign::cases() {
@@ -142,6 +164,14 @@ fn all_cases(missing: &BTreeSet<&str>) -> Vec<TestCase> {
             features: case.features(),
             provided: conformance_harness::provided(case.features(), missing),
             kind: CaseKind::RsaSign(case),
+        }));
+    }
+    for case in rsa_oaep::cases() {
+        cases.push(TestCase::new(Case {
+            name: case.case_id(),
+            features: case.features(),
+            provided: conformance_harness::provided(case.features(), missing),
+            kind: CaseKind::RsaOaep(case),
         }));
     }
     for (index, probe) in PROBES.iter().enumerate() {

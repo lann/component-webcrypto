@@ -48,6 +48,7 @@ import * as groupEddsaSmallOrder from "./js/componentize/wpt/build/group-eddsa-s
 import * as groupEcdsa from "./js/componentize/wpt/build/group-ecdsa.js";
 import * as groupRsaPss from "./js/componentize/wpt/build/group-rsa-pss.js";
 import * as groupRsaPkcs from "./js/componentize/wpt/build/group-rsa-pkcs.js";
+import * as groupRsaOaep from "./js/componentize/wpt/build/group-rsa-oaep.js";
 import * as groupRsaImportKey from "./js/componentize/wpt/build/group-rsa-import-key.js";
 import * as groupEcImportKey from "./js/componentize/wpt/build/group-ec-import-key.js";
 import * as groupEcImportKeyFailures from "./js/componentize/wpt/build/group-ec-import-key-failures.js";
@@ -83,6 +84,7 @@ const MODULES = {
   "group-ecdsa.js": groupEcdsa,
   "group-rsa-pss.js": groupRsaPss,
   "group-rsa-pkcs.js": groupRsaPkcs,
+  "group-rsa-oaep.js": groupRsaOaep,
   "group-rsa-import-key.js": groupRsaImportKey,
   "group-ec-import-key.js": groupEcImportKey,
   "group-ec-import-key-failures.js": groupEcImportKeyFailures,

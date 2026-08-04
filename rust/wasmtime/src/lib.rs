@@ -355,6 +355,34 @@ minted_resources! {
         policy: lann_webcrypto_core::KwPolicy,
     }
 
+    /// A `decryption-key-options` resource. See [`MacKeyOptions`].
+    #[derive(Debug)]
+    pub struct DecryptionKeyOptions {
+        #[payload]
+        policy: lann_webcrypto_core::TransportPolicy,
+    }
+
+    /// Backing type for the `public-encryption.encryption-key` resource.
+    ///
+    /// Public material only — encryption and wrapping are grant-free, and
+    /// there is no extractability gate (the exports are unconditional).
+    #[derive(Debug)]
+    pub struct EncryptionKey {
+        #[payload]
+        material: lann_webcrypto_core::EncryptionKeyMaterial,
+    }
+
+    /// Backing type for the `public-encryption.decryption-key` resource.
+    ///
+    /// `decrypt`/`unwrap` are one-shot and stateless per call, so the key
+    /// carries no per-operation state. The mint-time policy gates the two
+    /// operations and the private exports.
+    #[derive(Debug)]
+    pub struct DecryptionKey {
+        #[payload]
+        material: lann_webcrypto_core::DecryptionKeyMaterial,
+    }
+
     /// Backing type for the `key-wrap.kw-key` resource: the AES-KW
     /// key-encryption key's material.
     #[derive(Debug)]
@@ -562,7 +590,8 @@ minted_resources! {
 /// ```
 ///
 /// The `@unstable`-gated interfaces — the ChaCha family, `sha1-checked`,
-/// and the RSA signing pair (see `wit/README.md`, "Stability gates") — are
+/// the RSA signing pair, and RSA-OAEP decryption-key minting (see
+/// `wit/README.md`, "Stability gates") — are
 /// **not** added: a guest whose world imports them
 /// fails to instantiate against this default. Opt in with
 /// [`add_to_linker_with_options`].
@@ -582,6 +611,7 @@ pub struct LinkOptions {
     xchacha20_poly1305: bool,
     sha1_checked: bool,
     rsa_sign: bool,
+    rsa_oaep_decrypt: bool,
 }
 
 impl LinkOptions {
@@ -608,6 +638,12 @@ impl LinkOptions {
     /// `lann:webcrypto/rsa-pss-sign`.
     pub fn rsa_sign(&mut self, enabled: bool) -> &mut Self {
         self.rsa_sign = enabled;
+        self
+    }
+
+    /// Serve `lann:webcrypto/rsa-oaep-decrypt`.
+    pub fn rsa_oaep_decrypt(&mut self, enabled: bool) -> &mut Self {
+        self.rsa_oaep_decrypt = enabled;
         self
     }
 }
@@ -700,6 +736,17 @@ where
     bindings::webcrypto::rsa_pss_sign::add_to_linker::<_, WasiWebcrypto>(
         linker,
         bindings::webcrypto::rsa_pss_sign::LinkOptions::default().rsa_sign(options.rsa_sign),
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::public_encryption::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        T::webcrypto,
+    )?;
+    bindings::webcrypto::rsa_oaep_encrypt::add_to_linker::<_, WasiWebcrypto>(linker, T::webcrypto)?;
+    bindings::webcrypto::rsa_oaep_decrypt::add_to_linker::<_, WasiWebcrypto>(
+        linker,
+        bindings::webcrypto::rsa_oaep_decrypt::LinkOptions::default()
+            .rsa_oaep_decrypt(options.rsa_oaep_decrypt),
         T::webcrypto,
     )?;
     Ok(())

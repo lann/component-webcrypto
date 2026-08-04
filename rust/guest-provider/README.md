@@ -91,10 +91,14 @@ imported one.
 The enforcement therefore rests on the provider exporting the generic
 interface whose key resource the withheld minting interface mints. Every
 minting interface in the package `use`s a generic key resource, and this
-provider exports every generic kind, so the property holds across the
-surface — but a future class-D interface minting a resource from a kind
-this provider does not export would compose silently. The gate is what
-catches that.
+provider exports every generic kind — including `public-encryption`, which
+it exports with *neither* of its minting interfaces: RSA-OAEP has no
+in-guest-servable half (see the table below), so the kind's key resources
+are uninhabited here, and the export exists exactly so that a composition
+importing `rsa-oaep-encrypt` or `rsa-oaep-decrypt` fails at `wac plug`
+time instead of linking with the import left in place. The gate is what
+catches this property regressing — a withheld interface gaining an export,
+or a kind export going missing.
 
 The classes describe **keyed operations**. Operations without secrets —
 hashing public data, and notably **signature verification** (e.g. validating
@@ -120,7 +124,8 @@ what marks where secrets flow.
 | Checked SHA-1 digests (`sha1-checked`) | exempt (secret-free) | `sha1-checked` (sha1dc counter-cryptanalysis; both postures) | Unkeyed, like SHA-2; the collision detection branches only on the input, which the digest kind treats as public. |
 | Ed25519 (sign + verify) | B | `ed25519-dalek` (complete addition laws, no per-signature secret nonce, constant-time scalar arithmetic) | Constant-latency integer multiply; JIT does not pathologically rewrite straight-line arithmetic. |
 | ECDSA P-256/P-384 (**verify only**) | exempt (secret-free) | `p256`/`p384` verification — public keys and public signatures | Signing is class D (per-signature secret nonce; small leaks are key-recovering) and its interface (`ecdsa-sign`) is **not exported**; compositions requiring it fail at `wac plug` time. |
-| RSASSA-PKCS1-v1_5 / RSA-PSS (**verify only**) | exempt (secret-free) | `rsa` crate verification — public keys and public signatures | Signing and decryption are class D (per-message secrets and blinded private-key ops; the `rsa` crate's private-key operations additionally carry RUSTSEC-2023-0071, the Marvin timing sidechannel) — no RSA private-key interface exists in the package. |
+| RSASSA-PKCS1-v1_5 / RSA-PSS (**verify only**) | exempt (secret-free) | `rsa` crate verification — public keys and public signatures | Signing and decryption are class D (per-message secrets and blinded private-key ops; the `rsa` crate's private-key operations additionally carry RUSTSEC-2023-0071, the Marvin timing sidechannel) — the RSA private-key interfaces (`rsassa-pkcs1-v15-sign`, `rsa-pss-sign`) are **not exported**. |
+| RSA-OAEP (**neither half exported**) | D (decrypt); encrypt has no secret-free half | None — the `public-encryption` kind is exported with uninhabited key resources | Decryption is class D and the attack lineage's prime target (blinded private-key ops; the Marvin sidechannel, RUSTSEC-2023-0071). Encryption is *not* secret-free, unlike signature verification: the plaintext is the secret, and it transits general-purpose bignum arithmetic with no constant-time variant — so the kind has no exportable half at all. Exporting the kind makes compositions requiring `rsa-oaep-encrypt` or `rsa-oaep-decrypt` fail at `wac plug` time. |
 
 ChaCha20-Poly1305 (class A + B) is the *recommended* AEAD for in-guest use —
 constant time by construction rather than by countermeasure, it is the

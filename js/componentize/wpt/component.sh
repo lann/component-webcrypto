@@ -227,6 +227,11 @@ JS
     echo 'export { run_test };' >> "$B"/group-rsa-pss.js
     cat "$V"/helpers.js "$V"/rsa_pkcs_vectors.js "$V"/rsa.js > "$B"/group-rsa-pkcs.js
     echo 'export { run_test };' >> "$B"/group-rsa-pkcs.js
+    # encrypt_decrypt_rsa.js is upstream encrypt_decrypt/rsa.js, vendored
+    # under a disambiguated name (sign_verify/rsa.js above owns the flat
+    # directory's rsa.js).
+    cat "$V"/helpers.js "$V"/rsa_vectors.js "$V"/encrypt_decrypt_rsa.js > "$B"/group-rsa-oaep.js
+    echo 'export { run_test };' >> "$B"/group-rsa-oaep.js
     # rsa_importKey.https.any.js registers its tests at top level, like
     # ec_importKey above: wrap it in a callable, helpers outside the
     # wrapper.

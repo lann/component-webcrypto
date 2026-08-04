@@ -68,7 +68,8 @@ pub fn load(
             .chacha20_poly1305(true)
             .xchacha20_poly1305(true)
             .sha1_checked(true)
-            .rsa_sign(true),
+            .rsa_sign(true)
+            .rsa_oaep_decrypt(true),
     )?;
     let store = Store::new(
         &engine,

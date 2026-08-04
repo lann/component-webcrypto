@@ -54,4 +54,8 @@ world imports {
     import lann:webcrypto/rsassa-pkcs1-v15-sign@0.1.0;
     @unstable(feature = rsa-sign)
     import lann:webcrypto/rsa-pss-sign@0.1.0;
+    import lann:webcrypto/public-encryption@0.1.0;
+    import lann:webcrypto/rsa-oaep-encrypt@0.1.0;
+    @unstable(feature = rsa-oaep-decrypt)
+    import lann:webcrypto/rsa-oaep-decrypt@0.1.0;
 }

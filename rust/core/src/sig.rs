@@ -491,7 +491,7 @@ fn rsa_digest(variant: RsaVariant, data: &[u8]) -> Vec<u8> {
 }
 
 /// The registry digest name of an RSA variant (`algorithm-hash`).
-fn rsa_hash_name(variant: RsaVariant) -> &'static str {
+pub(crate) fn rsa_hash_name(variant: RsaVariant) -> &'static str {
     match variant {
         RsaVariant::Sha256 => "SHA-256",
         RsaVariant::Sha384 => "SHA-384",
@@ -527,7 +527,7 @@ fn pss_scheme(variant: RsaVariant, salt_length: u32) -> rsa::Pss {
 /// contract. The decode stops at the integers rather than going through
 /// `rsa`'s `DecodePublicKey`, whose construction enforces the crate's
 /// 4096-bit default ceiling; [`admit_rsa`] applies the family window.
-fn decode_rsa_spki(spki_der: &[u8]) -> Result<(rsa::BigUint, rsa::BigUint), Error> {
+pub(crate) fn decode_rsa_spki(spki_der: &[u8]) -> Result<(rsa::BigUint, rsa::BigUint), Error> {
     use der::Decode as _;
     let info = spki::SubjectPublicKeyInfoRef::from_der(spki_der)
         .map_err(|err| Error::InvalidKey(format!("invalid RSA spki: {err}")))?;
@@ -611,18 +611,23 @@ fn rsa_digest_len(variant: RsaVariant) -> u32 {
     }
 }
 
-/// Admit an RSA private key's public parts per the signing interfaces'
-/// window — 2048–8192 bits, tighter than the family's verification
-/// window (the WIT `rsassa-pkcs1-v15-sign` doc) — and the family
-/// exponent floor. The backend enforces the same modulus window; the
-/// check runs here so the contract's message does not ride backend
-/// defaults.
+/// Admit an RSA key's public parts per the tightened 2048–8192-bit
+/// window the private-key-bearing interfaces share (the WIT
+/// `rsassa-pkcs1-v15-sign` and `rsa-oaep-encrypt` contracts; signature
+/// *verification* keeps the family's 1024-bit floor) and the family
+/// exponent floor. `what` names the window's owner in the diagnostic.
+/// The backend enforces the same modulus window; the check runs here so
+/// the contract's message does not ride backend defaults.
 #[cfg(not(target_family = "wasm"))]
-fn admit_rsa_signing(n: &rsa::BigUint, e: &rsa::BigUint) -> Result<(), Error> {
+pub(crate) fn admit_rsa_2048_8192(
+    n: &rsa::BigUint,
+    e: &rsa::BigUint,
+    what: &str,
+) -> Result<(), Error> {
     let bits = n.bits();
     if !(2048..=8192).contains(&bits) {
         return Err(Error::InvalidKey(format!(
-            "RSA signing keys are 2048-8192 bits, got {bits} bits"
+            "{what} are 2048-8192 bits, got {bits} bits"
         )));
     }
     check_rsa_exponent(e)
@@ -633,7 +638,7 @@ fn admit_rsa_signing(n: &rsa::BigUint, e: &rsa::BigUint) -> Result<(), Error> {
 /// malformed DER and for any other PKCS#8 algorithm — including
 /// `id-RSASSA-PSS` parameters, per the WIT `rsa` family contract.
 #[cfg(not(target_family = "wasm"))]
-fn decode_rsa_pkcs8(pkcs8_der: &[u8]) -> Result<(rsa::BigUint, rsa::BigUint), Error> {
+pub(crate) fn decode_rsa_pkcs8(pkcs8_der: &[u8]) -> Result<(rsa::BigUint, rsa::BigUint), Error> {
     use der::Decode as _;
     let info = pkcs8::PrivateKeyInfo::from_der(pkcs8_der)
         .map_err(|err| Error::InvalidKey(format!("invalid RSA pkcs8: {err}")))?;
@@ -656,7 +661,9 @@ fn decode_rsa_pkcs8(pkcs8_der: &[u8]) -> Result<(rsa::BigUint, rsa::BigUint), Er
 /// consistency is not checked here: the backend import validates the key
 /// (n = p·q and CRT coherence) and rejects an inconsistent assembly.
 #[cfg(not(target_family = "wasm"))]
-fn rsa_private_jwk_to_pkcs8(jwk: &crate::jwk::RsaPrivateJwk) -> Result<Zeroizing<Vec<u8>>, Error> {
+pub(crate) fn rsa_private_jwk_to_pkcs8(
+    jwk: &crate::jwk::RsaPrivateJwk,
+) -> Result<Zeroizing<Vec<u8>>, Error> {
     use der::Encode as _;
     fn invalid<E>(_: E) -> Error {
         Error::InvalidKey("RSA JWK members do not encode a private key".into())
@@ -685,6 +692,29 @@ fn rsa_private_jwk_to_pkcs8(jwk: &crate::jwk::RsaPrivateJwk) -> Result<Zeroizing
         public_key: None,
     };
     Ok(Zeroizing::new(info.to_der().map_err(invalid)?))
+}
+
+/// Render the RFC 8017 RSAPrivateKey inside a backend PKCS#8 marshal as
+/// the full two-prime CRT private JWK the imports require — the shared
+/// JWK-export body of every RSA private key type. The marshal is the
+/// components' source: the backend key types expose no component getters.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn rsa_pkcs8_to_private_jwk(pkcs8_der: &[u8]) -> String {
+    use der::Decode as _;
+    let info = pkcs8::PrivateKeyInfo::from_der(pkcs8_der)
+        .expect("the backend marshals a valid PrivateKeyInfo");
+    let body = rsa::pkcs1::RsaPrivateKey::from_der(info.private_key)
+        .expect("the backend marshals a valid RSAPrivateKey");
+    crate::jwk::build_rsa_private(
+        body.modulus.as_bytes(),
+        body.public_exponent.as_bytes(),
+        body.private_exponent.as_bytes(),
+        body.prime1.as_bytes(),
+        body.prime2.as_bytes(),
+        body.exponent1.as_bytes(),
+        body.exponent2.as_bytes(),
+        body.coefficient.as_bytes(),
+    )
 }
 
 /// The aws-lc-rs padding algorithm serving a signing scheme: the variant's
@@ -1059,7 +1089,7 @@ impl SigningKeyMaterial {
     ) -> Result<Self, Error> {
         policy.check_useful()?;
         let (n, e) = decode_rsa_pkcs8(pkcs8_der)?;
-        admit_rsa_signing(&n, &e)?;
+        admit_rsa_2048_8192(&n, &e, "RSA signing keys")?;
         let key = aws_lc_rs::signature::RsaKeyPair::from_pkcs8(pkcs8_der)
             .map_err(|err| Error::InvalidKey(format!("invalid RSA pkcs8: {err}")))?;
         Ok(Self {
@@ -1301,26 +1331,12 @@ impl SigningKeyMaterial {
             },
             Rsa(key, _) => {
                 use aws_lc_rs::encoding::AsDer as _;
-                use der::Decode as _;
                 // The backend's PKCS#8 marshal (zeroized on drop) is the
                 // components' source: the keypair type exposes no
                 // component getters.
                 let pkcs8_der: aws_lc_rs::encoding::Pkcs8V1Der =
                     key.as_der().expect("valid key encodes");
-                let info = pkcs8::PrivateKeyInfo::from_der(pkcs8_der.as_ref())
-                    .expect("the backend marshals a valid PrivateKeyInfo");
-                let body = rsa::pkcs1::RsaPrivateKey::from_der(info.private_key)
-                    .expect("the backend marshals a valid RSAPrivateKey");
-                crate::jwk::build_rsa_private(
-                    body.modulus.as_bytes(),
-                    body.public_exponent.as_bytes(),
-                    body.private_exponent.as_bytes(),
-                    body.prime1.as_bytes(),
-                    body.prime2.as_bytes(),
-                    body.exponent1.as_bytes(),
-                    body.exponent2.as_bytes(),
-                    body.coefficient.as_bytes(),
-                )
+                rsa_pkcs8_to_private_jwk(pkcs8_der.as_ref())
             },
         ))
     }
