@@ -356,7 +356,6 @@ dependencies = [
  "component-test-formats",
  "futures",
  "serde_json",
- "tokio",
  "wasmtime",
  "wasmtime-wasi",
 ]

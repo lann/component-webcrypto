@@ -85,24 +85,32 @@ run-wasmtime: build
     {{root}}/target/release/ct-driver {{signing}} --jsonl \
         --target wasmtime-rustcrypto > results/wasmtime-signing.jsonl
 
-# The jco npm tree + both transpiles, skipped when up to date: npm
-# install only when package-lock.json is newer than the installed
-# tree's stamp, transpiles only when a guest wasm is newer than its
-# transpiled module. Both run-jco and run-browser depend on this;
-# `all` runs it once before the parallel target phase so the parallel
-# recipes never race on generated/.
+# The jco npm tree + both transpiles, skipped when up to date. The
+# guard is a content stamp (sha256 of both guest wasms, recorded in
+# generated/.stamp), not mtimes — mtimes lie under CI's artifact cache
+# and race across processes. The whole body holds a flock so the
+# parallel phase's standalone invocations (run-jco and run-browser both
+# depend on this) serialize: the first does the work, the second sees a
+# fresh stamp and no-ops.
 _jco-prepared: build
     #!/usr/bin/env bash
     set -euo pipefail
+    # Stamp before cd: {{guest}}/{{signing}} are valid from the recipe
+    # cwd but not from jco/ — and not always relative: module-from-root
+    # invocation resolves `root` absolute (justfile.shared.just), while
+    # in-directory invocation leaves it `../..`. Never re-anchor these
+    # variables with a textual prefix.
+    stamp=$(cat "{{guest}}" "{{signing}}" | sha256sum | cut -d' ' -f1)
     cd jco
+    exec 9> .prepare.lock
+    flock 9
     if [ package-lock.json -nt node_modules/.package-lock.json ]; then
         npm install --silent
     fi
-    if [ "../{{guest}}" -nt generated/conformance-guest-ct.js ]; then
+    if [ "$(cat generated/.stamp 2>/dev/null || true)" != "$stamp" ]; then
         npm run --silent transpile
-    fi
-    if [ "../{{signing}}" -nt generated/conformance-signing-guest-ct.js ]; then
         npm run --silent transpile:signing
+        printf '%s' "$stamp" > generated/.stamp
     fi
 
 # The jco-node target (browser-first host under Node/JSPI), both suites:

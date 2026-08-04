@@ -20,3 +20,4 @@ conformance/matrix.md
 conformance/driver-ct/results/
 conformance/driver-ct/jco/generated*/
 conformance/driver-ct/jco/node_modules/
+conformance/driver-ct/jco/.prepare.lock
