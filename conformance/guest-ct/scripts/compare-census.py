@@ -2,7 +2,8 @@
 """Census-parity check for the guest-ct port (M1.5 acceptance).
 
 Compares a component-test lockfile for conformance-guest-ct against the
-incumbent census (conformance/guest/tests.lock). The inventories must be
+incumbent census (../src/census-fixture.lock, the incumbent's final
+tests.lock, byte-frozen at the M1.6 cutover). The inventories must be
 equal except that (a) census entries under a generator prefix are covered
 by that prefix's record with the same tags, and (b) the port adds exactly
 the three `!feature` decline cases listed below (new in the port; the
@@ -20,7 +21,7 @@ root = os.path.normpath(os.path.join(here, "..", "..", ".."))
 new_lock = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "tests.lock")
 
 census = {}
-with open(os.path.join(root, "conformance", "guest", "tests.lock")) as f:
+with open(os.path.join(here, "..", "src", "census-fixture.lock")) as f:
     for m in re.finditer(
         r'\{ name = "([^"]+)"(?:, features = \[([^\]]*)\])? \}', f.read()
     ):

@@ -1,10 +1,10 @@
-//! The incumbent probe corpus, copied from `conformance-signing-guest`'s
-//! `src/lib.rs` (it cannot be `#[path]`-included: the incumbent's crate
-//! root also binds and exports the *old* tests world via
-//! `wit_bindgen::generate!`/`export_probe_suite!`, dropped here — the
-//! registration layer in `lib.rs` replaces it). Keep the probe bodies in
-//! sync with the incumbent until it is retired; the census-parity test
-//! pins names and tags.
+//! The probe corpus, inherited from the incumbent
+//! `conformance-signing-guest`'s `src/lib.rs` at the M1.6 cutover (the
+//! incumbent — whose crate root also bound and exported the *old* tests
+//! world via `wit_bindgen::generate!`/`export_probe_suite!`, dropped
+//! here — is deleted; this copy is the source now). The registration
+//! layer in `lib.rs` replaces the old export; the census-parity test
+//! pins names and tags against the frozen fixture.
 //!
 //! Incumbent doc, verbatim:
 //!

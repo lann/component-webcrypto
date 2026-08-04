@@ -48,6 +48,5 @@ pub fn feature_index(features: &[&str]) -> u8 {
     FEATURE_SETS
         .iter()
         .position(|set| *set == features)
-        .unwrap_or_else(|| panic!("feature set {features:?} is not in FEATURE_SETS"))
-        as u8
+        .unwrap_or_else(|| panic!("feature set {features:?} is not in FEATURE_SETS")) as u8
 }

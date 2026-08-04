@@ -19,6 +19,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # TODO: pin to a released component-test ref instead of the
+        # default branch.
+        run: git clone --depth 1 https://github.com/lann/component-test ../component-test
+
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and rustfmt/clippy components are
         # pinned in rust-toolchain.toml; `rustup show` installs exactly those.
@@ -43,7 +50,8 @@ jobs:
       # The whole job body lives in the justfile (`rust-checks`): formatting,
       # WIT validation, clippy, Rust tests (including the guest-under-Wasmtime
       # integration test), the composed fully in-guest demo, and the
-      # cross-implementation conformance suite. The justfile's `_step` wrapper
+      # cross-implementation conformance suite (`just conformance-ct::all`,
+      # the component-test stack). The justfile's `_step` wrapper
       # emits ::group::/::error:: annotations per recipe.
       - name: Run rust checks
         run: just gha::rust-checks
@@ -62,6 +70,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # TODO: pin to a released component-test ref instead of the
+        # default branch.
+        run: git clone --depth 1 https://github.com/lann/component-test ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -89,6 +104,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # TODO: pin to a released component-test ref instead of the
+        # default branch.
+        run: git clone --depth 1 https://github.com/lann/component-test ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -152,6 +174,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+
       - name: Install Node 24
         uses: actions/setup-node@v4
         with:
@@ -188,6 +211,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
 
       - name: Install Node 24
         uses: actions/setup-node@v4

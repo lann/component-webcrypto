@@ -123,8 +123,15 @@ fn run() -> Result<ExitCode> {
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
-    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_full(&suite_name, &target, mode, &missing, cases_per_instance, jobs))
-        .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_full(
+        &suite_name,
+        &target,
+        mode,
+        &missing,
+        cases_per_instance,
+        jobs,
+    ))
+    .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
     Ok(if summary.failed == 0 {
         ExitCode::SUCCESS

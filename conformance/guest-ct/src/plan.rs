@@ -10,9 +10,9 @@
 
 use std::rc::Rc;
 
-use component_test_sdk::{ArcStr, Failure, Registry, Tags, Verdict};
 #[cfg(not(feature = "rkyv-corpus"))]
 use component_test_sdk::GeneratedCase;
+use component_test_sdk::{ArcStr, Failure, Registry, Tags, Verdict};
 use conformance_harness::{FEATURE_CHACHA, FEATURE_SHA1_CHECKED, FEATURE_XCHACHA};
 use futures::future::LocalBoxFuture;
 
@@ -323,8 +323,8 @@ pub async fn declined(feature: &'static str) -> Verdict {
 mod corpus {
     #[cfg(not(feature = "preparsed"))]
     pub use crate::translate::{
-        aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases,
-        kw_cases, pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
+        aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, internal_nonce_cases, kw_cases,
+        pbkdf2_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
     };
 
     #[cfg(feature = "preparsed")]
@@ -796,8 +796,7 @@ fn register_row<T>(
     run: fn(Rc<T>) -> LocalBoxFuture<'static, Result<(), String>>,
 ) where
     T: rkyv::Archive + 'static,
-    T::Archived:
-        rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
     let prefixes = ArcStr::from(corpus.prefixes_blob.as_str());
     let leaves = ArcStr::from(corpus.leaves_blob.as_str());
@@ -836,8 +835,7 @@ fn row_plan<T>(
 ) -> Vec<PlanCase>
 where
     T: rkyv::Archive + 'static,
-    T::Archived:
-        rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
     corpus
         .cases
@@ -847,8 +845,7 @@ where
         .map(|((case, pr), lr)| {
             let prefix =
                 &corpus.prefixes_blob[pr.0.to_native() as usize..pr.1.to_native() as usize];
-            let leaf =
-                &corpus.leaves_blob[lr.0.to_native() as usize..lr.1.to_native() as usize];
+            let leaf = &corpus.leaves_blob[lr.0.to_native() as usize..lr.1.to_native() as usize];
             PlanCase {
                 id: format!("{prefix}/{leaf}"),
                 features: crate::corpus::FEATURE_SETS[corpus.features as usize],

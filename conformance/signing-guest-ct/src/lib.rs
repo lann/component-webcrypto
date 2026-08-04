@@ -2,16 +2,16 @@
 //! suite ported onto the `lann:component-test` guest SDK, exactly as
 //! `conformance-guest-ct` ports `conformance-guest`.
 //!
-//! The corpus is the incumbent's (`conformance-signing-guest`), copied
-//! into `probes.rs` (its crate root cannot be `#[path]`-included — see
-//! that module's header). What is new is the registration layer: one
+//! The corpus is the incumbent's (`conformance-signing-guest`), inherited
+//! at the M1.6 cutover as `probes.rs` (see that module's header; the
+//! incumbent is deleted). What is new is the registration layer: one
 //! literal `#[case]` fn per incumbent `probes!` row, named by the same
 //! ident-derivation the incumbent used (`probe/<ident with _ -> ->`).
 //! The incumbent census carries no feature tags, so there are no
 //! `!feature` decline cases to add.
 //!
 //! The static inventory (names + tags) is pinned to the incumbent census
-//! (`conformance/signing-guest/tests.lock`) by a native test
+//! (`src/census-fixture.lock`) by a native test
 //! (`census_test`).
 
 pub mod probes;

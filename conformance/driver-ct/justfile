@@ -59,5 +59,46 @@ aggregate-signing:
         --results wasmtime-rustcrypto=results/wasmtime-signing.jsonl \
         -o matrix-signing.md
 
-# Everything: build, lock-check, both targets, aggregates.
-all: lock-check run-wasmtime run-jco aggregate aggregate-signing
+# Everything: build, lock-check, class-D gate, both targets, aggregates.
+all: lock-check class-d run-wasmtime run-jco aggregate aggregate-signing
+
+# The class-D negative-composition gate (ported from the incumbent
+# harness): composing a consumer whose world imports `ecdsa-sign` (the
+# signing suite) with the in-guest provider must fail. This is what makes
+# "class D is enforced structurally" a fact rather than a claim — without
+# it, the provider could start exporting `ecdsa-sign` and every other
+# check would still report green, because targets-signing.toml excludes
+# everything but the wasmtime target by declaration.
+#
+# The composition fails on a resource-type mismatch, not on an unsatisfied
+# import: `wac plug` leaves imports it cannot satisfy in place. `ecdsa-sign`
+# does `use signature.{signing-key}`, and the provider *does* export
+# `signature`, so plugging rebinds `signing-key` to the provider's own
+# resource and orphans the `ecdsa-sign` import that still names the
+# imported one. The enforcement therefore holds only while the provider
+# exports the generic interface whose resource the withheld minting
+# interface mints — true of every minting interface in the package today.
+#
+# Matching the message on that interface name is load-bearing: a gate that
+# accepted any nonzero exit would also pass on a missing artifact or a
+# changed `wac` CLI.
+class-d: build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cargo build --manifest-path '{{root}}/Cargo.toml' --release \
+        -p lann-webcrypto-guest-provider --target wasm32-wasip2
+    output=$(wac plug {{signing}} \
+        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
+        -o '{{root}}/target/class-d-composition.wasm' 2>&1)
+    status=$?
+    if [ $status -eq 0 ]; then
+        echo "class-D gate: composing the signing suite with the in-guest provider SUCCEEDED." >&2
+        echo "The provider must not export lann:webcrypto/ecdsa-sign (rust/guest-provider/wit/world.wit)." >&2
+        exit 1
+    fi
+    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/ecdsa-sign'; then
+        echo "class-D gate: the composition failed, but not on ecdsa-sign:" >&2
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    echo "class-D gate: the signing suite does not compose with the in-guest provider (ecdsa-sign is not exported)."

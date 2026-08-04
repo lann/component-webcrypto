@@ -9,16 +9,17 @@
 //! work at all. Measurement experiments: the corpus is value-identical
 //! either way (same code produces it, just earlier).
 
-// The same #[path] inclusion lib.rs uses. translate.rs only reaches into
-// the rest of the incumbent for `crate::mint::ecdh_secret_jwk`, which is
+// The same module the crate compiles (src/translate.rs). translate.rs
+// only reaches into the rest of the suite for
+// `crate::mint::ecdh_secret_jwk`, which is
 // a pure string builder; a stub module satisfies it without dragging the
 // bindings-heavy mint.rs into the build script.
-#[path = "../guest/src/translate.rs"]
+#[path = "src/translate.rs"]
 #[allow(dead_code)]
 mod translate;
 
 mod mint {
-    /// Build-time copy of `conformance-guest`'s `mint::ecdh_secret_jwk`
+    /// Build-time copy of `src/mint.rs`'s `ecdh_secret_jwk`
     /// (kept in sync by the census-parity test: a drift changes case
     /// payloads and fails vectors).
     pub fn ecdh_secret_jwk(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
@@ -55,7 +56,7 @@ type RkyvSerializer<'a> = rkyv::api::high::HighSerializer<
 >;
 
 fn main() {
-    println!("cargo::rerun-if-changed=../guest/src/translate.rs");
+    println!("cargo::rerun-if-changed=src/translate.rs");
     println!("cargo::rerun-if-changed=../vectors");
     let mode = if std::env::var_os("CARGO_FEATURE_PREPARSED").is_some() {
         Mode::Postcard
@@ -87,7 +88,12 @@ fn main() {
     write(&out, mode, "aead", translate::aead_cases());
     write(&out, mode, "cbc", translate::cbc_cases());
     write(&out, mode, "kw", translate::kw_cases());
-    write(&out, mode, "internal_nonce", translate::internal_nonce_cases());
+    write(
+        &out,
+        mode,
+        "internal_nonce",
+        translate::internal_nonce_cases(),
+    );
     write(&out, mode, "sha2", translate::sha2_cases());
     write(&out, mode, "sig", translate::sig_cases());
     write(&out, mode, "speccheck", translate::speccheck_cases());
@@ -121,7 +127,10 @@ where
         let row_key = {
             let mut segs = id.splitn(3, '/');
             let (a, b) = (segs.next().unwrap(), segs.next().unwrap_or_default());
-            assert!(!b.is_empty(), "case id `{id}` has no row (two-segment) prefix");
+            assert!(
+                !b.is_empty(),
+                "case id `{id}` has no row (two-segment) prefix"
+            );
             format!("{a}/{b}")
         };
         let row = match rows.iter_mut().find(|(key, _)| *key == row_key) {
@@ -171,6 +180,8 @@ fn is_label(seg: &str) -> bool {
     !seg.is_empty()
         && seg.split('-').all(|word| {
             word.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-                && word.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && word
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         })
 }

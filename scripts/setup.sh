@@ -13,7 +13,7 @@
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
 #     integration test (`just demo::test-composed`)
 #   - the npm dependencies of every JS tree in the repository (jco host,
-#     demos, conformance adapter, webcrypto-componentize and its parity harness)
+#     demos, conformance jco runner, webcrypto-componentize and its parity harness)
 #
 # Prerequisites (not installed here): a Rust toolchain via rustup, and — for
 # the jco host — Node 24+ with npm (jco's async ABI uses JSPI, which Node
@@ -76,8 +76,8 @@ if [ "${SKIP_NODE:-}" != "1" ]; then
     (cd "$REPO_ROOT/js/jco" && npm install)
     log "Installing the jco demo driver's npm dependencies (examples/jco-demo)"
     (cd "$REPO_ROOT/examples/jco-demo" && npm install)
-    log "Installing the conformance jco adapter's npm dependencies (conformance/adapters/jco)"
-    (cd "$REPO_ROOT/conformance/adapters/jco" && npm install)
+    log "Installing the conformance jco runner's npm dependencies (conformance/driver-ct/jco)"
+    (cd "$REPO_ROOT/conformance/driver-ct/jco" && npm install)
     log "Installing the WPT parity gate's npm dependencies (js/componentize/wpt/parity)"
     (cd "$REPO_ROOT/js/componentize/wpt/parity" && npm install)
 fi

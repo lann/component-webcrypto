@@ -1,234 +1,120 @@
 # Conformance tests
 
-Two test **suites** — the shared suite and the host-only signing suite, each
-a guest component carrying its cases — run against every implementation of
-`lann:webcrypto`; the runner aggregates per-target results — validating them
-against the target facts in [`targets.toml`](targets.toml) and the
-checked-in suite lockfiles — and renders `matrix.md`. Run it with
-`just conformance::run` (see that recipe for the currently enabled targets).
+Two test **suites** — the shared suite ([`guest-ct/`](guest-ct)) and the
+host-only signing suite ([`signing-guest-ct/`](signing-guest-ct)), each a
+guest component carrying its cases — run against every implementation of
+`lann:webcrypto` on the [`lann:component-test`] stack: the suites are built
+on its guest SDK and export its frozen `tests` contract, and the drivers,
+lockfiles, and aggregation are its tooling. Run everything with
+`just conformance-ct::all` (see [`driver-ct/justfile`](driver-ct/justfile)
+for the individual recipes and the currently enabled targets).
 
-## Self-describing cases, target facts, and the lockfiles
+[`lann:component-test`]: https://github.com/lann/component-test
 
-Expectation policy lives in the cases, not the harness. Each suite's guest
-exports
-`all(missing) -> list<test-case>`; each case carries its stable `name`, the
-`features` it exercises beyond the baseline surface (feature tags are inert
-by default), and an async `run` returning `pass | fail(detail) |
-skipped(detail)`. A target declares only the features it is **missing**
-(`targets.toml`, cross-checked against what each adapter passed to `all`):
-cases tagged with a missing feature report `skipped`, and the feature-tagged
-*probes* assert the correct decline in both directions — a target that
-serves a feature it declares missing, or declines one it doesn't, fails.
-Growing the suites therefore never silently sheds coverage: new cases run
-everywhere until a target consciously opts out.
-
-Suites work the same way one level up: a suite may `require` features
-**structurally** (its guest's world imports them — the signing suite
-requires `ecdsa-sign`, which class D keeps out of the in-guest provider),
-and which suites a target must produce results for is *derived*: every
-suite except those requiring a feature the target is missing. There is no
-per-target suite list to maintain.
-
-A structural requirement cannot be policed the way a behavioral one is.
-The decline a feature-tagged probe asserts is a runtime answer, and a
-target missing a structurally required feature cannot instantiate the
-guest that would ask — a target declaring `ecdsa-sign` missing drops the
-signing suite by declaration, and no case can contradict it. What holds
-the composed target's declaration to the truth is the negative-composition
-gate, `just conformance::class-d`: it asserts that the signing guest does
-not compose with the in-guest provider, so the provider cannot start
-exporting `ecdsa-sign` while this manifest still says it does not.
-
-Each suite's case inventory is pinned by a lockfile (`guest/tests.lock`,
-`signing-guest/tests.lock`; TOML, one case per line with its feature tags,
-Cargo.lock-style): the runner rejects any results file whose case names or
-tags diverge, so case changes land intentionally via
-`just conformance::update-lock` with a reviewable diff.
-
-The lockfiles pin the **inventory**, not the assertions. A case that keeps
-its name while weakening what it checks — `Err(_)` where it demanded
-`Err(Error::AuthenticationFailed)` — produces no lockfile diff, and neither
-does an edit to a vector's own `result` or `tag` field. Both are caught the
-same way anything else in a checked-in file is: the change appears in the
-diff and someone reads it. Discriminating a specific error variant rather
-than any error is the property that makes these cases worth running;
-review protects it change by change, and the weekly mutation run
-(`just mutants`) measures it empirically — a mutant of the crypto core or
-the Wasmtime host that neither the unit tests nor these suites distinguish
-fails that job.
-
-What review cannot establish on its own is whether a vendored vector is
-what upstream published. `vectors/README.md` records the upstream revision
-of every file for that purpose, so a copy can be re-fetched and diffed
-against its source.
-
-## Architecture
+## Layout
 
 ```
 vectors/           # vendored Wycheproof JSON + the translation policy
                    #   (vectors/README.md) mapping vector expectations into
                    #   this package's stricter contract
-guest/             # the shared suite's guest: vectors compiled in (no I/O
-                   #   imports, so the composed target runs under a plain
-                   #   `wasmtime run`); exports all(missing) ->
-                   #   list<test-case>; tests.lock pins its cases
-signing-guest/     # the signing suite's host-only guest: probes for
-                   #   interfaces the in-guest
+harness/           # world-independent suite infrastructure: probe table
+                   #   machinery, feature names, error rendering, assertion
+                   #   helpers, stream delivery schedules
+                   #   (crate: conformance-harness)
+guest-ct/          # the shared suite: vectors compiled in (translate.rs),
+                   #   per-kind contract batteries (contract.rs), API
+                   #   probes (probes.rs); tests.lock pins its inventory
+signing-guest-ct/  # the signing suite: probes for interfaces the in-guest
                    #   provider deliberately does not export (ecdsa-sign);
-                   #   runs under the wasmtime and jco targets only, with
                    #   its own tests.lock
-adapters/
-  wasmtime/        # native adapter over lann-webcrypto-wasmtime's add_to_linker
-  composed-driver/   # CLI driver for the composed in-guest target (guest +
-                   #   in-guest provider via `wac plug`); prints results JSON
-  jco/             # Node + headless-Chromium adapters over webcrypto-jco's
-                   #   webcrypto.js (jco-node gates everywhere; jco-browser
-                   #   gates in CI, locally opt-in via CONFORMANCE_BROWSER=1
-                   #   with Chrome/Chromium 137+ installed); both stripe the
-                   #   cases across parallel workers, the browser adapter
-                   #   through web/'s harness, so gate and viewer cannot drift
-report/            # the results-file and lockfile wire shapes the Rust
-                   #   adapters serialize and the runner deserializes
-runner/            # aggregation: transport invariants + matrix.md rendering
-                   #   + the results-viewer data (--json-out)
-web/               # the results viewer: a dependency-free static page
-                   #   rendering the cross-target matrix as a collapsing
-                   #   tree, with a live "test this browser" run
-targets.toml       # suite facts (structurally required features) and
-                   #   target facts (missing features and why, optionality)
+driver-ct/         # the host driver (ct-driver: wasmtime + RustCrypto as
+                   #   the SUT, component-test-runner as the harness), the
+                   #   jco/Node runner (jco/), targets.toml (target
+                   #   capability manifests), the justfile module, and the
+                   #   committed matrix.md / matrix-signing.md
 ```
 
-Result files are `results/<target>.json` (or `<target>-<suite>.json`):
-`{ "target", "suite", "missing-features", "results": [{ "name",
-"features", "outcome", "detail" }] }`. Adapters exit nonzero only on harness
-errors — failing *cases* are the runner's business. The runner errors (exit
-nonzero) when a derived-required (target, suite) pair has no results file
-or an excluded pair has one, a file's cases diverge from its suite
-lockfile, a file's `missing-features` diverges from targets.toml, any
-(target, suite) pair appears twice, or any case fails; `just conformance::run`
-clears `results/` first, so stale files never classify as current.
+## Cases, feature tags, and the lockfiles
 
-## Test identity
+Expectation policy lives in the cases, not the harness. Each case carries a
+stable name (`<algorithm>/<source>/<case>/<schedule>` for vector cases,
+`probe/<name>` for API-contract probes) and the feature **tags** it
+exercises beyond the baseline surface. A target declares only the features
+it is **missing** ([`driver-ct/targets.toml`](driver-ct/targets.toml)):
+scheduling against that manifest is the runner's business — cases never
+inspect feature state — and each feature's decline assertion is its own
+`!feature` case, scheduled exactly on targets missing it. Growing the
+suites therefore never silently sheds coverage: new cases run everywhere
+until a target consciously opts out.
 
-`<algorithm>/<source>/<case>/<schedule>` for vector tests (e.g.
-`aes-gcm/wycheproof/tc42/bytes`) and `probe/<name>` for API-contract probes.
-One vector test runs both directions (seal and open) where applicable;
-failures name the direction in `detail`. Matrix rows aggregate by group
-(`<algorithm>/<source>`, or `probe`), so ids must stay stable as the suites
-grow.
+Each suite's case inventory is pinned by a component-test lockfile
+(`guest-ct/tests.lock`, `signing-guest-ct/tests.lock`), bound to the built
+suite by sha256; `just conformance-ct::lock-check` gates drift and
+`just conformance-ct::lock-update` regenerates after intentional case
+changes, landing them as a reviewable diff. The census-parity tests
+(`census_test.rs` in each suite crate) additionally anchor the inventory to
+the retired incumbent harness's final census, byte-frozen at the M1.6
+cutover as `src/census-fixture.lock` in each suite crate.
+
+The lockfiles pin the **inventory**, not the assertions. A case that keeps
+its name while weakening what it checks produces no lockfile diff; that is
+caught by review, and measured empirically by the weekly mutation run
+(`just mutants`) — a mutant of the crypto core or the Wasmtime host that
+neither the unit tests nor these suites distinguish fails that job.
 
 Every executed vector runs under multiple **chunking schedules** (`whole`,
-1-byte `bytes`, and block-boundary `straddle`; empty stream inputs collapse
-to `whole`). The
-streams-only WIT makes delivery schedule observable to implementations, so
-chunking invariance is part of the conformance claim — a class of test a
-buffer-based API could not even express.
+1-byte `bytes`, block-boundary `straddle`; empty stream inputs collapse to
+`whole`). The streams-only WIT makes delivery schedule observable to
+implementations, so chunking invariance is part of the conformance claim —
+a class of test a buffer-based API could not even express.
 
-## Results viewer
+## Targets and aggregation
 
-`just conformance::web` serves [`web/`](web) after a full conformance run: a
-dependency-free static page rendering every case as a collapsing tree (rows
-grouped by the `/` segments of case names, with per-subtree rollups) against
-one column per target. Its data is the runner's `--json-out` aggregate
-(`results/matrix.json` — lockfile case order, per-target outcome columns,
-target facts), written alongside `matrix.md` and cleared with the rest of
-`results/` each run.
+`just conformance-ct::all` builds the suites and the driver, drift-checks
+the lockfiles, runs the targets, and aggregates:
 
-The page is also itself a live target: **Test this browser** runs both
-transpiled suites (the same bundles the jco adapters use) against
-`js/jco/webcrypto.js` in the visiting browser — striped across parallel
-Web Workers, each with its own instances of the guests (cases are
-self-contained one-shots, so shards cannot interfere), falling back to a
-sequential main-thread run — streaming results into a "this browser" column
-and cross-checking the run against the static case inventory. A completed
-run is
-summarized at the bottom of the page, with nested expandable details for
-any failing cases. It needs
-[WebAssembly JSPI](https://caniuse.com/wf-wasm-jspi); without it the page
-still renders the static matrix. A finished run can be downloaded in the
-results-file shape (the `this-browser` target is deliberately not declared
-in targets.toml, so the runner would reject it — it is for inspection, not
-gating).
+- **wasmtime-rustcrypto** (`run-wasmtime`): ct-driver embeds
+  `lann-webcrypto-wasmtime` with every gated interface enabled — the
+  full-support target.
+- **jco-node** (`run-jco`): the suite transpiled with jco (JSPI) and driven
+  from Node 24+ against `webcrypto-jco`; missing `xchacha20-poly1305` (no
+  platform WebCrypto implements XChaCha) and `sha1-checked` (platform SHA-1
+  carries no sha1dc collision detection).
+- The **signing suite** runs under the wasmtime target only: its world
+  imports `ecdsa-sign` structurally, which class D keeps out of the
+  in-guest provider (see `rust/guest-provider/README.md`). The
+  negative-composition gate (`just conformance-ct::class-d`, part of
+  `all`) holds that declaration to the truth: it asserts the signing suite
+  does not compose with the in-guest provider, so the provider cannot
+  start exporting `ecdsa-sign` while the manifest still says it does not.
 
-The viewer is published at
-<https://lann.github.io/component-webcrypto/> (the site root links it
-alongside the public crates' API docs) by the `pages` workflow: every
-push to main reruns the conformance tests (including the jco-browser target)
-and deploys the site assembled by `just gha::pages-site` — a pruned
-mirror of the repository layout, which the page's relative URLs and the
-transpiled guests' relative imports of `js/jco/webcrypto.js` both rely on.
+Each target writes JSONL results (`driver-ct/results/`); the aggregation
+step (`component-test aggregate`) validates every results file against the
+lockfile and the target manifest and renders
+[`driver-ct/matrix.md`](driver-ct/matrix.md) /
+[`matrix-signing.md`](driver-ct/matrix-signing.md), exiting nonzero on any
+failure or transport problem.
 
-## Why this suite is shaped unlike its WebRTC sibling
+## Vector provenance
 
-This suite deliberately diverges from the
-[`lann:webrtc-datachannels`](https://github.com/lann/webrtc-datachannels)
-conformance machinery it is otherwise modeled on, because the thing under
-test is different in kind: WebRTC conformance tests *sessions between peers*;
-crypto conformance tests *functions against mathematics*.
-
-- **The oracle is published vectors, not peer convergence** — so the cases
-  are data-driven (Wycheproof + a translation policy) rather than hand-written
-  behavioral probes; probes exist only for the API contract itself (drain
-  rule, extractability, error variants, algorithm names).
-- **There are no interop pairs, signaling server, or live pairing.** The
-  algorithms are deterministic: two implementations that both match the
-  known-answer bytes match each other, transitively. The N×N live matrix the
-  sibling needs is redundant here.
-- **The "environment" axis is input adversity × delivery schedule**, not
-  network topology: Wycheproof's negative vectors replace hostile networks,
-  chunking schedules replace routing scenarios.
-- **Divergence is declared as missing features, not expected failures**:
-  e.g. the jco targets are missing `xchacha20-poly1305` (no platform
-  WebCrypto implements XChaCha; minting declines `unsupported` — a
-  platform gap a caller routes around with another provider) and
-  `sha1-checked` (platform SHA-1 carries no sha1dc collision detection —
-  the first feature the in-guest provider serves that the platform hosts
-  do not); jco-browser
-  additionally `chacha20-poly1305` (the host feature-detects it, and
-  Node's WebCrypto serves it where browsers do not yet); `targets.toml` is
-  the registry. The anticipated future declarations
-  are profile divergence (e.g. a FIPS-profile target missing a
-  permissive-key-policy feature). Bugs get fixed, not declared.
-- **The tests avoid platform-unspecified ground**: the signing probes
-  exercise generated keys, never imported private ones — browser hosts can
-  only serve `import-signing-key` via private-only PKCS#8, whose
-  `importKey` behavior is unspecified and inconsistent across engines
-  (w3c/webcrypto#356). The private-import known answers (RFC 6979
-  determinism, scalar export identity, known-point derivation, scalar
-  range rejection) are pinned by `lann-webcrypto-core`'s unit tests for
-  both Rust implementations instead.
-
-## Deliberately deferred
-
-- **Golden-artifact hand-off** (one target seals to a checked-in file,
-  others open it): still deferred even now that a randomized seal exists
-  (`aead-internal-nonce`), because its cross-target claims are already
-  covered deterministically — every target must `open` the same
-  vector-derived `iv ‖ ct ‖ tag` sealed messages, which pins the wire
-  format, and each target's own `seal` is verified by reopening. A checked-in
-  artifact would add only "target A's randomness works on target B", which
-  the format pin already implies. Revisit if a wire format ever gains
-  target-varying degrees of freedom.
-- **The timing lab** (dudect-style statistical tests of the composed in-guest
-  provider, targeting the class B/C surfaces in
-  `rust/guest-provider/README.md`): when built, it reports (a matrix column and
-  artifacts) but does **not** gate — statistical p-values flapping in CI
-  train people to ignore red.
+What review cannot establish on its own is whether a vendored vector is
+what upstream published. [`vectors/README.md`](vectors/README.md) records
+the upstream revision of every file for that purpose, so a copy can be
+re-fetched and diffed against its source.
 
 ## Growing the suites
 
 Adding an algorithm interface to the package is not done until its vector
 cases are here: vendor the vectors, extend the translation policy in
-`vectors/README.md` + `guest/src/translate.rs` (they must agree), tag the
-new cases with a feature name if any target legitimately cannot serve them
-(declaring it missing in `targets.toml` for those targets), and run
-`just conformance::update-lock` so the change lands as a reviewable
+`vectors/README.md` + `guest-ct/src/translate.rs` (they must agree), add
+the algorithm's `#[case_row]` registration in `guest-ct/src/lib.rs`, tag
+the new cases with a feature name if any target legitimately cannot serve
+them (declaring it missing in `driver-ct/targets.toml` for those targets,
+and adding the feature's `!feature` decline case), and run
+`just conformance-ct::lock-update` so the change lands as a reviewable
 lockfile diff. An algorithm of a kind with a contract battery
-(`guest/src/contract.rs`) also adds its table row there, inheriting the
-kind's standard cases — getters, extractability, key-material rejection,
-usage policy, the oct-JWK contract, round trip — as
-`<interface>/contract/…` lockfile entries;
-only behavior specific to the algorithm needs a hand-written probe. An
-algorithm the in-guest provider deliberately does not
-export lives in the signing suite, which the composed target never runs —
-that is absence, not failure.
+(`guest-ct/src/contract.rs`) also adds its table row there, inheriting the
+kind's standard cases as `<interface>/contract/…` lockfile entries; only
+behavior specific to the algorithm needs a hand-written probe. An algorithm
+the in-guest provider deliberately does not export lives in the signing
+suite — that is absence, not failure.

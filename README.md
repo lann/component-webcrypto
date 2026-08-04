@@ -119,10 +119,11 @@ examples/
                         #   webcrypto-componentize library; drives through the
                         #   same demo interface and composed pipeline
 conformance/            # cross-implementation conformance tests: vendored
-                        #   Wycheproof vectors + translation policy, a shared
-                        #   conformance guest (vectors under chunking
-                        #   schedules, plus API-contract probes), per-target
-                        #   adapters, and a runner rendering matrix.md
+                        #   Wycheproof vectors + translation policy, suite
+                        #   components on the lann:component-test guest SDK
+                        #   (vectors under chunking schedules, plus
+                        #   API-contract probes), and its driver/aggregation
+                        #   stack rendering driver-ct/matrix.md
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
@@ -162,22 +163,20 @@ just wpt::parity-webkit      #   pinned loss set (Playwright engines; gate in
                              #   CI — WebKit on macOS, the mobile-Safari proxy)
 just wpt::web                # serve the browser WPT parity page locally: the
                              #   same two legs run live in your browser
-just conformance::run        # the Wycheproof-derived conformance tests over the
-                             #   enabled targets; renders conformance/matrix.md
-just conformance::web        # serve the conformance results viewer locally
-                             #   (published with the public crates' rustdoc at
-                             #   https://lann.github.io/component-webcrypto/)
+just conformance-ct::all     # the Wycheproof-derived conformance tests over the
+                             #   enabled targets (component-test stack; expects
+                             #   the component-test checkout as a sibling of the
+                             #   repo); renders conformance/driver-ct/matrix.md
 just timing-lab::run         # dudect-style timing tests of the composed in-guest
                              #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs
 ```
 
-All three implementations run identical guest components. The conformance
+All implementations run identical suite components. The conformance
 tests (the vendored Wycheproof/CAVP/speccheck vectors — see
 [`conformance/vectors/README.md`](conformance/vectors/README.md) — under
-multiple stream-chunking schedules, plus API-contract probes) gate the wasmtime, composed, and jco-node
-targets everywhere, and the jco-browser target in CI (locally, opt in
-with `CONFORMANCE_BROWSER=1`; needs Chrome/Chromium 137+); the
+multiple stream-chunking schedules, plus API-contract probes) gate the
+wasmtime-rustcrypto and jco-node targets everywhere; the
 `crypto-demo` guest additionally covers the jco host end to end.
 
 A note on the in-guest provider: wasm offers no portable constant-time

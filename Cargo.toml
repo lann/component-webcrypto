@@ -8,15 +8,9 @@ members = [
     "examples/demo-driver",
     "examples/wasmtime-demo",
     "conformance/harness",
-    "conformance/guest",
     "conformance/guest-ct",
     "conformance/driver-ct",
-    "conformance/signing-guest",
     "conformance/signing-guest-ct",
-    "conformance/report",
-    "conformance/adapters/wasmtime",
-    "conformance/adapters/composed-driver",
-    "conformance/runner",
     "timing-lab",
 ]
 resolver = "2"

@@ -1,9 +1,10 @@
 //! `conformance-guest-ct`: the webcrypto conformance suite ported onto
 //! the `lann:component-test` guest SDK (M1.5 skeleton).
 //!
-//! The corpus is the incumbent's, reused wholesale: the `#[path]` modules
-//! below are `conformance-guest`'s own sources (translation, minting,
-//! runners, contract batteries, probes), compiled here unmodified. What
+//! The corpus is the incumbent's (`conformance-guest`), inherited
+//! wholesale at the M1.6 cutover: translation, minting, runners,
+//! contract batteries, probes — the modules below, moved here
+//! unmodified when the incumbent was deleted. What
 //! is new is the registration layer: `#[case_row]` rows for the
 //! vector and contract suites (one per census two-segment prefix, tags at
 //! the row, registration delegated to `plan::register` — under the
@@ -17,21 +18,13 @@
 //! by a native test (`census_test`); execution against a SUT is out of
 //! scope for this stage.
 
-// The incumbent corpus, wholesale. Path-included rather than depended on:
-// conformance-guest is a cdylib whose crate root also binds and exports
-// the *old* tests world, so it cannot be linked as a library. The modules
-// only reference each other via `crate::{mint,translate,contract}`, which
-// resolves identically here. (Flagged for M1.6: once the incumbent is
-// retired these files move here or into a shared crate.)
-#[path = "../../guest/src/contract.rs"]
+// The corpus, inherited wholesale from the incumbent `conformance-guest`
+// at the M1.6 cutover (these files moved here verbatim; the incumbent is
+// deleted). translation, minting, runners, contract batteries, probes.
 pub mod contract;
-#[path = "../../guest/src/mint.rs"]
 pub mod mint;
-#[path = "../../guest/src/probes.rs"]
 pub mod probes;
-#[path = "../../guest/src/translate.rs"]
 pub mod translate;
-#[path = "../../guest/src/vectors.rs"]
 pub mod vectors;
 
 pub mod plan;
@@ -139,7 +132,11 @@ mod webcrypto {
     }
 
     #[case_row(prefix = "aes-gcm-internal-nonce/wycheproof")]
-    fn row_aes_gcm_internal_nonce_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    fn row_aes_gcm_internal_nonce_wycheproof(
+        registry: &mut Registry,
+        prefix: &ArcStr,
+        tags: &Tags,
+    ) {
         crate::plan::register(registry, prefix, tags)
     }
 
@@ -147,7 +144,11 @@ mod webcrypto {
         prefix = "xchacha20-poly1305-internal-nonce/wycheproof",
         tags("xchacha20-poly1305")
     )]
-    fn row_xchacha20_poly1305_internal_nonce_wycheproof(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    fn row_xchacha20_poly1305_internal_nonce_wycheproof(
+        registry: &mut Registry,
+        prefix: &ArcStr,
+        tags: &Tags,
+    ) {
         crate::plan::register(registry, prefix, tags)
     }
 
@@ -255,7 +256,11 @@ mod webcrypto {
         prefix = "xchacha20-poly1305-internal-nonce/contract",
         tags("xchacha20-poly1305")
     )]
-    fn row_xchacha20_poly1305_internal_nonce_contract(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+    fn row_xchacha20_poly1305_internal_nonce_contract(
+        registry: &mut Registry,
+        prefix: &ArcStr,
+        tags: &Tags,
+    ) {
         crate::plan::register(registry, prefix, tags)
     }
 

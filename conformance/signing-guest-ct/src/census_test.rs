@@ -1,5 +1,7 @@
 //! Native census-parity test: the port's static inventory must equal the
-//! incumbent census (`conformance/signing-guest/tests.lock`) exactly.
+//! incumbent census (`src/census-fixture.lock` — the incumbent
+//! `conformance-signing-guest`'s final `tests.lock`, byte-frozen at the
+//! M1.6 cutover; the incumbent itself is deleted) exactly.
 //! The incumbent census carries no feature tags, so there are no
 //! additive decline cases to exclude.
 
@@ -10,7 +12,7 @@ type Inventory = BTreeMap<String, Vec<String>>;
 /// Parse the incumbent census: `{ name = "..." }` (no features in this
 /// suite — asserted below).
 fn census() -> Inventory {
-    let text = include_str!("../../signing-guest/tests.lock");
+    let text = include_str!("census-fixture.lock");
     let mut out = Inventory::new();
     for line in text.lines() {
         let Some(rest) = line.trim().strip_prefix("{ name = \"") else {

@@ -1,11 +1,11 @@
 name: pages
 
-# Publish the Pages site: the conformance results viewer (conformance/web/),
-# the browser WPT parity page (js/componentize/wpt/web/), and the public
-# crates' API docs. Runs the full conformance suite on every push to main
-# (under Actions that includes the jco-browser target, so the published
-# matrix carries every column), builds the WPT page's artifacts and the
-# rustdoc, then deploys the site assembled by `just gha::pages-site`.
+# Publish the Pages site: the browser WPT parity page
+# (js/componentize/wpt/web/) and the public crates' API docs. Builds the
+# WPT page's artifacts and the rustdoc, then deploys the site assembled by
+# `just gha::pages-site`. (The incumbent conformance results viewer was
+# retired at the M1.6 cutover; the component-test matrix is the committed
+# conformance/driver-ct/matrix.md.)
 # The pages' URLs are all relative, so they serve correctly from the
 # project subpath.
 
@@ -32,6 +32,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Checkout component-test (path dependency)
+        # The conformance ct crates path-depend on a sibling checkout of
+        # lann/component-test (see conformance/driver-ct/justfile).
+        # TODO: pin to a released component-test ref instead of the
+        # default branch.
+        run: git clone --depth 1 https://github.com/lann/component-test ../component-test
+
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
@@ -52,9 +59,6 @@ jobs:
         run: ./scripts/setup.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Run the conformance suite
-        run: just conformance::run
 
       - name: Build the WPT parity page artifacts
         run: just wpt::web-artifacts

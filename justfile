@@ -8,8 +8,7 @@ import 'justfile.shared.just'
 # GitHub Actions plumbing: CI job entry points and workflow-only recipes.
 mod gha '.github'
 
-# The cross-implementation conformance tests.
-mod conformance
+# The cross-implementation conformance tests (component-test stack).
 mod conformance-ct "conformance/driver-ct/justfile"
 
 # The demo guest + drivers (Wasmtime, composed in-guest, jco/Node).
@@ -43,14 +42,16 @@ fmt-check:
 
 # Run clippy across all crates (the wasm crates on their wasm targets).
 clippy:
-    cargo clippy --workspace --exclude crypto-demo --exclude lann-webcrypto-guest-provider --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab -- -D warnings
+    cargo clippy --workspace --exclude crypto-demo --exclude lann-webcrypto-guest-provider --exclude crypto-demo-driver --exclude timing-lab -- -D warnings
     cargo clippy -p crypto-demo --target wasm32-unknown-unknown -- -D warnings
-    cargo clippy -p conformance-guest --target wasm32-unknown-unknown -- -D warnings
-    cargo clippy -p conformance-signing-guest --target wasm32-unknown-unknown -- -D warnings
     cargo clippy -p lann-webcrypto-guest-provider --target wasm32-wasip2 -- -D warnings
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
-    cargo clippy -p conformance-composed-driver --target wasm32-wasip2 -- -D warnings
+    # The conformance suites build natively too (the census-parity tests),
+    # which the workspace line covers; this checks their component builds
+    # in the configuration the conformance run ships (rkyv corpus).
+    cargo clippy -p conformance-guest-ct -p conformance-signing-guest-ct \
+        --features conformance-guest-ct/rkyv-corpus --target wasm32-wasip2 -- -D warnings
     # lann-webcrypto-guest's optional source adaptors are only compiled with their
     # features on, and one of them holds the only code path that can produce
     # `Error::Read` — the crate's subtlest behaviour. Nothing in the
@@ -76,12 +77,11 @@ validate-wit:
     wasm-tools component wit js/componentize/wpt/wit --all-features
     wasm-tools component wit examples/componentize-demo/wit
     wasm-tools component wit js/componentize/wpt/wit
-    wasm-tools component wit conformance/guest/wit
 
 # Run the Rust tests, including the wasmtime-demo integration test (which
 # builds and runs the crypto-demo guest under the Wasmtime host).
 test:
-    cargo test --workspace --exclude crypto-demo --exclude crypto-demo-driver --exclude conformance-guest --exclude conformance-signing-guest --exclude conformance-composed-driver --exclude timing-lab
+    cargo test --workspace --exclude crypto-demo --exclude crypto-demo-driver --exclude timing-lab
 
 # Build the API docs for the public-facing crates: the Wasmtime host crate
 # and the guest-side SDK. Both document on the host target (the SDK also
@@ -91,7 +91,7 @@ rust-docs:
     cargo doc --no-deps -p lann-webcrypto-wasmtime -p lann-webcrypto-guest
 
 # Run cargo-mutants over the shared crypto core and the Wasmtime host, with
-# the unit tests plus both conformance suites (via the wasmtime adapter's
+# the unit tests plus both conformance suites (via the ct driver's
 # env-gated oracle test) as the oracle: a mutant survives only if neither
 # distinguishes it. This is what polices assertion *strength* — the
 # lockfiles pin the case inventory, not what the cases check. Expensive and
@@ -112,11 +112,11 @@ rust-docs:
 # contract makes an operation that returns without draining its input
 # stream deadlock the guest's feeder. Every other nonzero status (missed
 # mutants, usage error, failing baseline) stays fatal.
-mutants shard="": conformance::build-guest conformance::build-signing-guest
+mutants shard="": conformance-ct::build
     #!/usr/bin/env bash
     set -uo pipefail
-    CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/conformance/guest/build/conformance-guest.component.wasm" \
-    CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/conformance/signing-guest/build/conformance-signing-guest.component.wasm" \
+    CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/target/wasm32-wasip2/release/conformance_guest_ct.wasm" \
+    CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm" \
         cargo mutants --jobs 2 --profile mutants \
         -p lann-webcrypto-core -p lann-webcrypto-wasmtime \
         {{ if shard != "" { "--shard " + shard } else { "" } }}
