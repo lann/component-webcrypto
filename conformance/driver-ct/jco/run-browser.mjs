@@ -61,69 +61,77 @@ for (const entry of SUITES) {
   }
 }
 
-// The in-page harness: fetches each suite's core-wasm tag inventory,
-// imports the transpiled suite (whose lann:webcrypto imports resolve to
-// js/jco/webcrypto.js — the browser-first host, feature-detecting per
-// call), and runs harness.mjs's case loop, collecting the JSONL event
-// rows. The import map resolves the transpiled guests' bare
-// @bytecodealliance/preview2-shim specifiers to the shim's browser build
-// in the driver's node_modules (Node resolves them natively; a page
-// cannot).
+// The in-page harness: spawns a pool of module Web Workers
+// (worker-browser.mjs), each running one shard of a suite's case loop
+// with its own instance of the transpiled suite (whose lann:webcrypto
+// imports resolve to js/jco/webcrypto.js — the browser-first host,
+// feature-detecting per call — and whose wasi imports resolve to
+// relative paths into the preview2-shim browser build, mapped at
+// transpile time: module workers cannot see a page's import map).
+// Rows come back tagged with their suite-order index and are re-sorted
+// before reporting.
 //
 // Heartbeats feed the Node-side stall watchdog: fire-and-forget (a
 // closing page must not turn a heartbeat into an unhandled rejection),
 // throttled to one per twenty-five rows.
 const BASE = "/conformance/driver-ct/jco";
-const SHIM = `${BASE}/node_modules/@bytecodealliance/preview2-shim/lib/browser`;
 const harness = (suites) => `<!doctype html>
 <link rel="icon" href="data:,">
 <title>lann:webcrypto conformance (component-test stack)</title>
-<script type="importmap">
-{
-  "imports": {
-    "@bytecodealliance/preview2-shim/cli": "${SHIM}/cli.js",
-    "@bytecodealliance/preview2-shim/clocks": "${SHIM}/clocks.js",
-    "@bytecodealliance/preview2-shim/io": "${SHIM}/io.js"
-  }
-}
-</script>
 <script type="module">
-import { inventoryLookup, runCases } from "${BASE}/harness.mjs";
+import { mergeCounts, workerCount } from "${BASE}/harness.mjs";
 
 const suites = ${JSON.stringify(suites)};
+const jobs = workerCount(navigator.hardwareConcurrency ?? 4);
 const beat = (note) => {
   try { window.__progress(note).catch(() => {}); } catch {}
 };
 let rows = 0;
 
+// One shard of one suite: a fresh worker running its stripe to
+// completion. Workers are per-shard (not reused across suites) so each
+// suite gets fresh instances, as the sequential harness had.
+const runShard = (suite, missing, cores, shard) =>
+  new Promise((resolve, reject) => {
+    const worker = new Worker("${BASE}/worker-browser.mjs", { type: "module" });
+    const events = [];
+    worker.onmessage = ({ data }) => {
+      if (data.kind === "event") {
+        events.push(data);
+        rows += 1;
+        if (rows % 25 === 0) beat("row " + rows + ": " + data.event.case);
+      } else if (data.kind === "counts") {
+        worker.terminate();
+        resolve({ events, counts: data.counts });
+      } else {
+        worker.terminate();
+        reject(new Error("worker (shard " + shard.index + "): " + data.error));
+      }
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      reject(new Error("worker (shard " + shard.index + "): " + (e.message ?? e)));
+    };
+    worker.postMessage({ suite, missing, cores, shard });
+  });
+
 (async () => {
   try {
     const out = {};
     for (const { suite, missing, cores } of suites) {
-      beat("loading " + suite);
-      const coreModules = [];
-      for (const core of cores) {
-        const res = await fetch("${BASE}/generated/" + core);
-        if (!res.ok) throw new Error("fetching " + core + ": " + res.status);
-        coreModules.push(new Uint8Array(await res.arrayBuffer()));
-      }
-      const tagsOf = inventoryLookup(coreModules);
-      const { tests } = await import("${BASE}/generated/" + suite + ".js");
-      const cases = await tests.all();
-      beat("suite " + suite + ": " + cases.length + " cases");
-      const events = [];
-      const counts = await runCases({
-        cases,
-        tagsOf,
-        missing,
-        emit: (event) => {
-          events.push(event);
-          rows += 1;
-          if (rows % 25 === 0) beat("row " + rows + ": " + event.case);
-        },
-      });
-      delete counts.failures; // page-side detail; the rows carry it all
-      out[suite] = { events, counts };
+      beat("suite " + suite + ": " + jobs + " workers");
+      const shards = await Promise.all(
+        Array.from({ length: jobs }, (_, index) =>
+          runShard(suite, missing, cores, { index, count: jobs })
+        )
+      );
+      const events = shards.flatMap((s) => s.events);
+      events.sort((a, b) => a.index - b.index);
+      out[suite] = {
+        events: events.map((e) => e.event),
+        counts: mergeCounts(shards.map((s) => s.counts)),
+      };
+      delete out[suite].counts.failures;
     }
     window.__report(out);
   } catch (err) {

@@ -42,6 +42,17 @@ jobs:
           shared-key: rust-checks
           cache-all-crates: true
 
+      - name: Cache component-test build
+        # rust-cache above covers only this repo's workspace; the sibling
+        # checkout's target dir would otherwise rebuild release wasmtime
+        # every run (~10 min on the hosted runners). The build is a pure
+        # function of the pinned rev and the toolchain, so the key never
+        # needs invalidating beyond those.
+        uses: actions/cache@v4
+        with:
+          path: ../component-test/target
+          key: component-test-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
+
       - name: Install Node 24
         uses: actions/setup-node@v4
         with:

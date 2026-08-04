@@ -97,18 +97,30 @@ export function envelope(target, suite) {
  * not-applicable rows). Thrown on inventory drift (a case no tags
  * record covers) — the run is unsound, not failing.
  *
+ * `shard` selects a stripe of the suite (case `i` belongs to shard
+ * `i % count`), letting several workers — each with its own instance
+ * of the transpiled suite — run disjoint slices concurrently. Striping
+ * balances load better than contiguous chunks: expensive cases cluster
+ * by algorithm. The default runs everything. `emit` receives the case's
+ * suite-order index alongside the event so a sharded consumer can
+ * restore suite order.
+ *
  * @param {object} options
  * @param {Array} options.cases  `tests.all()` from the transpiled suite.
  * @param {(name: string) => string[] | undefined} options.tagsOf
  * @param {string[]} options.missing
  * @param {string} [options.only]  Substring filter (skips emit entirely).
- * @param {(event: object) => void} options.emit
+ * @param {(event: object, index: number) => void} options.emit
+ * @param {{ index: number, count: number }} [options.shard]
  * @returns {Promise<{passed, failed, skipped, na, total, failures}>}
  */
-export async function runCases({ cases, tagsOf, missing, only, emit }) {
-  let passed = 0, failed = 0, skipped = 0, na = 0;
+export async function runCases({ cases, tagsOf, missing, only, emit, shard }) {
+  const { index: shardIndex, count: shardCount } = shard ?? { index: 0, count: 1 };
+  let passed = 0, failed = 0, skipped = 0, na = 0, total = 0;
   const failures = [];
-  for (const testCase of cases) {
+  for (const [caseIndex, testCase] of cases.entries()) {
+    if (caseIndex % shardCount !== shardIndex) continue;
+    total++;
     const name = String(testCase.name());
     if (only && !name.includes(only)) continue;
     const tags = tagsOf(name);
@@ -120,7 +132,7 @@ export async function runCases({ cases, tagsOf, missing, only, emit }) {
       const excluding = tags.find((t) =>
         t.startsWith("!") ? !missing.includes(t.slice(1)) : missing.includes(t)
       );
-      emit({ case: name, status: "not-applicable", detail: excluding ?? "" });
+      emit({ case: name, status: "not-applicable", detail: excluding ?? "" }, caseIndex);
       continue;
     }
     const diags = [];
@@ -153,7 +165,29 @@ export async function runCases({ cases, tagsOf, missing, only, emit }) {
       }
     }
     if (diags.length > 0) event.diagnostics = diags;
-    emit(event);
+    emit(event, caseIndex);
   }
-  return { passed, failed, skipped, na, total: cases.length, failures };
+  return { passed, failed, skipped, na, total, failures };
+}
+
+/**
+ * Merge per-shard `runCases` counts. Shards partition the suite, so the
+ * sums reproduce an unsharded run's counts exactly.
+ */
+export function mergeCounts(parts) {
+  const out = { passed: 0, failed: 0, skipped: 0, na: 0, total: 0, failures: [] };
+  for (const c of parts) {
+    out.passed += c.passed;
+    out.failed += c.failed;
+    out.skipped += c.skipped;
+    out.na += c.na;
+    out.total += c.total;
+    if (c.failures) out.failures.push(...c.failures);
+  }
+  return out;
+}
+
+/** The worker-pool size for this machine (the incumbent adapters' cap). */
+export function workerCount(available) {
+  return Math.max(1, Math.min(available ?? 1, 8));
 }
