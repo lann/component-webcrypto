@@ -116,8 +116,9 @@ therefore fallible even where no extractability gate applies (see
 
 - `algorithm-*` getters project the
   [W3C Web Cryptography API](https://www.w3.org/TR/WebCryptoAPI/) registry's
-  algorithm properties, spelled and denominated (bits) as the registry
-  defines them.
+  algorithm properties, spelled and denominated as the registry defines
+  them: bit counts for lengths, big-endian bytes for the RSA public
+  exponent (`RsaKeyAlgorithm.publicExponent`'s `BigInteger`).
 - `*-size` getters report operation-contract quantities in bytes.
 - `can-*` getters report the usage recorded at mint (or carried by a
   platform keystore key). An operation the key refuses fails with

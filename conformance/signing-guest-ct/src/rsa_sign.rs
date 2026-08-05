@@ -351,6 +351,11 @@ pub async fn rsa_sign_key_contract() -> Result<(), String> {
             "generated signing-key algorithm-length",
         )?;
         expect(
+            key.algorithm_public_exponent(),
+            Some(vec![1, 0, 1]),
+            "generated signing-key algorithm-public-exponent",
+        )?;
+        expect(
             key.algorithm_curve(),
             None,
             "generated signing-key algorithm-curve",
@@ -370,6 +375,11 @@ pub async fn rsa_sign_key_contract() -> Result<(), String> {
             public.algorithm_length(),
             Some(2048),
             "generated verifying-key algorithm-length",
+        )?;
+        expect(
+            public.algorithm_public_exponent(),
+            Some(vec![1, 0, 1]),
+            "generated verifying-key algorithm-public-exponent",
         )?;
 
         let sig = sig_sign_ok(&key, payload, Schedule::Whole).await?;

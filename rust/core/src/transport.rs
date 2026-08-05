@@ -182,6 +182,14 @@ impl EncryptionKeyMaterial {
         Some(self.public.key_size_bits() as u32)
     }
 
+    /// The public exponent's big-endian bytes
+    /// (`encryption-key.algorithm-public-exponent`).
+    pub fn public_exponent(&self) -> Option<Vec<u8>> {
+        let (_, e) = decode_rsa_spki(&self.spki_der())
+            .expect("the backend serializes a valid rsaEncryption SPKI");
+        Some(e.to_bytes_be())
+    }
+
     /// RSA public keys have no raw form (the platform serves `spki` and
     /// `jwk` only), so the `encryption-key.export-key-raw` contract
     /// renders `unsupported`.
@@ -394,6 +402,21 @@ impl DecryptionKeyMaterial {
     /// The modulus length in bits (`decryption-key.algorithm-length`).
     pub fn length(&self) -> Option<u32> {
         Some(self.private.key_size_bits() as u32)
+    }
+
+    /// The public exponent's big-endian bytes
+    /// (`decryption-key.algorithm-public-exponent`), from the private
+    /// key's public half — public data, so no extractability gate.
+    pub fn public_exponent(&self) -> Option<Vec<u8>> {
+        use aws_lc_rs::encoding::AsDer as _;
+        let der: aws_lc_rs::encoding::PublicKeyX509Der = self
+            .private
+            .public_key()
+            .as_der()
+            .expect("valid key encodes");
+        let (_, e) = decode_rsa_spki(der.as_ref())
+            .expect("the backend serializes a valid rsaEncryption SPKI");
+        Some(e.to_bytes_be())
     }
 
     /// Whether the key permits `decrypt` (`can-decrypt`).

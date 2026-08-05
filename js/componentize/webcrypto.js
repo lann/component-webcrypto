@@ -923,34 +923,6 @@ const RSA_VARIANTS = {
 };
 
 /**
- * Decode an unpadded base64url string (RFC 7515's encoding, the JWK
- * integer form) to bytes. Used on WIT-exported JWK members, which the
- * provider encodes canonically.
- * @param {string} text
- * @returns {Uint8Array<ArrayBuffer>}
- */
-function base64UrlDecode(text) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
-  let bits = 0;
-  let bitCount = 0;
-  let offset = 0;
-  for (const char of text) {
-    const value = alphabet.indexOf(char);
-    if (value < 0) {
-      throw new TypeError("invalid base64url in a JWK member");
-    }
-    bits = (bits << 6) | value;
-    bitCount += 6;
-    if (bitCount >= 8) {
-      bitCount -= 8;
-      out[offset++] = (bits >> bitCount) & 0xff;
-    }
-  }
-  return out;
-}
-
-/**
  * The per-salt-length reminting state of an RSA-PSS public `CryptoKey`:
  * the WIT binds the salt length at mint, so serving WebCrypto's
  * per-operation `saltLength` means holding the key's SPKI and minting the
@@ -1734,18 +1706,16 @@ async function importKey(format, keyData, algorithm, extractable, keyUsages) {
           ? rsassaVerify.importVerifyingKeyJwk(variant.tag, jwkForImport(jwk, "sig", usages))
           : rsassaVerify.importVerifyingKeySpki(variant.tag, bytesOf(keyData, "keyData")),
     );
-    // The projected RsaHashedKeyAlgorithm: the modulus length from the
-    // key's own getter; the public exponent from the exported JWK's `e`
-    // (the WIT models no exponent getter — the JWK carries it).
+    // The projected RsaHashedKeyAlgorithm, from the key's own getters
+    // (the exponent copied into a fresh, unshared buffer).
     const modulusLength = /** @type {number} */ (handle.algorithmLength());
-    const exported = /** @type {{ e: string }} */ (
-      JSON.parse(/** @type {string} */ (await callImport(handle.exportKeyJwk())))
-    );
     /** @type {RsaHashedKeyAlgorithm} */
     const projected = {
       name: alg.name,
       modulusLength,
-      publicExponent: base64UrlDecode(exported.e),
+      publicExponent: new Uint8Array(
+        /** @type {Uint8Array} */ (handle.algorithmPublicExponent()),
+      ),
       hash: Object.freeze({ name: /** @type {string} */ (alg.hash) }),
     };
     const key = mintKey(handle, "public", projected, !!extractable, usages);

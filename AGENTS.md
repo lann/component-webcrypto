@@ -587,9 +587,7 @@ closed numbers remain stable references.
   proxy).
 - More algorithms per kind — each is a new minting interface plus
   constructors, never a generic change.
-- More `signature` algorithms (RSA-PSS/RSASSA-PKCS1-v1_5 need an
-  `algorithm-length` getter — semver-minor; see the evolution rules in the
-  WIT section — and SPKI/PKCS#8 formats); the
+- More `signature` algorithms; the
   per-algorithm `-verify`/`-sign` minting split already carries the class-D
   policy (the in-guest provider exports `ecdsa-verify` but not `ecdsa-sign`).
 - Extending the timing lab (`timing-lab/`) toward the class B/C surfaces'

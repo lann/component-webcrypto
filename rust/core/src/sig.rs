@@ -378,6 +378,20 @@ impl SigPublic {
         )
     }
 
+    /// The RSA public exponent's big-endian bytes
+    /// (`verifying-key.algorithm-public-exponent`). `None` for Ed25519
+    /// and ECDSA, which have no such parameter.
+    pub fn public_exponent(&self) -> Option<Vec<u8>> {
+        sig_public_match!(self,
+            Ed25519(_) => None,
+            Ecdsa(_, _) => None,
+            Rsa(key, _) => {
+                use rsa::traits::PublicKeyParts as _;
+                Some(key.e().to_bytes_be())
+            },
+        )
+    }
+
     /// The public key material in the minting interface's documented form —
     /// raw 32 bytes for Ed25519, an uncompressed SEC1 point for ECDSA — or
     /// `unsupported` for the RSA family, which has no raw public form (the
@@ -1266,6 +1280,20 @@ impl SigningKeyMaterial {
             Rsa(key, _) => {
                 let (n, _) = rsa_keypair_public_parts(key);
                 Some(n.bits() as u32)
+            },
+        )
+    }
+
+    /// The RSA public exponent's big-endian bytes
+    /// (`signing-key.algorithm-public-exponent`). `None` for Ed25519 and
+    /// ECDSA, which have no such parameter.
+    pub fn public_exponent(&self) -> Option<Vec<u8>> {
+        sig_private_match!(&self.private,
+            Ed25519(_) => None,
+            Ecdsa(_, _) => None,
+            Rsa(key, _) => {
+                let (_, e) = rsa_keypair_public_parts(key);
+                Some(e.to_bytes_be())
             },
         )
     }

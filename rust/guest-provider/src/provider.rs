@@ -1679,6 +1679,10 @@ impl GuestVerifyingKey for VerifyingKey {
         self.public.length()
     }
 
+    fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.public.public_exponent()
+    }
+
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         Ok(self.public.export()?)
     }
@@ -1721,6 +1725,10 @@ impl GuestSigningKey for SigningKey {
 
     fn algorithm_length(&self) -> Option<u32> {
         self.material.length()
+    }
+
+    fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.material.public_exponent()
     }
 
     fn extractable(&self) -> bool {
@@ -1967,6 +1975,10 @@ impl GuestEncryptionKey for EncryptionKey {
         self.never()
     }
 
+    fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.never()
+    }
+
     async fn export_key_raw(&self) -> Result<Vec<u8>, Error> {
         self.never()
     }
@@ -2026,6 +2038,10 @@ impl GuestDecryptionKey for DecryptionKey {
     }
 
     fn can_unwrap(&self) -> bool {
+        self.never()
+    }
+
+    fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
         self.never()
     }
 

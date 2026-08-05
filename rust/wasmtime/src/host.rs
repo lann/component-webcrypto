@@ -1960,6 +1960,13 @@ impl signature_iface::HostVerifyingKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_length(&mut self, self_: Resource<VerifyingKey>) -> Result<Option<u32>> {
         Ok(self.table.get(&self_)?.public.length())
     }
+
+    fn algorithm_public_exponent(
+        &mut self,
+        self_: Resource<VerifyingKey>,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(self.table.get(&self_)?.public.public_exponent())
+    }
 }
 
 impl<T: Send> signature_iface::HostVerifyingKeyWithStore<T> for WasiWebcrypto {
@@ -2019,6 +2026,13 @@ impl signature_iface::HostSigningKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_length(&mut self, self_: Resource<SigningKey>) -> Result<Option<u32>> {
         Ok(self.table.get(&self_)?.material.length())
+    }
+
+    fn algorithm_public_exponent(
+        &mut self,
+        self_: Resource<SigningKey>,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(self.table.get(&self_)?.material.public_exponent())
     }
 
     fn extractable(&mut self, self_: Resource<SigningKey>) -> Result<bool> {
@@ -2515,6 +2529,13 @@ impl HostEncryptionKey for WasiWebcryptoCtxView<'_> {
     fn algorithm_length(&mut self, self_: Resource<EncryptionKey>) -> Result<Option<u32>> {
         Ok(self.table.get(&self_)?.material.length())
     }
+
+    fn algorithm_public_exponent(
+        &mut self,
+        self_: Resource<EncryptionKey>,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(self.table.get(&self_)?.material.public_exponent())
+    }
 }
 
 impl<T: Send> HostEncryptionKeyWithStore<T> for WasiWebcrypto {
@@ -2587,6 +2608,13 @@ impl HostDecryptionKey for WasiWebcryptoCtxView<'_> {
 
     fn algorithm_length(&mut self, self_: Resource<DecryptionKey>) -> Result<Option<u32>> {
         Ok(self.table.get(&self_)?.material.length())
+    }
+
+    fn algorithm_public_exponent(
+        &mut self,
+        self_: Resource<DecryptionKey>,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(self.table.get(&self_)?.material.public_exponent())
     }
 
     fn can_decrypt(&mut self, self_: Resource<DecryptionKey>) -> Result<bool> {
