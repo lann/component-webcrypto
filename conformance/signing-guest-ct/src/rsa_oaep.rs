@@ -493,6 +493,11 @@ pub async fn rsa_oaep_encrypt_contract() -> Result<(), String> {
         Some(2048),
         "encryption-key algorithm-length",
     )?;
+    expect(
+        key.algorithm_public_exponent(),
+        Some(vec![1, 0, 1]),
+        "encryption-key algorithm-public-exponent",
+    )?;
 
     // The public exports: SPKI round-trips byte-exact (rsaEncryption
     // SubjectPublicKeyInfo DER is canonical), the JWK carries the
@@ -526,6 +531,11 @@ pub async fn rsa_oaep_encrypt_contract() -> Result<(), String> {
         from_jwk.algorithm_length(),
         Some(2048),
         "jwk-imported encryption-key algorithm-length",
+    )?;
+    expect(
+        from_jwk.algorithm_public_exponent(),
+        Some(vec![1, 0, 1]),
+        "jwk-imported encryption-key algorithm-public-exponent",
     )?;
 
     // The plaintext bound: modulus bytes (256) minus twice the digest
@@ -623,6 +633,16 @@ pub async fn rsa_oaep_round_trip() -> Result<(), String> {
             private.algorithm_length(),
             Some(2048),
             "generated decryption-key algorithm-length",
+        )?;
+        expect(
+            private.algorithm_public_exponent(),
+            Some(vec![1, 0, 1]),
+            "generated decryption-key algorithm-public-exponent",
+        )?;
+        expect(
+            private.algorithm_public_exponent(),
+            public.algorithm_public_exponent(),
+            "the pair's algorithm-public-exponent getters",
         )?;
         expect(private.can_decrypt(), true, "can-decrypt getter")?;
         expect(private.can_unwrap(), true, "can-unwrap getter")?;

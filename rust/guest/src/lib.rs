@@ -1303,6 +1303,13 @@ impl VerifyingKey {
         self.0.algorithm_length()
     }
 
+    /// The RSA public exponent's big-endian bytes (WebCrypto's
+    /// `RsaKeyAlgorithm.publicExponent`; `[1, 0, 1]` for 65537). `None`
+    /// for Ed25519 and ECDSA, which have no such parameter.
+    pub fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.0.algorithm_public_exponent()
+    }
+
     /// The public key material, in the minting interface's documented
     /// public format.
     ///
@@ -1349,6 +1356,11 @@ impl SigningKey {
     /// See [`VerifyingKey::algorithm_length`].
     pub fn algorithm_length(&self) -> Option<u32> {
         self.0.algorithm_length()
+    }
+
+    /// See [`VerifyingKey::algorithm_public_exponent`].
+    pub fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.0.algorithm_public_exponent()
     }
 
     /// Whether the private key material may be exported. There is
@@ -1428,6 +1440,12 @@ impl EncryptionKey {
     /// RSA modulus length (WebCrypto's `RsaKeyAlgorithm.modulusLength`).
     pub fn algorithm_length(&self) -> Option<u32> {
         self.0.algorithm_length()
+    }
+
+    /// The public exponent's big-endian bytes (WebCrypto's
+    /// `RsaKeyAlgorithm.publicExponent`; `[1, 0, 1]` for 65537).
+    pub fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.0.algorithm_public_exponent()
     }
 
     /// The public key material, in the minting interface's documented
@@ -1515,6 +1533,11 @@ impl DecryptionKey {
     /// See [`EncryptionKey::algorithm_length`].
     pub fn algorithm_length(&self) -> Option<u32> {
         self.0.algorithm_length()
+    }
+
+    /// See [`EncryptionKey::algorithm_public_exponent`].
+    pub fn algorithm_public_exponent(&self) -> Option<Vec<u8>> {
+        self.0.algorithm_public_exponent()
     }
 
     /// Whether the key permits [`decrypt`](Self::decrypt) — the usage

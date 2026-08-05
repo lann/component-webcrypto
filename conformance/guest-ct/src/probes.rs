@@ -2357,6 +2357,11 @@ async fn ecdsa_cross_hash_variants() -> Result<(), String> {
             Some(hash.to_string()),
             "cross-variant algorithm-hash",
         )?;
+        expect(
+            key.algorithm_public_exponent(),
+            None,
+            "cross-variant algorithm-public-exponent (ECDSA has none)",
+        )?;
         // 0x0101…01 is in range (below both curve orders) and nonzero for
         // both halves, so rejection can only come from verification.
         let sig = vec![0x01u8; if curve == "P-256" { 64 } else { 96 }];
@@ -2481,8 +2486,9 @@ const RSA_PSS_SALT0_SIG: &str = "20081f8894a1330c4d503f642880e3c30e398fc6235c24f
      c67126e391f922ef7b1bb1911cd6e1b303cb2910dd70672bbfb62ea4eaad725c";
 
 /// The RSA verifying-key contract on both minting families: the getters
-/// report the mint binding (name, mint-bound hash, modulus length, no
-/// curve), raw export fails `unsupported` (RSA public keys have no raw
+/// report the mint binding (name, mint-bound hash, modulus length, the
+/// public exponent's big-endian bytes, no curve), raw export fails
+/// `unsupported` (RSA public keys have no raw
 /// form), the SPKI export round-trips the imported DER, the JWK export
 /// re-imports to the same key, a JWK `alg` disagreeing with the variant —
 /// or with the other RSA family — fails `invalid-key`, and a public JWK
@@ -2512,6 +2518,11 @@ async fn rsa_key_contract() -> Result<(), String> {
         v15.algorithm_length(),
         Some(2048),
         "RSASSA verifying-key algorithm-length",
+    )?;
+    expect(
+        v15.algorithm_public_exponent(),
+        Some(vec![1, 0, 1]),
+        "RSASSA verifying-key algorithm-public-exponent",
     )?;
     expect(
         v15.algorithm_curve(),

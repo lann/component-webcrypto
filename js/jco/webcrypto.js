@@ -4119,6 +4119,17 @@ export class VerifyingKey {
   }
 
   /**
+   * The RSA public exponent's big-endian bytes, from the platform key's
+   * own `RsaKeyAlgorithm.publicExponent`; `undefined` for Ed25519 and
+   * ECDSA, whose algorithms have no such member.
+   * @returns {Uint8Array | undefined}
+   */
+  algorithmPublicExponent() {
+    const e = /** @type {RsaHashedKeyAlgorithm} */ (this.#key.algorithm).publicExponent;
+    return e === undefined ? undefined : new Uint8Array(e);
+  }
+
+  /**
    * The public key material (`raw`: 32 bytes for Ed25519, an uncompressed
    * SEC1 point for ECDSA). The RSA family has no raw public form (the
    * platform serves `spki` and `jwk` only), so its keys fail `unsupported`
@@ -4251,6 +4262,15 @@ export class SigningKey extends keyResourceTail({ canSign: "sign" }) {
 
   algorithmLength() {
     return this.#algorithm.length;
+  }
+
+  /**
+   * See `VerifyingKey.algorithmPublicExponent`.
+   * @returns {Uint8Array | undefined}
+   */
+  algorithmPublicExponent() {
+    const e = /** @type {RsaHashedKeyAlgorithm} */ (platformKeyOf(this).algorithm).publicExponent;
+    return e === undefined ? undefined : new Uint8Array(e);
   }
 
   /**
@@ -5518,6 +5538,16 @@ export class EncryptionKey {
   }
 
   /**
+   * The public exponent's big-endian bytes, from the platform key's own
+   * `RsaKeyAlgorithm.publicExponent`.
+   * @returns {Uint8Array | undefined}
+   */
+  algorithmPublicExponent() {
+    const e = /** @type {RsaHashedKeyAlgorithm} */ (this.#key.algorithm).publicExponent;
+    return e === undefined ? undefined : new Uint8Array(e);
+  }
+
+  /**
    * RSA public keys have no raw form (see `VerifyingKey.exportKeyRaw`).
    * @returns {Promise<Uint8Array>}
    */
@@ -5618,6 +5648,15 @@ export class DecryptionKey extends keyResourceTail({}) {
 
   algorithmLength() {
     return this.#algorithm.modulusLength;
+  }
+
+  /**
+   * See `EncryptionKey.algorithmPublicExponent`.
+   * @returns {Uint8Array | undefined}
+   */
+  algorithmPublicExponent() {
+    const e = /** @type {RsaHashedKeyAlgorithm} */ (platformKeyOf(this).algorithm).publicExponent;
+    return e === undefined ? undefined : new Uint8Array(e);
   }
 
   /** The usage grants: the mint policy recorded in `decryptionKeyGrants`. */
