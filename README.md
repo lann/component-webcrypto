@@ -143,14 +143,11 @@ crate's bindings instead.
 ## Build & run
 
 Prerequisites: Rust (via rustup; the toolchain and wasm target are pinned in
-`rust-toolchain.toml`), `wasm-tools`, — for the jco host — Node 24+ (jco's
-async ABI uses JSPI), and a checkout of
-[lann/component-test](https://github.com/lann/component-test) as a **sibling
-of this repository** at (or past) the rev pinned in `.component-test-rev`:
-the conformance crates are workspace members with path dependencies into it,
-so every `cargo` command — including the first `just test` — needs it
-present. `./scripts/setup.sh` installs the rest (including that clone when
-missing).
+`rust-toolchain.toml`), `wasm-tools`, and — for the jco host — Node 24+
+(jco's async ABI uses JSPI). `./scripts/setup.sh` installs the rest. The
+[lann/component-test](https://github.com/lann/component-test) test stack is
+an ordinary git dependency pinned by rev in the root `Cargo.toml`
+(enforced by `Cargo.lock`); cargo fetches it — no sibling checkout needed.
 
 ```sh
 just test                    # Rust tests, incl. the guest-under-Wasmtime integration test
@@ -176,9 +173,8 @@ just wpt::parity-webkit      #   pinned loss set (Playwright engines; gate in
 just wpt::web                # serve the browser WPT parity page locally: the
                              #   same two legs run live in your browser
 just conformance-ct::all     # the Wycheproof-derived conformance tests over the
-                             #   enabled targets (component-test stack; expects
-                             #   the component-test checkout as a sibling of the
-                             #   repo); renders conformance/driver-ct/matrix.md
+                             #   enabled targets (component-test stack);
+                             #   renders conformance/driver-ct/matrix.md
 just timing-lab::run         # dudect-style timing tests of the composed in-guest
                              #   provider (statistical; not part of `just ci`)
 just ci                      # everything CI runs

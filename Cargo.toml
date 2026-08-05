@@ -15,6 +15,17 @@ members = [
 ]
 resolver = "2"
 
+# The lann:component-test stack, pinned by git rev (bump deliberately:
+# update the rev here, `cargo update -p component-test-sdk -p
+# component-test-runner`, and commit the Cargo.lock diff; the CI tools
+# cache and the ct/ct-runner binaries key off the locked rev). To
+# develop against a local checkout, add a `[patch]` override — see
+# AGENTS.md "Build & run". Publishing component-test to a registry
+# retires this arrangement.
+[workspace.dependencies]
+component-test-sdk = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
+component-test-runner = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
+
 # The mutation run's profile (`just mutants`): dependencies optimized —
 # wasmtime and the RustCrypto cores are compiled once, at baseline, and make
 # the conformance-oracle runs near release speed — while workspace members
