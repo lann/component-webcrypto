@@ -53,12 +53,18 @@ _ct-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "${CONFORMANCE_CT_TOOLS:-}" ]; then
+        for bin in component-test ct-runner; do
+            [ -x "$CONFORMANCE_CT_TOOLS/$bin" ] || {
+                echo "CONFORMANCE_CT_TOOLS is set but $CONFORMANCE_CT_TOOLS/$bin is not executable" >&2
+                exit 1
+            }
+        done
         mkdir -p "{{ct-tools}}/bin"
         ln -sf "$CONFORMANCE_CT_TOOLS/component-test" "$CONFORMANCE_CT_TOOLS/ct-runner" "{{ct-tools}}/bin/"
         rm -f "{{ct-tools}}/.rev"
         exit 0
     fi
-    rev=$(grep -m1 -oE 'component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
+    rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | grep -oE '[0-9a-f]+$')
     [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
     if [ -x "{{ct-tools}}/bin/component-test" ] && [ -x "{{ct-tools}}/bin/ct-runner" ] \
         && [ "$(cat "{{ct-tools}}/.rev" 2>/dev/null)" = "$rev" ]; then

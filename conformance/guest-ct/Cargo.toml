@@ -22,8 +22,8 @@ rkyv-corpus = []
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The port target: the component-test guest SDK (path-dep against the
-# component-test checkout during the migration).
+# The component-test guest SDK (rev-pinned git dependency; see the
+# root Cargo.toml workspace.dependencies entry).
 component-test-sdk = { workspace = true }
 # The #[suite] macro expands a wit_bindgen::generate! naming this crate.
 # 0.60 (what the SDK is developed against); the SUT bindings below keep

@@ -102,7 +102,7 @@ jobs:
         # dependency's rev); the tools cache below keys on it.
         id: ct-rev
         run: |
-          rev=$(grep -m1 -oE 'component-test\?rev=[0-9a-f]+' Cargo.lock | cut -d= -f2)
+          rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' Cargo.lock | grep -oE '[0-9a-f]+$')
           test -n "$rev"
           echo "rev=$rev" >> "$GITHUB_OUTPUT"
 
