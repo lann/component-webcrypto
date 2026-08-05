@@ -66,6 +66,17 @@ _ct-tools:
     fi
     rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | grep -oE '[0-9a-f]+$')
     [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
+    # Cross-pin check: the JS runner core (@lann/component-test-js, a
+    # git-sourced npm dependency) must pin the SAME component-test rev
+    # as the cargo side — a skewed bump runs the JS harness against a
+    # Rust runner from a different rev, a subtle contract-mismatch
+    # generator. Bump both together: the rev in Cargo.toml + `npm
+    # install --save-exact github:lann/component-test#<rev>` in jco/.
+    npm_rev=$(grep -m1 -oE 'component-test#[0-9a-f]{40}' jco/package-lock.json | cut -d'#' -f2)
+    if [ "$npm_rev" != "$rev" ]; then
+        echo "component-test pin skew: Cargo.lock has $rev but jco/package-lock.json has ${npm_rev:-none}" >&2
+        exit 1
+    fi
     if [ -x "{{ct-tools}}/bin/component-test" ] && [ -x "{{ct-tools}}/bin/ct-runner" ] \
         && [ "$(cat "{{ct-tools}}/.rev" 2>/dev/null)" = "$rev" ]; then
         exit 0

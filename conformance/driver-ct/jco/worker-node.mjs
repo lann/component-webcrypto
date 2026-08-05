@@ -6,7 +6,8 @@
 // parent's execArgv, so `--experimental-wasm-jspi` carries over.
 import { readFile } from "node:fs/promises";
 import { parentPort, workerData } from "node:worker_threads";
-import { inventoryLookup, runCases } from "./harness.mjs";
+import { inventoryLookup, runCases } from "@lann/component-test-js/harness";
+import { Context } from "../context.js";
 
 const { suite, missing, only, shard } = workerData;
 
@@ -23,6 +24,7 @@ const { tests } = await import(`./generated/${suite}.js`);
 
 const counts = await runCases({
   cases: await tests.all(),
+  Context,
   tagsOf,
   missing,
   only,

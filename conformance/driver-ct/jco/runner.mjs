@@ -7,11 +7,11 @@
 // and the Node counterpart of the browser driver's Web Worker pool
 // (run-browser.mjs). Workers interleave, so the rows are re-sorted
 // into suite order before emission. The inventory parsing and per-case
-// loop live in harness.mjs, shared with the browser driver.
+// loop live in the upstream runner core (@lann/component-test-js, the rev-pinned git dependency — one harness for every runner, per lann/component-test#5).
 import { availableParallelism } from "node:os";
 import { parseArgs } from "node:util";
 import { Worker } from "node:worker_threads";
-import { envelope, mergeCounts, workerCount } from "./harness.mjs";
+import { envelope, mergeCounts, workerCount } from "@lann/component-test-js/harness";
 
 const { values } = parseArgs({
   options: {
@@ -57,13 +57,19 @@ const parts = await Promise.all(
 
 rows.sort((a, b) => a.index - b.index);
 if (jsonl) {
-  const lines = [JSON.stringify(envelope(values.target, suite))];
+  // The lockfile names the suite by its wasm file stem (underscores);
+  // the transpile name is hyphenated. Envelope with the lockfile identity
+  // so the aggregate's cross-check stays quiet.
+  const lines = [JSON.stringify(envelope(values.target, suite.replaceAll("-", "_")))];
   for (const { event } of rows) lines.push(JSON.stringify(event));
   lines.push('{"segment-end":true}');
   console.log(lines.join("\n"));
 }
 
-const { passed, failed, skipped, na, total, failures } = mergeCounts(parts);
+const { passed, failed, skipped, na, total } = mergeCounts(parts);
+const failures = rows
+  .filter(({ event }) => event.status === "fail")
+  .map(({ event }) => ({ name: event.case, detail: event.detail ?? "", diags: event.diagnostics ?? [] }));
 if (!jsonl) for (const f of failures.slice(0, 20)) {
   console.log(`FAIL: ${f.name}: ${f.detail}`);
   for (const d of f.diags) console.log(`    diag: ${d}`);
