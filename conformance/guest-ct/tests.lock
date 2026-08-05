@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_ct"
-artifact_sha256 = "8801b79d11076f37b0f21763da4ba35a2d096de287e9a9d7d7d301bb3172257d"
+artifact_sha256 = "18741dde4de0cff10df5a8f2931160577e1af6f0c1bfc25c991e48e4937ec287"
 
 [[case]]
 name = "probe/aead-wrap-grants"
