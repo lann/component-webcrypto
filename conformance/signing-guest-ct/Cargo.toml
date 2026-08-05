@@ -9,9 +9,9 @@ description = "The host-only signing conformance suite ported onto the lann:comp
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The port target: the component-test guest SDK (path-dep against the
-# component-test checkout during the migration).
-component-test-sdk = { path = "../../../component-test/crates/component-test-sdk" }
+# The port target: the component-test guest SDK (git-pinned; the rev
+# lives in the workspace manifest's [workspace.dependencies]).
+component-test-sdk = { workspace = true }
 # The #[suite] macro expands a wit_bindgen::generate! naming this crate.
 # 0.60 (what the SDK is developed against); the SUT bindings keep their
 # own 0.59 via lann-webcrypto-guest — disjoint packages, merged at

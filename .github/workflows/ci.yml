@@ -19,18 +19,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Checkout component-test (path dependency)
-        # The conformance ct crates path-depend on a sibling checkout of
-        # lann/component-test (see conformance/driver-ct/justfile).
-        # Pinned via .component-test-rev (bump deliberately; the sibling
-        # path dependency makes this repo's builds track that rev).
-        # The clone lives *inside* the workspace (actions/cache cannot
-        # save paths outside it) with a symlink providing the sibling path.
-        run: |
-          git clone https://github.com/lann/component-test .component-test
-          git -C .component-test checkout --detach "$(cat .component-test-rev)"
-          ln -s "$PWD/.component-test" ../component-test
-
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and rustfmt/clippy components are
         # pinned in rust-toolchain.toml; `rustup show` installs exactly those.
@@ -71,13 +59,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Checkout component-test (path dependency)
-        # See the rust-checks job's twin step.
-        run: |
-          git clone https://github.com/lann/component-test .component-test
-          git -C .component-test checkout --detach "$(cat .component-test-rev)"
-          ln -s "$PWD/.component-test" ../component-test
-
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
@@ -107,7 +88,7 @@ jobs:
           # inclusion so anything the build newly reads must be added
           # here deliberately; a new build input outside these globs
           # means updating this key.
-          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', '.component-test-rev', 'rust/**', 'wit/**', 'conformance/vectors/**', 'conformance/harness/**', 'conformance/guest-ct/Cargo.toml', 'conformance/guest-ct/build.rs', 'conformance/guest-ct/src/**', 'conformance/signing-guest-ct/Cargo.toml', 'conformance/signing-guest-ct/src/**', 'conformance/class-d/**', 'conformance/driver-ct/Cargo.toml', 'conformance/driver-ct/src/**') }}
+          key: conformance-artifacts-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'rust/**', 'wit/**', 'conformance/vectors/**', 'conformance/harness/**', 'conformance/guest-ct/Cargo.toml', 'conformance/guest-ct/build.rs', 'conformance/guest-ct/src/**', 'conformance/signing-guest-ct/Cargo.toml', 'conformance/signing-guest-ct/src/**', 'conformance/class-d/**', 'conformance/driver-ct/Cargo.toml', 'conformance/driver-ct/src/**') }}
 
       - name: Cache cargo
         if: steps.ct-artifacts.outputs.cache-hit != 'true'
@@ -116,19 +97,24 @@ jobs:
           shared-key: conformance
           cache-all-crates: true
 
+      - name: Read the component-test pin
+        # The rev the workspace manifest's git pin resolved to, from
+        # Cargo.lock — the same value conformance-ct::_ct-tools reads.
+        id: ct-rev
+        run: echo "rev=$(grep -om1 'github.com/lann/component-test?rev=[0-9a-f]*' Cargo.lock | sed 's/.*rev=//')" >> "$GITHUB_OUTPUT"
+
       - name: Cache component-test tools
         # The prebuilt component-test CLI + generic runner binaries
-        # (conformance-ct::_ct-tools populates bin/ and reuses it when it
-        # matches the sibling's HEAD). Caching the binaries rather than
-        # the sibling's target dir skips cargo entirely on a hit — a
-        # fresh clone's mtimes otherwise force ~2 min of rebuild/relink
-        # even with a cached target. The binaries are a pure function of
-        # the pinned rev and the toolchain, so the key never needs
-        # invalidating beyond those.
+        # (conformance-ct::_ct-tools cargo-installs them from the git pin
+        # into target/ct-tools and reuses them when the recorded rev
+        # matches). Caching the install dir skips the ~2 min
+        # wasmtime-embedding build on a hit. The binaries are a pure
+        # function of the pinned rev and the toolchain, so the key never
+        # needs invalidating beyond those.
         uses: actions/cache@v4
         with:
-          path: .component-test/bin
-          key: component-test-bin-v2-${{ runner.os }}-${{ hashFiles('.component-test-rev', 'rust-toolchain.toml') }}
+          path: target/ct-tools
+          key: component-test-bin-v3-${{ runner.os }}-${{ steps.ct-rev.outputs.rev }}-${{ hashFiles('rust-toolchain.toml') }}
 
       - name: Install Node 24
         uses: actions/setup-node@v4
@@ -189,18 +175,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Checkout component-test (path dependency)
-        # The conformance ct crates path-depend on a sibling checkout of
-        # lann/component-test (see conformance/driver-ct/justfile).
-        # Pinned via .component-test-rev (bump deliberately; the sibling
-        # path dependency makes this repo's builds track that rev).
-        # The clone lives *inside* the workspace (actions/cache cannot
-        # save paths outside it) with a symlink providing the sibling path.
-        run: |
-          git clone https://github.com/lann/component-test .component-test
-          git -C .component-test checkout --detach "$(cat .component-test-rev)"
-          ln -s "$PWD/.component-test" ../component-test
-
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
@@ -227,18 +201,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Checkout component-test (path dependency)
-        # The conformance ct crates path-depend on a sibling checkout of
-        # lann/component-test (see conformance/driver-ct/justfile).
-        # Pinned via .component-test-rev (bump deliberately; the sibling
-        # path dependency makes this repo's builds track that rev).
-        # The clone lives *inside* the workspace (actions/cache cannot
-        # save paths outside it) with a symlink providing the sibling path.
-        run: |
-          git clone https://github.com/lann/component-test .component-test
-          git -C .component-test checkout --detach "$(cat .component-test-rev)"
-          ln -s "$PWD/.component-test" ../component-test
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install

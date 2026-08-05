@@ -15,6 +15,22 @@ members = [
 ]
 resolver = "2"
 
+# The lann:component-test stack (the guest SDK the conformance suites
+# build on, and the host runner library the driver embeds), consumed as
+# a git dependency pinned by rev. The pin lives here once; Cargo.lock
+# carries the resolved sha, which the tooling (`conformance-ct::_ct-tools`)
+# and CI cache keys read. Publishing component-test to registries
+# replaces the git pin with a version requirement eventually.
+#
+# Local iteration on component-test itself: point a
+# `[patch."https://github.com/lann/component-test"]` section at a
+# checkout's crates, and set COMPONENT_TEST_TOOLS to a directory holding
+# its `component-test` and `ct-runner` binaries (see
+# conformance/driver-ct/justfile).
+[workspace.dependencies]
+component-test-sdk = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
+component-test-runner = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
+
 # The mutation run's profile (`just mutants`): dependencies optimized —
 # wasmtime and the RustCrypto cores are compiled once, at baseline, and make
 # the conformance-oracle runs near release speed — while workspace members

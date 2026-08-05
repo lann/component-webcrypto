@@ -1,19 +1,21 @@
 # component-test conformance recipes. Module recipes run from this
 # directory (conformance/driver-ct); `root` is the repo root. The
-# component-test checkout lives as a sibling of the repo, pinned by
-# .component-test-rev (CI clones and checks out that rev; locally,
-# keep the sibling at or past the pin). Publishing component-test to
-# registries replaces this arrangement eventually.
+# component-test stack is a git dependency pinned by rev in the
+# workspace manifest's [workspace.dependencies]; the CLI/runner
+# binaries are installed from the same pin by _ct-tools. Publishing
+# component-test to registries replaces the git pin eventually.
 
 root := "../.."
-ct-tree := root + "/../component-test"
-# The component-test CLI and generic runner are invoked as prebuilt
-# binaries from the sibling checkout's bin/ (populated by _ct-tools;
-# CI caches that directory keyed on .component-test-rev, so runs skip
-# both the build and the ~2 min of rebuild/relink cargo pays on a
-# fresh clone even with a cached target dir).
-ct := ct-tree + "/bin/component-test"
-ct-runner := ct-tree + "/bin/ct-runner"
+# The component-test CLI and generic runner: prebuilt binaries in the
+# repo's target dir, installed from the workspace's git pin (_ct-tools;
+# CI caches the directory keyed on the resolved rev). Local iteration
+# on component-test itself: set COMPONENT_TEST_TOOLS to a directory
+# holding your own `component-test` and `ct-runner` builds, with a
+# `[patch."https://github.com/lann/component-test"]` section covering
+# the crates.
+ct-bin := env('COMPONENT_TEST_TOOLS', root + "/target/ct-tools/bin")
+ct := ct-bin + "/component-test"
+ct-runner := ct-bin + "/ct-runner"
 guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
 signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
 provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
@@ -42,30 +44,42 @@ build:
         --features conformance-guest-ct/rkyv-corpus
     cargo build --manifest-path {{root}}/Cargo.toml --release -p conformance-driver-ct
 
-# Populate the sibling checkout's bin/ with the component-test CLI and
-# the generic runner. Reused when the binaries exist and match the
-# sibling's HEAD; a dirty sibling tree always rebuilds (local iteration
-# on component-test itself). --release is load-bearing: the runner
-# embeds wasmtime, and a dev-profile Cranelift + host runs the composed
+# Install the pinned component-test CLI and generic runner into
+# target/ct-tools/bin. The rev is read from Cargo.lock (the resolved
+# form of the workspace manifest's git pin), so the tools and the
+# crates cannot disagree; reused when the recorded rev matches.
+# COMPONENT_TEST_TOOLS bypasses the install (local iteration on
+# component-test itself). --locked builds against component-test's own
+# lockfile. The release profile is load-bearing: the runner embeds
+# wasmtime, and a dev-profile Cranelift + host runs the composed
 # corpus ~16x slower (~5 min vs ~19 s), which blew CI's job timeout.
 _ct-tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    tree="{{ct-tree}}"
-    rev=$(git -C "$tree" rev-parse HEAD)
-    # Tracked modifications only (-uno): bin/ itself (and target/) live
-    # untracked inside the checkout and must not count as dirt, or the
-    # reuse check can never pass.
-    dirty=$(git -C "$tree" status --porcelain -uno)
-    if [ -z "$dirty" ] && [ -x "$tree/bin/component-test" ] && [ -x "$tree/bin/ct-runner" ] \
-        && [ "$(cat "$tree/bin/.rev" 2>/dev/null)" = "$rev" ]; then
+    if [ -n "${COMPONENT_TEST_TOOLS:-}" ]; then
+        for bin in component-test ct-runner; do
+            if [ ! -x "${COMPONENT_TEST_TOOLS}/$bin" ]; then
+                echo "COMPONENT_TEST_TOOLS is set but ${COMPONENT_TEST_TOOLS}/$bin is not executable" >&2
+                exit 1
+            fi
+        done
         exit 0
     fi
-    cargo build -q --release --manifest-path "$tree/Cargo.toml" \
-        -p component-test-cli -p component-test-runner
-    mkdir -p "$tree/bin"
-    cp "$tree/target/release/component-test" "$tree/target/release/ct-runner" "$tree/bin/"
-    if [ -z "$dirty" ]; then printf '%s' "$rev" > "$tree/bin/.rev"; else rm -f "$tree/bin/.rev"; fi
+    rev=$(grep -om1 'github.com/lann/component-test?rev=[0-9a-f]*' '{{root}}/Cargo.lock' | sed 's/.*rev=//')
+    if [ -z "$rev" ]; then
+        echo "could not read the component-test rev from Cargo.lock (is the git pin in [workspace.dependencies] intact?)" >&2
+        exit 1
+    fi
+    bin_dir='{{root}}/target/ct-tools/bin'
+    if [ -x "$bin_dir/component-test" ] && [ -x "$bin_dir/ct-runner" ] \
+        && [ "$(cat "$bin_dir/.rev" 2>/dev/null)" = "$rev" ]; then
+        exit 0
+    fi
+    cargo install -q --locked \
+        --git https://github.com/lann/component-test --rev "$rev" \
+        --root '{{root}}/target/ct-tools' \
+        component-test-cli component-test-runner
+    printf '%s' "$rev" > "$bin_dir/.rev"
 
 # Drift-check the committed lockfiles.
 lock-check: build _ct-tools
