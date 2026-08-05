@@ -12,6 +12,12 @@
 #     in-guest provider (`just demo::compose`)
 #   - wasmtime, the host runtime that runs the composed in-guest crypto
 #     integration test (`just demo::test-composed`)
+#   - the sibling checkout of lann/component-test at the rev pinned by
+#     .component-test-rev — a workspace-wide prerequisite: the conformance
+#     ct crates are workspace members with path dependencies into it, and
+#     cargo resolves the workspace before selecting packages, so *every*
+#     cargo command (fmt, clippy, test, metadata, rust-analyzer) fails
+#     without it
 #   - the npm dependencies of every JS tree in the repository (jco host,
 #     demos, conformance jco runner, webcrypto-componentize and its parity harness)
 #
@@ -34,6 +40,22 @@ WAC_VERSION="${WAC_VERSION:-0.10.1}"
 WASMTIME_VERSION="${WASMTIME_VERSION:-47.0.1}"
 
 log() { printf '\n==> %s\n' "$1"; }
+
+# The component-test sibling checkout: a workspace-wide prerequisite (see
+# the header). Missing: clone and detach at the pin. Present: never touch
+# it — it may be someone's working checkout — but verify it *contains* the
+# pinned rev and say exactly what to do when it does not.
+COMPONENT_TEST_DIR="$REPO_ROOT/../component-test"
+COMPONENT_TEST_REV="$(cat "$REPO_ROOT/.component-test-rev")"
+if [ ! -e "$COMPONENT_TEST_DIR" ]; then
+    log "Cloning the component-test path dependency (pinned by .component-test-rev)"
+    git clone https://github.com/lann/component-test "$COMPONENT_TEST_DIR"
+    git -C "$COMPONENT_TEST_DIR" checkout --detach "$COMPONENT_TEST_REV"
+elif ! git -C "$COMPONENT_TEST_DIR" cat-file -e "${COMPONENT_TEST_REV}^{commit}" 2>/dev/null; then
+    log "WARNING: $COMPONENT_TEST_DIR does not contain the pinned rev $COMPONENT_TEST_REV"
+    echo "    Update it with: git -C \"$COMPONENT_TEST_DIR\" fetch origin" >&2
+    echo "    (this script never modifies an existing checkout)" >&2
+fi
 
 log "Installing the pinned Rust toolchain and wasm targets (rust-toolchain.toml)"
 (cd "$REPO_ROOT" && (rustup show active-toolchain || rustup toolchain install))

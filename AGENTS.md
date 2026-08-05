@@ -358,9 +358,16 @@ absent an exceptional recorded ruling.
 ## Build & run
 
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in
-`rust-toolchain.toml`), `wasm-tools`, `just`, and Node 24+ with npm for the
-jco path. Run `./scripts/setup.sh` once (idempotent; `SKIP_NODE=1` to skip the
-npm install).
+`rust-toolchain.toml`), `wasm-tools`, `just`, Node 24+ with npm for the
+jco path, and a checkout of lann/component-test as a **sibling of the
+repo** containing the rev pinned in `.component-test-rev` — a
+workspace-wide prerequisite, not a conformance-only one: the conformance
+ct crates are workspace members with path dependencies into it, and cargo
+resolves the workspace before selecting packages, so every cargo command
+(fmt, clippy, test, metadata, rust-analyzer project load) fails without
+it. Run `./scripts/setup.sh` once (idempotent; clones the sibling when
+missing, never modifies an existing one; `SKIP_NODE=1` to skip the npm
+install).
 
 The [`justfile`](justfile) is the single entry point; run `just` to list
 recipes. Component-scoped recipes live in module justfiles colocated with
