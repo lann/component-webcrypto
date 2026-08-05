@@ -1,5 +1,5 @@
 //! `conformance-guest-ct`: the webcrypto conformance suite ported onto
-//! the `polymorph:component-test` guest SDK (M1.5 skeleton).
+//! the `polymorph:test` guest SDK (M1.5 skeleton).
 //!
 //! The corpus is the incumbent's (`conformance-guest`), inherited
 //! wholesale at the M1.6 cutover: translation, minting, runners,
