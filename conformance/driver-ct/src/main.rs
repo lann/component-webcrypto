@@ -3,6 +3,7 @@
 //!
 //! Usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...]
 //! [--jobs N] [--cases-per-instance N] [--target key] [--only substring]
+//! [--enumerate]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,6 +66,7 @@ fn run() -> Result<ExitCode> {
     let mut jobs: usize = 1;
     let mut target: String = "wasmtime-rustcrypto".into();
     let mut only: Option<String> = None;
+    let mut enumerate = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -97,6 +99,7 @@ fn run() -> Result<ExitCode> {
                         .ok_or_else(|| anyhow::anyhow!("--only needs a substring"))?,
                 );
             }
+            "--enumerate" => enumerate = true,
             "--jsonl" => mode = OutputMode::Jsonl,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             other => bail!("unexpected argument `{other}`"),
@@ -133,6 +136,19 @@ fn run() -> Result<ExitCode> {
         },
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+
+    // Census enumeration (`component-test lock --leaves` input): the
+    // suite imports the SUT, so the generic ct-runner cannot
+    // instantiate it — enumeration lives here, like everything else
+    // that needs the linker.
+    if enumerate {
+        let names = wasmtime_wasi::runtime::in_tokio(runner.enumerate())
+            .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+        for name in names {
+            println!("{name}");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_opts(
         &suite_name,
