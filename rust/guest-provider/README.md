@@ -64,7 +64,7 @@ code for wasm targets at all (`#[cfg(not(target_family = "wasm"))]`), so the
 class-D code is absent from this component's binary, not merely unexported.
 Choose a host-side provider for them.
 
-`just conformance::class-d` is that enforcement's gate: it asserts that the
+`just conformance-ct::class-d` is that enforcement's gate: it asserts that the
 conformance signing guest, whose world imports `ecdsa-sign`, does not
 compose with this provider.
 

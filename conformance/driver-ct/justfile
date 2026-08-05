@@ -17,8 +17,7 @@ composed := root + "/target/conformance-composed-ct.wasm"
 
 # CI/opt-in predicate for the optional jco-browser target: non-empty when
 # it should run — always under GitHub Actions (the runner image ships
-# Chrome), locally only with CONFORMANCE_BROWSER=1 (the incumbent's
-# conformance-browser-enabled convention; see justfile.shared.just).
+# Chrome), locally only with CONFORMANCE_BROWSER=1.
 conformance-browser-enabled := if env('GITHUB_ACTIONS', '') == 'true' { '1' } else if env('CONFORMANCE_BROWSER', '') == '1' { '1' } else { '' }
 
 # Build both suite components (rkyv corpus) and the host driver.
@@ -227,7 +226,12 @@ build-provider:
 # RustCrypto provider, run under the GENERIC component-test host runner
 # (ct-runner provides only wasi + test-context — exactly the composed
 # artifact's imports; the leftover lann:webcrypto/{types,aes,rsa} imports
-# are type-only and instantiate trivially). The provider exports every
+# are type-only and instantiate trivially). --suite-artifact is
+# load-bearing beyond case discovery: it carries the tags section, which
+# keeps the stream *scheduled* — the aggregate holds scheduled streams
+# to the strict status-vs-applicability errors, where an unscheduled
+# stream (`scheduling: none`) is only reclassified with a warning. The
+# provider exports every
 # gated interface the suite imports (sha1-checked); its one gap is class
 # D's ecdsa-sign,
 # which nothing in the shared suite is tagged with — declared for the
@@ -304,7 +308,9 @@ aggregate-signing: _ct-tools
 
 # Refresh the committed matrices from a FULL run (all targets incl.
 # browser: CONFORMANCE_BROWSER=1 just conformance-ct::all first).
-# Commit the diff - like lockfiles, the diff is the review surface.
+# Without Chrome, `just gha::update-matrices-from-ci` copies them from
+# the branch's CI conformance-results artifact instead. Commit the
+# diff - like lockfiles, the diff is the review surface.
 matrix-update:
     cp results/matrix.md matrix.md
     cp results/matrix-signing.md matrix-signing.md

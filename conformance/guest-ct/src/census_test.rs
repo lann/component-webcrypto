@@ -1,9 +1,10 @@
 //! Native census-parity test: the port's static inventory must equal the
 //! incumbent census (`src/census-fixture.lock` — the incumbent
-//! `conformance-guest`'s final `tests.lock`, byte-frozen at the M1.6
-//! cutover; the incumbent itself is deleted) exactly — the
-//! decline cases are additive and deliberately excluded here (they are
-//! new; the lockfile-diff script accounts for them).
+//! `conformance-guest`'s final `tests.lock`, its inventory frozen at the
+//! M1.6 cutover; the incumbent itself is deleted) exactly — the decline
+//! cases and the post-cutover generator rows are additive and
+//! deliberately excluded here (they are new; `tests.lock` pins them,
+//! declines as exact cases and generated rows per-leaf).
 
 use std::collections::BTreeMap;
 

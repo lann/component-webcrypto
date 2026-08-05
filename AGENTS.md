@@ -123,29 +123,19 @@ conformance/            # cross-implementation conformance tests, on the
   signing-guest-ct/     #   the host-only suite for surfaces the in-guest
                         #     provider does not export (ecdsa-sign)
   driver-ct/            #   the wasmtime host driver (ct-driver), the
-                        #     jco/Node runner (jco/), targets.toml (target
-                        #     capability manifests), the conformance-ct
-                        #     justfile module, and the committed matrix.md
-                        #     aggregates
+                        #     jco runner (jco/) serving the jco-node and
+                        #     jco-browser targets (browser gates in CI,
+                        #     locally opt-in via CONFORMANCE_BROWSER=1
+                        #     with Chrome installed), targets.toml +
+                        #     targets-signing.toml (target capability
+                        #     manifests), the conformance-ct justfile
+                        #     module, the committed matrix.md +
+                        #     matrix-signing.md aggregates, and the
+                        #     staged results viewer
+                        #     (`just conformance-ct::web`)
   class-d/              #   the class-D gate's negative-composition probe
                         #     worlds: dedicated dummy consumers of withheld
                         #     minting interfaces (see conformance/README.md)
-  adapters/             #   per-target drivers: wasmtime, composed-driver (for
-                        #     the composed target), jco (Node gates everywhere;
-                        #     the browser target gates in CI, locally opt-in
-                        #     via CONFORMANCE_BROWSER=1 with Chrome installed)
-                        #     — jco reads its missing-features from targets.toml
-  report/               #   the results-file and lockfile wire shapes the Rust
-                        #     adapters serialize and the runner deserializes
-                        #     (crate: conformance-report)
-  runner/               #   aggregates results: validates them against
-                        #     targets.toml + the suite lockfiles, renders
-                        #     conformance/matrix.md + the viewer data
-  web/                  #   results viewer: static page (collapsing
-                        #     cross-target tree + a live "test this
-                        #     browser" run); serve with `just conformance::web`
-  targets.toml          #   suite facts (required features) + target facts
-                        #     (missing features, optionality)
 timing-lab/             # dudect-style statistical timing tests of the
                         #   composed in-guest provider (non-gating; see its
                         #   README for methodology and detection limits)
@@ -412,7 +402,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just componentize::typecheck` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
 | `just componentize::test` | the `webcrypto-componentize` library, the componentize-demo guest, the in-guest provider, or any WIT. Gates in CI. Componentizes the JS demo guest from your tree (with the downloaded, digest-verified componentize-js — see the WPT row for the pin mechanics), composes it with the in-guest provider and driver, and runs it under `wasmtime`. The behavioral gate on the shim's checks the WPT census cannot observe (the SHA-1 collision postures, the extension-error transport). |
 | `just wpt::test` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just componentize::update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just wpt::update-expectations`. |
-| `just conformance-ct::all` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance suites/vectors/translation policy, or driver-ct/targets.toml. Intentional case changes also need `just conformance-ct::lock-update`. Gates on the wasmtime-rustcrypto and jco-node targets (Node 24+), aggregating against the committed lockfiles and target manifests. |
+| `just conformance-ct::all` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance suites/vectors/translation policy, or driver-ct/targets.toml. Runs the wasmtime-rustcrypto, composed, and jco-node targets always (Node 24+) and jco-browser under CI or CONFORMANCE_BROWSER=1 (Chrome/Chromium), aggregating against the committed lockfiles and target manifests; CI additionally diffs the committed matrices (`matrix-check`). Intentional case changes also need `just conformance-ct::lock-update` and `just conformance-ct::matrix-update` — the latter from a full run including the browser leg, or without Chrome via `just gha::update-matrices-from-ci` (copies the matrices from the branch's CI `conformance-results` artifact). |
 | `just demo::transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
 | `just jco::test-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since its workers each run their cases sequentially against their own host instance. |
 | `just jco::typecheck` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |
@@ -425,8 +415,8 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just ci` | anything touching the guest, jco host, or WIT. |
 
 Behavioral changes must keep all three implementations in sync: the
-conformance tests (`just conformance-ct::all`) gate the wasmtime-rustcrypto
-and jco-node targets, and the same guest component must report every check
+conformance tests (`just conformance-ct::all`) gate the wasmtime-rustcrypto,
+composed, and jco targets, and the same guest component must report every check
 passing under `just test` (Wasmtime), `just demo::test-node` (jco), and
 `just demo::test-composed` (in-guest). When adding behavior, extend the
 conformance suites (vectors or

@@ -2,7 +2,7 @@
 // consumer of `rsa-oaep-encrypt`, which the in-guest provider deliberately
 // does not export (encryption runs secret plaintext through
 // non-constant-time bignum arithmetic — see rust/guest-provider/README.md).
-// The class-D gate (`just conformance::class-d`) builds a dummy component
+// The class-D gate (`just conformance-ct::class-d`) builds a dummy component
 // of this world and asserts it does NOT compose with the provider.
 //
 // The `oaep-probe` world proves the same for the decryption mints; each

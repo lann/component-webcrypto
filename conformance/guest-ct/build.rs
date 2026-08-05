@@ -19,9 +19,11 @@
 mod translate;
 
 mod mint {
-    /// Build-time copy of `src/mint.rs`'s `ecdh_secret_jwk`
-    /// (kept in sync by the census-parity test: a drift changes case
-    /// payloads and fails vectors).
+    /// Build-time copy of `src/mint.rs`'s `ecdh_secret_jwk`, kept in
+    /// sync by vector execution: a drift changes the ECDH cases'
+    /// payloads and fails them in rkyv-corpus conformance runs (the
+    /// census-parity test compares ids and tags only and cannot see
+    /// payloads).
     pub fn ecdh_secret_jwk(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
         format!(
             r#"{{"kty":"EC","crv":"{crv}","x":"{}","y":"{}","d":"{}"}}"#,

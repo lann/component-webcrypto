@@ -72,7 +72,7 @@ and the aggregate's coverage check holds every target to the same set).
 changes, landing them as a reviewable diff. The aggregates bind against
 these same committed lockfiles. The census-parity tests
 (`census_test.rs` in each suite crate) additionally anchor the inventory to
-the retired incumbent harness's final census, byte-frozen at the M1.6
+the retired incumbent harness's final census, frozen at the M1.6
 cutover (and re-frozen as the incumbent's suites grew before its
 retirement landed) as `src/census-fixture.lock` in each suite crate. The
 port diverges from the incumbent ids in exactly one documented way, which
@@ -191,3 +191,24 @@ unknown status therefore surfaces as a warning naming the case and
 status plus a coverage error, and cannot pass silently. Gating parity
 with the incumbent holds; ratified on that basis (upstream's
 fold/coverage tests pin the diversion and the leaf set-equality).
+
+Two adjacent validation-semantics deltas vs the incumbent runner are
+accepted, recorded here (the incumbent had no equivalents; #310 is the
+analysis):
+
+- **`deselected` is a green non-executed status.** A known schema
+  status (a filtered run's complement), it counts as covered and is
+  not failing, so a results file from a filtered run aggregates
+  without error provided every case is present-or-deselected. The
+  committed matrices are the backstop: per-row counts move when
+  execution is displaced by deselection, and `matrix-check` diffs
+  them in CI — a filtered results file cannot land without a visible
+  matrix diff. No gating recipe passes a filter.
+- **A `--missing` typo in a run recipe is caught behaviorally, not by
+  a named declaration.** The envelope carries no declared-missing
+  field to compare with targets.toml; instead the aggregate
+  cross-checks every reported status against the manifest-derived
+  applicability, so a recipe/manifest skew surfaces as per-case
+  validation errors (executed-but-inapplicable, or
+  applicable-but-not-applicable) rather than one declaration-mismatch
+  error. Equally hard-failing, differently named.
