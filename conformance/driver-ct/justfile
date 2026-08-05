@@ -71,7 +71,7 @@ _ct-tools:
     # Rust runner from a different rev, a subtle contract-mismatch
     # generator. Bump both together: the rev in Cargo.toml + `npm
     # install --save-exact github:polymorph-components/polymorph-test#<rev>` in jco/.
-    npm_rev=$(grep -m1 -oE 'component-test#[0-9a-f]{40}' jco/package-lock.json | cut -d'#' -f2)
+    npm_rev=$(grep -m1 -oE 'polymorph-test#[0-9a-f]{40}' jco/package-lock.json | cut -d'#' -f2)
     if [ "$npm_rev" != "$rev" ]; then
         echo "component-test pin skew: Cargo.lock has $rev but jco/package-lock.json has ${npm_rev:-none}" >&2
         exit 1
