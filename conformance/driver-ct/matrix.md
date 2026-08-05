@@ -50,7 +50,7 @@
 | rsassa-pkcs1-v15-sha512-4096 (302 cases) | pass | pass | pass | pass |
 | sha1-checked/decline/minting | N/A | pass | pass | N/A |
 | sha2 (963 cases) | pass | pass | pass | pass |
-| x25519 (519 cases) | pass | pass | pass | pass |
+| x25519 (1587 cases) | pass | pass | pass | pass |
 
 ## Failures
 
@@ -58,7 +58,7 @@ None.
 
 ## Summary
 
-- `composed`: 1 N/A, 18021 pass (18022 total)
-- `jco-browser`: 1 N/A, 18021 pass (18022 total)
-- `jco-node`: 1 N/A, 18021 pass (18022 total)
-- `wasmtime-rustcrypto`: 1 N/A, 18021 pass (18022 total)
+- `composed`: 1 N/A, 19089 pass (19090 total)
+- `jco-browser`: 1 N/A, 19089 pass (19090 total)
+- `jco-node`: 1 N/A, 19089 pass (19090 total)
+- `wasmtime-rustcrypto`: 1 N/A, 19089 pass (19090 total)

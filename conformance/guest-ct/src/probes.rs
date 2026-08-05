@@ -2288,20 +2288,61 @@ async fn ed25519_private_format_imports() -> Result<(), String> {
 /// default hash), and each executes verification under that binding — a
 /// well-formed wrong signature (in-range `r ‖ s`) fails
 /// `authentication-failed` through the pairing's own digest. Upstream
-/// publishes no vector file for P-256/SHA-384 or P-384/SHA-256, so this
-/// is their only verify execution on targets the signing suite does not
-/// reach.
+/// publishes no vector file for P-256/SHA-384 or P-384/SHA-256, so those
+/// two additionally verify an OpenSSL-generated known answer (the valid
+/// signature passes; the same signature over a tampered message fails
+/// through the pairing's digest) — their only positive verify execution
+/// on any target, and their only verify execution at all on targets the
+/// signing suite does not reach.
 async fn ecdsa_cross_hash_variants() -> Result<(), String> {
     let mut p256 = vec![0x04];
     p256.extend(unhex(P256_A25_X));
     p256.extend(unhex(P256_A25_Y));
     // The vendored Wycheproof P-384 file's group public key.
     let p384 = unhex("042da57dda1089276a543f9ffdac0bff0d976cad71eb7280e7d9bfd9fee4bdb2f20f47ff888274389772d98cc5752138aa4b6d054d69dcf3e25ec49df870715e34883b1836197d76f8ad962e78f6571bbc7407b0d6091f9e4d88f014274406174f");
-    for (variant, point, curve, hash) in [
-        (EcdsaVariant::P256Sha384, &p256, "P-256", "SHA-384"),
-        (EcdsaVariant::P256Sha512, &p256, "P-256", "SHA-512"),
-        (EcdsaVariant::P384Sha256, &p384, "P-384", "SHA-256"),
-        (EcdsaVariant::P384Sha512, &p384, "P-384", "SHA-512"),
+    // Known answers for the pairings without an upstream vector file,
+    // generated with OpenSSL 3.5.3 (`openssl ecparam -genkey`, `openssl
+    // dgst -sha384/-sha256 -sign`, DER decoded to fixed-width P1363)
+    // over KAT_MESSAGE, and verified with `openssl dgst -verify` at
+    // generation.
+    let p256_sha384_key = unhex(
+        "04c3ed370a58c67158ae8c9c83bc3060b3ee0d55492210d45a41deae1acf033d\
+         8397234b01c5c72f2b7809b46e0802f3679eacc4ab9e3899e0a84d06b852afc9\
+         70",
+    );
+    let p256_sha384_sig = unhex(
+        "7b1c25e1ce70d578ba23d98a19e363c2781d5ddb95edc89bc5819c805c2b1204\
+         9d863291e914f29eb064706a2a17cb6fc5aa1762b0ffacc9ac2a596198723d60",
+    );
+    let p384_sha256_key = unhex(
+        "04d75237faa5db4f14f9e634b3c3b3718e338a4e12be06877d48f956f8c3b330\
+         340153b104d0eae15a8b0effd6ff170e8b84b09622d6d75ed43d52fcc5329db7\
+         c722b385556394e87f8c0dfb9713e47c7e5ee600a1c2461185ee9430d21cb694\
+         99",
+    );
+    let p384_sha256_sig = unhex(
+        "6b3ce4a6e26e864464e5aa1ae72439d0b5791a902a4a9ab576929592348a4d4d\
+         99e0b2e2565b226bd0db0696a6479eae577c37d4fb188b651b36565fe9a86ba5\
+         a3bf27b866c9683eb4b7f226fcf5e59cd2a98ee788a3ea7c55c4b124623db6bf",
+    );
+    const KAT_MESSAGE: &[u8] = b"cross-hash digest binding";
+    for (variant, point, curve, hash, kat) in [
+        (
+            EcdsaVariant::P256Sha384,
+            &p256,
+            "P-256",
+            "SHA-384",
+            Some((&p256_sha384_key, &p256_sha384_sig)),
+        ),
+        (EcdsaVariant::P256Sha512, &p256, "P-256", "SHA-512", None),
+        (
+            EcdsaVariant::P384Sha256,
+            &p384,
+            "P-384",
+            "SHA-256",
+            Some((&p384_sha256_key, &p384_sha256_sig)),
+        ),
+        (EcdsaVariant::P384Sha512, &p384, "P-384", "SHA-512", None),
     ] {
         let key = import_ecdsa_verifying_key(variant, point.clone())
             .await
@@ -2319,13 +2360,40 @@ async fn ecdsa_cross_hash_variants() -> Result<(), String> {
         // 0x0101…01 is in range (below both curve orders) and nonzero for
         // both halves, so rejection can only come from verification.
         let sig = vec![0x01u8; if curve == "P-256" { 64 } else { 96 }];
-        let verified =
-            sig_verify_op(&key, b"cross-hash digest binding", &sig, Schedule::Whole).await?;
+        let verified = sig_verify_op(&key, KAT_MESSAGE, &sig, Schedule::Whole).await?;
         expect_err(
             &format!("verify ({curve}/{hash})"),
             ErrKind::AuthenticationFailed,
             verified,
             "a fabricated signature verified",
+        )?;
+        let Some((kat_point, kat_sig)) = kat else {
+            continue;
+        };
+        let kat_key = import_ecdsa_verifying_key(variant, kat_point.to_vec())
+            .await
+            .map_err(|e| {
+                describe(
+                    &format!("import-verifying-key-raw (KAT {curve}/{hash})"),
+                    &e,
+                )
+            })?;
+        sig_verify_ok(
+            &kat_key,
+            KAT_MESSAGE,
+            kat_sig,
+            Schedule::Whole,
+            &format!("verify (KAT {curve}/{hash})"),
+        )
+        .await?;
+        let mut tampered = KAT_MESSAGE.to_vec();
+        tampered[0] ^= 0x01;
+        let verified = sig_verify_op(&kat_key, &tampered, kat_sig, Schedule::Whole).await?;
+        expect_err(
+            &format!("verify (KAT {curve}/{hash}, tampered message)"),
+            ErrKind::AuthenticationFailed,
+            verified,
+            "a known-answer signature verified a tampered message",
         )?;
     }
     Ok(())

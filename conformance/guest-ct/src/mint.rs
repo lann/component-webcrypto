@@ -222,6 +222,30 @@ pub async fn import_x25519_secret_key(
         .await
 }
 
+pub async fn import_x25519_public_key_spki(spki: Vec<u8>) -> Result<AgreementPublicKey, Error> {
+    x25519::import_public_key_spki(spki).await
+}
+
+pub async fn import_x25519_public_key_jwk(jwk: String) -> Result<AgreementPublicKey, Error> {
+    x25519::import_public_key_jwk(jwk).await
+}
+
+pub async fn import_x25519_secret_key_pkcs8(
+    pkcs8: Vec<u8>,
+    bits: bool,
+    key: bool,
+) -> Result<AgreementSecretKey, Error> {
+    x25519::import_secret_key_pkcs8(pkcs8, agreement_options(bits, key, false)).await
+}
+
+pub async fn import_x25519_secret_key_jwk(
+    jwk: String,
+    bits: bool,
+    key: bool,
+) -> Result<AgreementSecretKey, Error> {
+    x25519::import_secret_key_jwk(jwk, agreement_options(bits, key, false)).await
+}
+
 pub async fn generate_x25519_key(
     bits: bool,
     key: bool,

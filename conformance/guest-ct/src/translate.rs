@@ -284,9 +284,15 @@ const SIG_VECTORS: [(SigAlg, &str); 5] = [
 const X25519_VECTORS: &str = include_str!("../../vectors/x25519_test.json");
 /// The derived companion mapping each XDH vector's `tcId` to its private
 /// key's public coordinate (see `conformance/vectors/README.md`): the
-/// vectors carry raw scalars, but the package's only secret-key import is
-/// the OKP JWK, whose `x` is mandatory.
+/// vectors carry raw scalars, and the translation imports them as OKP
+/// JWKs, whose `x` is mandatory.
 const X25519_PUBLIC_KEYS: &str = include_str!("../../vectors/x25519_test_public_keys.json");
+
+/// The encoded-key X25519 files: SPKI/PKCS#8 (`asn`) and OKP-JWK
+/// (`jwk`) forms of the same computation corpus. No companions: each
+/// file carries both keys in its own encoding.
+const X25519_ASN_VECTORS: &str = include_str!("../../vectors/x25519_asn_test.json");
+const X25519_JWK_VECTORS: &str = include_str!("../../vectors/x25519_jwk_test.json");
 
 /// The ECDH vector files, each with the derived companion mapping its
 /// `tcId`s to the private scalar's public coordinates (see
@@ -747,6 +753,174 @@ pub fn x25519_cases() -> Vec<X25519Case> {
                 private_public: unhex(&field, private_public),
                 shared,
                 zero_shared,
+            });
+        }
+    }
+    cases
+}
+
+/// The encoded-key X25519 files' key pair, in one file's encoding,
+/// carrying the dispatch to the matching import pair.
+#[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum X25519Encoded {
+    /// The `asn` file: an X.509 SPKI public key and a PKCS#8 secret key
+    /// (`import-public-key-spki`, `import-secret-key-pkcs8`), both DER.
+    Spki { public: Vec<u8>, secret: Vec<u8> },
+    /// The `jwk` file: RFC 8037 OKP JWKs as JSON text
+    /// (`import-public-key-jwk`, `import-secret-key-jwk`).
+    Jwk { public: String, secret: String },
+}
+
+impl X25519Encoded {
+    /// The source segment in test ids, naming the vector file family.
+    fn source(&self) -> &'static str {
+        match self {
+            X25519Encoded::Spki { .. } => "wycheproof-spki",
+            X25519Encoded::Jwk { .. } => "wycheproof-jwk",
+        }
+    }
+}
+
+/// One encoded-key X25519 vector's expected outcome.
+#[derive(
+    Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub enum X25519EncodedExpect {
+    /// The public import must fail `invalid-key`.
+    RejectPublic,
+    /// The secret import must fail `invalid-key`.
+    RejectSecret,
+    /// Both imports succeed; `agree` must fail `invalid-key` (the
+    /// contributory all-zero check).
+    ZeroShared,
+    /// Both imports succeed; the agreement derives the published shared
+    /// secret.
+    Shared,
+}
+
+/// One encoded-key X25519 vector: import the secret key and the peer in
+/// the file's encoding, `agree`, and check the shared secret — or expect
+/// the flagged import (or the agreement) to fail `invalid-key`. The
+/// value-level policy is `x25519/wycheproof`'s; what these files add is
+/// the encoded admission dimension (SPKI/PKCS#8 and OKP-JWK structure).
+/// No chunking schedules: agreement carries no streams.
+#[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct X25519EncodedCase {
+    pub tc_id: u64,
+    pub keys: X25519Encoded,
+    /// The expected shared secret (rejection cases never reach it).
+    pub shared: Vec<u8>,
+    pub expect: X25519EncodedExpect,
+}
+
+impl VectorCase for X25519EncodedCase {
+    fn case_id(&self) -> String {
+        vector_case_id("x25519", self.keys.source(), self.tc_id, None)
+    }
+}
+
+#[derive(Deserialize)]
+struct XdhJwkGroup {
+    tests: Vec<XdhJwkTest>,
+}
+
+#[derive(Deserialize)]
+struct XdhJwkTest {
+    #[serde(rename = "tcId")]
+    tc_id: u64,
+    flags: Vec<String>,
+    public: serde_json::Value,
+    private: serde_json::Value,
+    shared: String,
+    result: String,
+}
+
+/// Map one encoded-key vector's upstream verdict onto the WIT's policy.
+/// `acceptable` marks the same value-level families as the raw file
+/// (twist points, non-canonical values, small-order peers), pinned by
+/// `ZeroSharedSecret` exactly as `x25519_cases` pins them; there is no
+/// encoding-laxity family to exclude (X25519 SPKI/PKCS#8 carry no curve
+/// parameters, and upstream marks every structural malformation
+/// `invalid` outright):
+///
+/// - `invalid` flagged `MissingOctetString` (the one private-side
+///   structural case): the secret import must fail `invalid-key`.
+/// - other `invalid` vectors (all flagged `InvalidPublic`:
+///   wrong-algorithm SPKIs, malformed or wrong-type JWKs): the public
+///   import must fail `invalid-key`.
+/// - everything else runs to agreement, `ZeroSharedSecret` deciding
+///   between the contributory `invalid-key` and the published secret.
+fn xdh_encoded_expect(
+    field: &str,
+    result: &str,
+    flags: &[String],
+    shared: &[u8],
+) -> X25519EncodedExpect {
+    match result {
+        "invalid" => {
+            if flags.iter().any(|f| f == "MissingOctetString") {
+                return X25519EncodedExpect::RejectSecret;
+            }
+            assert!(
+                flags.iter().any(|f| f == "InvalidPublic"),
+                "vector {field}: invalid case with unrecognized flags {flags:?}"
+            );
+            X25519EncodedExpect::RejectPublic
+        }
+        "valid" | "acceptable" => {
+            let zero_shared = flags.iter().any(|f| f == "ZeroSharedSecret");
+            assert_eq!(
+                zero_shared,
+                shared.iter().all(|&b| b == 0),
+                "vector {field}: ZeroSharedSecret flag disagrees with its shared value"
+            );
+            if zero_shared {
+                X25519EncodedExpect::ZeroShared
+            } else {
+                X25519EncodedExpect::Shared
+            }
+        }
+        other => panic!("vector {field} has unknown result {other:?}"),
+    }
+}
+
+/// Translate the encoded-key X25519 files (see [`xdh_encoded_expect`]
+/// for the verdict policy). Every vector runs.
+pub fn x25519_encoded_cases() -> Vec<X25519EncodedCase> {
+    let mut cases = Vec::new();
+    let asn: VectorFile<XdhGroup> = serde_json::from_str(X25519_ASN_VECTORS)
+        .unwrap_or_else(|err| panic!("parsing x25519 asn vectors: {err}"));
+    for group in &asn.test_groups {
+        for test in &group.tests {
+            let field = format!("x25519 asn tc{}", test.tc_id);
+            let shared = unhex(&field, &test.shared);
+            let expect = xdh_encoded_expect(&field, &test.result, &test.flags, &shared);
+            cases.push(X25519EncodedCase {
+                tc_id: test.tc_id,
+                keys: X25519Encoded::Spki {
+                    public: unhex(&field, &test.public),
+                    secret: unhex(&field, &test.private),
+                },
+                shared,
+                expect,
+            });
+        }
+    }
+    let jwk: VectorFile<XdhJwkGroup> = serde_json::from_str(X25519_JWK_VECTORS)
+        .unwrap_or_else(|err| panic!("parsing x25519 jwk vectors: {err}"));
+    for group in &jwk.test_groups {
+        for test in &group.tests {
+            let field = format!("x25519 jwk tc{}", test.tc_id);
+            let shared = unhex(&field, &test.shared);
+            let expect = xdh_encoded_expect(&field, &test.result, &test.flags, &shared);
+            cases.push(X25519EncodedCase {
+                tc_id: test.tc_id,
+                keys: X25519Encoded::Jwk {
+                    public: test.public.to_string(),
+                    secret: test.private.to_string(),
+                },
+                shared,
+                expect,
             });
         }
     }

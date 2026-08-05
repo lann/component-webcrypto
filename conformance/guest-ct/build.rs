@@ -95,6 +95,12 @@ fn main() {
     write(&out, mode, "speccheck", translate::speccheck_cases());
     write(&out, mode, "rsa", translate::rsa_cases());
     write(&out, mode, "x25519", translate::x25519_cases());
+    write(
+        &out,
+        mode,
+        "x25519-encoded",
+        translate::x25519_encoded_cases(),
+    );
     write(&out, mode, "ecdh", translate::ecdh_cases());
 }
 

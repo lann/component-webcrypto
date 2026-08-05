@@ -332,6 +332,16 @@ mod webcrypto {
         crate::plan::register(registry, prefix, tags)
     }
 
+    #[case_row(prefix = "x25519/wycheproof-spki")]
+    fn row_x25519_wycheproof_spki(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
+    }
+
+    #[case_row(prefix = "x25519/wycheproof-jwk")]
+    fn row_x25519_wycheproof_jwk(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
+        crate::plan::register(registry, prefix, tags)
+    }
+
     #[case_row(prefix = "ecdh-p256/wycheproof-spki")]
     fn row_ecdh_p256_wycheproof_spki(registry: &mut Registry, prefix: &ArcStr, tags: &Tags) {
         crate::plan::register(registry, prefix, tags)
