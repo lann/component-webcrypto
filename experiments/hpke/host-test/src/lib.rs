@@ -1,5 +1,5 @@
 //! Wasmtime host harness for the experimental HPKE component, backed by
-//! [`lann_webcrypto_wasmtime`]'s RustCrypto implementation of `lann:webcrypto`.
+//! [`polymorph_webcrypto_wasmtime`]'s RustCrypto implementation of `polymorph:webcrypto`.
 //!
 //! The component's exports are async-lifted WIT functions and all of its
 //! state travels as bytes, so each helper instantiates fresh and makes one
@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use lann_webcrypto_wasmtime::standalone::{self, Ctx};
-use lann_webcrypto_wasmtime::WasiWebcryptoCtx;
+use polymorph_webcrypto_wasmtime::standalone::{self, Ctx};
+use polymorph_webcrypto_wasmtime::WasiWebcryptoCtx;
 use wasmtime::component::Accessor;
 
 mod bindings {

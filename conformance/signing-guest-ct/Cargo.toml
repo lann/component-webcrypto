@@ -3,7 +3,7 @@ name = "conformance-signing-guest-ct"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "The host-only signing conformance suite ported onto the lann:component-test guest SDK: same probe bodies and case ids as conformance-signing-guest, exported through the frozen tests contract."
+description = "The host-only signing conformance suite ported onto the polymorph:component-test guest SDK: same probe bodies and case ids as conformance-signing-guest, exported through the frozen tests contract."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 component-test-sdk = { workspace = true }
 # The #[suite] macro expands a wit_bindgen::generate! naming this crate.
 # 0.60 (what the SDK is developed against); the SUT bindings keep their
-# own 0.59 via lann-webcrypto-guest — disjoint packages, merged at
+# own 0.59 via polymorph-webcrypto-guest — disjoint packages, merged at
 # wasm-component-ld.
 wit-bindgen = { version = "0.60", features = ["async"] }
 
@@ -23,7 +23,7 @@ wit-bindgen = { version = "0.60", features = ["async"] }
 # `rsa-sign` and `rsa-oaep-decrypt` add the gated RSA private-key imports
 # to the generated world — this suite, like the `ecdsa-sign` import it
 # exists for, runs only under the host-backed targets.
-lann-webcrypto-guest = { path = "../../rust/guest", features = ["rsa-sign", "rsa-oaep-decrypt"] }
+polymorph-webcrypto-guest = { path = "../../rust/guest", features = ["rsa-sign", "rsa-oaep-decrypt"] }
 conformance-harness = { path = "../harness" }
 futures = { version = "0.3", default-features = false, features = ["async-await", "alloc"] }
 # Parsing the vendored Wycheproof sig-gen/OAEP JSON compiled into the guest.

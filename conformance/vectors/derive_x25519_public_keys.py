@@ -2,7 +2,7 @@
 """Regenerate x25519_test_public_keys.json from x25519_test.json.
 
 The Wycheproof XDH vectors carry each test's private key as a raw scalar,
-but `lann:webcrypto`'s only secret-key import is the RFC 8037 OKP private
+but `polymorph:webcrypto`'s only secret-key import is the RFC 8037 OKP private
 JWK, whose public coordinate `x` is mandatory. This script derives that
 coordinate — X25519(clamp(private), 9), the RFC 7748 public key — for
 every vector, so the conformance guest can build the JWK the interface

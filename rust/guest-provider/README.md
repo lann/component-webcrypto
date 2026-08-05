@@ -1,6 +1,6 @@
-# `lann-webcrypto-guest-provider`
+# `polymorph-webcrypto-guest-provider`
 
-The in-guest implementation of `lann:webcrypto`: a wasm component (built for
+The in-guest implementation of `polymorph:webcrypto`: a wasm component (built for
 `wasm32-wasip2`) that runs RustCrypto entirely inside the guest and **exports**
 the package surface. Compose it under any consumer with `wac plug` and the
 result is a single self-contained component whose cryptography needs no crypto
@@ -39,7 +39,7 @@ Two facts frame the residual risk:
 
 When a host-side implementation is available, prefer it. The side-channel
 ordering of this repository's implementations is: `webcrypto-jco` (platform Web
-Crypto — native, hardware-accelerated, best studied), then `lann-webcrypto-wasmtime`
+Crypto — native, hardware-accelerated, best studied), then `polymorph-webcrypto-wasmtime`
 (native RustCrypto), then this provider.
 
 ## Timing-channel classification
@@ -59,7 +59,7 @@ JIT), weighted by how **forgiving of failure** the construction is
 Class D is enforced structurally, not by documentation: this provider simply
 does not export those algorithm interfaces, so a composition that needs them
 **fails at `wac plug` time** rather than running quietly degraded — and one
-level deeper, the shared `lann-webcrypto-core` compiles no ECDSA signing
+level deeper, the shared `polymorph-webcrypto-core` compiles no ECDSA signing
 code for wasm targets at all (`#[cfg(not(target_family = "wasm"))]`), so the
 class-D code is absent from this component's binary, not merely unexported.
 Choose a host-side provider for them.
@@ -75,7 +75,7 @@ compose with this provider.
 ```
 error: encoding produced a component that failed validation
 Caused by:
-    type mismatch for import `lann:webcrypto/ecdsa-sign@0.1.0`
+    type mismatch for import `polymorph:webcrypto/ecdsa-sign@0.1.0`
     type mismatch in instance export `signing-key`
     resource types are not the same (...)
 ```

@@ -1,7 +1,7 @@
 // @ts-check
 //
 // The interface-conformance assertions: `webcrypto.js` against the
-// definitions jco derives from the `lann:webcrypto` package.
+// definitions jco derives from the `polymorph:webcrypto` package.
 //
 // This module is never imported at runtime — `package.json` exposes only
 // `webcrypto.js`, and nothing here has an effect. It exists so that
@@ -68,17 +68,17 @@ import {
   x25519,
 } from "./webcrypto.js";
 
-/** @import * as Mac from "./generated/interfaces/lann-webcrypto-mac.js" */
-/** @import * as Aead from "./generated/interfaces/lann-webcrypto-aead.js" */
-/** @import * as DigestInterface from "./generated/interfaces/lann-webcrypto-digest.js" */
-/** @import * as Signature from "./generated/interfaces/lann-webcrypto-signature.js" */
-/** @import * as Derivation from "./generated/interfaces/lann-webcrypto-derivation.js" */
-/** @import * as Hkdf from "./generated/interfaces/lann-webcrypto-hkdf.js" */
-/** @import * as Pbkdf2 from "./generated/interfaces/lann-webcrypto-pbkdf2.js" */
-/** @import * as KeyAgreement from "./generated/interfaces/lann-webcrypto-key-agreement.js" */
-/** @import * as KeyWrap from "./generated/interfaces/lann-webcrypto-key-wrap.js" */
-/** @import * as PublicEncryption from "./generated/interfaces/lann-webcrypto-public-encryption.js" */
-/** @import * as Wrapping from "./generated/interfaces/lann-webcrypto-wrapping.js" */
+/** @import * as Mac from "./generated/interfaces/polymorph-webcrypto-mac.js" */
+/** @import * as Aead from "./generated/interfaces/polymorph-webcrypto-aead.js" */
+/** @import * as DigestInterface from "./generated/interfaces/polymorph-webcrypto-digest.js" */
+/** @import * as Signature from "./generated/interfaces/polymorph-webcrypto-signature.js" */
+/** @import * as Derivation from "./generated/interfaces/polymorph-webcrypto-derivation.js" */
+/** @import * as Hkdf from "./generated/interfaces/polymorph-webcrypto-hkdf.js" */
+/** @import * as Pbkdf2 from "./generated/interfaces/polymorph-webcrypto-pbkdf2.js" */
+/** @import * as KeyAgreement from "./generated/interfaces/polymorph-webcrypto-key-agreement.js" */
+/** @import * as KeyWrap from "./generated/interfaces/polymorph-webcrypto-key-wrap.js" */
+/** @import * as PublicEncryption from "./generated/interfaces/polymorph-webcrypto-public-encryption.js" */
+/** @import * as Wrapping from "./generated/interfaces/polymorph-webcrypto-wrapping.js" */
 
 // --- resource-bearing interfaces -------------------------------------------
 //
@@ -180,109 +180,109 @@ const decryptionKeyServesPublicEncryption = (key) => key;
  * the generated `ikm` declares a private constructor that this host's
  * mint-token constructor cannot match, and the instance assertions carry
  * the class. The functions are what a namespace assertion buys here.
- * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-hkdf.js"), "Ikm">}
+ * @type {Omit<typeof import("./generated/interfaces/polymorph-webcrypto-hkdf.js"), "Ikm">}
  */
 const hkdfInterface = hkdf;
 
 /**
  * See `hkdfInterface`: the resource class is carried by the instance
  * assertions above.
- * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-pbkdf2.js"), "Password">}
+ * @type {Omit<typeof import("./generated/interfaces/polymorph-webcrypto-pbkdf2.js"), "Password">}
  */
 const pbkdf2Interface = pbkdf2;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha2.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-hmac-sha2.js")} */
 const hmacSha2Interface = hmacSha2;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-hmac-sha1.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-hmac-sha1.js")} */
 const hmacSha1Interface = hmacSha1;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-hkdf-sha1.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-hkdf-sha1.js")} */
 const hkdfSha1Interface = hkdfSha1;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-hkdf-sha2.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-hkdf-sha2.js")} */
 const hkdfSha2Interface = hkdfSha2;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-pbkdf2-sha2.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-pbkdf2-sha2.js")} */
 const pbkdf2Sha2Interface = pbkdf2Sha2;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-pbkdf2-sha1.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-pbkdf2-sha1.js")} */
 const pbkdf2Sha1Interface = pbkdf2Sha1;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-sha2.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-sha2.js")} */
 const sha2Interface = sha2;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-sha1-checked.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-sha1-checked.js")} */
 const sha1CheckedInterface = sha1Checked;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-gcm.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-aes-gcm.js")} */
 const aesGcmInterface = aesGcm;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-cbc.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-aes-cbc.js")} */
 const aesCbcInterface = aesCbc;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-ctr.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-aes-ctr.js")} */
 const aesCtrInterface = aesCtr;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-ed25519-verify.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-ed25519-verify.js")} */
 const ed25519VerifyInterface = ed25519Verify;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-ed25519-sign.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-ed25519-sign.js")} */
 const ed25519SignInterface = ed25519Sign;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdsa-verify.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-ecdsa-verify.js")} */
 const ecdsaVerifyInterface = ecdsaVerify;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdsa-sign.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-ecdsa-sign.js")} */
 const ecdsaSignInterface = ecdsaSign;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsassa-pkcs1-v15-verify.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsassa-pkcs1-v15-verify.js")} */
 const rsassaPkcs1V15VerifyInterface = rsassaPkcs1V15Verify;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-verify.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsa-pss-verify.js")} */
 const rsaPssVerifyInterface = rsaPssVerify;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsassa-pkcs1-v15-sign.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsassa-pkcs1-v15-sign.js")} */
 const rsassaPkcs1V15SignInterface = rsassaPkcs1V15Sign;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-pss-sign.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsa-pss-sign.js")} */
 const rsaPssSignInterface = rsaPssSign;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-x25519.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-x25519.js")} */
 const x25519Interface = x25519;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-ecdh.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-ecdh.js")} */
 const ecdhInterface = ecdh;
 
 /**
  * `Omit` of the token-constructor resource classes, like `hkdfInterface`:
  * the instance assertions above carry them.
- * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-wrapping.js"), "WrapInput" | "UnwrapInput">}
+ * @type {Omit<typeof import("./generated/interfaces/polymorph-webcrypto-wrapping.js"), "WrapInput" | "UnwrapInput">}
  */
 const wrappingInterface = wrapping;
 
 /**
  * See `wrappingInterface`; `KwKeyOptions` has a public constructor, so
  * only `KwKey` is carried by its instance assertion.
- * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-key-wrap.js"), "KwKey">}
+ * @type {Omit<typeof import("./generated/interfaces/polymorph-webcrypto-key-wrap.js"), "KwKey">}
  */
 const keyWrapInterface = keyWrap;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-aes-kw.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-aes-kw.js")} */
 const aesKwInterface = aesKw;
 
 /**
  * See `wrappingInterface`; `DecryptionKeyOptions` has a public
  * constructor, so only the key classes are carried by their instance
  * assertions.
- * @type {Omit<typeof import("./generated/interfaces/lann-webcrypto-public-encryption.js"), "EncryptionKey" | "DecryptionKey">}
+ * @type {Omit<typeof import("./generated/interfaces/polymorph-webcrypto-public-encryption.js"), "EncryptionKey" | "DecryptionKey">}
  */
 const publicEncryptionInterface = publicEncryption;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-oaep-encrypt.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsa-oaep-encrypt.js")} */
 const rsaOaepEncryptInterface = rsaOaepEncrypt;
 
-/** @type {typeof import("./generated/interfaces/lann-webcrypto-rsa-oaep-decrypt.js")} */
+/** @type {typeof import("./generated/interfaces/polymorph-webcrypto-rsa-oaep-decrypt.js")} */
 const rsaOaepDecryptInterface = rsaOaepDecrypt;
 
 export const checked = {

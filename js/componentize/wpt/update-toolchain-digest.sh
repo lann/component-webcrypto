@@ -15,8 +15,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
 REV="$(cat js/componentize/componentize-js.rev)"
 PINS=js/componentize/componentize-js.sha256
-RELEASE="${COMPONENTIZE_JS_RELEASE:-https://github.com/lann/component-webcrypto/releases/download/toolchains}"
-REPO="${COMPONENTIZE_JS_REPO:-lann/component-webcrypto}"
+RELEASE="${COMPONENTIZE_JS_RELEASE:-https://github.com/polymorph-components/polymorph-webcrypto/releases/download/toolchains}"
+REPO="${COMPONENTIZE_JS_REPO:-polymorph-components/polymorph-webcrypto}"
 WORKFLOW=".github/workflows/componentize-js-toolchain.yml"
 
 platform() {

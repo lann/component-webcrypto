@@ -1,14 +1,14 @@
-//! Guest-side bindings and ergonomic helpers for the `lann:webcrypto`
+//! Guest-side bindings and ergonomic helpers for the `polymorph:webcrypto`
 //! interfaces.
 //!
 //! This crate is the intended way for Rust guest components to *consume*
-//! `lann:webcrypto`: it binds the whole import surface once (the
+//! `polymorph:webcrypto`: it binds the whole import surface once (the
 //! [`bindings`] module) and wraps the key resources in newtypes whose
 //! operations take a [`DataSource`] — a byte slice, an owned buffer, or a
 //! component-model stream — so callers need none of the stream plumbing the
 //! interfaces are defined in terms of.
 //!
-//! Most consumers need **no `lann:webcrypto` WIT at all**: link this crate
+//! Most consumers need **no `polymorph:webcrypto` WIT at all**: link this crate
 //! and call it, and the componentized binary imports exactly the interfaces
 //! it uses (unused imports are stripped). Only list the imports in your own
 //! world — remapping them onto this crate's [`bindings`] modules with
@@ -169,7 +169,7 @@ mod generated {
     });
 }
 
-/// The generated bindings for the full `lann:webcrypto` import surface.
+/// The generated bindings for the full `polymorph:webcrypto` import surface.
 ///
 /// The newtype wrappers cover the common cases; these are the escape hatch
 /// for callers driving the streams themselves and for passing resources
@@ -180,10 +180,10 @@ pub mod bindings {
     // interfaces only alias, and rustdoc renders an alias into a private
     // module as an empty enum.
     #[cfg(feature = "rsa-oaep-decrypt")]
-    pub use super::generated::lann::webcrypto::rsa_oaep_decrypt;
+    pub use super::generated::polymorph::webcrypto::rsa_oaep_decrypt;
     #[cfg(feature = "sha1-checked")]
-    pub use super::generated::lann::webcrypto::sha1_checked;
-    pub use super::generated::lann::webcrypto::{
+    pub use super::generated::polymorph::webcrypto::sha1_checked;
+    pub use super::generated::polymorph::webcrypto::{
         aead, aes, aes_cbc, aes_ctr, aes_gcm, aes_kw, cipher, derivation, digest, ecdh, ecdsa_sign,
         ecdsa_verify, ed25519_sign, ed25519_verify, hkdf, hkdf_sha1, hkdf_sha2, hmac_sha1,
         hmac_sha2, key_agreement, key_wrap, mac, pbkdf2, pbkdf2_sha1, pbkdf2_sha2,
@@ -191,7 +191,7 @@ pub mod bindings {
         signature, types, wrapping, x25519,
     };
     #[cfg(feature = "rsa-sign")]
-    pub use super::generated::lann::webcrypto::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
+    pub use super::generated::polymorph::webcrypto::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
 }
 
 pub use generated::wit_stream;
@@ -262,8 +262,8 @@ pub enum Error {
 /// The known extension-error conditions, as (`origin`, `name`) constants
 /// for matching against [`Error::Extension`].
 pub mod extension {
-    /// The `origin` of conditions the `lann:webcrypto` package defines.
-    pub const LANN_WEBCRYPTO: &str = "lann:webcrypto";
+    /// The `origin` of conditions the `polymorph:webcrypto` package defines.
+    pub const LANN_WEBCRYPTO: &str = "polymorph:webcrypto";
     /// `sha1-checked`'s collision condition: a rejecting digest's input
     /// carried a SHA-1 collision attack pattern.
     pub const COLLISION_DETECTED: &str = "collision-detected";
@@ -1399,7 +1399,7 @@ impl EncryptionKey {
     /// Encrypt a plaintext bounded by the key. `label` is optional context
     /// bound into the padding: decryption succeeds only under the same
     /// label (WebCrypto's `RsaOaepParams.label`). A plaintext above the
-    /// key's bound fails [`Error::Extension`] (origin `"lann:webcrypto"`,
+    /// key's bound fails [`Error::Extension`] (origin `"polymorph:webcrypto"`,
     /// name `"message-too-long"`) — the signal to switch to hybrid
     /// wrapping: encrypt a symmetric key, wrap the payload under it.
     pub async fn encrypt(
@@ -2112,7 +2112,7 @@ mod tests {
         ));
         assert!(matches!(
             Error::from(Raw::Extension(ExtensionError {
-                origin: "lann:webcrypto".into(),
+                origin: "polymorph:webcrypto".into(),
                 name: "collision-detected".into(),
                 message: "m".into(),
             })),

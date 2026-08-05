@@ -37,7 +37,7 @@ V=js/componentize/wpt/vendor
 B=js/componentize/wpt/build
 REV="$(cat js/componentize/componentize-js.rev)"
 TOOLCHAIN_DIR=target/toolchains
-COMPONENTIZE_JS_RELEASE="${COMPONENTIZE_JS_RELEASE:-https://github.com/lann/component-webcrypto/releases/download/toolchains}"
+COMPONENTIZE_JS_RELEASE="${COMPONENTIZE_JS_RELEASE:-https://github.com/polymorph-components/polymorph-webcrypto/releases/download/toolchains}"
 
 # The platform an asset is built for, in the naming the workflow publishes.
 platform() {

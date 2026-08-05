@@ -1,6 +1,6 @@
-//! The exported `lann:webcrypto` resources and key-minting functions.
+//! The exported `polymorph:webcrypto` resources and key-minting functions.
 //!
-//! The cryptography itself lives in `lann-webcrypto-core`, shared verbatim
+//! The cryptography itself lives in `polymorph-webcrypto-core`, shared verbatim
 //! with the Wasmtime host; this module contributes only what is
 //! guest-specific — stream plumbing, the exported resource types, and the
 //! bindings glue converting the generated types to the core's.
@@ -12,80 +12,80 @@
 
 use std::cell::Cell;
 
-use lann_webcrypto_core::{
+use polymorph_webcrypto_core::{
     served_sha2, AeadKeyMaterial, AeadPolicy, AgreementPolicy, CipherKeyMaterial, CipherMode,
     CipherPolicy, KwKeyMaterial, KwPolicy, MacKeyMaterial, MacPolicy, SigPublic,
     SigningKeyMaterial, SigningPolicy, TransportPolicy, UnwrapInputMaterial, WrapFormat,
     WrapInputMaterial, HMAC_NAME,
 };
 
-use crate::exports::lann::webcrypto::aead::{
+use crate::exports::polymorph::webcrypto::aead::{
     AeadKey as ExportedAeadKey, AeadKeyOptions as ExportedAeadKeyOptions, Guest as AeadGuest,
     GuestAeadKey, GuestAeadKeyOptions,
 };
-use crate::exports::lann::webcrypto::aes_cbc::Guest as AesCbcGuest;
-use crate::exports::lann::webcrypto::aes_ctr::Guest as AesCtrGuest;
-use crate::exports::lann::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
-use crate::exports::lann::webcrypto::aes_kw::Guest as AesKwGuest;
-use crate::exports::lann::webcrypto::cipher::{
+use crate::exports::polymorph::webcrypto::aes_cbc::Guest as AesCbcGuest;
+use crate::exports::polymorph::webcrypto::aes_ctr::Guest as AesCtrGuest;
+use crate::exports::polymorph::webcrypto::aes_gcm::{AesVariant, Guest as AesGcmGuest};
+use crate::exports::polymorph::webcrypto::aes_kw::Guest as AesKwGuest;
+use crate::exports::polymorph::webcrypto::cipher::{
     CipherKey as ExportedCipherKey, CipherKeyOptions as ExportedCipherKeyOptions,
     Guest as CipherGuest, GuestCipherKey, GuestCipherKeyOptions,
 };
-use crate::exports::lann::webcrypto::derivation::{
+use crate::exports::polymorph::webcrypto::derivation::{
     self, Guest as DerivationGuest, GuestDeriveInput, GuestDeriveOptions,
 };
-use crate::exports::lann::webcrypto::digest::{self as digest, Guest as DigestGuest, GuestDigest};
-use crate::exports::lann::webcrypto::ecdh::{EcdhVariant, Guest as EcdhGuest};
-use crate::exports::lann::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
-use crate::exports::lann::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
-use crate::exports::lann::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
-use crate::exports::lann::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
-use crate::exports::lann::webcrypto::hkdf_sha1::Guest as HkdfSha1Guest;
-use crate::exports::lann::webcrypto::hkdf_sha2::Guest as HkdfSha2Guest;
-use crate::exports::lann::webcrypto::hmac_sha1::Guest as HmacSha1Guest;
-use crate::exports::lann::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
-use crate::exports::lann::webcrypto::key_agreement::{
+use crate::exports::polymorph::webcrypto::digest::{self as digest, Guest as DigestGuest, GuestDigest};
+use crate::exports::polymorph::webcrypto::ecdh::{EcdhVariant, Guest as EcdhGuest};
+use crate::exports::polymorph::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
+use crate::exports::polymorph::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
+use crate::exports::polymorph::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
+use crate::exports::polymorph::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
+use crate::exports::polymorph::webcrypto::hkdf_sha1::Guest as HkdfSha1Guest;
+use crate::exports::polymorph::webcrypto::hkdf_sha2::Guest as HkdfSha2Guest;
+use crate::exports::polymorph::webcrypto::hmac_sha1::Guest as HmacSha1Guest;
+use crate::exports::polymorph::webcrypto::hmac_sha2::Guest as HmacSha2Guest;
+use crate::exports::polymorph::webcrypto::key_agreement::{
     self as key_agreement_iface, Guest as KeyAgreementGuest, GuestAgreementKeyOptions,
     GuestPublicKey, GuestSecretKey,
 };
-use crate::exports::lann::webcrypto::key_wrap::{
+use crate::exports::polymorph::webcrypto::key_wrap::{
     self as key_wrap_iface, Guest as KeyWrapGuest, GuestKwKey, GuestKwKeyOptions,
 };
-use crate::exports::lann::webcrypto::mac::{
+use crate::exports::polymorph::webcrypto::mac::{
     self, Guest as MacGuest, GuestMacKey, GuestMacKeyOptions,
 };
-use crate::exports::lann::webcrypto::pbkdf2::{
+use crate::exports::polymorph::webcrypto::pbkdf2::{
     self as pbkdf2_iface, Guest as Pbkdf2Guest, GuestPassword,
 };
-use crate::exports::lann::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
-use crate::exports::lann::webcrypto::pbkdf2_sha2::Guest as Pbkdf2Sha2Guest;
-use crate::exports::lann::webcrypto::public_encryption::{
+use crate::exports::polymorph::webcrypto::pbkdf2_sha1::Guest as Pbkdf2Sha1Guest;
+use crate::exports::polymorph::webcrypto::pbkdf2_sha2::Guest as Pbkdf2Sha2Guest;
+use crate::exports::polymorph::webcrypto::public_encryption::{
     Guest as PublicEncryptionGuest, GuestDecryptionKey, GuestDecryptionKeyOptions,
     GuestEncryptionKey,
 };
-use crate::exports::lann::webcrypto::rsa_pss_verify::Guest as RsaPssVerifyGuest;
-use crate::exports::lann::webcrypto::rsassa_pkcs1_v15_verify::{
+use crate::exports::polymorph::webcrypto::rsa_pss_verify::Guest as RsaPssVerifyGuest;
+use crate::exports::polymorph::webcrypto::rsassa_pkcs1_v15_verify::{
     Guest as RsassaVerifyGuest, RsaVariant,
 };
-use crate::exports::lann::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
-use crate::exports::lann::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
-use crate::exports::lann::webcrypto::signature::{
+use crate::exports::polymorph::webcrypto::sha1_checked::Guest as Sha1CheckedGuest;
+use crate::exports::polymorph::webcrypto::sha2::{Guest as Sha2Guest, Sha2Variant};
+use crate::exports::polymorph::webcrypto::signature::{
     self as signature_iface, Guest as SignatureGuest, GuestSigningKey, GuestSigningKeyOptions,
     GuestVerifyingKey,
 };
-use crate::exports::lann::webcrypto::wrapping::{
+use crate::exports::polymorph::webcrypto::wrapping::{
     self as wrapping_iface, Guest as WrappingGuest, GuestUnwrapInput, GuestWrapInput,
 };
-use crate::exports::lann::webcrypto::x25519::Guest as X25519Guest;
-use crate::lann::webcrypto::types::Error;
+use crate::exports::polymorph::webcrypto::x25519::Guest as X25519Guest;
+use crate::polymorph::webcrypto::types::Error;
 
 pub struct Component;
 
 // --- bindings glue -------------------------------------------------------------
 
-lann_webcrypto_core::impl_conversions! {
+polymorph_webcrypto_core::impl_conversions! {
     error: Error,
-    extension: crate::lann::webcrypto::types::ExtensionError,
+    extension: crate::polymorph::webcrypto::types::ExtensionError,
     sha2: Sha2Variant,
     aes: AesVariant,
     ecdsa: EcdsaVariant,
@@ -95,7 +95,7 @@ lann_webcrypto_core::impl_conversions! {
 
 /// Unwrap an entropy result: the WASI random source backing the guest's
 /// `getrandom` is always available, so a failure is unreachable.
-fn rng_infallible<T>(result: Result<T, lann_webcrypto_core::RngError>) -> T {
+fn rng_infallible<T>(result: Result<T, polymorph_webcrypto_core::RngError>) -> T {
     result.expect("WASI random source is always available")
 }
 
@@ -159,7 +159,7 @@ pub struct WrapInput {
 
 impl WrapInput {
     fn handle(
-        material: Result<WrapInputMaterial, lann_webcrypto_core::Error>,
+        material: Result<WrapInputMaterial, polymorph_webcrypto_core::Error>,
     ) -> Result<wrapping_iface::WrapInput, Error> {
         Ok(wrapping_iface::WrapInput::new(Self {
             material: Cell::new(Some(material?)),
@@ -186,7 +186,7 @@ pub struct UnwrapInput {
 
 impl UnwrapInput {
     fn handle(
-        material: Result<UnwrapInputMaterial, lann_webcrypto_core::Error>,
+        material: Result<UnwrapInputMaterial, polymorph_webcrypto_core::Error>,
     ) -> Result<wrapping_iface::UnwrapInput, Error> {
         Ok(wrapping_iface::UnwrapInput::new(Self {
             material: Cell::new(Some(material?)),
@@ -343,7 +343,7 @@ impl AesKwGuest for Component {
         options: key_wrap_iface::KwKeyOptions,
     ) -> Result<key_wrap_iface::KwKey, Error> {
         let policy = options.get::<KwKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::derive_kw_key(
+        let material = polymorph_webcrypto_core::derive_kw_key(
             variant.into(),
             &input.get::<DeriveInput>().material,
             policy,
@@ -358,7 +358,7 @@ impl AesKwGuest for Component {
     ) -> Result<key_wrap_iface::KwKey, Error> {
         let policy = options.get::<KwKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_kw_key(variant.into(), UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_kw_key(variant.into(), UnwrapInput::take(input), policy)?;
         Ok(key_wrap_iface::KwKey::new(KwKey { material }))
     }
 
@@ -368,7 +368,7 @@ impl AesKwGuest for Component {
         options: key_wrap_iface::KwKeyOptions,
     ) -> Result<key_wrap_iface::KwKey, Error> {
         let policy = options.get::<KwKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_kw_key_jwk(
+        let material = polymorph_webcrypto_core::unwrap_kw_key_jwk(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -640,7 +640,7 @@ impl DigestGuest for Component {
 /// `compute` is one-shot and stateless per call, so the resource is
 /// reusable.
 pub struct Digest {
-    variant: lann_webcrypto_core::DigestKind,
+    variant: polymorph_webcrypto_core::DigestKind,
 }
 
 impl GuestDigest for Digest {
@@ -664,7 +664,7 @@ impl Sha2Guest for Component {
     fn make_digest(variant: Sha2Variant) -> Result<digest::Digest, Error> {
         let variant = served_sha2(variant.into())?;
         Ok(digest::Digest::new(Digest {
-            variant: lann_webcrypto_core::DigestKind::Sha2(variant),
+            variant: polymorph_webcrypto_core::DigestKind::Sha2(variant),
         }))
     }
 }
@@ -674,16 +674,16 @@ impl Sha2Guest for Component {
 impl Sha1CheckedGuest for Component {
     fn make_rejecting_digest() -> Result<digest::Digest, Error> {
         Ok(digest::Digest::new(Digest {
-            variant: lann_webcrypto_core::DigestKind::Sha1Checked(
-                lann_webcrypto_core::Sha1Posture::Reject,
+            variant: polymorph_webcrypto_core::DigestKind::Sha1Checked(
+                polymorph_webcrypto_core::Sha1Posture::Reject,
             ),
         }))
     }
 
     fn make_mitigating_digest() -> Result<digest::Digest, Error> {
         Ok(digest::Digest::new(Digest {
-            variant: lann_webcrypto_core::DigestKind::Sha1Checked(
-                lann_webcrypto_core::Sha1Posture::Mitigate,
+            variant: polymorph_webcrypto_core::DigestKind::Sha1Checked(
+                polymorph_webcrypto_core::Sha1Posture::Mitigate,
             ),
         }))
     }
@@ -729,7 +729,7 @@ impl HmacSha2Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::derive_mac_key(
+        let material = polymorph_webcrypto_core::derive_mac_key(
             &input.get::<DeriveInput>().material,
             variant.into(),
             length,
@@ -745,7 +745,7 @@ impl HmacSha2Guest for Component {
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_mac_key(variant.into(), UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_mac_key(variant.into(), UnwrapInput::take(input), policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
@@ -755,7 +755,7 @@ impl HmacSha2Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_mac_key_jwk(
+        let material = polymorph_webcrypto_core::unwrap_mac_key_jwk(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -798,7 +798,7 @@ impl HmacSha1Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::derive_mac_key_sha1(
+        let material = polymorph_webcrypto_core::derive_mac_key_sha1(
             &input.get::<DeriveInput>().material,
             length,
             policy,
@@ -811,7 +811,7 @@ impl HmacSha1Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_mac_key_sha1(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_mac_key_sha1(UnwrapInput::take(input), policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
@@ -821,7 +821,7 @@ impl HmacSha1Guest for Component {
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_mac_key_jwk_sha1(UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_mac_key_jwk_sha1(UnwrapInput::take(input), policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 }
@@ -832,7 +832,7 @@ impl HkdfSha1Guest for Component {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare_sha1(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare_sha1(
             &input.get::<Ikm>().material,
             &salt,
             info,
@@ -845,7 +845,7 @@ impl HkdfSha1Guest for Component {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare_from_sha1(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare_from_sha1(
             &input.get::<DeriveInput>().material,
             &salt,
             info,
@@ -860,7 +860,7 @@ impl Pbkdf2Sha1Guest for Component {
         salt: Vec<u8>,
         iterations: u32,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
             &input.get::<Password>().material,
             salt,
             iterations,
@@ -878,7 +878,7 @@ impl DerivationGuest for Component {
 
 options_resource! {
     /// An exported `derive-options`. See [`MacKeyOptions`].
-    pub struct DeriveOptions(lann_webcrypto_core::DerivePolicy): GuestDeriveOptions {
+    pub struct DeriveOptions(polymorph_webcrypto_core::DerivePolicy): GuestDeriveOptions {
         can_derive_bits => derive_bits,
         can_derive_key => derive_key,
     }
@@ -887,7 +887,7 @@ options_resource! {
 /// An exported `derive-input`: the shared core's parameterized derivation
 /// (run eagerly at `prepare` — the PRK, not the base secret).
 pub struct DeriveInput {
-    material: lann_webcrypto_core::DeriveInputMaterial,
+    material: polymorph_webcrypto_core::DeriveInputMaterial,
 }
 
 impl GuestDeriveInput for DeriveInput {
@@ -912,7 +912,7 @@ impl HkdfGuest for Component {
         options: derivation::DeriveOptions,
     ) -> Result<hkdf_iface::Ikm, Error> {
         let policy = options.get::<DeriveOptions>().policy.get();
-        let material = lann_webcrypto_core::IkmMaterial::import(raw, policy)?;
+        let material = polymorph_webcrypto_core::IkmMaterial::import(raw, policy)?;
         Ok(hkdf_iface::Ikm::new(Ikm { material }))
     }
 
@@ -921,7 +921,7 @@ impl HkdfGuest for Component {
         options: derivation::DeriveOptions,
     ) -> Result<hkdf_iface::Ikm, Error> {
         let policy = options.get::<DeriveOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_ikm(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_ikm(UnwrapInput::take(input), policy)?;
         Ok(hkdf_iface::Ikm::new(Ikm { material }))
     }
 }
@@ -933,7 +933,7 @@ impl HkdfSha2Guest for Component {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare(
             variant.into(),
             &input.get::<Ikm>().material,
             &salt,
@@ -948,7 +948,7 @@ impl HkdfSha2Guest for Component {
         salt: Vec<u8>,
         info: Vec<u8>,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare_from(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare_from(
             variant.into(),
             &input.get::<DeriveInput>().material,
             &salt,
@@ -960,7 +960,7 @@ impl HkdfSha2Guest for Component {
 
 /// An exported `hkdf.ikm`: the shared core's input keying material.
 pub struct Ikm {
-    material: lann_webcrypto_core::IkmMaterial,
+    material: polymorph_webcrypto_core::IkmMaterial,
 }
 
 impl GuestIkm for Ikm {
@@ -981,7 +981,7 @@ impl Pbkdf2Guest for Component {
         options: derivation::DeriveOptions,
     ) -> Result<pbkdf2_iface::Password, Error> {
         let policy = options.get::<DeriveOptions>().policy.get();
-        let material = lann_webcrypto_core::PasswordMaterial::import(raw, policy)?;
+        let material = polymorph_webcrypto_core::PasswordMaterial::import(raw, policy)?;
         Ok(pbkdf2_iface::Password::new(Password { material }))
     }
 
@@ -990,7 +990,7 @@ impl Pbkdf2Guest for Component {
         options: derivation::DeriveOptions,
     ) -> Result<pbkdf2_iface::Password, Error> {
         let policy = options.get::<DeriveOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_password(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_password(UnwrapInput::take(input), policy)?;
         Ok(pbkdf2_iface::Password::new(Password { material }))
     }
 }
@@ -1002,7 +1002,7 @@ impl Pbkdf2Sha2Guest for Component {
         salt: Vec<u8>,
         iterations: u32,
     ) -> Result<derivation::DeriveInput, Error> {
-        let material = lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2(
+        let material = polymorph_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2(
             variant.into(),
             &input.get::<Password>().material,
             salt,
@@ -1014,7 +1014,7 @@ impl Pbkdf2Sha2Guest for Component {
 
 /// An exported `pbkdf2.password`: the shared core's password material.
 pub struct Password {
-    material: lann_webcrypto_core::PasswordMaterial,
+    material: polymorph_webcrypto_core::PasswordMaterial,
 }
 
 impl GuestPassword for Password {
@@ -1046,7 +1046,7 @@ options_resource! {
 
 /// An exported `key-agreement.public-key`: public material only.
 pub struct AgreementPublicKey {
-    material: lann_webcrypto_core::AgreementPublicMaterial,
+    material: polymorph_webcrypto_core::AgreementPublicMaterial,
 }
 
 impl GuestPublicKey for AgreementPublicKey {
@@ -1071,7 +1071,7 @@ impl GuestPublicKey for AgreementPublicKey {
 /// secret (X25519 or ECDH; both class B — see the README's classification
 /// table).
 pub struct AgreementSecretKey {
-    material: lann_webcrypto_core::AgreementSecretMaterial,
+    material: polymorph_webcrypto_core::AgreementSecretMaterial,
 }
 
 impl GuestSecretKey for AgreementSecretKey {
@@ -1128,7 +1128,7 @@ impl GuestSecretKey for AgreementSecretKey {
 
 impl X25519Guest for Component {
     async fn import_public_key_raw(raw: Vec<u8>) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw)?;
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1137,14 +1137,14 @@ impl X25519Guest for Component {
     async fn import_public_key_spki(
         spki: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki)?;
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
     }
 
     async fn import_public_key_jwk(jwk: String) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk)?;
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1156,7 +1156,7 @@ impl X25519Guest for Component {
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy)?;
+            polymorph_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1168,7 +1168,7 @@ impl X25519Guest for Component {
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy)?;
+            polymorph_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1185,7 +1185,7 @@ impl X25519Guest for Component {
     > {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let (secret, public) =
-            rng_infallible(lann_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy))?;
+            rng_infallible(polymorph_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy))?;
         Ok((
             key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
             key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
@@ -1198,7 +1198,7 @@ impl X25519Guest for Component {
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_x25519_secret_key_jwk(UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_x25519_secret_key_jwk(UnwrapInput::take(input), policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1210,7 +1210,7 @@ impl X25519Guest for Component {
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_x25519_secret_key_pkcs8(UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_x25519_secret_key_pkcs8(UnwrapInput::take(input), policy)?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1223,7 +1223,7 @@ impl EcdhGuest for Component {
         raw: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
         let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw)?;
+            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1234,7 +1234,7 @@ impl EcdhGuest for Component {
         spki: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
         let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki)?;
+            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1245,7 +1245,7 @@ impl EcdhGuest for Component {
         jwk: String,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
         let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk)?;
+            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1257,7 +1257,7 @@ impl EcdhGuest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
             variant.into(),
             &jwk,
             policy,
@@ -1273,7 +1273,7 @@ impl EcdhGuest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
             variant.into(),
             &pkcs8,
             policy,
@@ -1295,7 +1295,7 @@ impl EcdhGuest for Component {
     > {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let (secret, public) = rng_infallible(
-            lann_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy),
+            polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy),
         )?;
         Ok((
             key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
@@ -1309,7 +1309,7 @@ impl EcdhGuest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_ecdh_secret_key_jwk(
+        let material = polymorph_webcrypto_core::unwrap_ecdh_secret_key_jwk(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -1325,7 +1325,7 @@ impl EcdhGuest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(
+        let material = polymorph_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -1374,7 +1374,7 @@ impl AesGcmGuest for Component {
         options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::derive_aes_gcm_key(
+        let material = polymorph_webcrypto_core::derive_aes_gcm_key(
             &input.get::<DeriveInput>().material,
             variant.into(),
             policy,
@@ -1388,7 +1388,7 @@ impl AesGcmGuest for Component {
         options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_aes_gcm_key(
+        let material = polymorph_webcrypto_core::unwrap_aes_gcm_key(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -1402,7 +1402,7 @@ impl AesGcmGuest for Component {
         options: ExportedAeadKeyOptions,
     ) -> Result<ExportedAeadKey, Error> {
         let policy = options.get::<AeadKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_aes_gcm_key_jwk(
+        let material = polymorph_webcrypto_core::unwrap_aes_gcm_key_jwk(
             variant.into(),
             UnwrapInput::take(input),
             policy,
@@ -1584,7 +1584,7 @@ macro_rules! cipher_minting {
                 options: ExportedCipherKeyOptions,
             ) -> Result<ExportedCipherKey, Error> {
                 let policy = options.get::<CipherKeyOptions>().policy.get();
-                let material = lann_webcrypto_core::derive_cipher_key(
+                let material = polymorph_webcrypto_core::derive_cipher_key(
                     &input.get::<DeriveInput>().material,
                     $mode,
                     variant.into(),
@@ -1599,7 +1599,7 @@ macro_rules! cipher_minting {
                 options: ExportedCipherKeyOptions,
             ) -> Result<ExportedCipherKey, Error> {
                 let policy = options.get::<CipherKeyOptions>().policy.get();
-                let material = lann_webcrypto_core::unwrap_cipher_key(
+                let material = polymorph_webcrypto_core::unwrap_cipher_key(
                     $mode,
                     variant.into(),
                     UnwrapInput::take(input),
@@ -1614,7 +1614,7 @@ macro_rules! cipher_minting {
                 options: ExportedCipherKeyOptions,
             ) -> Result<ExportedCipherKey, Error> {
                 let policy = options.get::<CipherKeyOptions>().policy.get();
-                let material = lann_webcrypto_core::unwrap_cipher_key_jwk(
+                let material = polymorph_webcrypto_core::unwrap_cipher_key_jwk(
                     $mode,
                     variant.into(),
                     UnwrapInput::take(input),
@@ -1823,7 +1823,7 @@ impl Ed25519SignGuest for Component {
         options: signature_iface::SigningKeyOptions,
     ) -> Result<signature_iface::SigningKey, Error> {
         let policy = options.get::<SigningKeyOptions>().policy.get();
-        let material = lann_webcrypto_core::unwrap_ed25519_signing_key_pkcs8(
+        let material = polymorph_webcrypto_core::unwrap_ed25519_signing_key_pkcs8(
             UnwrapInput::take(input),
             policy,
         )?;
@@ -1836,7 +1836,7 @@ impl Ed25519SignGuest for Component {
     ) -> Result<signature_iface::SigningKey, Error> {
         let policy = options.get::<SigningKeyOptions>().policy.get();
         let material =
-            lann_webcrypto_core::unwrap_ed25519_signing_key_jwk(UnwrapInput::take(input), policy)?;
+            polymorph_webcrypto_core::unwrap_ed25519_signing_key_jwk(UnwrapInput::take(input), policy)?;
         Ok(signature_iface::SigningKey::new(SigningKey { material }))
     }
 }

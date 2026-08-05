@@ -6,7 +6,7 @@
 // parent's execArgv, so `--experimental-wasm-jspi` carries over.
 import { readFile } from "node:fs/promises";
 import { parentPort, workerData } from "node:worker_threads";
-import { inventoryLookup, runCases } from "@lann/component-test-js/harness";
+import { inventoryLookup, runCases } from "@polymorph/component-test-js/harness";
 import { Context } from "../context.js";
 
 const { suite, missing, only, shard } = workerData;

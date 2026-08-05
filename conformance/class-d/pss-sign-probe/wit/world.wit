@@ -11,11 +11,11 @@
 // resources and orphans the import (the mechanism is documented on
 // `../oaep-probe/wit/world.wit` and in the `class-d` recipe).
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/`,
-// pulled in through the `deps/lann-webcrypto` symlink.
+// The `polymorph:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/polymorph-webcrypto` symlink.
 package conformance:class-d-pss-sign-probe;
 
 world pss-sign-probe {
     @unstable(feature = rsa-sign)
-    import lann:webcrypto/rsa-pss-sign@0.1.0;
+    import polymorph:webcrypto/rsa-pss-sign@0.1.0;
 }

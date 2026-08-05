@@ -1,7 +1,7 @@
-//! `lann-webcrypto-guest-provider`: a wasm **component** that runs RustCrypto *in-guest*
-//! and exports the `lann:webcrypto` package surface.
+//! `polymorph-webcrypto-guest-provider`: a wasm **component** that runs RustCrypto *in-guest*
+//! and exports the `polymorph:webcrypto` package surface.
 //!
-//! This is the third implementation alongside the `lann-webcrypto-wasmtime` (RustCrypto,
+//! This is the third implementation alongside the `polymorph-webcrypto-wasmtime` (RustCrypto,
 //! native) and `webcrypto-jco` (browser Web Crypto) hosts. Unlike those two — which
 //! satisfy the guest's imports host-side — this one is itself a component: the
 //! cryptography runs entirely inside wasm, and key generation draws on the

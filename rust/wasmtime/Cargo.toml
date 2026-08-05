@@ -1,9 +1,9 @@
 [package]
-name = "lann-webcrypto-wasmtime"
+name = "polymorph-webcrypto-wasmtime"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Wasmtime host implementation of the lann:webcrypto interfaces, backed by RustCrypto."
+description = "Wasmtime host implementation of the polymorph:webcrypto interfaces, backed by RustCrypto."
 
 [dependencies]
 # Wasmtime with component-model async (streams/futures) support. The
@@ -17,5 +17,5 @@ futures = "0.3"
 # waiter are the parts a hand-written queue here got wrong.
 mea = "0.6"
 # The cryptography itself, shared verbatim with the in-guest provider.
-lann-webcrypto-core = { path = "../core" }
+polymorph-webcrypto-core = { path = "../core" }
 

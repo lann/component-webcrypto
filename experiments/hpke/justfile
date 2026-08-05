@@ -10,21 +10,21 @@ build-component:
         target/wasm32-unknown-unknown/release/hpke_guest.wasm \
         -o build/hpke.component.wasm
 
-# Run the smoke tests against the Wasmtime host (lann-webcrypto-wasmtime serves
-# the lann:webcrypto imports natively). Builds the component itself.
+# Run the smoke tests against the Wasmtime host (polymorph-webcrypto-wasmtime serves
+# the polymorph:webcrypto imports natively). Builds the component itself.
 test:
     cargo test -p hpke-host-test
 
-# Compose the fully in-guest smoke run: the HPKE guest's lann:webcrypto
+# Compose the fully in-guest smoke run: the HPKE guest's polymorph:webcrypto
 # imports are satisfied by the repository's in-guest provider (RustCrypto in
 # wasm), then a CLI driver (async wasi:cli/run) is plugged on top. Mirrors
 # the root justfile's `_compose`.
 compose: build-component
     cargo build --release -p hpke-driver --target wasm32-wasip2
-    cargo build --release -p lann-webcrypto-guest-provider --target wasm32-wasip2 \
+    cargo build --release -p polymorph-webcrypto-guest-provider --target wasm32-wasip2 \
         --manifest-path ../../Cargo.toml
     wac plug build/hpke.component.wasm \
-        --plug ../../target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
+        --plug ../../target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm \
         -o build/hpke-with-crypto.wasm
     wac plug target/wasm32-wasip2/release/hpke_driver.wasm \
         --plug build/hpke-with-crypto.wasm \

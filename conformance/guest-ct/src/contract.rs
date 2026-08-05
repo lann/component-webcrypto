@@ -23,15 +23,15 @@ use conformance_harness::stream::{
     sign_ok, try_sign, verify_ok, verify_op, Schedule,
 };
 use conformance_harness::{b64url, describe, expect, expect_bytes, expect_err, unhex, ErrKind};
-use lann_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
-use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
-use lann_webcrypto_guest::bindings::derivation::DeriveInput;
-use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
-use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
-use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
-use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::{
+use polymorph_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
+use polymorph_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
+use polymorph_webcrypto_guest::bindings::derivation::DeriveInput;
+use polymorph_webcrypto_guest::bindings::ecdh::EcdhVariant;
+use polymorph_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
+use polymorph_webcrypto_guest::bindings::sha2::Sha2Variant;
+use polymorph_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::{
     aes_cbc, aes_ctr, aes_gcm, ecdh, hkdf, hkdf_sha2, hmac_sha1, hmac_sha2, pbkdf2, pbkdf2_sha2,
     x25519,
 };

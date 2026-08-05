@@ -1,9 +1,9 @@
 {
-  "name": "@lann/webcrypto-componentize",
+  "name": "@polymorph/webcrypto-componentize",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A crypto.subtle subset for JS guests componentized with componentize-js, backed by the lann:webcrypto imports. No runtime dependencies; the component's world supplies them.",
+  "description": "A crypto.subtle subset for JS guests componentized with componentize-js, backed by the polymorph:webcrypto imports. No runtime dependencies; the component's world supplies them.",
   "exports": "./webcrypto.js",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -9,7 +9,7 @@ repository makes. Specifically:
 - **No stability.** An experiment may be rewritten, broken, or deleted
   tomorrow. Do not depend on anything in this directory.
 - **No review bar.** The code here is exploratory: it exists to exercise the
-  `lann:webcrypto` interfaces from the position of a real consumer and to
+  `polymorph:webcrypto` interfaces from the position of a real consumer and to
   surface findings about the package surface, not to ship.
 
 Each experiment is its own Cargo workspace (deliberately not a member of the
@@ -21,5 +21,5 @@ repository; it does not harden in place here.
 ## Contents
 
 - [`hpke/`](hpke/) — RFC 9180 HPKE as a wasm component whose cryptography is
-  entirely `lann:webcrypto` imports (via the `hpke-rs` pluggable-provider
+  entirely `polymorph:webcrypto` imports (via the `hpke-rs` pluggable-provider
   engine).

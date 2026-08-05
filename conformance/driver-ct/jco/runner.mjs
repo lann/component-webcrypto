@@ -7,11 +7,11 @@
 // and the Node counterpart of the browser driver's Web Worker pool
 // (run-browser.mjs). Workers interleave, so the rows are re-sorted
 // into suite order before emission. The inventory parsing and per-case
-// loop live in the upstream runner core (@lann/component-test-js, the rev-pinned git dependency — one harness for every runner, per lann/component-test#5).
+// loop live in the upstream runner core (@polymorph/component-test-js, the rev-pinned git dependency — one harness for every runner, per polymorph-components/polymorph-test#5).
 import { availableParallelism } from "node:os";
 import { parseArgs } from "node:util";
 import { Worker } from "node:worker_threads";
-import { envelope, mergeCounts, workerCount } from "@lann/component-test-js/harness";
+import { envelope, mergeCounts, workerCount } from "@polymorph/component-test-js/harness";
 
 const { values } = parseArgs({
   options: {

@@ -1,6 +1,6 @@
 # timing-lab
 
-A dudect-style statistical timing lab for the composed `lann:webcrypto`
+A dudect-style statistical timing lab for the composed `polymorph:webcrypto`
 in-guest provider: the same component the demos and conformance tests exercise,
 measured entirely in-guest under `wasmtime`.
 

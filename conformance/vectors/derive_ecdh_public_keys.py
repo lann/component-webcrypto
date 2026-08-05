@@ -3,7 +3,7 @@
 files.
 
 The Wycheproof ECDH `asn`- and `ecpoint`-encoded vectors carry each test's
-private key as a raw scalar, but `lann:webcrypto`'s ECDH secret-key imports
+private key as a raw scalar, but `polymorph:webcrypto`'s ECDH secret-key imports
 are the platform formats — an EC private JWK, whose public coordinates
 `x`/`y` RFC 7518 makes mandatory, or PKCS#8. This script derives those
 coordinates — the affine point `d * G` — for every vector, so the

@@ -1,8 +1,8 @@
-# `experiments/hpke` — RFC 9180 HPKE over `lann:webcrypto`
+# `experiments/hpke` — RFC 9180 HPKE over `polymorph:webcrypto`
 
-An experimental consumer of the `lann:webcrypto` package: a wasm component
+An experimental consumer of the `polymorph:webcrypto` package: a wasm component
 exporting RFC 9180 HPKE (base mode, single-shot) whose cryptography is
-entirely `lann:webcrypto` imports. Read
+entirely `polymorph:webcrypto` imports. Read
 [`experiments/README.md`](../README.md) first: nothing here carries the
 repository's guarantees — no CI, no stability, delete-at-will.
 
@@ -20,7 +20,7 @@ become a real deliverable it would graduate to its own repository.
 - **Engine**: [`hpke-rs`](https://crates.io/crates/hpke-rs), which is
   generic over a pluggable crypto provider (`hpke_rs_crypto::HpkeCrypto`
   — a flat, synchronous, byte-oriented trait). `guest/src/provider.rs`
-  implements that trait over the `lann:webcrypto` imports; hpke-rs
+  implements that trait over the `polymorph:webcrypto` imports; hpke-rs
   contributes the KEM/key-schedule state machine and none of the crypto.
 - **Exports** (`guest/wit/world.wit`): single-shot base-mode
   `seal`/`open`, `generate-key-pair`, `derive-key-pair`, and a
@@ -33,7 +33,7 @@ become a real deliverable it would graduate to its own repository.
 ```
 guest/       the wasm component (wit-bindgen; wasm32-unknown-unknown +
              `wasm-tools component new`, the crypto-demo pattern)
-host-test/   Wasmtime-host smoke tests: lann-webcrypto-wasmtime serves the
+host-test/   Wasmtime-host smoke tests: polymorph-webcrypto-wasmtime serves the
              imports natively; round trips + RFC 9180 A.1/A.2 known answers
 driver/      wasi:cli/run driver for the composed run (the demo-driver
              pattern)
@@ -50,8 +50,8 @@ Both smoke runs execute the component under a real wasm host; there are no
 native unit tests of the HPKE logic.
 
 ```
-just test           # Wasmtime host: lann-webcrypto-wasmtime (RustCrypto) serves
-                    # the lann:webcrypto imports. Round trips, tamper and
+just test           # Wasmtime host: polymorph-webcrypto-wasmtime (RustCrypto) serves
+                    # the polymorph:webcrypto imports. Round trips, tamper and
                     # wrong-key/AAD failures, RFC 9180 A.1 + A.2 base-mode
                     # known answers (DeriveKeyPair, deterministic seal, open).
 just test-composed  # Fully in-guest: the component's imports are satisfied

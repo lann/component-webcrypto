@@ -6,7 +6,7 @@ publish = false
 description = "Wasmtime-host smoke tests for the experimental HPKE component."
 
 [dependencies]
-lann-webcrypto-wasmtime = { path = "../../../rust/wasmtime" }
+polymorph-webcrypto-wasmtime = { path = "../../../rust/wasmtime" }
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
 anyhow = "1"
 

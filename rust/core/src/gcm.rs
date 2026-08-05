@@ -7,7 +7,7 @@
 //! GCM is assembled per NIST SP 800-38D from the same primitives the
 //! `aes-gcm` crate composes: `ghash` (masked-multiply universal hash) and
 //! `ctr` over the fixsliced `aes`, so the timing-channel classification is
-//! unchanged (see lann-webcrypto-guest-provider's README). The standard-parameter path
+//! unchanged (see polymorph-webcrypto-guest-provider's README). The standard-parameter path
 //! (96-bit nonce, 16-byte tag) does not come through here: callers route
 //! it to the `aes-gcm` crate, and the unit tests pin this module to the
 //! crate's output on the shared parameter point.

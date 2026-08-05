@@ -1,4 +1,4 @@
-//! Hand-written API-contract probes: the parts of the `lann:webcrypto`
+//! Hand-written API-contract probes: the parts of the `polymorph:webcrypto`
 //! contract neither the Wycheproof vectors nor the per-kind [`contract`]
 //! batteries express — error variants for misuse, the seal/open
 //! stream-closure rule, parameter-space contracts, chaining semantics,
@@ -25,13 +25,13 @@ use conformance_harness::{
     b64url, describe, expect, expect_bytes, expect_err, probes, unhex, ErrKind,
     FEATURE_SHA1_CHECKED, P256_A25_X, P256_A25_Y,
 };
-use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::ecdsa_verify::{
+use polymorph_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
-use lann_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
+use polymorph_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
+use polymorph_webcrypto_guest::bindings::types::Error;
 
 /// The features a bare tag in the `probes!` table stands for. Which
 /// features exist is this suite's business, not the harness's.
@@ -120,7 +120,7 @@ pub async fn run_declined(features: &[&str]) -> Result<String, String> {
 /// Generate an AES-256 key, rendering a WIT error as a probe failure.
 async fn generate_key_256(
     extractable: bool,
-) -> Result<lann_webcrypto_guest::bindings::aead::AeadKey, String> {
+) -> Result<polymorph_webcrypto_guest::bindings::aead::AeadKey, String> {
     generate_key(AesVariant::Aes256, extractable)
         .await
         .map_err(|e| describe("generate-key", &e))
@@ -347,7 +347,7 @@ async fn sign_prefix_drop() -> Result<(), String> {
 
     // Feed only a prefix of the message's chunk schedule, then drop the
     // writer as if the producer failed midway.
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let feed_prefix = async {
         let mut tx = tx;
         let mut sent = 0usize;
@@ -677,11 +677,11 @@ async fn large_stream() -> Result<(), String> {
     let key = import_hmac_key(Sha2Variant::Sha256, b"large-stream key".to_vec(), false)
         .await
         .map_err(|e| describe("import-key-raw", &e))?;
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (chunked, fed) = futures::join!(key.sign(rx), feed(tx, boundary_chunks(&payload)));
     fed?;
     let chunked = chunked.map_err(|e| describe("sign over boundary chunks", &e))?;
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (whole, fed) = futures::join!(key.sign(rx), feed(tx, vec![payload.clone()]));
     fed?;
     let whole = whole.map_err(|e| describe("sign over one whole write", &e))?;
@@ -689,7 +689,7 @@ async fn large_stream() -> Result<(), String> {
 
     let key = generate_key_256(false).await?;
     let nonce = [5u8; 12];
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (sealed, fed) = futures::join!(
         key.seal(nonce.to_vec(), b"large aad".to_vec(), None, rx),
         feed(tx, boundary_chunks(&payload))
@@ -697,7 +697,7 @@ async fn large_stream() -> Result<(), String> {
     fed?;
     let sealed = sealed.map_err(|e| describe("seal", &e))?.collect().await;
     expect(sealed.len(), LEN + 16, "sealed length")?;
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (opened, fed) = futures::join!(
         key.open(nonce.to_vec(), b"large aad".to_vec(), None, rx),
         feed(tx, boundary_chunks(&sealed))
@@ -729,14 +729,14 @@ async fn stream_empty_writes() -> Result<(), String> {
         chunks.push(chunk);
         chunks.push(Vec::new());
     }
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (tag, fed) = futures::join!(key.sign(rx), feed(tx, chunks));
     fed?;
     let tag = tag.map_err(|e| describe("sign with interleaved empty writes", &e))?;
     expect_bytes(&tag, &expected, "tag over a stream with empty writes")?;
 
     // A stream of nothing but empty writes is an empty input, not a stall.
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (empty_tag, fed) = futures::join!(
         key.sign(rx),
         feed(tx, vec![Vec::new(), Vec::new(), Vec::new()])
@@ -753,7 +753,7 @@ async fn stream_empty_writes() -> Result<(), String> {
         .await
         .map_err(|e| describe("generate-key", &e))?;
     let nonce = [7u8; 12];
-    let (tx, rx) = lann_webcrypto_guest::wit_stream::new();
+    let (tx, rx) = polymorph_webcrypto_guest::wit_stream::new();
     let (sealed, fed) = futures::join!(
         aes.seal(nonce.to_vec(), b"empty-write aad".to_vec(), None, rx),
         feed(tx, vec![Vec::new(), payload.clone(), Vec::new()])
@@ -1039,8 +1039,8 @@ async fn jwk_semantics() -> Result<(), String> {
 /// grants' enforcement and getters are the contract battery's `usage`
 /// area, per family.)
 async fn aead_wrap_grants() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::aes_gcm;
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aes_gcm;
 
     let options = AeadKeyOptions::new();
     options.can_wrap(true);
@@ -1095,8 +1095,8 @@ async fn aead_wrap_grants() -> Result<(), String> {
 /// untouched options resource cannot generate, and a granted key reports
 /// the grant through `can-sign`.
 async fn signing_usage_policy() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ed25519_sign;
-    use lann_webcrypto_guest::bindings::signature::SigningKeyOptions;
+    use polymorph_webcrypto_guest::bindings::ed25519_sign;
+    use polymorph_webcrypto_guest::bindings::signature::SigningKeyOptions;
 
     expect_err(
         "zero-usage generate-key",
@@ -1119,11 +1119,11 @@ async fn signing_usage_policy() -> Result<(), String> {
 /// HMAC length default (the hash's block size) rides the same
 /// get-key-length step `generate-key` uses.
 async fn hkdf_derive_key_equivalence() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf_sha2;
-    use lann_webcrypto_guest::bindings::hmac_sha2;
-    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aes_gcm;
+    use polymorph_webcrypto_guest::bindings::hkdf_sha2;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::mac::MacKeyOptions;
 
     let ikm = import_ikm(b"equivalence input keying material".to_vec(), true, true)
         .await
@@ -1189,7 +1189,7 @@ async fn hkdf_derive_key_equivalence() -> Result<(), String> {
 /// cases, and KDF-from-KDF chaining fails as the platform's
 /// `deriveKey(… → "HKDF")` does.
 async fn hkdf_params_and_chaining() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hkdf_sha2;
+    use polymorph_webcrypto_guest::bindings::hkdf_sha2;
 
     let empty = import_ikm(Vec::new(), true, true)
         .await
@@ -1244,10 +1244,10 @@ async fn hkdf_params_and_chaining() -> Result<(), String> {
 /// no `pbkdf2-sha2.prepare-from` at all, and `hkdf-sha2.prepare-from` refuses KDF
 /// upstreams of either flavor.
 async fn pbkdf2_contract() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::aes_gcm;
-    use lann_webcrypto_guest::bindings::hkdf_sha2;
-    use lann_webcrypto_guest::bindings::pbkdf2_sha2;
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aes_gcm;
+    use polymorph_webcrypto_guest::bindings::hkdf_sha2;
+    use polymorph_webcrypto_guest::bindings::pbkdf2_sha2;
 
     // RFC 7914 §11 known answer (c = 1), through the full WIT surface.
     let password = import_password(b"passwd".to_vec(), true, true)
@@ -1326,7 +1326,7 @@ async fn pbkdf2_contract() -> Result<(), String> {
 /// import contract's rejections, extractability recording, and the
 /// zero-grant mint refusals.
 async fn x25519_key_contract() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::x25519;
+    use polymorph_webcrypto_guest::bindings::x25519;
 
     let (secret, public) = generate_x25519_key(true, true)
         .await
@@ -1566,7 +1566,7 @@ async fn x25519_agree_contract() -> Result<(), String> {
 /// IKM — and chaining is gated by the `derive-key` grant, refusing
 /// `not-permitted` from a key-less input.
 async fn x25519_chaining() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hkdf_sha2;
+    use polymorph_webcrypto_guest::bindings::hkdf_sha2;
 
     let shared = unhex(RFC7748_SHARED);
     let alice =
@@ -1637,7 +1637,7 @@ async fn x25519_chaining() -> Result<(), String> {
 /// the wrong-length and crv-mismatch import rejections, extractability
 /// recording, and the zero-grant mint refusal.
 async fn ecdh_key_contract() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
+    use polymorph_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
 
     let (secret, public) = generate_ecdh_key(EcdhVariant::P256, true, true)
         .await
@@ -1818,7 +1818,7 @@ async fn ecdh_key_contract() -> Result<(), String> {
 /// unobservable while X25519 was the only algorithm minting the kind's
 /// resources.
 async fn ecdh_agree_contract() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
+    use polymorph_webcrypto_guest::bindings::ecdh::EcdhVariant;
 
     for (variant, size, what) in [
         (EcdhVariant::P256, 32usize, "P-256"),
@@ -1892,8 +1892,8 @@ async fn ecdh_agree_contract() -> Result<(), String> {
 /// secret imported as IKM, and chaining rides the `derive-key` grant,
 /// refusing `not-permitted` from a key-less input.
 async fn ecdh_chaining() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
-    use lann_webcrypto_guest::bindings::hkdf_sha2;
+    use polymorph_webcrypto_guest::bindings::ecdh::EcdhVariant;
+    use polymorph_webcrypto_guest::bindings::hkdf_sha2;
 
     let shared = unhex(ECDH_P256_SHARED);
     let secret_jwk = ecdh_secret_jwk(
@@ -1994,8 +1994,8 @@ fn rfc8410_spki(oid_tail: u8, key: &[u8]) -> Vec<u8> {
 /// → re-import → raw export is the identity, a wrong-curve SPKI fails
 /// `invalid-key`, and the JWK `alg` allowlists hold on both algorithms.
 async fn sig_public_format_imports() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdsa_verify;
-    use lann_webcrypto_guest::bindings::ed25519_verify;
+    use polymorph_webcrypto_guest::bindings::ecdsa_verify;
+    use polymorph_webcrypto_guest::bindings::ed25519_verify;
 
     // Ed25519: the RFC 8032 TEST 3 public key through all three formats,
     // each verifying the pinned deterministic signature.
@@ -2182,7 +2182,7 @@ async fn sig_public_format_imports() -> Result<(), String> {
 /// d-less OKP JWK is not a signing key.
 async fn ed25519_private_format_imports() -> Result<(), String> {
     use crate::mint::signing_options;
-    use lann_webcrypto_guest::bindings::ed25519_sign;
+    use polymorph_webcrypto_guest::bindings::ed25519_sign;
 
     let seed = unhex(ED25519_TEST3_SEED);
     let msg = unhex(ED25519_TEST3_MSG);
@@ -2498,7 +2498,7 @@ async fn rsa_key_contract() -> Result<(), String> {
         import_rsa_pss_verifying_key_jwk, import_rsa_pss_verifying_key_spki,
         import_rsassa_verifying_key_jwk, import_rsassa_verifying_key_spki,
     };
-    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+    use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
 
     let spki = unhex(RSA_2048_SPKI);
     let v15 = import_rsassa_verifying_key_spki(RsaVariant::Sha256, spki.clone())
@@ -2641,7 +2641,7 @@ async fn rsa_admission_contract() -> Result<(), String> {
         import_rsa_pss_verifying_key_spki, import_rsassa_verifying_key_jwk,
         import_rsassa_verifying_key_spki,
     };
-    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+    use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
 
     let spki_768 = unhex(RSA_768_SPKI);
     expect_err(
@@ -2713,7 +2713,7 @@ async fn rsa_admission_contract() -> Result<(), String> {
 /// and fails `authentication-failed` under the other's.
 async fn rsa_pss_salt_binding() -> Result<(), String> {
     use crate::mint::import_rsa_pss_verifying_key_spki;
-    use lann_webcrypto_guest::bindings::rsa::RsaVariant;
+    use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
 
     let spki = unhex(RSA_2048_SPKI);
     let sig_salt32 = unhex(RSA_PSS_SALT32_SIG);
@@ -2762,7 +2762,7 @@ async fn rsa_pss_salt_binding() -> Result<(), String> {
 /// PKCS#8 imports still derive the known shared secret, the gated secret
 /// exports round-trip, and the gate holds on non-extractable keys.
 async fn x25519_format_roundtrips() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::x25519;
+    use polymorph_webcrypto_guest::bindings::x25519;
 
     let alice_x = unhex(RFC7748_ALICE_X);
     let alice_d = unhex(RFC7748_ALICE_D);
@@ -2890,7 +2890,7 @@ fn p256_ec_spki(point: &[u8]) -> Vec<u8> {
 /// exports, cross-curve material is rejected on every import format, and
 /// the declared-but-unserved P-521 declines `unsupported`.
 async fn ecdh_format_roundtrips() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
+    use polymorph_webcrypto_guest::bindings::ecdh::{self, EcdhVariant};
 
     let d = unhex(ECDH_P256_D);
     let x = unhex(ECDH_P256_X);
@@ -3113,8 +3113,8 @@ const SHATTERED_2: &str = "255044462d312e330a25e2e3cfd30a0a0a312030206f626a0a3c3
 /// and the mitigating posture returns the deterministic safe hashes, under
 /// which the pair no longer collides.
 async fn sha1_checked_postures() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::sha1_checked;
-    use lann_webcrypto_guest::bindings::types::Error;
+    use polymorph_webcrypto_guest::bindings::sha1_checked;
+    use polymorph_webcrypto_guest::bindings::types::Error;
 
     let rejecting =
         sha1_checked::make_rejecting_digest().map_err(|e| describe("make-rejecting-digest", &e))?;
@@ -3148,7 +3148,7 @@ async fn sha1_checked_postures() -> Result<(), String> {
         let got = compute_op(&rejecting, m, Schedule::Whole).await?;
         match got {
             Err(Error::Extension(ext))
-                if ext.origin == "lann:webcrypto"
+                if ext.origin == "polymorph:webcrypto"
                     && ext.name == "collision-detected"
                     && ext.message == "input carries a SHA-1 collision attack pattern" => {}
             Err(other) => {
@@ -3181,7 +3181,7 @@ async fn sha1_checked_postures() -> Result<(), String> {
 /// The decline assertion for targets declaring `sha1-checked` missing:
 /// both constructors must fail `unsupported`.
 async fn sha1_checked_minting_declined() -> Result<String, String> {
-    use lann_webcrypto_guest::bindings::sha1_checked;
+    use polymorph_webcrypto_guest::bindings::sha1_checked;
 
     expect_err(
         "make-rejecting-digest",
@@ -3364,13 +3364,13 @@ async fn cbc_uniform_failure() -> Result<(), String> {
 /// `derive-bits` + `import-key-raw` over the same HKDF derivation (the
 /// `hkdf_derive_key_equivalence` pattern).
 async fn cipher_derive_key() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr, hkdf_sha2};
+    use polymorph_webcrypto_guest::bindings::{aes_cbc, aes_ctr, hkdf_sha2};
 
     let ikm = import_ikm(vec![0x0b; 22], true, true)
         .await
         .map_err(|e| describe("import-ikm", &e))?;
     let input = hkdf_sha2::prepare(
-        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        polymorph_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &ikm,
         b"salt".to_vec(),
         b"info".to_vec(),
@@ -3441,7 +3441,7 @@ async fn cipher_derive_key() -> Result<(), String> {
 /// shared chaining and iteration rules.
 async fn sha1_derive_surface() -> Result<(), String> {
     use crate::mint::mac_options;
-    use lann_webcrypto_guest::bindings::{
+    use polymorph_webcrypto_guest::bindings::{
         hkdf_sha1, hkdf_sha2, hmac_sha1, pbkdf2_sha1, pbkdf2_sha2,
     };
 
@@ -3485,7 +3485,7 @@ async fn sha1_derive_surface() -> Result<(), String> {
     // And the SHA-2 chain from the same resources still works: one ikm
     // parameterizes either hash family.
     hkdf_sha2::prepare(
-        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        polymorph_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &ikm,
         b"salt".to_vec(),
         b"info".to_vec(),
@@ -3504,7 +3504,7 @@ async fn sha1_derive_surface() -> Result<(), String> {
         "prepared a zero-iteration derivation",
     )?;
     pbkdf2_sha2::prepare(
-        lann_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
+        polymorph_webcrypto_guest::bindings::sha2::Sha2Variant::Sha256,
         &password,
         b"salt".to_vec(),
         1,
@@ -3518,7 +3518,7 @@ async fn sha1_derive_surface() -> Result<(), String> {
 /// the exported bytes, `unwrap` verifies (a tampered wrap fails
 /// `authentication-failed`), and the raw unwrap mint recovers the material.
 async fn aead_wrap_operations() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
 
     let kek = generate_key(AesVariant::Aes256, false)
         .await
@@ -3594,8 +3594,8 @@ async fn wrap_input_gates() -> Result<(), String> {
 /// and the unwrap domain (out-of-domain input is `authentication-failed`,
 /// indistinguishable from a bad ICV).
 async fn kw_key_contract() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aes_kw;
-    use lann_webcrypto_guest::bindings::key_wrap::KwKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aes_kw;
+    use polymorph_webcrypto_guest::bindings::key_wrap::KwKeyOptions;
 
     let key = import_kw_key(AesVariant::Aes256, vec![1u8; 32], true)
         .await
@@ -3691,7 +3691,7 @@ async fn kw_key_contract() -> Result<(), String> {
 /// a multiple of 8 (observable in the wrapped length), and the JWK unwrap
 /// mint's parse tolerates the trailing padding.
 async fn kw_jwk_padding() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
 
     let kek = generate_kw_key(AesVariant::Aes128, false)
         .await
@@ -3737,7 +3737,7 @@ async fn kw_jwk_padding() -> Result<(), String> {
 /// malformed CBC unwrap fails with the mode's one fixed `other` message,
 /// never `authentication-failed`.
 async fn cipher_wrap_uniform_failure() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aes_cbc;
+    use polymorph_webcrypto_guest::bindings::aes_cbc;
 
     // Full grants: the comparison below runs both `wrap` and `encrypt` on
     // one key (grant enforcement is `cipher_usage_policy`'s subject).
@@ -3778,8 +3778,8 @@ async fn cipher_wrap_uniform_failure() -> Result<(), String> {
 /// The unwrap-path JWK `use`/`key_ops` checks: the mints validate the two
 /// members in the caller's stead, with fixed `invalid-key` messages.
 async fn unwrap_jwk_usage_members() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hmac_sha2;
-    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::mac::MacKeyOptions;
 
     let kek = generate_key(AesVariant::Aes256, false)
         .await
@@ -3855,7 +3855,7 @@ async fn unwrap_jwk_usage_members() -> Result<(), String> {
 /// derivations without its bytes ever surfacing, agreeing with the same
 /// secret imported directly.
 async fn kdf_secret_unwrap() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::{hkdf, hkdf_sha2, pbkdf2, pbkdf2_sha2};
+    use polymorph_webcrypto_guest::bindings::{hkdf, hkdf_sha2, pbkdf2, pbkdf2_sha2};
 
     let kek = generate_key(AesVariant::Aes256, false)
         .await
@@ -3957,9 +3957,9 @@ async fn kdf_secret_unwrap() -> Result<(), String> {
 /// Wrap `input` under the AEAD `kek` and unwrap it back: the transport
 /// leg every unwrap-mint probe shares.
 async fn wrap_then_unwrap(
-    kek: &lann_webcrypto_guest::bindings::aead::AeadKey,
-    input: lann_webcrypto_guest::bindings::wrapping::WrapInput,
-) -> Result<lann_webcrypto_guest::bindings::wrapping::UnwrapInput, String> {
+    kek: &polymorph_webcrypto_guest::bindings::aead::AeadKey,
+    input: polymorph_webcrypto_guest::bindings::wrapping::WrapInput,
+) -> Result<polymorph_webcrypto_guest::bindings::wrapping::UnwrapInput, String> {
     let nonce = [0x51u8; 12];
     let wrapped = kek
         .wrap(nonce.to_vec(), b"unwrap-mint probe".to_vec(), None, input)
@@ -3975,7 +3975,7 @@ async fn wrap_then_unwrap(
 /// signs, and verifies under the original public half; the minted key
 /// carries the mint's options.
 async fn signing_key_unwrap() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ed25519_sign;
+    use polymorph_webcrypto_guest::bindings::ed25519_sign;
 
     let (key, public) = generate_ed25519_key(true)
         .await
@@ -4036,7 +4036,7 @@ async fn signing_key_unwrap() -> Result<(), String> {
 /// JWK and as PKCS#8, mints back out through `unwrap-secret-key-*` and
 /// agrees with Bob's public to the vector's shared secret.
 async fn agreement_key_unwrap() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::x25519;
+    use polymorph_webcrypto_guest::bindings::x25519;
 
     let secret = x25519::import_secret_key_jwk(
         x25519_secret_jwk(&unhex(RFC7748_ALICE_X), &unhex(RFC7748_ALICE_D)),
@@ -4099,7 +4099,7 @@ async fn agreement_key_unwrap() -> Result<(), String> {
 /// KEK, and each minted key agrees with its original across an
 /// encrypt/decrypt round trip.
 async fn cipher_key_unwrap() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::{aes_cbc, aes_ctr};
+    use polymorph_webcrypto_guest::bindings::{aes_cbc, aes_ctr};
 
     let plaintext = b"cipher unwrap-mint probe";
 

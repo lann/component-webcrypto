@@ -1,5 +1,5 @@
-# The jco host library (@lann/webcrypto-jco): a browser-compatible
-# implementation of the lann:webcrypto imports over the Web Crypto API.
+# The jco host library (@polymorph/webcrypto-jco): a browser-compatible
+# implementation of the polymorph:webcrypto imports over the Web Crypto API.
 
 # Type-check the jco host against the interface definitions jco-transpile
 # derives from `wit/`. The definitions are generated on demand, so there is

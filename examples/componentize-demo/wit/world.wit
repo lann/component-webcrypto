@@ -1,51 +1,51 @@
 // Demo-only WIT for the `componentize-demo` example component: the world the
-// JS guest is componentized against. The shared `lann:webcrypto` package
+// JS guest is componentized against. The shared `polymorph:webcrypto` package
 // lives once at the repository root `wit/` and is pulled in through the
-// `deps/lann-webcrypto` symlink; the `demo:webcrypto-demo` package (the demo
+// `deps/polymorph-webcrypto` symlink; the `demo:webcrypto-demo` package (the demo
 // entry-point interface shared with the Rust `crypto-demo` guest) comes in
 // through the `deps/webcrypto-demo` symlink.
 package demo:componentize-webcrypto-demo@0.1.0;
 
 /// The world for a JS guest using the WebCrypto-subset library in
-/// `js/componentize/`: it imports exactly the `lann:webcrypto` surface the
+/// `js/componentize/`: it imports exactly the `polymorph:webcrypto` surface the
 /// library is backed by (HMAC-SHA-256 via `hmac-sha2`/`mac`, AES-256-GCM via
 /// `aes-gcm`/`aead`, and the derive model via `derivation`/`hkdf`/`pbkdf2`/
 /// `key-agreement`/`x25519`/`ecdh`, digests via `sha2`/`digest`, signatures via `signature`/`ed25519-*`/`ecdsa-verify`/`rsassa-pkcs1-v15-verify`/`rsa-pss-verify` — never `ecdsa-sign`, which the in-guest provider's class-D policy withholds) and exports the same demo entry point as the
 /// Rust `crypto-demo` guest, so the existing `crypto-demo-driver` can drive
 /// it.
 world componentize-demo {
-    import lann:webcrypto/types@0.1.0;
-    import lann:webcrypto/mac@0.1.0;
-    import lann:webcrypto/aead@0.1.0;
-    import lann:webcrypto/hmac-sha2@0.1.0;
-    import lann:webcrypto/hmac-sha1@0.1.0;
-    import lann:webcrypto/aes-gcm@0.1.0;
-    import lann:webcrypto/cipher@0.1.0;
-    import lann:webcrypto/aes-cbc@0.1.0;
-    import lann:webcrypto/aes-ctr@0.1.0;
-    import lann:webcrypto/wrapping@0.1.0;
-    import lann:webcrypto/key-wrap@0.1.0;
-    import lann:webcrypto/aes-kw@0.1.0;
-    import lann:webcrypto/derivation@0.1.0;
-    import lann:webcrypto/hkdf@0.1.0;
-    import lann:webcrypto/hkdf-sha2@0.1.0;
-    import lann:webcrypto/hkdf-sha1@0.1.0;
-    import lann:webcrypto/pbkdf2@0.1.0;
-    import lann:webcrypto/pbkdf2-sha2@0.1.0;
-    import lann:webcrypto/pbkdf2-sha1@0.1.0;
-    import lann:webcrypto/key-agreement@0.1.0;
-    import lann:webcrypto/x25519@0.1.0;
-    import lann:webcrypto/ecdh@0.1.0;
-    import lann:webcrypto/digest@0.1.0;
-    import lann:webcrypto/sha2@0.1.0;
+    import polymorph:webcrypto/types@0.1.0;
+    import polymorph:webcrypto/mac@0.1.0;
+    import polymorph:webcrypto/aead@0.1.0;
+    import polymorph:webcrypto/hmac-sha2@0.1.0;
+    import polymorph:webcrypto/hmac-sha1@0.1.0;
+    import polymorph:webcrypto/aes-gcm@0.1.0;
+    import polymorph:webcrypto/cipher@0.1.0;
+    import polymorph:webcrypto/aes-cbc@0.1.0;
+    import polymorph:webcrypto/aes-ctr@0.1.0;
+    import polymorph:webcrypto/wrapping@0.1.0;
+    import polymorph:webcrypto/key-wrap@0.1.0;
+    import polymorph:webcrypto/aes-kw@0.1.0;
+    import polymorph:webcrypto/derivation@0.1.0;
+    import polymorph:webcrypto/hkdf@0.1.0;
+    import polymorph:webcrypto/hkdf-sha2@0.1.0;
+    import polymorph:webcrypto/hkdf-sha1@0.1.0;
+    import polymorph:webcrypto/pbkdf2@0.1.0;
+    import polymorph:webcrypto/pbkdf2-sha2@0.1.0;
+    import polymorph:webcrypto/pbkdf2-sha1@0.1.0;
+    import polymorph:webcrypto/key-agreement@0.1.0;
+    import polymorph:webcrypto/x25519@0.1.0;
+    import polymorph:webcrypto/ecdh@0.1.0;
+    import polymorph:webcrypto/digest@0.1.0;
+    import polymorph:webcrypto/sha2@0.1.0;
     @unstable(feature = sha1-checked)
-    import lann:webcrypto/sha1-checked@0.1.0;
-    import lann:webcrypto/signature@0.1.0;
-    import lann:webcrypto/ed25519-verify@0.1.0;
-    import lann:webcrypto/ed25519-sign@0.1.0;
-    import lann:webcrypto/ecdsa-verify@0.1.0;
-    import lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
-    import lann:webcrypto/rsa-pss-verify@0.1.0;
+    import polymorph:webcrypto/sha1-checked@0.1.0;
+    import polymorph:webcrypto/signature@0.1.0;
+    import polymorph:webcrypto/ed25519-verify@0.1.0;
+    import polymorph:webcrypto/ed25519-sign@0.1.0;
+    import polymorph:webcrypto/ecdsa-verify@0.1.0;
+    import polymorph:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    import polymorph:webcrypto/rsa-pss-verify@0.1.0;
     import wasi:random/random@0.2.0;
 
     export demo:webcrypto-demo/demo@0.1.0;

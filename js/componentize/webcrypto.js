@@ -1,7 +1,7 @@
 // @ts-check
 // A WebCrypto-subset library for JS guests componentized with
 // componentize-js (https://github.com/dicej/componentize-js, the wit-dylib
-// reboot of ComponentizeJS), backed by the `lann:webcrypto` interfaces.
+// reboot of ComponentizeJS), backed by the `polymorph:webcrypto` interfaces.
 //
 // The surface mirrors `crypto.subtle` for the supported algorithms:
 //
@@ -32,7 +32,7 @@
 //   - `generateKey`             (the secret-key algorithms and the
 //     X25519, ECDH, and Ed25519 pairs)
 //
-// The component's world must import `lann:webcrypto/hmac-sha2@0.1.0`,
+// The component's world must import `polymorph:webcrypto/hmac-sha2@0.1.0`,
 // `hmac-sha1`, `aes-gcm`, `aes-cbc`, `aes-ctr`, `aes-kw`,
 // `wrapping`, `key-wrap`, `derivation`, `hkdf`,
 // `hkdf-sha2`, `hkdf-sha1`, `pbkdf2`, `pbkdf2-sha2`, `pbkdf2-sha1`,
@@ -153,33 +153,33 @@
 // derive sources mint with both grants and the platform's usage model is
 // enforced here, the jco host's agreement-key pattern.
 
-import * as hmacSha2 from "lann:webcrypto/hmac-sha2@0.1.0";
-import * as hmacSha1Iface from "lann:webcrypto/hmac-sha1@0.1.0";
-import * as aesGcm from "lann:webcrypto/aes-gcm@0.1.0";
-import * as aesCbcIface from "lann:webcrypto/aes-cbc@0.1.0";
-import * as aesCtrIface from "lann:webcrypto/aes-ctr@0.1.0";
-import * as aesKwIface from "lann:webcrypto/aes-kw@0.1.0";
-import * as hkdfIface from "lann:webcrypto/hkdf@0.1.0";
-import * as hkdfSha2Iface from "lann:webcrypto/hkdf-sha2@0.1.0";
-import * as hkdfSha1Iface from "lann:webcrypto/hkdf-sha1@0.1.0";
-import * as pbkdf2Iface from "lann:webcrypto/pbkdf2@0.1.0";
-import * as pbkdf2Sha2Iface from "lann:webcrypto/pbkdf2-sha2@0.1.0";
-import * as pbkdf2Sha1Iface from "lann:webcrypto/pbkdf2-sha1@0.1.0";
-import * as x25519Iface from "lann:webcrypto/x25519@0.1.0";
-import * as ecdhIface from "lann:webcrypto/ecdh@0.1.0";
-import * as sha2Iface from "lann:webcrypto/sha2@0.1.0";
-import * as sha1CheckedIface from "lann:webcrypto/sha1-checked@0.1.0";
-import * as ed25519Verify from "lann:webcrypto/ed25519-verify@0.1.0";
-import * as ed25519Sign from "lann:webcrypto/ed25519-sign@0.1.0";
-import * as ecdsaVerify from "lann:webcrypto/ecdsa-verify@0.1.0";
-import * as rsassaVerify from "lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0";
-import * as rsaPssVerifyIface from "lann:webcrypto/rsa-pss-verify@0.1.0";
+import * as hmacSha2 from "polymorph:webcrypto/hmac-sha2@0.1.0";
+import * as hmacSha1Iface from "polymorph:webcrypto/hmac-sha1@0.1.0";
+import * as aesGcm from "polymorph:webcrypto/aes-gcm@0.1.0";
+import * as aesCbcIface from "polymorph:webcrypto/aes-cbc@0.1.0";
+import * as aesCtrIface from "polymorph:webcrypto/aes-ctr@0.1.0";
+import * as aesKwIface from "polymorph:webcrypto/aes-kw@0.1.0";
+import * as hkdfIface from "polymorph:webcrypto/hkdf@0.1.0";
+import * as hkdfSha2Iface from "polymorph:webcrypto/hkdf-sha2@0.1.0";
+import * as hkdfSha1Iface from "polymorph:webcrypto/hkdf-sha1@0.1.0";
+import * as pbkdf2Iface from "polymorph:webcrypto/pbkdf2@0.1.0";
+import * as pbkdf2Sha2Iface from "polymorph:webcrypto/pbkdf2-sha2@0.1.0";
+import * as pbkdf2Sha1Iface from "polymorph:webcrypto/pbkdf2-sha1@0.1.0";
+import * as x25519Iface from "polymorph:webcrypto/x25519@0.1.0";
+import * as ecdhIface from "polymorph:webcrypto/ecdh@0.1.0";
+import * as sha2Iface from "polymorph:webcrypto/sha2@0.1.0";
+import * as sha1CheckedIface from "polymorph:webcrypto/sha1-checked@0.1.0";
+import * as ed25519Verify from "polymorph:webcrypto/ed25519-verify@0.1.0";
+import * as ed25519Sign from "polymorph:webcrypto/ed25519-sign@0.1.0";
+import * as ecdsaVerify from "polymorph:webcrypto/ecdsa-verify@0.1.0";
+import * as rsassaVerify from "polymorph:webcrypto/rsassa-pkcs1-v15-verify@0.1.0";
+import * as rsaPssVerifyIface from "polymorph:webcrypto/rsa-pss-verify@0.1.0";
 // Imported for evaluation only: `make-digest` returns `digest` resources,
 // whose generated class lives in this module (see the note below).
-import "lann:webcrypto/digest@0.1.0";
+import "polymorph:webcrypto/digest@0.1.0";
 // Likewise: the wrap operations return `wrap-input`/`unwrap-input`
 // resources, whose generated classes live in the `wrapping` module.
-import "lann:webcrypto/wrapping@0.1.0";
+import "polymorph:webcrypto/wrapping@0.1.0";
 import * as wasiRandom from "wasi:random/random@0.2.0";
 import * as witWorld from "wit-world";
 // The resource-owning interfaces must be imported (evaluated) for their
@@ -187,13 +187,13 @@ import * as witWorld from "wit-world";
 // `mac-key`/`aead-key` wrapper from the class in its interface's module.
 // The `*-key-options` classes are the same interfaces' mint-time policy
 // resources, constructed here per mint.
-import { MacKeyOptions } from "lann:webcrypto/mac@0.1.0";
-import { AeadKeyOptions } from "lann:webcrypto/aead@0.1.0";
-import { CipherKeyOptions } from "lann:webcrypto/cipher@0.1.0";
-import { KwKeyOptions } from "lann:webcrypto/key-wrap@0.1.0";
-import { DeriveOptions } from "lann:webcrypto/derivation@0.1.0";
-import { AgreementKeyOptions } from "lann:webcrypto/key-agreement@0.1.0";
-import { SigningKeyOptions } from "lann:webcrypto/signature@0.1.0";
+import { MacKeyOptions } from "polymorph:webcrypto/mac@0.1.0";
+import { AeadKeyOptions } from "polymorph:webcrypto/aead@0.1.0";
+import { CipherKeyOptions } from "polymorph:webcrypto/cipher@0.1.0";
+import { KwKeyOptions } from "polymorph:webcrypto/key-wrap@0.1.0";
+import { DeriveOptions } from "polymorph:webcrypto/derivation@0.1.0";
+import { AgreementKeyOptions } from "polymorph:webcrypto/key-agreement@0.1.0";
+import { SigningKeyOptions } from "polymorph:webcrypto/signature@0.1.0";
 
 // --- errors -------------------------------------------------------------------
 
@@ -232,7 +232,7 @@ function dom(name, message, cause = undefined) {
  */
 
 /**
- * True for errors raised by the `lann:webcrypto` imports: componentize-js
+ * True for errors raised by the `polymorph:webcrypto` imports: componentize-js
  * surfaces an `err` result as a thrown `ComponentError` whose `payload` is
  * the WIT `types.error` variant, a `{ tag, val }` object.
  * @param {unknown} e
@@ -256,7 +256,7 @@ function isWitError(e) {
  * @type {Readonly<Record<string, Readonly<Record<string, string>> | undefined>>}
  */
 const EXTENSION_ERRORS = {
-  "lann:webcrypto": { "collision-detected": "OperationError" },
+  "polymorph:webcrypto": { "collision-detected": "OperationError" },
 };
 
 /**
@@ -324,7 +324,7 @@ async function verdict(operation) {
 }
 
 /**
- * Await an async `lann:webcrypto` import and normalize its settlement.
+ * Await an async `polymorph:webcrypto` import and normalize its settlement.
  *
  * componentize-js (as of the revision pinned in componentize-js.rev)
  * settles async imports through two paths: an import that suspends resolves
@@ -368,7 +368,7 @@ function unwrapResult(value) {
 }
 
 /**
- * Call a synchronous `lann:webcrypto` import, normalizing a thrown
+ * Call a synchronous `polymorph:webcrypto` import, normalizing a thrown
  * `ComponentError` and the raw `result` wrapper (the sync counterpart of
  * `callImport`).
  * @param {() => unknown} run
@@ -512,7 +512,7 @@ const HANDLES = new WeakMap();
 const MINT_TOKEN = Symbol("CryptoKey mint token");
 
 /**
- * The WebCrypto `CryptoKey` projection of a `lann:webcrypto` key resource:
+ * The WebCrypto `CryptoKey` projection of a `polymorph:webcrypto` key resource:
  * `"secret"` for the HMAC, AES-GCM, and KDF keys, `"public"`/`"private"`
  * for the X25519 pair.
  */
@@ -527,7 +527,7 @@ export class CryptoKey {
 
   /**
    * @param {symbol} token
-   * @param {any} handle the `lann:webcrypto` key resource
+   * @param {any} handle the `polymorph:webcrypto` key resource
    * @param {KeyType} type
    * @param {KeyAlgorithm} algorithm
    * @param {boolean} extractable

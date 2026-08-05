@@ -1,5 +1,5 @@
 //! Ready-made embedding for hosts whose component imports only
-//! `lann:webcrypto`: the canonical store state and the engine/linker/store
+//! `polymorph:webcrypto`: the canonical store state and the engine/linker/store
 //! setup this repository's drivers share (the demo host and the
 //! conformance adapter), so the engine configuration the async imports
 //! require has one definition.
@@ -39,7 +39,7 @@ impl WasiWebcryptoView for Ctx {
 }
 
 /// An engine configured for the component-model async ABI the
-/// `lann:webcrypto` imports use.
+/// `polymorph:webcrypto` imports use.
 pub fn engine() -> wasmtime::Result<Engine> {
     let mut config = Config::new();
     config.wasm_component_model(true);
@@ -48,7 +48,7 @@ pub fn engine() -> wasmtime::Result<Engine> {
 }
 
 /// Load the component at `path` and prepare everything an instantiation
-/// needs: a linker with the `lann:webcrypto` imports added, and a store
+/// needs: a linker with the `polymorph:webcrypto` imports added, and a store
 /// whose state carries `webcrypto`.
 pub fn load(
     path: &Path,

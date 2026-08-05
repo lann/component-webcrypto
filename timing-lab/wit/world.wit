@@ -1,20 +1,20 @@
 // The timing-lab world. The lab is a driver-style component (like the
-// crypto-demo driver): it imports the `lann:webcrypto` surfaces under
+// crypto-demo driver): it imports the `polymorph:webcrypto` surfaces under
 // measurement — satisfied by composing the in-guest provider in with
 // `wac plug` — and exports an async `wasi:cli/run` (via the `wasip3` crate),
 // so the composed lab runs under a plain `wasmtime run`.
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/` and
-// is pulled in through the `deps/lann-webcrypto` symlink.
-package lann:timing-lab;
+// The `polymorph:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/polymorph-webcrypto` symlink.
+package polymorph:timing-lab;
 
 /// The measurement harness: imports the surfaces under test.
 world lab {
-    import lann:webcrypto/mac@0.1.0;
-    import lann:webcrypto/aead@0.1.0;
-    import lann:webcrypto/hmac-sha2@0.1.0;
-    import lann:webcrypto/aes-gcm@0.1.0;
-    import lann:webcrypto/key-agreement@0.1.0;
-    import lann:webcrypto/x25519@0.1.0;
-    import lann:webcrypto/ecdh@0.1.0;
+    import polymorph:webcrypto/mac@0.1.0;
+    import polymorph:webcrypto/aead@0.1.0;
+    import polymorph:webcrypto/hmac-sha2@0.1.0;
+    import polymorph:webcrypto/aes-gcm@0.1.0;
+    import polymorph:webcrypto/key-agreement@0.1.0;
+    import polymorph:webcrypto/x25519@0.1.0;
+    import polymorph:webcrypto/ecdh@0.1.0;
 }

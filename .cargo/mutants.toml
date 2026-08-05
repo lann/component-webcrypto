@@ -6,8 +6,8 @@
 # tests nor the cross-implementation cases distinguish it.
 
 test_package = [
-    "lann-webcrypto-core",
-    "lann-webcrypto-wasmtime",
+    "polymorph-webcrypto-core",
+    "polymorph-webcrypto-wasmtime",
     "conformance-driver-ct",
 ]
 

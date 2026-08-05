@@ -35,7 +35,7 @@ if (ENGINE !== "firefox" && ENGINE !== "chromium" && ENGINE !== "webkit") {
 // record arrays at the end.
 const HARNESS = `<!doctype html>
 <link rel="icon" href="data:,">
-<title>lann:webcrypto WPT parity</title>
+<title>polymorph:webcrypto WPT parity</title>
 <script type="module">
 import { runBaselineLeg, runRoundtripLeg } from "/js/componentize/wpt/web/legs.mjs";
 

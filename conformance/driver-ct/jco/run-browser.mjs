@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { runPageHarness } from "../../../scripts/browser-page-driver.mjs";
-import { envelope } from "@lann/component-test-js/harness";
+import { envelope } from "@polymorph/component-test-js/harness";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const RESULTS_DIR = fileURLToPath(new URL("../results/", import.meta.url));
@@ -63,7 +63,7 @@ for (const entry of SUITES) {
 
 // The in-page harness: spawns a pool of module Web Workers
 // (worker-browser.mjs), each running one shard of a suite's case loop
-// with its own instance of the transpiled suite (whose lann:webcrypto
+// with its own instance of the transpiled suite (whose polymorph:webcrypto
 // imports resolve to js/jco/webcrypto.js — the browser-first host,
 // feature-detecting per call — and whose wasi imports resolve to
 // relative paths into the preview2-shim browser build, mapped at
@@ -77,9 +77,9 @@ for (const entry of SUITES) {
 const BASE = "/conformance/driver-ct/jco";
 const harness = (suites) => `<!doctype html>
 <link rel="icon" href="data:,">
-<title>lann:webcrypto conformance (component-test stack)</title>
+<title>polymorph:webcrypto conformance (component-test stack)</title>
 <script type="module">
-import { mergeCounts, workerCount } from "${BASE}/node_modules/@lann/component-test-js/js/viewer/harness.mjs";
+import { mergeCounts, workerCount } from "${BASE}/node_modules/@polymorph/component-test-js/js/viewer/harness.mjs";
 
 const suites = ${JSON.stringify(suites)};
 const jobs = workerCount(navigator.hardwareConcurrency ?? 4);

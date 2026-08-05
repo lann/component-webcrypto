@@ -1,5 +1,5 @@
 //! The shared RustCrypto core of the two Rust implementations of
-//! `lann:webcrypto`: `lann-webcrypto-wasmtime` (native host) and `lann-webcrypto-guest-provider` (in-guest
+//! `polymorph:webcrypto`: `polymorph-webcrypto-wasmtime` (native host) and `polymorph-webcrypto-guest-provider` (in-guest
 //! wasm component).
 //!
 //! Everything algorithm-shaped lives here exactly once — cipher and digest
@@ -27,7 +27,7 @@
 //! ECDSA signing handles a per-signature secret nonce whose timing leakage
 //! is key-recovering, and RSA private-key operations leak key material
 //! through timing unless constant-time end to end — class D in
-//! lann-webcrypto-guest-provider's timing-channel classification. The
+//! polymorph-webcrypto-guest-provider's timing-channel classification. The
 //! load-bearing enforcement is the in-guest provider's world, which never
 //! exports `ecdsa-sign`, the `rsa-sign` interfaces, or (with working
 //! implementations) the RSA-OAEP operations: a composition that
@@ -155,7 +155,7 @@ pub struct ExtensionError {
 }
 
 /// The extension-condition `origin` for conditions this package defines.
-pub const EXTENSION_ORIGIN: &str = "lann:webcrypto";
+pub const EXTENSION_ORIGIN: &str = "polymorph:webcrypto";
 
 /// The `sha1-checked` collision condition's `name`.
 pub const COLLISION_DETECTED: &str = "collision-detected";
@@ -165,7 +165,7 @@ pub const MESSAGE_TOO_LONG: &str = "message-too-long";
 
 impl Error {
     /// The `sha1-checked` rejecting posture's error: extension condition
-    /// `("lann:webcrypto", "collision-detected")`, with the message both
+    /// `("polymorph:webcrypto", "collision-detected")`, with the message both
     /// Rust implementations share verbatim.
     pub fn collision_detected() -> Self {
         Self::Extension(ExtensionError {
@@ -176,7 +176,7 @@ impl Error {
     }
 
     /// The `public-encryption` over-bound error on `encrypt`/`wrap`:
-    /// extension condition `("lann:webcrypto", "message-too-long")`, with
+    /// extension condition `("polymorph:webcrypto", "message-too-long")`, with
     /// the key's plaintext bound and the rejected length in the message.
     pub fn message_too_long(bound_bytes: usize, got_bytes: usize) -> Self {
         Self::Extension(ExtensionError {

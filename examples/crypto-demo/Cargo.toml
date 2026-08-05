@@ -14,14 +14,14 @@ anyhow = "1"
 # `async` pulls in the component-model `stream`/`future` runtime support and
 # the `wit_stream` helpers used to feed byte streams to the imports.
 wit-bindgen = { version = "0.59", features = ["async"] }
-# The lann:webcrypto bindings and byte-buffer helpers; carries the imports,
+# The polymorph:webcrypto bindings and byte-buffer helpers; carries the imports,
 # so this component's own world declares only its export. Both optional
 # source adaptors are enabled: the demo is the wrapper layer's execution
 # harness, and these features' feed loops run nowhere else. `sha1-checked`
 # adds the gated checked-SHA-1 imports, whose wrappers the demo also
 # executes (implementations may decline the constructors — the demo's
 # check accepts the documented fail-closed posture).
-lann-webcrypto-guest = { path = "../../rust/guest", features = ["bytes", "futures-io", "sha1-checked"] }
+polymorph-webcrypto-guest = { path = "../../rust/guest", features = ["bytes", "futures-io", "sha1-checked"] }
 # `join!` lets the component feed a stream and await the consuming import
 # concurrently within a single cooperative task (no OS threads).
 futures = { version = "0.3", default-features = false, features = ["async-await"] }

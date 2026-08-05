@@ -2,8 +2,8 @@
 
 A WebCrypto-subset library for JavaScript guests componentized with
 [componentize-js] (the wit-dylib–based reboot of ComponentizeJS), backed by
-the `lann:webcrypto` interfaces. This is the JS-guest counterpart of the Rust
-[`lann-webcrypto-guest`](../lann-webcrypto-guest): where `lann-webcrypto-guest` wraps the raw bindings in
+the `polymorph:webcrypto` interfaces. This is the JS-guest counterpart of the Rust
+[`polymorph-webcrypto-guest`](../polymorph-webcrypto-guest): where `polymorph-webcrypto-guest` wraps the raw bindings in
 ergonomic Rust newtypes, `webcrypto.js` wraps them in the API JS code already
 knows — `crypto.subtle`.
 
@@ -18,7 +18,7 @@ algorithms, operations, and key formats — is enumerated at the top of
 
 Keys are `CryptoKey` objects (`type` `"secret"`, `"public"`, or
 `"private"`, `algorithm`, `extractable`, `usages`) wrapping
-`lann:webcrypto` key resources; usages and extractability
+`polymorph:webcrypto` key resources; usages and extractability
 are enforced with WebCrypto's error vocabulary. The library maps the WIT
 `types.error` variant onto that vocabulary (`authentication-failed` →
 `OperationError`, `not-extractable` → `InvalidAccessError`, `invalid-key` →
@@ -46,8 +46,8 @@ toolchain, so neither CI nor contributors compile SpiderMonkey.
 
 ## Using it in a component
 
-The component's world must import `lann:webcrypto/hmac-sha2@0.1.0` and
-`lann:webcrypto/aes-gcm@0.1.0` (WIT elaboration pulls in their
+The component's world must import `polymorph:webcrypto/hmac-sha2@0.1.0` and
+`polymorph:webcrypto/aes-gcm@0.1.0` (WIT elaboration pulls in their
 `mac`/`aead`/`types` dependencies) — see
 [`examples/componentize-demo`](../examples/componentize-demo) for a complete
 world, guest, and composition. The `sha1-checked`
@@ -57,7 +57,7 @@ that world line carries an `@unstable(feature = ...)` gate and the
 componentize-js invocation passes
 `--features sha1-checked`. The
 library is a single file with no
-dependencies; componentize-js resolves its `lann:webcrypto/...` module
+dependencies; componentize-js resolves its `polymorph:webcrypto/...` module
 specifiers against the world at componentize time, and resolves the library
 itself as a file path relative to `componentize-js componentize`'s
 `--base-directory`.

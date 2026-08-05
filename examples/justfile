@@ -9,7 +9,7 @@ wasmtime: build-component
     cargo run --release --manifest-path '{{root}}/Cargo.toml' --bin wasmtime-demo-host -- \
         crypto-demo/build/crypto-demo.component.wasm
 
-# Compose the fully in-guest demo: the crypto-demo guest's lann:webcrypto
+# Compose the fully in-guest demo: the crypto-demo guest's polymorph:webcrypto
 # imports are satisfied by the in-guest provider's exports (`wac plug`), then
 # the CLI driver (async wasi:cli/run) is plugged on top, yielding one
 # self-contained component in target/crypto-demo-composed.wasm.

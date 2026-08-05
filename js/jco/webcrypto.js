@@ -1,5 +1,5 @@
 // @ts-check
-// Host implementation of the `lann:webcrypto` imports for jco-transpiled
+// Host implementation of the `polymorph:webcrypto` imports for jco-transpiled
 // components. The interfaces served are the ones `wit/world.wit` names;
 // `interface-check.js` asserts this file against them.
 //
@@ -10,7 +10,7 @@
 // provides the same globals natively.
 //
 // `jco --map` wires this module in as the component's imports with one
-// wildcard — `--map 'lann:webcrypto/*@0.1.0=./webcrypto.js#*'` — so the
+// wildcard — `--map 'polymorph:webcrypto/*@0.1.0=./webcrypto.js#*'` — so the
 // export convention is fixed: every interface is served by the named export
 // spelling its name in camelCase (`hmacSha2`, `aesGcm`, …), and the
 // resource-bearing interfaces export objects holding their resource classes.
@@ -918,7 +918,7 @@ async function importHmacKeyJwk(resolved, jwk, options) {
   return new MacKey(key, jwkKeyBytes(material.k) * 8, hash);
 }
 
-/** The `lann:webcrypto/mac` interface: its resource classes. */
+/** The `polymorph:webcrypto/mac` interface: its resource classes. */
 export const mac = { MacKey, MacKeyOptions };
 
 /**
@@ -988,7 +988,7 @@ function unwrapHmacKeyJwk(resolve, input, options) {
 }
 
 /**
- * The `lann:webcrypto/hmac-sha1` interface: the same platform paths as
+ * The `polymorph:webcrypto/hmac-sha1` interface: the same platform paths as
  * `hmac-sha2` at `SHA-1` (the platform serves the hash; HMAC's security
  * rests on the PRF property, which SHA-1's collision breaks do not
  * reach — see the WIT doc).
@@ -1027,7 +1027,7 @@ export const hmacSha1 = {
   unwrapKeyJwk: (input, options) => unwrapHmacKeyJwk(() => SHA1_HMAC, input, options),
 };
 
-/** The `lann:webcrypto/hmac-sha2` interface. */
+/** The `polymorph:webcrypto/hmac-sha2` interface. */
 export const hmacSha2 = {
   /**
    * @param {string} variant
@@ -1182,7 +1182,7 @@ export class UnwrapInput {
   }
 }
 
-/** The `lann:webcrypto/wrapping` interface: its resource classes. */
+/** The `polymorph:webcrypto/wrapping` interface: its resource classes. */
 export const wrapping = { WrapInput, UnwrapInput };
 
 /**
@@ -1509,13 +1509,13 @@ async function unwrapIkm(input, options) {
   );
 }
 
-/** The `lann:webcrypto/derivation` interface: its resource classes. */
+/** The `polymorph:webcrypto/derivation` interface: its resource classes. */
 export const derivation = { DeriveOptions, DeriveInput };
 
-/** The `lann:webcrypto/hkdf` interface: the hash-independent half. */
+/** The `polymorph:webcrypto/hkdf` interface: the hash-independent half. */
 export const hkdf = { Ikm, importIkm, unwrapIkm };
 
-/** The `lann:webcrypto/hkdf-sha2` interface. */
+/** The `polymorph:webcrypto/hkdf-sha2` interface. */
 export const hkdfSha2 = {
   /**
    * @param {string} variant
@@ -1535,7 +1535,7 @@ export const hkdfSha2 = {
 };
 
 /**
- * The `lann:webcrypto/hkdf-sha1` interface: `hkdf`'s prepare steps at
+ * The `polymorph:webcrypto/hkdf-sha1` interface: `hkdf`'s prepare steps at
  * `SHA-1` (see `hmacSha1`'s note; the `ikm` resource is shared).
  */
 export const hkdfSha1 = {
@@ -1636,10 +1636,10 @@ async function unwrapPassword(input, options) {
   );
 }
 
-/** The `lann:webcrypto/pbkdf2` interface. */
+/** The `polymorph:webcrypto/pbkdf2` interface. */
 export const pbkdf2 = { Password, importPassword, unwrapPassword };
 
-/** The `lann:webcrypto/pbkdf2-sha2` interface. */
+/** The `polymorph:webcrypto/pbkdf2-sha2` interface. */
 export const pbkdf2Sha2 = {
   /**
    * @param {string} variant
@@ -1652,7 +1652,7 @@ export const pbkdf2Sha2 = {
 };
 
 /**
- * The `lann:webcrypto/pbkdf2-sha1` interface: `pbkdf2`'s prepare step at
+ * The `polymorph:webcrypto/pbkdf2-sha1` interface: `pbkdf2`'s prepare step at
  * `SHA-1` (see `hmacSha1`'s note; the `password` resource is shared).
  */
 export const pbkdf2Sha1 = {
@@ -1952,7 +1952,7 @@ async function generateX25519Key(options) {
   ];
 }
 
-/** The `lann:webcrypto/key-agreement` interface: its resource classes. */
+/** The `polymorph:webcrypto/key-agreement` interface: its resource classes. */
 export const keyAgreement = { AgreementKeyOptions, PublicKey: AgreementPublicKey, SecretKey: AgreementSecretKey };
 
 /**
@@ -2044,7 +2044,7 @@ async function unwrapX25519SecretKeyPkcs8(input, options) {
   );
 }
 
-/** The `lann:webcrypto/x25519` interface. */
+/** The `polymorph:webcrypto/x25519` interface. */
 export const x25519 = {
   importPublicKeyRaw: importX25519PublicKey,
   importPublicKeySpki: importX25519PublicKeySpki,
@@ -2371,7 +2371,7 @@ async function unwrapEcdhSecretKeyPkcs8(variant, input, options) {
   );
 }
 
-/** The `lann:webcrypto/ecdh` interface. */
+/** The `polymorph:webcrypto/ecdh` interface. */
 export const ecdh = {
   importPublicKeyRaw: importEcdhPublicKey,
   importPublicKeySpki: importEcdhPublicKeySpki,
@@ -2427,10 +2427,10 @@ function makeDigest(variant) {
   return new Digest(sha2Variant(variant).hash);
 }
 
-/** The `lann:webcrypto/digest` interface: its resource class. */
+/** The `polymorph:webcrypto/digest` interface: its resource class. */
 export const digest = { Digest };
 
-/** The `lann:webcrypto/sha2` interface. */
+/** The `polymorph:webcrypto/sha2` interface. */
 export const sha2 = { makeDigest };
 
 /**
@@ -2446,7 +2446,7 @@ function unsupportedSha1Checked() {
   throw errUnsupported("sha1-checked is not served by this implementation");
 }
 
-/** The `lann:webcrypto/sha1-checked` interface. */
+/** The `polymorph:webcrypto/sha1-checked` interface. */
 export const sha1Checked = {
   makeRejectingDigest: () => unsupportedSha1Checked(),
   makeMitigatingDigest: () => unsupportedSha1Checked(),
@@ -2522,10 +2522,10 @@ function aeadGrantedOps(policy) {
   return ops;
 }
 
-/** The `lann:webcrypto/aead` interface: its resource classes. */
+/** The `polymorph:webcrypto/aead` interface: its resource classes. */
 export const aead = { AeadKey, AeadKeyOptions };
 
-/** The `lann:webcrypto/aes-gcm` interface. */
+/** The `polymorph:webcrypto/aes-gcm` interface. */
 export const aesGcm = {
   /**
    * Import raw key material as the declared AES variant. A variant this
@@ -3081,13 +3081,13 @@ function cipherMinting(name) {
   return minting;
 }
 
-/** The `lann:webcrypto/cipher` interface: its resource classes. */
+/** The `polymorph:webcrypto/cipher` interface: its resource classes. */
 export const cipher = { CipherKey, CipherKeyOptions };
 
-/** The `lann:webcrypto/aes-cbc` interface. */
+/** The `polymorph:webcrypto/aes-cbc` interface. */
 export const aesCbc = cipherMinting("AES-CBC");
 
-/** The `lann:webcrypto/aes-ctr` interface. */
+/** The `polymorph:webcrypto/aes-ctr` interface. */
 export const aesCtr = cipherMinting("AES-CTR");
 
 /** @type {WeakMap<KwKeyOptions, { wrap: boolean, unwrap: boolean, extractable: boolean }>} */
@@ -3307,11 +3307,11 @@ export class KwKey {
   }
 }
 
-/** The `lann:webcrypto/key-wrap` interface: its resource classes. */
+/** The `polymorph:webcrypto/key-wrap` interface: its resource classes. */
 export const keyWrap = { KwKey, KwKeyOptions };
 
 /**
- * The `lann:webcrypto/aes-kw` interface: the `aesGcm`/`cipherMinting`
+ * The `polymorph:webcrypto/aes-kw` interface: the `aesGcm`/`cipherMinting`
  * minting contract at `AES-KW`.
  */
 export const aesKw = {
@@ -4503,7 +4503,7 @@ async function importEd25519VerifyingKey(raw) {
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
-/** The `lann:webcrypto/signature` interface: its resource classes. */
+/** The `polymorph:webcrypto/signature` interface: its resource classes. */
 export const signature = { VerifyingKey, SigningKey, SigningKeyOptions };
 
 /**
@@ -4537,7 +4537,7 @@ async function importEd25519VerifyingKeyJwk(jwkText) {
   return new VerifyingKey(key, ED25519_ALGORITHM);
 }
 
-/** The `lann:webcrypto/ed25519-verify` interface. */
+/** The `polymorph:webcrypto/ed25519-verify` interface. */
 export const ed25519Verify = {
   importVerifyingKeyRaw: importEd25519VerifyingKey,
   importVerifyingKeySpki: importEd25519VerifyingKeySpki,
@@ -4641,7 +4641,7 @@ async function unwrapEd25519SigningKeyJwk(input, options) {
   );
 }
 
-/** The `lann:webcrypto/ed25519-sign` interface. */
+/** The `polymorph:webcrypto/ed25519-sign` interface. */
 export const ed25519Sign = {
   generateKey: generateEd25519Key,
   importSigningKeyPkcs8: importEd25519SigningKeyPkcs8,
@@ -4718,7 +4718,7 @@ async function importEcdsaVerifyingKeyJwk(variant, jwkText) {
   return new VerifyingKey(key, entry);
 }
 
-/** The `lann:webcrypto/ecdsa-verify` interface. */
+/** The `polymorph:webcrypto/ecdsa-verify` interface. */
 export const ecdsaVerify = {
   importVerifyingKeyRaw: importEcdsaVerifyingKey,
   importVerifyingKeySpki: importEcdsaVerifyingKeySpki,
@@ -4827,7 +4827,7 @@ async function unwrapEcdsaSigningKeyJwk(variant, input, options) {
   );
 }
 
-/** The `lann:webcrypto/ecdsa-sign` interface. */
+/** The `polymorph:webcrypto/ecdsa-sign` interface. */
 export const ecdsaSign = {
   generateKey: generateEcdsaKey,
   importSigningKeyPkcs8: importEcdsaSigningKeyPkcs8,
@@ -4978,7 +4978,7 @@ async function importRsaVerifyingKeyJwk(name, variant, jwkText, saltLength) {
   return new VerifyingKey(key, rsaAlgorithm(name, hash, modulusLength, saltLength));
 }
 
-/** The `lann:webcrypto/rsassa-pkcs1-v15-verify` interface. */
+/** The `polymorph:webcrypto/rsassa-pkcs1-v15-verify` interface. */
 export const rsassaPkcs1V15Verify = {
   /**
    * @param {string} variant
@@ -4994,7 +4994,7 @@ export const rsassaPkcs1V15Verify = {
     importRsaVerifyingKeyJwk("RSASSA-PKCS1-v1_5", variant, jwk, undefined),
 };
 
-/** The `lann:webcrypto/rsa-pss-verify` interface. */
+/** The `polymorph:webcrypto/rsa-pss-verify` interface. */
 export const rsaPssVerify = {
   /**
    * @param {string} variant
@@ -5232,7 +5232,7 @@ async function unwrapRsaSigningKeyJwk(name, variant, input, options) {
   );
 }
 
-/** The `lann:webcrypto/rsassa-pkcs1-v15-sign` interface. */
+/** The `polymorph:webcrypto/rsassa-pkcs1-v15-sign` interface. */
 export const rsassaPkcs1V15Sign = {
   /**
    * @param {string} variant
@@ -5271,7 +5271,7 @@ export const rsassaPkcs1V15Sign = {
     unwrapRsaSigningKeyJwk("RSASSA-PKCS1-v1_5", variant, input, options),
 };
 
-/** The `lann:webcrypto/rsa-pss-sign` interface. */
+/** The `polymorph:webcrypto/rsa-pss-sign` interface. */
 export const rsaPssSign = {
   /**
    * @param {string} variant
@@ -5408,7 +5408,7 @@ function oaepAlgorithm(entry, modulusLength) {
 }
 
 /**
- * `error.extension` — origin `"lann:webcrypto"`, name `"message-too-long"`
+ * `error.extension` — origin `"polymorph:webcrypto"`, name `"message-too-long"`
  * — the public-encryption kind's named plaintext-bound condition (see
  * `wit/encryption.wit`): the signal to switch to hybrid wrapping.
  * @param {string} what
@@ -5419,7 +5419,7 @@ function errMessageTooLong(what, length, algorithm) {
   return {
     tag: "extension",
     val: {
-      origin: "lann:webcrypto",
+      origin: "polymorph:webcrypto",
       name: "message-too-long",
       message: `${what} is ${length} bytes; this key's RSA-OAEP bound is ${algorithm.plaintextBound}`,
     },
@@ -5718,7 +5718,7 @@ export class DecryptionKey extends keyResourceTail({}) {
   }
 }
 
-/** The `lann:webcrypto/public-encryption` interface: its resource classes. */
+/** The `polymorph:webcrypto/public-encryption` interface: its resource classes. */
 export const publicEncryption = { EncryptionKey, DecryptionKey, DecryptionKeyOptions };
 
 /**
@@ -5792,7 +5792,7 @@ async function importOaepEncryptionKeyJwk(variant, jwkText) {
   return new EncryptionKey(key, oaepAlgorithm(entry, modulusLength));
 }
 
-/** The `lann:webcrypto/rsa-oaep-encrypt` interface. */
+/** The `polymorph:webcrypto/rsa-oaep-encrypt` interface. */
 export const rsaOaepEncrypt = {
   importEncryptionKeySpki: importOaepEncryptionKeySpki,
   importEncryptionKeyJwk: importOaepEncryptionKeyJwk,
@@ -5943,7 +5943,7 @@ async function unwrapOaepDecryptionKeyJwk(variant, input, options) {
   );
 }
 
-/** The `lann:webcrypto/rsa-oaep-decrypt` interface. */
+/** The `polymorph:webcrypto/rsa-oaep-decrypt` interface. */
 export const rsaOaepDecrypt = {
   generateKey: generateOaepKey,
   importDecryptionKeyPkcs8: importOaepDecryptionKeyPkcs8,

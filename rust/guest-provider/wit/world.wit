@@ -1,7 +1,7 @@
-// The `lann-webcrypto-guest-provider` component world.
+// The `polymorph-webcrypto-guest-provider` component world.
 //
-// This is the third implementation of `lann:webcrypto`, alongside the
-// `lann-webcrypto-wasmtime` (RustCrypto, native) and `webcrypto-jco` (browser Web Crypto)
+// This is the third implementation of `polymorph:webcrypto`, alongside the
+// `polymorph-webcrypto-wasmtime` (RustCrypto, native) and `webcrypto-jco` (browser Web Crypto)
 // hosts. Unlike those two, this implementation is itself a **wasm component**:
 // it runs RustCrypto in-guest and *exports* the package surface.
 //
@@ -16,44 +16,44 @@
 // classification); algorithm interfaces that cannot meet that bar are simply
 // not exported, so a composition requiring them fails at `wac plug` time.
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/` and
-// is pulled in through the `deps/lann-webcrypto` symlink, exactly like the
+// The `polymorph:webcrypto` package lives once at the repository root `wit/` and
+// is pulled in through the `deps/polymorph-webcrypto` symlink, exactly like the
 // demo components do.
 package guest:webcrypto;
 
 /// The composable in-guest WebCrypto provider.
 world provider {
-    export lann:webcrypto/mac@0.1.0;
-    export lann:webcrypto/aead@0.1.0;
-    export lann:webcrypto/cipher@0.1.0;
-    export lann:webcrypto/digest@0.1.0;
-    export lann:webcrypto/sha2@0.1.0;
+    export polymorph:webcrypto/mac@0.1.0;
+    export polymorph:webcrypto/aead@0.1.0;
+    export polymorph:webcrypto/cipher@0.1.0;
+    export polymorph:webcrypto/digest@0.1.0;
+    export polymorph:webcrypto/sha2@0.1.0;
     @unstable(feature = sha1-checked)
-    export lann:webcrypto/sha1-checked@0.1.0;
-    export lann:webcrypto/hmac-sha2@0.1.0;
-    export lann:webcrypto/hmac-sha1@0.1.0;
-    export lann:webcrypto/aes-gcm@0.1.0;
-    export lann:webcrypto/aes-cbc@0.1.0;
-    export lann:webcrypto/aes-ctr@0.1.0;
-    export lann:webcrypto/wrapping@0.1.0;
-    export lann:webcrypto/key-wrap@0.1.0;
-    export lann:webcrypto/aes-kw@0.1.0;
-    export lann:webcrypto/derivation@0.1.0;
-    export lann:webcrypto/hkdf@0.1.0;
-    export lann:webcrypto/hkdf-sha2@0.1.0;
-    export lann:webcrypto/hkdf-sha1@0.1.0;
-    export lann:webcrypto/pbkdf2@0.1.0;
-    export lann:webcrypto/pbkdf2-sha2@0.1.0;
-    export lann:webcrypto/pbkdf2-sha1@0.1.0;
-    export lann:webcrypto/key-agreement@0.1.0;
-    export lann:webcrypto/x25519@0.1.0;
-    export lann:webcrypto/ecdh@0.1.0;
-    export lann:webcrypto/signature@0.1.0;
-    export lann:webcrypto/ed25519-verify@0.1.0;
-    export lann:webcrypto/ed25519-sign@0.1.0;
-    export lann:webcrypto/ecdsa-verify@0.1.0;
-    export lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
-    export lann:webcrypto/rsa-pss-verify@0.1.0;
+    export polymorph:webcrypto/sha1-checked@0.1.0;
+    export polymorph:webcrypto/hmac-sha2@0.1.0;
+    export polymorph:webcrypto/hmac-sha1@0.1.0;
+    export polymorph:webcrypto/aes-gcm@0.1.0;
+    export polymorph:webcrypto/aes-cbc@0.1.0;
+    export polymorph:webcrypto/aes-ctr@0.1.0;
+    export polymorph:webcrypto/wrapping@0.1.0;
+    export polymorph:webcrypto/key-wrap@0.1.0;
+    export polymorph:webcrypto/aes-kw@0.1.0;
+    export polymorph:webcrypto/derivation@0.1.0;
+    export polymorph:webcrypto/hkdf@0.1.0;
+    export polymorph:webcrypto/hkdf-sha2@0.1.0;
+    export polymorph:webcrypto/hkdf-sha1@0.1.0;
+    export polymorph:webcrypto/pbkdf2@0.1.0;
+    export polymorph:webcrypto/pbkdf2-sha2@0.1.0;
+    export polymorph:webcrypto/pbkdf2-sha1@0.1.0;
+    export polymorph:webcrypto/key-agreement@0.1.0;
+    export polymorph:webcrypto/x25519@0.1.0;
+    export polymorph:webcrypto/ecdh@0.1.0;
+    export polymorph:webcrypto/signature@0.1.0;
+    export polymorph:webcrypto/ed25519-verify@0.1.0;
+    export polymorph:webcrypto/ed25519-sign@0.1.0;
+    export polymorph:webcrypto/ecdsa-verify@0.1.0;
+    export polymorph:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    export polymorph:webcrypto/rsa-pss-verify@0.1.0;
     // The kind alone: neither RSA-OAEP minting interface is exported —
     // decryption is class D, and encryption runs secret plaintext through
     // non-constant-time bignum arithmetic, so the kind has no
@@ -61,5 +61,5 @@ world provider {
     // importing `rsa-oaep-encrypt` or `rsa-oaep-decrypt` fail at
     // `wac plug` time (see the crate README, "What the failure looks
     // like"); its key resources can never be minted here.
-    export lann:webcrypto/public-encryption@0.1.0;
+    export polymorph:webcrypto/public-encryption@0.1.0;
 }

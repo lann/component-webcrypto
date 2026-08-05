@@ -16,7 +16,7 @@
 //!   attack recovers plaintext from exactly such a distinction).
 //! - A plaintext above the key's bound (modulus bytes − 2·digest length
 //!   − 2) fails `encrypt`/`wrap` with the named extension condition
-//!   `("lann:webcrypto", "message-too-long")`.
+//!   `("polymorph:webcrypto", "message-too-long")`.
 //! - Admission tightens the RSA family window on both ends: 2048–8192
 //!   bits (the WIT `rsa-oaep-encrypt` contract — encryption creates
 //!   future artifacts, so there is no legacy tier below 2048).
@@ -133,7 +133,7 @@ impl EncryptionKeyMaterial {
     /// the same parameterization (RFC 8017's default label is the empty
     /// string). Encryption is randomized. A plaintext above the key's
     /// bound — modulus bytes − 2·digest length − 2 — fails with the
-    /// extension condition `("lann:webcrypto", "message-too-long")`.
+    /// extension condition `("polymorph:webcrypto", "message-too-long")`.
     pub fn encrypt(&self, label: Option<&[u8]>, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
         let bound = self.oaep.max_plaintext_size(oaep_algorithm(self.variant));
         if plaintext.len() > bound {
@@ -704,7 +704,7 @@ mod tests {
             assert_eq!(
                 public.encrypt(None, &over),
                 Err(Error::Extension(ExtensionError {
-                    origin: "lann:webcrypto".into(),
+                    origin: "polymorph:webcrypto".into(),
                     name: "message-too-long".into(),
                     message: format!(
                         "this key bounds plaintexts to {bound} bytes, got {} bytes",

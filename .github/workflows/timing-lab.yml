@@ -34,7 +34,7 @@ jobs:
   timing-lab:
     # Scheduled workflows run in forks too, where this measures nothing
     # anyone reads.
-    if: github.repository == 'lann/component-webcrypto'
+    if: github.repository == 'polymorph-components/polymorph-webcrypto'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -64,7 +64,7 @@ jobs:
         env:
           TIMING_LAB_SAMPLES: ${{ inputs.samples || '2000' }}
 
-  # Mutation testing: cargo-mutants over lann-webcrypto-core and lann-webcrypto-wasmtime, oracle =
+  # Mutation testing: cargo-mutants over polymorph-webcrypto-core and polymorph-webcrypto-wasmtime, oracle =
   # their unit tests + both conformance suites through the ct driver's
   # env-gated oracle test. A missed mutant fails the job: it is a change to
   # the crypto that no suite distinguishes — exactly the assertion-strength
@@ -78,7 +78,7 @@ jobs:
   # artifact; growing the shard count is the lever if the mutant count
   # outgrows the timeout below.
   mutants:
-    if: github.repository == 'lann/component-webcrypto'
+    if: github.repository == 'polymorph-components/polymorph-webcrypto'
     runs-on: ubuntu-latest
     strategy:
       # One shard's missed mutants must not cancel the others: the weekly

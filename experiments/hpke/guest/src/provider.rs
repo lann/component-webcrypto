@@ -1,7 +1,7 @@
-//! The [`HpkeCrypto`] provider backed by `lann:webcrypto` imports.
+//! The [`HpkeCrypto`] provider backed by `polymorph:webcrypto` imports.
 //!
 //! hpke-rs's provider trait is synchronous and byte-oriented; the
-//! `lann:webcrypto` imports are async and handle-oriented. Every provider
+//! `polymorph:webcrypto` imports are async and handle-oriented. Every provider
 //! method therefore runs its import calls under [`wit_bindgen::block_on`],
 //! which is legal only because this component's exports are sync-lifted
 //! (a sync task may block on `waitable-set.wait`).
@@ -25,11 +25,11 @@
 use hpke_rs_crypto::error::Error;
 use hpke_rs_crypto::types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
 use hpke_rs_crypto::{HpkeCrypto, HpkeTestRng};
-use lann_webcrypto_guest::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::key_agreement::AgreementKeyOptions;
-use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
-use lann_webcrypto_guest::bindings::x25519;
-use lann_webcrypto_guest::{aes_gcm, hmac_sha2, sha2, Aead, AeadKeyOptions, MacKeyOptions};
+use polymorph_webcrypto_guest::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::bindings::key_agreement::AgreementKeyOptions;
+use polymorph_webcrypto_guest::bindings::sha2::Sha2Variant;
+use polymorph_webcrypto_guest::bindings::x25519;
+use polymorph_webcrypto_guest::{aes_gcm, hmac_sha2, sha2, Aead, AeadKeyOptions, MacKeyOptions};
 use wit_bindgen::block_on;
 use zeroize::Zeroize;
 
@@ -110,7 +110,7 @@ fn hmac_key_for_salt(salt: &[u8]) -> Vec<u8> {
     }
 }
 
-async fn hmac_sha256_key(key: Vec<u8>) -> Result<lann_webcrypto_guest::Mac, Error> {
+async fn hmac_sha256_key(key: Vec<u8>) -> Result<polymorph_webcrypto_guest::Mac, Error> {
     hmac_sha2::import_key_raw(
         Sha2Variant::Sha256,
         key,
@@ -223,7 +223,7 @@ impl HpkeTestRng for WebcryptoPrng {
     }
 }
 
-/// The `lann:webcrypto`-backed crypto provider for [`hpke_rs::Hpke`].
+/// The `polymorph:webcrypto`-backed crypto provider for [`hpke_rs::Hpke`].
 #[derive(Debug)]
 pub struct WebcryptoProvider;
 
@@ -231,7 +231,7 @@ impl HpkeCrypto for WebcryptoProvider {
     type HpkePrng = WebcryptoPrng;
 
     fn name() -> String {
-        "lann-webcrypto".into()
+        "polymorph-webcrypto".into()
     }
 
     fn supports_kdf(alg: KdfAlgorithm) -> Result<(), Error> {
@@ -407,8 +407,8 @@ impl HpkeCrypto for WebcryptoProvider {
         block_on(async {
             let key = aead_key(alg, key).await?;
             let opened = key.open(nonce, aad, msg).await.map_err(|e| match e {
-                lann_webcrypto_guest::Error::AuthenticationFailed => Error::AeadOpenError,
-                lann_webcrypto_guest::Error::InvalidNonce(detail) => {
+                polymorph_webcrypto_guest::Error::AuthenticationFailed => Error::AeadOpenError,
+                polymorph_webcrypto_guest::Error::InvalidNonce(detail) => {
                     Error::CryptoLibraryError(format!("invalid nonce: {detail}"))
                 }
                 other => crypto_err("open", other),

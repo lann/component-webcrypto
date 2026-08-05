@@ -1,4 +1,4 @@
-// Host-side JS implementation of lann:component-test/test-context@0.1.0
+// Host-side JS implementation of polymorph:component-test/test-context@0.1.0
 // (the jco analog of the context provider: the runner is the provider).
 export class Context {
   constructor(onDiagnostic) {

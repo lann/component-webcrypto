@@ -11,14 +11,14 @@ key-capability surface (usages, extractability, malformed-input rejection).
 
 The guest exports the same `demo:webcrypto-demo/demo@0.1.0` entry point as
 the Rust `crypto-demo` guest, so the existing `crypto-demo-driver` drives it
-unchanged, and its `lann:webcrypto` imports are satisfied the same way the
-composed demo's are: plugged with the in-guest `lann-webcrypto-guest-provider` provider via
+unchanged, and its `polymorph:webcrypto` imports are satisfied the same way the
+composed demo's are: plugged with the in-guest `polymorph-webcrypto-guest-provider` provider via
 `wac plug`, yielding one self-contained component that runs under plain
 `wasmtime run`.
 
 ```
 app.js  ──componentize-js──▶  componentize-demo.component.wasm
-                                   │  wac plug (provider: lann_webcrypto_guest_provider.wasm)
+                                   │  wac plug (provider: polymorph_webcrypto_guest_provider.wasm)
                                    ▼
                               …-with-crypto.wasm
                                    │  wac plug (driver: crypto_demo_driver.wasm)

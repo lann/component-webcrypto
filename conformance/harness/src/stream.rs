@@ -5,7 +5,7 @@
 //! Every base helper returns the operation's outcome and the feeder's
 //! outcome *separately*, so the feeder's fate (fully written, or rejected
 //! by an early close the closure rule permits on error) is distinguishable
-//! from the call's own error. The lann-webcrypto-guest wrappers
+//! from the call's own error. The polymorph-webcrypto-guest wrappers
 //! deliberately merge the two; the stream-closure probes are why these
 //! helpers do not.
 //!
@@ -16,14 +16,14 @@
 //! helpers additionally fold the operation's error through [`describe`]
 //! under the caller's context, for the plain ok path.
 
-use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::cipher::CipherKey;
-use lann_webcrypto_guest::bindings::digest::Digest;
-use lann_webcrypto_guest::bindings::mac::MacKey;
-use lann_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
-use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::wit_bindgen::StreamWriter;
-use lann_webcrypto_guest::{wit_stream, StreamReader};
+use polymorph_webcrypto_guest::bindings::aead::AeadKey;
+use polymorph_webcrypto_guest::bindings::cipher::CipherKey;
+use polymorph_webcrypto_guest::bindings::digest::Digest;
+use polymorph_webcrypto_guest::bindings::mac::MacKey;
+use polymorph_webcrypto_guest::bindings::signature::{SigningKey, VerifyingKey};
+use polymorph_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::wit_bindgen::StreamWriter;
+use polymorph_webcrypto_guest::{wit_stream, StreamReader};
 
 use crate::describe;
 

@@ -1,4 +1,4 @@
-//! Full-grant minting helpers over the raw `lann:webcrypto` bindings.
+//! Full-grant minting helpers over the raw `polymorph:webcrypto` bindings.
 //!
 //! The vector cases and most probes mint keys to exercise *algorithms*,
 //! not usage policy, so these wrappers grant every usage and expose only
@@ -7,23 +7,23 @@
 //! its own right, exercised with explicitly constructed options.
 
 use conformance_harness::b64url;
-use lann_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
-use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
-use lann_webcrypto_guest::bindings::derivation::DeriveOptions;
-use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
-use lann_webcrypto_guest::bindings::hkdf::{self, Ikm};
-use lann_webcrypto_guest::bindings::key_agreement::{
+use polymorph_webcrypto_guest::bindings::aead::{AeadKey, AeadKeyOptions};
+use polymorph_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::bindings::cipher::{CipherKey, CipherKeyOptions};
+use polymorph_webcrypto_guest::bindings::derivation::DeriveOptions;
+use polymorph_webcrypto_guest::bindings::ecdh::EcdhVariant;
+use polymorph_webcrypto_guest::bindings::hkdf::{self, Ikm};
+use polymorph_webcrypto_guest::bindings::key_agreement::{
     AgreementKeyOptions, PublicKey as AgreementPublicKey, SecretKey as AgreementSecretKey,
 };
-use lann_webcrypto_guest::bindings::key_wrap::{KwKey, KwKeyOptions};
-use lann_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
-use lann_webcrypto_guest::bindings::pbkdf2::{self, Password};
-use lann_webcrypto_guest::bindings::rsa::RsaVariant;
-use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
-use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
-use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::{
+use polymorph_webcrypto_guest::bindings::key_wrap::{KwKey, KwKeyOptions};
+use polymorph_webcrypto_guest::bindings::mac::{MacKey, MacKeyOptions};
+use polymorph_webcrypto_guest::bindings::pbkdf2::{self, Password};
+use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
+use polymorph_webcrypto_guest::bindings::sha2::Sha2Variant;
+use polymorph_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
+use polymorph_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::{
     aes_cbc, aes_ctr, aes_gcm, aes_kw, ecdh, ed25519_sign, hmac_sha1, hmac_sha2, rsa_pss_verify,
     rsassa_pkcs1_v15_verify, x25519,
 };

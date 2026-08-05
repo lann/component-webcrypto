@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 component-test-runner = { workspace = true }
-lann-webcrypto-wasmtime = { path = "../../rust/wasmtime" }
+polymorph-webcrypto-wasmtime = { path = "../../rust/wasmtime" }
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "runtime"] }
 wasmtime-wasi = "47"
 anyhow = "1"

@@ -1,10 +1,10 @@
-# `lann:webcrypto`
+# `polymorph:webcrypto`
 
 A WebCrypto-flavored WIT package plus multiple implementations that run the
 *same* guest component: a Wasmtime host backed by RustCrypto, a jco host
 backed by the browser Web Crypto API, and an in-guest wasm component
 (RustCrypto compiled to wasm, composable via `wac plug`). A sibling of
-[`lann:webrtc-datachannels`](https://github.com/lann/webrtc-datachannels),
+[`polymorph:webrtc-datachannels`](https://github.com/polymorph-components/polymorph-webrtc-datachannels),
 following the same architecture.
 
 ## Design
@@ -83,15 +83,15 @@ are specified in [`wit/README.md`](wit/README.md) and the WIT doc comments.
 ## Layout
 
 ```
-wit/                    # the lann:webcrypto package (defined once, here)
+wit/                    # the polymorph:webcrypto package (defined once, here)
 rust/                   # the Rust crates (dir = crate name minus the
-                        #   `lann-webcrypto-` family root)
+                        #   `polymorph-webcrypto-` family root)
   core/                 # shared RustCrypto core of both Rust
                         #   implementations; ECDSA signing is compiled out
                         #   of wasm builds
   wasmtime/             # Wasmtime host crate (RustCrypto); add_to_linker +
                         #   WasiWebcryptoView
-  guest/                # guest-side Rust library over the lann:webcrypto
+  guest/                # guest-side Rust library over the polymorph:webcrypto
                         #   imports: typed wrappers and a byte-source
                         #   abstraction, so consumers need not hand-roll
                         #   stream plumbing
@@ -100,14 +100,14 @@ rust/                   # the Rust crates (dir = crate name minus the
                         #   `wac plug` — see its README for the wasm
                         #   timing-channel classification & export policy
 js/                     # the JS packages (dir = npm name minus the
-                        #   `@lann/webcrypto-` family root)
+                        #   `@polymorph/webcrypto-` family root)
   jco/                  # jco host library: webcrypto.js,
                         #   browser-compatible Web Crypto API only
                         #   (crypto.subtle / getRandomValues); no
                         #   dependencies
   componentize/         # WebCrypto-subset library (crypto.subtle) for JS
                         #   guests built with componentize-js, backed by the
-                        #   lann:webcrypto imports; the JS counterpart of
+                        #   polymorph:webcrypto imports; the JS counterpart of
                         #   rust/guest
 examples/
   crypto-demo/          # guest component: known-answer vectors, chunked
@@ -123,7 +123,7 @@ examples/
                         #   same demo interface and composed pipeline
 conformance/            # cross-implementation conformance tests: vendored
                         #   Wycheproof vectors + translation policy, suite
-                        #   components on the lann:component-test guest SDK
+                        #   components on the polymorph:component-test guest SDK
                         #   (vectors under chunking schedules, plus
                         #   API-contract probes), and its driver/aggregation
                         #   stack rendering driver-ct/matrix.md
@@ -136,8 +136,8 @@ experiments/            # quarantined exploratory consumers of the package
 ```
 
 Components that name the package in their own WIT pull it in through
-`wit/deps/lann-webcrypto` symlinks back to the root `wit/`, so there is a
-single copy to edit; guests built on `lann-webcrypto-guest` reach it through that
+`wit/deps/polymorph-webcrypto` symlinks back to the root `wit/`, so there is a
+single copy to edit; guests built on `polymorph-webcrypto-guest` reach it through that
 crate's bindings instead.
 
 ## Build & run
@@ -145,7 +145,7 @@ crate's bindings instead.
 Prerequisites: Rust (via rustup; the toolchain and wasm target are pinned in
 `rust-toolchain.toml`), `wasm-tools`, and — for the jco host — Node 24+
 (jco's async ABI uses JSPI). `./scripts/setup.sh` installs the rest. The
-[lann/component-test](https://github.com/lann/component-test) test stack is
+[polymorph-components/polymorph-test](https://github.com/polymorph-components/polymorph-test) test stack is
 an ordinary git dependency pinned by rev in the root `Cargo.toml`
 (enforced by `Cargo.lock`); cargo fetches it — no sibling checkout needed.
 

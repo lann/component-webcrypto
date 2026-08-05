@@ -1,13 +1,13 @@
 // Demo-only WIT for the `crypto-demo` example component. The shared
-// `lann:webcrypto` package lives once at the repository root `wit/`; this
-// guest reaches it through `lann-webcrypto-guest`'s bindings, so no `deps` copy is
+// `polymorph:webcrypto` package lives once at the repository root `wit/`; this
+// guest reaches it through `polymorph-webcrypto-guest`'s bindings, so no `deps` copy is
 // needed here.
 package demo:webcrypto-demo@0.1.0;
 
 /// The demo entry point exported by the component.
 interface demo {
     /// Run the demo's known-answer and round-trip checks against the
-    /// imported `lann:webcrypto` implementation. Returns a human-readable
+    /// imported `polymorph:webcrypto` implementation. Returns a human-readable
     /// summary on success or a failure description.
     run: async func() -> result<string, string>;
 }
