@@ -371,7 +371,7 @@ mod corpus {
     #[cfg(not(feature = "preparsed"))]
     pub use crate::translate::{
         aead_cases, cbc_cases, ecdh_cases, hkdf_cases, hmac_cases, kw_cases, pbkdf2_cases,
-        rsa_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases,
+        rsa_cases, sha2_cases, sig_cases, speccheck_cases, x25519_cases, x25519_encoded_cases,
     };
 
     #[cfg(feature = "preparsed")]
@@ -401,6 +401,11 @@ mod corpus {
         ),
         (rsa_cases, crate::translate::RsaCase, "rsa.bin"),
         (x25519_cases, crate::translate::X25519Case, "x25519.bin"),
+        (
+            x25519_encoded_cases,
+            crate::translate::X25519EncodedCase,
+            "x25519-encoded.bin"
+        ),
         (ecdh_cases, crate::translate::EcdhCase, "ecdh.bin"),
     ];
 }
@@ -763,6 +768,20 @@ mod rows {
             |c| Box::pin(async move { vectors::run_x25519_case(&c).await })
         ),
         (
+            "x25519/wycheproof-spki",
+            x25519_wycheproof_spki,
+            crate::translate::X25519EncodedCase,
+            "x25519_wycheproof-spki.rkyv",
+            |c| Box::pin(async move { vectors::run_x25519_encoded_case(&c).await })
+        ),
+        (
+            "x25519/wycheproof-jwk",
+            x25519_wycheproof_jwk,
+            crate::translate::X25519EncodedCase,
+            "x25519_wycheproof-jwk.rkyv",
+            |c| Box::pin(async move { vectors::run_x25519_encoded_case(&c).await })
+        ),
+        (
             "ecdh-p256/wycheproof-spki",
             ecdh_p256_wycheproof_spki,
             crate::translate::EcdhCase,
@@ -903,6 +922,11 @@ fn vector_builder(prefix: &str) -> Option<Vec<PlanCase>> {
         "x25519/wycheproof" => vector_cases(corpus::x25519_cases(), |c| {
             Box::pin(async move { vectors::run_x25519_case(&c).await })
         }),
+        "x25519/wycheproof-spki" | "x25519/wycheproof-jwk" => {
+            vector_cases(corpus::x25519_encoded_cases(), |c| {
+                Box::pin(async move { vectors::run_x25519_encoded_case(&c).await })
+            })
+        }
         p if p.starts_with("ecdh-p") => vector_cases(corpus::ecdh_cases(), |c| {
             Box::pin(async move { vectors::run_ecdh_case(&c).await })
         }),

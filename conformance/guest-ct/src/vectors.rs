@@ -6,13 +6,15 @@ use crate::mint::{
     import_ecdh_public_key_spki, import_ecdh_secret_key, import_hmac_key, import_hmac_sha1_key,
     import_ikm, import_key_raw, import_kw_key, import_password, import_rsa_pss_verifying_key_jwk,
     import_rsa_pss_verifying_key_spki, import_rsassa_verifying_key_jwk,
-    import_rsassa_verifying_key_spki, import_x25519_public_key, import_x25519_secret_key,
-    mac_options,
+    import_rsassa_verifying_key_spki, import_x25519_public_key, import_x25519_public_key_jwk,
+    import_x25519_public_key_spki, import_x25519_secret_key, import_x25519_secret_key_jwk,
+    import_x25519_secret_key_pkcs8, mac_options,
 };
 use crate::translate::{
     AeadAlg, AeadCase, AeadExpectation, CbcCase, EcdhCase, EcdhCurve, EcdhPublic, HkdfAlg,
     HkdfCase, HmacAlg, HmacCase, KwCase, Pbkdf2Alg, Pbkdf2Case, RsaCase, RsaExpectation, RsaFamily,
-    RsaImport, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase, X25519Case,
+    RsaImport, Sha2Alg, Sha2Case, SigAlg, SigCase, SpeccheckCase, X25519Case, X25519Encoded,
+    X25519EncodedCase, X25519EncodedExpect,
 };
 use conformance_harness::stream::{
     ci_decrypt_ok, ci_decrypt_op, ci_encrypt_ok, compute_ok, open_ok, open_op, seal_ok, seal_op,
@@ -142,6 +144,74 @@ pub async fn run_x25519_case(case: &X25519Case) -> Result<(), String> {
         .map_err(|e| describe("import-secret-key-jwk", &e))?;
     let agreed = secret.agree(&peer).await;
     if case.zero_shared {
+        return expect_err(
+            "agree with a small-order peer",
+            ErrKind::InvalidKey,
+            agreed,
+            "agreement produced the all-zero shared secret",
+        );
+    }
+    let input = agreed.map_err(|e| describe("agree", &e))?;
+    let shared = input
+        .derive_bits(None)
+        .await
+        .map_err(|e| describe("derive-bits (natural length)", &e))?;
+    expect_bytes(&shared, &case.shared, "shared secret")?;
+    let prefix = input
+        .derive_bits(Some(128))
+        .await
+        .map_err(|e| describe("derive-bits (truncated)", &e))?;
+    expect_bytes(&prefix, &case.shared[..16], "truncated shared secret")?;
+    Ok(())
+}
+
+/// Run one encoded-key X25519 vector: import the peer and the secret
+/// key in the file's encoding (SPKI/PKCS#8 DER, or OKP JWKs), `agree`,
+/// and check the derived shared secret at its natural length and a
+/// truncated prefix — or, per the case's expectation, require the
+/// flagged import (or, for the small-order peers, `agree`) to fail
+/// `invalid-key`.
+pub async fn run_x25519_encoded_case(case: &X25519EncodedCase) -> Result<(), String> {
+    let (public_what, peer) = match &case.keys {
+        X25519Encoded::Spki { public, .. } => (
+            "import-public-key-spki",
+            import_x25519_public_key_spki(public.clone()).await,
+        ),
+        X25519Encoded::Jwk { public, .. } => (
+            "import-public-key-jwk",
+            import_x25519_public_key_jwk(public.clone()).await,
+        ),
+    };
+    if matches!(case.expect, X25519EncodedExpect::RejectPublic) {
+        return expect_err(
+            public_what,
+            ErrKind::InvalidKey,
+            peer,
+            "imported a public key upstream marks for rejection",
+        );
+    }
+    let peer = peer.map_err(|e| describe(public_what, &e))?;
+    let (secret_what, secret) = match &case.keys {
+        X25519Encoded::Spki { secret, .. } => (
+            "import-secret-key-pkcs8",
+            import_x25519_secret_key_pkcs8(secret.clone(), true, true).await,
+        ),
+        X25519Encoded::Jwk { secret, .. } => (
+            "import-secret-key-jwk",
+            import_x25519_secret_key_jwk(secret.clone(), true, true).await,
+        ),
+    };
+    if matches!(case.expect, X25519EncodedExpect::RejectSecret) {
+        return expect_err(
+            secret_what,
+            ErrKind::InvalidKey,
+            secret,
+            "imported a secret key upstream marks for rejection",
+        );
+    }
+    let secret = secret.map_err(|e| describe(secret_what, &e))?;
+    let agreed = secret.agree(&peer).await;
+    if matches!(case.expect, X25519EncodedExpect::ZeroShared) {
         return expect_err(
             "agree with a small-order peer",
             ErrKind::InvalidKey,

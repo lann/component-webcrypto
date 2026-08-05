@@ -157,14 +157,20 @@ re-fetched and diffed against its source.
 
 Adding an algorithm interface to the package is not done until its vector
 cases are here: vendor the vectors, extend the translation policy in
-`vectors/README.md` + `guest-ct/src/translate.rs` (they must agree), add
-the algorithm's `#[case_row]` registration in `guest-ct/src/lib.rs` and
-its row in `guest-ct/src/plan.rs`, tag
+`vectors/README.md` + `guest-ct/src/translate.rs` (they must agree), wire
+the corpus through `guest-ct/src/plan.rs` (the rkyv row table, the
+default-mode builder arm, the preparsed table) and `build.rs`'s corpus
+list, give it a runner in `guest-ct/src/vectors.rs`, add the row's
+`#[case_row]` registration in `guest-ct/src/lib.rs` — post-cutover rows
+register there only; `plan::ROWS` is the frozen incumbent share — tag
 the new cases with a feature name if any target legitimately cannot serve
 them (declaring it missing in `driver-ct/targets.toml` for those targets,
 and adding the feature's `!feature` decline case), and run
 `just conformance-ct::lock-update` so the change lands as a reviewable
-lockfile diff. An algorithm of a kind with a contract battery
+lockfile diff, then `just conformance-ct::matrix-update` from a full run
+including the browser leg (without Chrome,
+`just gha::update-matrices-from-ci` copies the matrices from the
+branch's CI artifact). An algorithm of a kind with a contract battery
 (`guest-ct/src/contract.rs`) also adds its table row there, inheriting the
 kind's standard cases as `<interface>/contract/…` lockfile entries; only
 behavior specific to the algorithm needs a hand-written probe. An algorithm

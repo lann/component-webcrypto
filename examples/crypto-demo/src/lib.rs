@@ -148,7 +148,9 @@ impl Guest for Component {
         };
 
         check("hmac-key-export", hmac_key_export().await).await?;
+        check("hmac-sha1-known-answer", hmac_sha1_known_answer().await).await?;
         check("digest-wrapper", digest_wrapper().await).await?;
+        check("sha1-checked-or-declined", sha1_checked_or_declined().await).await?;
         check("aead-wrapper-seal", aead_wrapper_seal().await).await?;
         check("concurrent-seal-open", concurrent_seal_open().await).await?;
         check("key-wrap-tour", key_wrap_tour().await).await?;
@@ -157,6 +159,7 @@ impl Guest for Component {
             aes_ctr_wrapper_roundtrip().await,
         )
         .await?;
+        check("aes-cbc-known-answer", aes_cbc_known_answer().await).await?;
         check("ed25519-verify", ed25519_verify_check().await).await?;
         check(
             "ed25519-wrapper-roundtrip",
@@ -170,7 +173,9 @@ impl Guest for Component {
         .await?;
         check("rsa-verify-known-answer", rsa_verify_known_answer().await).await?;
         check("hkdf-rfc5869-derive", hkdf_derive().await).await?;
+        check("hkdf-sha1-derive", hkdf_sha1_derive().await).await?;
         check("pbkdf2-rfc7914-derive", pbkdf2_derive().await).await?;
+        check("pbkdf2-sha1-derive", pbkdf2_sha1_derive().await).await?;
         check("x25519-agreement", x25519_agreement().await).await?;
         check("ecdh-agreement", ecdh_agreement().await).await?;
         check(
@@ -276,6 +281,35 @@ async fn digest_wrapper() -> Result<()> {
         "recomputed digest: got {}",
         hex(&again)
     );
+    Ok(())
+}
+
+/// The `sha1_checked` SDK wrappers: an implementation either serves the
+/// checked SHA-1 constructors — both collision postures then compute the
+/// FIPS 180 "abc" digest, attack-free input being posture-independent —
+/// or declines them `unsupported`, the fail-closed posture of
+/// browser-backed hosts (both constructors must agree).
+async fn sha1_checked_or_declined() -> Result<()> {
+    use lann_webcrypto_guest::{sha1_checked, Error};
+    let minted = (
+        sha1_checked::make_rejecting_digest(),
+        sha1_checked::make_mitigating_digest(),
+    );
+    let (rejecting, mitigating) = match minted {
+        (Err(Error::Unsupported(_)), Err(Error::Unsupported(_))) => return Ok(()),
+        (rejecting, mitigating) => (
+            rejecting.context("make-rejecting-digest")?,
+            mitigating.context("make-mitigating-digest")?,
+        ),
+    };
+    let abc_sha1 = hexlower!("a9993e364706816aba3e25717850c26c9cd0d89d");
+    for (what, digest) in [("rejecting", &rejecting), ("mitigating", &mitigating)] {
+        let got = digest
+            .compute(b"abc")
+            .await
+            .with_context(|| format!("compute ({what})"))?;
+        ensure!(got == abc_sha1, "{what} digest: got {}", hex(&got));
+    }
     Ok(())
 }
 
@@ -390,6 +424,37 @@ async fn concurrent_seal_open() -> Result<()> {
     a.and(b).and(c).and(d).and(e).and(f).and(g).and(h)
 }
 
+/// HMAC-SHA-1 through its SDK wrappers against RFC 2202 case 1: the
+/// imported key signs "Hi There" to the published tag, verifies it, and
+/// rejects a corrupted one.
+async fn hmac_sha1_known_answer() -> Result<()> {
+    use lann_webcrypto_guest::hmac_sha1;
+    let key = hmac_sha1::import_key_raw(
+        vec![0x0b; 20],
+        lann_webcrypto_guest::MacKeyOptions {
+            sign: true,
+            verify: true,
+            extractable: false,
+        },
+    )
+    .await
+    .context("import-key-raw")?;
+    let tag = key.sign(&b"Hi There"[..]).await.context("sign")?;
+    ensure!(
+        tag == hexlower!("b617318655057264e28bc0b6fb378c8ef146be00"),
+        "HMAC-SHA-1 tag: got {}",
+        hex(&tag)
+    );
+    key.verify(&b"Hi There"[..], &tag).await.context("verify")?;
+    let mut corrupted = tag.clone();
+    corrupted[0] ^= 1;
+    ensure!(
+        key.verify(&b"Hi There"[..], &corrupted).await.is_err(),
+        "corrupted tag verified"
+    );
+    Ok(())
+}
+
 // --- cipher ----------------------------------------------------------------
 
 /// The cipher tour: the `CipherKey` wrapper end to end — generate through
@@ -414,6 +479,42 @@ async fn aes_ctr_wrapper_roundtrip() -> Result<()> {
     ensure!(ciphertext != plaintext, "ciphertext equals plaintext");
     let decrypted = key
         .decrypt(&iv[..], Some(64), ciphertext)
+        .await?
+        .collect()
+        .await;
+    ensure!(decrypted == plaintext, "round trip disagreed");
+    Ok(())
+}
+
+/// AES-CBC through its SDK wrappers against NIST SP 800-38A F.2.1's
+/// first block: the imported key encrypts the block to the published
+/// ciphertext (followed by one full PKCS#7 padding block), and the
+/// ciphertext decrypts back to the block.
+async fn aes_cbc_known_answer() -> Result<()> {
+    use lann_webcrypto_guest::{aes_cbc, CipherKeyOptions};
+    let key = aes_cbc::import_key_raw(
+        aes_cbc::AesVariant::Aes128,
+        hexlower!("2b7e151628aed2a6abf7158809cf4f3c"),
+        CipherKeyOptions {
+            encrypt: true,
+            decrypt: true,
+            wrap: false,
+            unwrap: false,
+            extractable: false,
+        },
+    )
+    .await
+    .context("import-key-raw")?;
+    let iv = hexlower!("000102030405060708090a0b0c0d0e0f");
+    let plaintext = hexlower!("6bc1bee22e409f96e93d7e117393172a");
+    let ciphertext = key.encrypt(&iv[..], None, &plaintext[..]).await?;
+    ensure!(
+        ciphertext.len() == 32 && ciphertext[..16] == hexlower!("7649abac8119b246cee98e9b12e9197d"),
+        "CBC ciphertext: got {}",
+        hex(&ciphertext)
+    );
+    let decrypted = key
+        .decrypt(&iv[..], None, ciphertext)
         .await?
         .collect()
         .await;
@@ -661,6 +762,51 @@ async fn pbkdf2_derive() -> Result<()> {
             "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc\
              49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
         ),
+        "derived key mismatch: got {}",
+        hex(&dk)
+    );
+    Ok(())
+}
+
+/// HKDF-SHA-1 through its SDK wrappers against RFC 5869 A.4 (test case
+/// 4): the imported IKM derives the published 42-byte OKM.
+async fn hkdf_sha1_derive() -> Result<()> {
+    use lann_webcrypto_guest::{hkdf, hkdf_sha1, DeriveOptions};
+    let options = DeriveOptions {
+        derive_bits: true,
+        derive_key: false,
+    };
+    let ikm = hkdf::import_ikm(vec![0x0b; 11], options).await?;
+    let input = hkdf_sha1::prepare(
+        &ikm,
+        hexlower!("000102030405060708090a0b0c"),
+        hexlower!("f0f1f2f3f4f5f6f7f8f9"),
+    )
+    .await?;
+    let okm = input.derive_bits(Some(42 * 8)).await?;
+    ensure!(
+        okm == hexlower!(
+            "085a01ea1b10f36933068b56efa5ad81a4f14b822f5b091568a9cdd4f155fda2c22e422478d305f3f896"
+        ),
+        "OKM mismatch: got {}",
+        hex(&okm)
+    );
+    Ok(())
+}
+
+/// PBKDF2-HMAC-SHA-1 through its SDK wrappers against RFC 6070's c=2
+/// vector (P="password", S="salt", dkLen=20).
+async fn pbkdf2_sha1_derive() -> Result<()> {
+    use lann_webcrypto_guest::{pbkdf2, pbkdf2_sha1, DeriveOptions};
+    let options = DeriveOptions {
+        derive_bits: true,
+        derive_key: false,
+    };
+    let password = pbkdf2::import_password(b"password", options).await?;
+    let input = pbkdf2_sha1::prepare(&password, b"salt", 2).await?;
+    let dk = input.derive_bits(Some(20 * 8)).await?;
+    ensure!(
+        dk == hexlower!("ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957"),
         "derived key mismatch: got {}",
         hex(&dk)
     );

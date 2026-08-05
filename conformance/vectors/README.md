@@ -14,16 +14,18 @@ commit
 (2026-07-21; the vendored files themselves last changed upstream in
 `e0df04e0c033f2d25c5051dd06230336c7822358`, 2025-10-07):
 
-- `hmac_sha256_test.json`, `hmac_sha384_test.json`, `hmac_sha512_test.json`
-  — HMAC MAC vectors for every served SHA-2 parameterization.
-- `pbkdf2_hmacsha256_test.json`, `pbkdf2_hmacsha384_test.json`,
-  `pbkdf2_hmacsha512_test.json` — PBKDF2 derivation vectors for every
-  served SHA-2 parameterization. Every vector runs and every one is
-  `valid` upstream, including the empty-password cases (empty KDF secrets
-  are accepted package-wide — see `wit/README.md`, "Empty KDF secrets are
-  accepted").
-- `hkdf_sha256_test.json`, `hkdf_sha384_test.json`, `hkdf_sha512_test.json`
-  — HKDF derivation vectors for every served SHA-2 parameterization. Every
+- `hmac_sha1_test.json`, `hmac_sha256_test.json`, `hmac_sha384_test.json`,
+  `hmac_sha512_test.json` — HMAC MAC vectors for every served
+  parameterization (`hmac-sha1` and the SHA-2 family).
+- `pbkdf2_hmacsha1_test.json`, `pbkdf2_hmacsha256_test.json`,
+  `pbkdf2_hmacsha384_test.json`, `pbkdf2_hmacsha512_test.json` — PBKDF2
+  derivation vectors for every served parameterization. Every vector runs
+  and every one is `valid` upstream, including the empty-password cases
+  (empty KDF secrets are accepted package-wide — see `wit/README.md`,
+  "Empty KDF secrets are accepted").
+- `hkdf_sha1_test.json`, `hkdf_sha256_test.json`, `hkdf_sha384_test.json`,
+  `hkdf_sha512_test.json` — HKDF derivation vectors for every served
+  parameterization. Every
   vector runs: the WIT surface carries the full (ikm, salt, info, size)
   parameter space, and the invalid vectors (`SizeTooLarge`) map onto the
   RFC 5869 output bound, reported as `error.other`.
@@ -113,13 +115,24 @@ commit
   encrypt-side window probe as the below-window must-reject key.
 - `x25519_test.json` — X25519 key-agreement vectors, including the twist,
   non-canonical, and small-order public keys that discriminate agreement
-  policies. The vectors carry each private key as a raw scalar, but the
-  package's only secret-key import is the RFC 8037 OKP private JWK, whose
+  policies. The vectors carry each private key as a raw scalar, and the
+  translation imports it as an RFC 8037 OKP private JWK, whose
   public coordinate `x` is mandatory — so the derived companion
   `x25519_test_public_keys.json` maps each `tcId` to its private key's
   public coordinate. It is generated, not vendored: regenerate it with
   `derive_x25519_public_keys.py` (a plain RFC 7748 ladder, self-checked
   against the §6.1 key pairs) after refreshing the vector file.
+- `x25519_asn_test.json`, `x25519_jwk_test.json` — the same agreement
+  corpus with encoded keys: SPKI public keys and PKCS#8 secret keys
+  (`asn`), and RFC 8037 OKP JWKs for both halves (`jwk`, serialized to
+  JSON text for the JWK imports; the extra `kid` member is harmless,
+  since unrecognized JWK members are ignored). What they add over the
+  raw file is the encoded admission dimension — wrong-algorithm SPKIs,
+  a malformed PrivateKeyInfo, and malformed or wrong-type JWKs that
+  discriminate admission policies, the rationale that vendored the ECDH
+  asn/webcrypto analogues. No companions: each file carries both keys
+  in its own encoding. (`x25519_pem_test.json` is not vendored — PEM is
+  not a WIT format.)
 - `ecdh_secp256r1_test.json`, `ecdh_secp384r1_test.json` — ECDH
   key-agreement vectors with SPKI-encoded peer public keys (upstream's
   `asn` encoding) and raw private scalars, including the off-curve,
@@ -225,6 +238,8 @@ only the host-only signing suite can run); in summary:
 | RSA-OAEP, `acceptable` (the `SmallIntegerCiphertext` vectors: a ciphertext that is a numerically small integer) | **Excluded** — acceptance is legitimately policy-divergent across implementations: platform WebCrypto decrypts them, while aws-lc-rs rejects them as RNG-failure/attack artifacts, and RFC 8017 tolerates either, so no single expectation holds across targets (the ECDH `acceptable` exclusions' reasoning). |
 | X25519, any vector whose `shared` is non-zero (`valid`, and the `acceptable` twist/non-canonical cases — RFC 7748's masking accepts both) | `import-public-key` and `import-secret-key-jwk` (built with the derived `x` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. No chunking schedules: agreement carries no streams. |
 | X25519, `ZeroSharedSecret` flag (small-order public keys) | import succeeds (deliberately permissive, like the platform's); `agree` fails `invalid-key` — the contributory all-zero check, pinned at the operation that computes the secret. |
+| X25519 asn/jwk files, `valid` or `acceptable` | as the raw X25519 rows above, importing in the file's encoding: `import-public-key-spki` + `import-secret-key-pkcs8` (asn), or `import-public-key-jwk` + `import-secret-key-jwk` (jwk). The value-level policy is identical — what these files add is the encoded admission dimension. |
+| X25519 asn/jwk files, `invalid` | the flagged import fails `invalid-key`: `InvalidPublic` (wrong-algorithm SPKIs, malformed or wrong-type JWKs) lands on the public import, and the asn file's one `MissingOctetString` case (a malformed PrivateKeyInfo) lands on the secret import. There is no encoding-laxity family to exclude: X25519 SPKI and PKCS#8 carry no curve parameters, and upstream marks structural malformations `invalid` outright. |
 | ECDH (any file), `valid` | the public import (per the file's encoding: raw / SPKI / JWK) and `import-secret-key-jwk` (the webcrypto files' own private JWK, or one built from the normalized scalar plus the derived `x`/`y` companion) succeed; `agree` succeeds; `derive-bits(none)` equals `shared`, and a truncated request equals its prefix. Scalars are normalized to the curve's field size (the files' big-endian hex may carry a leading zero byte or be short). No chunking schedules: agreement carries no streams. |
 | ECDH, `invalid` | the public import fails `invalid-key`. Every invalid case in these files is a public-key admission failure — off-curve points and invalid-curve attacks, wrong curves, malformed encodings — and the WIT pins strict public admission at import, so they all land there (unlike X25519, where degenerate peers surface at `agree`). |
 | ECDH ecpoint, `acceptable` (a compressed encoding of a valid point) | the raw import fails `invalid-key`: upstream marks compressed admission policy-divergent, but the WIT pins the raw format to uncompressed-only. |
