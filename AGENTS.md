@@ -106,8 +106,8 @@ examples/
                         #   interface as crypto-demo, composed and run via
                         #   `just componentize::test` (gates in CI)
 conformance/            # cross-implementation conformance tests, on the
-                        #   lann:component-test stack (expected as a
-                        #   sibling checkout of the repo) — see
+                        #   lann:component-test stack (a git dependency
+                        #   pinned by rev in the root Cargo.toml) — see
                         #   conformance/README.md for the architecture
   vectors/              #   vendored Wycheproof JSON + the translation
                         #     policy; its README records the upstream
@@ -359,15 +359,24 @@ absent an exceptional recorded ruling.
 
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in
 `rust-toolchain.toml`), `wasm-tools`, `just`, Node 24+ with npm for the
-jco path, and a checkout of lann/component-test as a **sibling of the
-repo** containing the rev pinned in `.component-test-rev` — a
-workspace-wide prerequisite, not a conformance-only one: the conformance
-ct crates are workspace members with path dependencies into it, and cargo
-resolves the workspace before selecting packages, so every cargo command
-(fmt, clippy, test, metadata, rust-analyzer project load) fails without
-it. Run `./scripts/setup.sh` once (idempotent; clones the sibling when
-missing, never modifies an existing one; `SKIP_NODE=1` to skip the npm
-install).
+jco path. Run `./scripts/setup.sh` once (idempotent; `SKIP_NODE=1` to
+skip the npm install). The lann:component-test stack is a git dependency
+pinned by rev in the root `Cargo.toml` and enforced by `Cargo.lock`;
+cargo fetches it, and `conformance-ct::_ct-tools` cargo-installs the
+`component-test`/`ct-runner` binaries at the same locked rev. To bump
+the pin: edit the rev in `Cargo.toml`, run `cargo update -p
+component-test-sdk -p component-test-runner`, and commit the lock diff.
+To develop against a local component-test checkout, add a temporary
+override to the root `Cargo.toml` (do not commit it):
+
+```toml
+[patch."https://github.com/lann/component-test"]
+component-test-sdk = { path = "../component-test/crates/component-test-sdk" }
+component-test-runner = { path = "../component-test/crates/component-test-runner" }
+```
+
+and point `CONFORMANCE_CT_TOOLS` at a directory with your own
+`component-test` and `ct-runner` builds for the driver-ct recipes.
 
 The [`justfile`](justfile) is the single entry point; run `just` to list
 recipes. Component-scoped recipes live in module justfiles colocated with
@@ -403,7 +412,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just componentize::typecheck` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
 | `just componentize::test` | the `webcrypto-componentize` library, the componentize-demo guest, the in-guest provider, or any WIT. Gates in CI. Componentizes the JS demo guest from your tree (with the downloaded, digest-verified componentize-js — see the WPT row for the pin mechanics), composes it with the in-guest provider and driver, and runs it under `wasmtime`. The behavioral gate on the shim's checks the WPT census cannot observe (the SHA-1 collision postures, the extension-error transport). |
 | `just wpt::test` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just componentize::update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just wpt::update-expectations`. |
-| `just conformance-ct::all` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance suites/vectors/translation policy, or driver-ct/targets.toml. Intentional case changes also need `just conformance-ct::lock-update`. Gates on the wasmtime-rustcrypto and jco-node targets (Node 24+), aggregating against the committed lockfiles and target manifests. Needs the component-test checkout as a sibling of the repo. |
+| `just conformance-ct::all` | any host/guest behavior the tests assert — the WIT surface, an implementation, the conformance suites/vectors/translation policy, or driver-ct/targets.toml. Intentional case changes also need `just conformance-ct::lock-update`. Gates on the wasmtime-rustcrypto and jco-node targets (Node 24+), aggregating against the committed lockfiles and target manifests. |
 | `just demo::transpile` | anything affecting the component's interfaces, or the transpile flags in `examples/jco-demo/package.json`. |
 | `just jco::test-host` | the jco host's input-buffering admission subsystem (`configure`, the admission queue). Runs `webcrypto.js` directly under `node --test`; the conformance suite cannot reach this code, since its workers each run their cases sequentially against their own host instance. |
 | `just jco::typecheck` | the jco host (`webcrypto.js`), its world, or any WIT. Regenerates the interface definitions and type-checks the host against them; no component build. |

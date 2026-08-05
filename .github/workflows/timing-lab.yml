@@ -41,15 +41,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Checkout component-test (path dependency)
-        # The conformance ct crates path-depend on a sibling checkout of
-        # lann/component-test (see conformance/driver-ct/justfile).
-        # Pinned via .component-test-rev (bump deliberately; the sibling
-        # path dependency makes this repo's builds track that rev).
-        run: |
-          git clone https://github.com/lann/component-test ../component-test
-          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
-
       - name: Install Rust toolchain
         # The toolchain version, wasm target, and components are pinned in
         # rust-toolchain.toml; `rustup show` installs exactly those.
@@ -99,15 +90,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Checkout component-test (path dependency)
-        # The conformance ct crates path-depend on a sibling checkout of
-        # lann/component-test (see conformance/driver-ct/justfile).
-        # Pinned via .component-test-rev (bump deliberately; the sibling
-        # path dependency makes this repo's builds track that rev).
-        run: |
-          git clone https://github.com/lann/component-test ../component-test
-          git -C ../component-test checkout --detach "$(cat .component-test-rev)"
 
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install

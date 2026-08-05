@@ -318,6 +318,7 @@ dependencies = [
 [[package]]
 name = "component-test-core"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "arcstr",
  "serde",
@@ -326,6 +327,7 @@ dependencies = [
 [[package]]
 name = "component-test-formats"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -340,6 +342,7 @@ dependencies = [
 [[package]]
 name = "component-test-results"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -350,6 +353,7 @@ dependencies = [
 [[package]]
 name = "component-test-runner"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -363,6 +367,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "component-test-core",
  "component-test-sdk-macro",
@@ -374,6 +379,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk-macro"
 version = "0.1.0"
+source = "git+https://github.com/lann/component-test?rev=c90b2f07c005aae7548038849723f1e943e3eed8#c90b2f07c005aae7548038849723f1e943e3eed8"
 dependencies = [
  "component-test-core",
  "proc-macro2",
