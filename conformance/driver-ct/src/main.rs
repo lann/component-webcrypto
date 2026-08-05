@@ -2,6 +2,7 @@
 //! (conformance-guest-ct) against the wasmtime-impl RustCrypto host.
 //!
 //! Usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...]
+//! [--jobs N] [--cases-per-instance N] [--target key] [--only substring]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -63,6 +64,7 @@ fn run() -> Result<ExitCode> {
     let mut cases_per_instance: usize = 0; // cheap pure-compute corpus: single instance
     let mut jobs: usize = 1;
     let mut target: String = "wasmtime-rustcrypto".into();
+    let mut only: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -89,13 +91,22 @@ fn run() -> Result<ExitCode> {
                     .ok_or_else(|| anyhow::anyhow!("--cases-per-instance needs a number"))?;
                 cases_per_instance = v.parse()?;
             }
+            "--only" => {
+                only = Some(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("--only needs a substring"))?,
+                );
+            }
             "--jsonl" => mode = OutputMode::Jsonl,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             other => bail!("unexpected argument `{other}`"),
         }
     }
     let suite = suite.ok_or_else(|| {
-        anyhow::anyhow!("usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2]")
+        anyhow::anyhow!(
+            "usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...] \
+             [--jobs N] [--cases-per-instance N] [--target key] [--only substring]"
+        )
     })?;
     let suite_name = suite
         .file_stem()
@@ -123,13 +134,14 @@ fn run() -> Result<ExitCode> {
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
-    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_full(
+    let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_opts(
         &suite_name,
         &target,
         mode,
         &missing,
         cases_per_instance,
         jobs,
+        only.as_deref(),
     ))
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
