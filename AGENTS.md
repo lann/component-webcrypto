@@ -4,10 +4,10 @@ Guidance for automated agents (and humans) working in this repository.
 
 ## What this repository is
 
-`lann:webcrypto`: a WIT interface plus multiple implementations that run the
+`polymorph:webcrypto`: a WIT interface plus multiple implementations that run the
 *same* guest component against real cryptography: a Wasmtime host (RustCrypto)
 and a jco host (browser Web Crypto API). It is a sibling of
-`lann:webrtc-datachannels` and deliberately mirrors its architecture — prefer
+`polymorph:webrtc-datachannels` and deliberately mirrors its architecture — prefer
 clarity and correctness over features, and keep the implementations
 behaviourally in sync (the conformance tests and the `crypto-demo` guest's
 checks are the cross-implementation gate).
@@ -24,7 +24,7 @@ rather than relying on a cached summary.
 ## Repository layout
 
 ```
-wit/                    # the lann:webcrypto package, one file per layer:
+wit/                    # the polymorph:webcrypto package, one file per layer:
                         #   webcrypto.wit holds the structural types and
                         #   the founding generic primitive kinds; later
                         #   generic kinds live in their own files
@@ -34,23 +34,23 @@ wit/                    # the lann:webcrypto package, one file per layer:
                         #   parameterization interface, and grow as
                         #   algorithms are added
 rust/                   # the Rust library surface (directory = crate name
-                        # minus the `lann-webcrypto-` family root)
-  core/                 # lann-webcrypto-core: the shared RustCrypto core of
+                        # minus the `polymorph-webcrypto-` family root)
+  core/                 # polymorph-webcrypto-core: the shared RustCrypto core of
                         #   both Rust implementations: cipher/digest
                         #   dispatch, key validation and generation, error
                         #   rendering,
                         #   signature keys (ECDSA signing is compiled out of
                         #   wasm builds — class D)
-  wasmtime/             # lann-webcrypto-wasmtime: Wasmtime host crate,
+  wasmtime/             # polymorph-webcrypto-wasmtime: Wasmtime host crate,
                         #   modeled after wasmtime_wasi_http::p3;
                         #   add_to_linker + WasiWebcryptoView
-  guest/                # lann-webcrypto-guest: guest-side Rust library over
-                        #   the lann:webcrypto imports: typed wrappers with
+  guest/                # polymorph-webcrypto-guest: guest-side Rust library over
+                        #   the polymorph:webcrypto imports: typed wrappers with
                         #   a byte-source abstraction, so consumers do not
                         #   re-implement the feed-a-stream-and-await
                         #   plumbing; the Rust counterpart of
-                        #   @lann/webcrypto-componentize
-  guest-provider/       # lann-webcrypto-guest-provider: wasm COMPONENT,
+                        #   @polymorph/webcrypto-componentize
+  guest-provider/       # polymorph-webcrypto-guest-provider: wasm COMPONENT,
                         #   RustCrypto in-guest, EXPORTS the package
                         #   surface; composable via `wac plug`; buffer.rs
                         #   makes input buffering fallible, so allocation
@@ -61,8 +61,8 @@ rust/                   # the Rust library surface (directory = crate name
                         #   README for the timing-channel classification and
                         #   export policy
 js/                     # the JS library surface (directory = npm name minus
-                        # the `@lann/webcrypto-` family root)
-  jco/                  # @lann/webcrypto-jco: jco host LIBRARY.
+                        # the `@polymorph/webcrypto-` family root)
+  jco/                  # @polymorph/webcrypto-jco: jco host LIBRARY.
                         #   webcrypto.js implements the imports over the
                         #   browser-compatible Web Crypto API ONLY; no
                         #   runtime dependencies, no demo code.
@@ -72,10 +72,10 @@ js/                     # the JS library surface (directory = npm name minus
                         #   against them (`just jco::typecheck`); test/
                         #   covers the admission subsystem conformance
                         #   cannot reach
-  componentize/         # @lann/webcrypto-componentize: JS guest library for
+  componentize/         # @polymorph/webcrypto-componentize: JS guest library for
                         #   componentize-js (dicej's ComponentizeJS reboot):
                         #   webcrypto.js exposes a crypto.subtle subset over
-                        #   the lann:webcrypto imports — its header is the
+                        #   the polymorph:webcrypto imports — its header is the
                         #   registry of the served algorithm/format sets
                         #   (SERVED_ALGORITHMS) and of every deviation; the
                         #   toolchain revision is pinned in
@@ -92,10 +92,10 @@ js/                     # the JS library surface (directory = npm name minus
                         #   Pages site (serve with `just wpt::web`)
 examples/
   crypto-demo/          # guest component exercising the primitive kinds end
-                        #   to end (reaches lann:webcrypto via lann-webcrypto-guest)
+                        #   to end (reaches polymorph:webcrypto via polymorph-webcrypto-guest)
   demo-driver/          # CLI driver (async wasi:cli/run) for the composed
                         #   fully in-guest demo
-  wasmtime-demo/        # thin native host over lann-webcrypto-wasmtime's add_to_linker
+  wasmtime-demo/        # thin native host over polymorph-webcrypto-wasmtime's add_to_linker
                         #   + the integration test (tests/demo.rs)
   jco-demo/             # Node 24+ driver for the jco host: transpiles
                         #   crypto-demo with jco (one wildcard --map; async
@@ -106,7 +106,7 @@ examples/
                         #   interface as crypto-demo, composed and run via
                         #   `just componentize::test` (gates in CI)
 conformance/            # cross-implementation conformance tests, on the
-                        #   lann:component-test stack (a git dependency
+                        #   polymorph:component-test stack (a git dependency
                         #   pinned by rev in the root Cargo.toml) — see
                         #   conformance/README.md for the architecture
   vectors/              #   vendored Wycheproof JSON + the translation
@@ -148,8 +148,8 @@ scripts/setup.sh        # one-shot dependency setup (idempotent; used by CI)
 
 ### WIT is organized by ownership — one copy of the shared package
 
-The **`lann:webcrypto`** package is defined exactly once, at the root
-[`wit/`](wit). Components pull it in through `wit/deps/lann-webcrypto`
+The **`polymorph:webcrypto`** package is defined exactly once, at the root
+[`wit/`](wit). Components pull it in through `wit/deps/polymorph-webcrypto`
 **symlinks** back to the root. Do not copy the package into a component or
 replace those symlinks with real directories.
 
@@ -350,7 +350,7 @@ absent an exceptional recorded ruling.
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in
 `rust-toolchain.toml`), `wasm-tools`, `just`, Node 24+ with npm for the
 jco path. Run `./scripts/setup.sh` once (idempotent; `SKIP_NODE=1` to
-skip the npm install). The lann:component-test stack is a git dependency
+skip the npm install). The polymorph:component-test stack is a git dependency
 pinned by rev in the root `Cargo.toml` and enforced by `Cargo.lock`;
 cargo fetches it, and `conformance-ct::_ct-tools` cargo-installs the
 `component-test`/`ct-runner` binaries at the same locked rev. To bump
@@ -360,7 +360,7 @@ To develop against a local component-test checkout, add a temporary
 override to the root `Cargo.toml` (do not commit it):
 
 ```toml
-[patch."https://github.com/lann/component-test"]
+[patch."https://github.com/polymorph-components/polymorph-test"]
 component-test-sdk = { path = "../component-test/crates/component-test-sdk" }
 component-test-runner = { path = "../component-test/crates/component-test-runner" }
 ```
@@ -398,7 +398,7 @@ Run the recipes that cover what you changed, and fix anything they report.
 | `just validate-wit` | any `.wit` file. |
 | `just test` | any Rust host/guest code (includes the guest-under-Wasmtime integration test). |
 | `just demo::build-component` | the `crypto-demo` guest or its WIT. |
-| `just demo::test-composed` | the `lann-webcrypto-guest-provider` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
+| `just demo::test-composed` | the `polymorph-webcrypto-guest-provider` provider, the demo driver, or any WIT (composes guest + provider + driver with `wac plug` and runs under `wasmtime`). |
 | `just componentize::typecheck` | the `webcrypto-componentize` library. Asserts its exported surface against the Web Cryptography API definitions TypeScript ships; no component build, nothing generated. |
 | `just componentize::test` | the `webcrypto-componentize` library, the componentize-demo guest, the in-guest provider, or any WIT. Gates in CI. Componentizes the JS demo guest from your tree (with the downloaded, digest-verified componentize-js — see the WPT row for the pin mechanics), composes it with the in-guest provider and driver, and runs it under `wasmtime`. The behavioral gate on the shim's checks the WPT census cannot observe (the SHA-1 collision postures, the extension-error transport). |
 | `just wpt::test` | the `webcrypto-componentize` library, its `wpt/` harness or vendored files, the in-guest provider, or any WIT. Gates in CI. The runner is componentized from your tree in seconds; the componentize-js build it needs is downloaded and digest-verified (`js/componentize/wpt/component.sh`), never compiled here. Changing `js/componentize/componentize-js.rev` triggers the `componentize-js-toolchain` workflow; this check then fails until that publishes *and* `just componentize::update-toolchain-digest` records the new digests. Intentional changes to the test census also need `just wpt::update-expectations`. |

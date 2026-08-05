@@ -1,5 +1,5 @@
 //! The timing lab: dudect-style statistical timing tests of the composed
-//! `lann:webcrypto` in-guest provider, run entirely in-guest.
+//! `polymorph:webcrypto` in-guest provider, run entirely in-guest.
 //!
 //! Methodology ("dude, is my code constant time?" — Reparaz, Balasch,
 //! Verbauwhede, DATE 2017): for each surface, interleave measurements of two
@@ -36,15 +36,15 @@ mod bindings {
     });
 }
 
-use bindings::lann::webcrypto::aead::AeadKey;
-use bindings::lann::webcrypto::aes_gcm;
-use bindings::lann::webcrypto::ecdh;
-use bindings::lann::webcrypto::hmac_sha2;
-use bindings::lann::webcrypto::key_agreement::{
+use bindings::polymorph::webcrypto::aead::AeadKey;
+use bindings::polymorph::webcrypto::aes_gcm;
+use bindings::polymorph::webcrypto::ecdh;
+use bindings::polymorph::webcrypto::hmac_sha2;
+use bindings::polymorph::webcrypto::key_agreement::{
     AgreementKeyOptions, PublicKey as AgreementPublicKey, SecretKey as AgreementSecretKey,
 };
-use bindings::lann::webcrypto::mac::MacKey;
-use bindings::lann::webcrypto::x25519;
+use bindings::polymorph::webcrypto::mac::MacKey;
+use bindings::polymorph::webcrypto::x25519;
 use bindings::wit_stream;
 
 use data_encoding_macro::hexlower;
@@ -269,7 +269,7 @@ async fn timed_verify(key: &MacKey, message: &[u8], tag: Vec<u8>) -> Result<u64,
     });
     let ns = start.elapsed().as_nanos() as u64;
     match result {
-        Err(bindings::lann::webcrypto::types::Error::AuthenticationFailed) => Ok(ns),
+        Err(bindings::polymorph::webcrypto::types::Error::AuthenticationFailed) => Ok(ns),
         Ok(()) => Err("corrupted tag unexpectedly verified".into()),
         Err(err) => Err(format!("unexpected verify error: {err:?}")),
     }
@@ -286,7 +286,7 @@ async fn timed_open_fail(key: &AeadKey, nonce: &[u8], sealed: &[u8]) -> Result<u
     });
     let ns = start.elapsed().as_nanos() as u64;
     match result {
-        Err(bindings::lann::webcrypto::types::Error::AuthenticationFailed) => Ok(ns),
+        Err(bindings::polymorph::webcrypto::types::Error::AuthenticationFailed) => Ok(ns),
         Ok(rx) => {
             drain(rx).await;
             Err("corrupted ciphertext unexpectedly opened".into())
@@ -315,7 +315,7 @@ async fn timed_seal(key: &AeadKey, nonce: &[u8], plaintext: &[u8]) -> Result<u64
 
 /// Read a byte stream to its end, collecting the contents.
 ///
-/// Deliberately not the `lann-webcrypto-guest` wrappers: this crate shares
+/// Deliberately not the `polymorph-webcrypto-guest` wrappers: this crate shares
 /// wit-bindgen runtime types with `wasip3` (pinned to an older wit-bindgen;
 /// see Cargo.toml), and mixing two runtime versions in one component does
 /// not work — and a measurement harness wants its stream plumbing inline
@@ -564,7 +564,7 @@ async fn measure_agree<F, Fut>(
 where
     F: Fn(Vec<u8>) -> Fut,
     Fut: std::future::Future<
-        Output = Result<AgreementSecretKey, bindings::lann::webcrypto::types::Error>,
+        Output = Result<AgreementSecretKey, bindings::polymorph::webcrypto::types::Error>,
     >,
 {
     let AgreeSurface {
@@ -716,7 +716,7 @@ async fn run_lab() -> Result<(), String> {
 
     // mac-key.verify: corrupted tag, first vs last byte.
     {
-        let options = bindings::lann::webcrypto::mac::MacKeyOptions::new();
+        let options = bindings::polymorph::webcrypto::mac::MacKeyOptions::new();
         options.can_sign(true);
         options.can_verify(true);
         let key = hmac_sha2::generate_key(hmac_sha2::Sha2Variant::Sha256, None, options)
@@ -744,8 +744,8 @@ async fn run_lab() -> Result<(), String> {
 
     // AEAD tag rejection + seal data-dependence, per algorithm. The lab
     // measures seal/open, so grant exactly those usages.
-    fn seal_open_options() -> bindings::lann::webcrypto::aead::AeadKeyOptions {
-        let options = bindings::lann::webcrypto::aead::AeadKeyOptions::new();
+    fn seal_open_options() -> bindings::polymorph::webcrypto::aead::AeadKeyOptions {
+        let options = bindings::polymorph::webcrypto::aead::AeadKeyOptions::new();
         options.can_seal(true);
         options.can_open(true);
         options

@@ -65,7 +65,7 @@ async fn tiny_buffer_limit_fails_recoverably() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_component(&workspace_root);
 
-    let mut ctx = lann_webcrypto_wasmtime::WasiWebcryptoCtx::new();
+    let mut ctx = polymorph_webcrypto_wasmtime::WasiWebcryptoCtx::new();
     ctx.set_per_call_buffer_limit(Some(4));
     let err = wasmtime_demo::run_demo_with(&component, ctx)
         .await
@@ -95,7 +95,7 @@ async fn checks_complete_under_a_contended_pool() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let component = build_component(&workspace_root);
 
-    let mut ctx = lann_webcrypto_wasmtime::WasiWebcryptoCtx::new();
+    let mut ctx = polymorph_webcrypto_wasmtime::WasiWebcryptoCtx::new();
     ctx.set_per_call_buffer_limit(Some(32 * 1024));
     ctx.set_total_buffer_limit(Some(64 * 1024));
     let summary = tokio::time::timeout(

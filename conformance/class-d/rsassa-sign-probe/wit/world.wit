@@ -12,11 +12,11 @@
 // resources and orphans the import (the mechanism is documented on
 // `../oaep-probe/wit/world.wit` and in the `class-d` recipe).
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/`,
-// pulled in through the `deps/lann-webcrypto` symlink.
+// The `polymorph:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/polymorph-webcrypto` symlink.
 package conformance:class-d-rsassa-sign-probe;
 
 world rsassa-sign-probe {
     @unstable(feature = rsa-sign)
-    import lann:webcrypto/rsassa-pkcs1-v15-sign@0.1.0;
+    import polymorph:webcrypto/rsassa-pkcs1-v15-sign@0.1.0;
 }

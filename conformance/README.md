@@ -3,13 +3,13 @@
 Two test **suites** — the shared suite ([`guest-ct/`](guest-ct)) and the
 host-only signing suite ([`signing-guest-ct/`](signing-guest-ct)), each a
 guest component carrying its cases — run against every implementation of
-`lann:webcrypto` on the [`lann:component-test`] stack: the suites are built
+`polymorph:webcrypto` on the [`polymorph:component-test`] stack: the suites are built
 on its guest SDK and export its frozen `tests` contract, and the drivers,
 lockfiles, and aggregation are its tooling. Run everything with
 `just conformance-ct::all` (see [`driver-ct/justfile`](driver-ct/justfile)
 for the individual recipes and the currently enabled targets).
 
-[`lann:component-test`]: https://github.com/lann/component-test
+[`polymorph:component-test`]: https://github.com/polymorph-components/polymorph-test
 
 ## Layout
 
@@ -61,7 +61,7 @@ until a target consciously opts out.
 Each suite's case inventory is pinned by a component-test lockfile
 (`guest-ct/tests.lock`, `signing-guest-ct/tests.lock`); the inventory is
 the binding — the recorded sha256 is build provenance only, since wasm
-builds are not reproducible across checkouts (lann/component-test#44).
+builds are not reproducible across checkouts (polymorph-components/polymorph-test#44).
 The lockfiles enumerate every case: exact `[[case]]` entries for probes
 and declines, and per-leaf `cases` enumerations for the `[[generated]]`
 rows (`lock --leaves`, fed from `ct-driver --enumerate` — a vector case
@@ -100,7 +100,7 @@ a class of test a buffer-based API could not even express.
 the lockfiles, runs the targets, and aggregates:
 
 - **wasmtime-rustcrypto** (`run-wasmtime`): ct-driver embeds
-  `lann-webcrypto-wasmtime` with every gated interface enabled — the
+  `polymorph-webcrypto-wasmtime` with every gated interface enabled — the
   full-support target.
 - **composed** (`run-composed`): the suite plugged with the in-guest
   RustCrypto provider (`wac plug`), run under the generic component-test
@@ -191,7 +191,7 @@ unknown-status row out of the parsed results, so the case is then
 run — for the whole census. Exact `[[case]]` entries are set-checked
 directly, and the `[[generated]]` rows' leaves are enumerated in the
 lockfiles (`lock --leaves`, fed from `ct-driver --enumerate` by
-`conformance-ct::lock-update`; lann/component-test#49), so an
+`conformance-ct::lock-update`; polymorph-components/polymorph-test#49), so an
 unenumerated or missing leaf is an error by name, not a warning. An
 unknown status therefore surfaces as a warning naming the case and
 status plus a coverage error, and cannot pass silently. Gating parity

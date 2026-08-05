@@ -1,9 +1,9 @@
 [package]
-name = "lann-webcrypto-guest-provider"
+name = "polymorph-webcrypto-guest-provider"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "In-guest wasm component implementation of the lann:webcrypto interfaces, backed by RustCrypto; exports the package surface for composition via `wac plug`."
+description = "In-guest wasm component implementation of the polymorph:webcrypto interfaces, backed by RustCrypto; exports the package surface for composition via `wac plug`."
 
 [lib]
 crate-type = ["cdylib"]
@@ -17,4 +17,4 @@ wit-bindgen = { version = "0.59", features = ["async", "async-spawn"] }
 # wasm target the core selects the soft (fixsliced, table-free) AES backend
 # — what makes AES-GCM acceptable in-guest (see the README's timing-channel
 # classification) — and compiles no ECDSA signing code (class D).
-lann-webcrypto-core = { path = "../core" }
+polymorph-webcrypto-core = { path = "../core" }

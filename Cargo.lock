@@ -318,7 +318,7 @@ dependencies = [
 [[package]]
 name = "component-test-core"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "arcstr",
  "serde",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "component-test-formats"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -342,7 +342,7 @@ dependencies = [
 [[package]]
 name = "component-test-results"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "component-test-runner"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "component-test-core",
  "component-test-sdk-macro",
@@ -381,7 +381,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk-macro"
 version = "0.1.0"
-source = "git+https://github.com/lann/component-test?rev=e4dd2d50ffd14a0da680cc2569a137724c0ccc78#e4dd2d50ffd14a0da680cc2569a137724c0ccc78"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=289a8fdcac71b31589d359cd6e715ef81f232220#289a8fdcac71b31589d359cd6e715ef81f232220"
 dependencies = [
  "component-test-core",
  "proc-macro2",
@@ -395,7 +395,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "component-test-runner",
- "lann-webcrypto-wasmtime",
+ "polymorph-webcrypto-wasmtime",
  "wasmtime",
  "wasmtime-wasi",
 ]
@@ -408,7 +408,7 @@ dependencies = [
  "conformance-harness",
  "data-encoding",
  "futures",
- "lann-webcrypto-guest",
+ "polymorph-webcrypto-guest",
  "postcard",
  "rkyv",
  "serde",
@@ -422,7 +422,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "futures",
- "lann-webcrypto-guest",
+ "polymorph-webcrypto-guest",
  "rkyv",
  "serde",
 ]
@@ -435,7 +435,7 @@ dependencies = [
  "conformance-harness",
  "data-encoding",
  "futures",
- "lann-webcrypto-guest",
+ "polymorph-webcrypto-guest",
  "serde",
  "serde_json",
  "wit-bindgen 0.60.0",
@@ -693,7 +693,7 @@ dependencies = [
  "data-encoding-macro",
  "futures",
  "futures-io",
- "lann-webcrypto-guest",
+ "polymorph-webcrypto-guest",
  "wit-bindgen 0.59.0",
 ]
 
@@ -1487,65 +1487,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lann-webcrypto-core"
-version = "0.1.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "aes-kw",
- "aws-lc-rs",
- "ctr",
- "data-encoding",
- "data-encoding-macro",
- "der",
- "ed25519-dalek",
- "getrandom 0.3.4",
- "ghash",
- "hkdf",
- "hmac",
- "p256",
- "p384",
- "pkcs8",
- "rsa",
- "serde_json",
- "sha1",
- "sha1-checked",
- "sha2",
- "spki",
- "subtle",
- "x25519-dalek",
- "zeroize",
-]
-
-[[package]]
-name = "lann-webcrypto-guest"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures",
- "futures-io",
- "wit-bindgen 0.59.0",
-]
-
-[[package]]
-name = "lann-webcrypto-guest-provider"
-version = "0.1.0"
-dependencies = [
- "lann-webcrypto-core",
- "wit-bindgen 0.59.0",
-]
-
-[[package]]
-name = "lann-webcrypto-wasmtime"
-version = "0.1.0"
-dependencies = [
- "futures",
- "lann-webcrypto-core",
- "mea",
- "wasmtime",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,6 +1783,65 @@ name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
+name = "polymorph-webcrypto-core"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "aes-kw",
+ "aws-lc-rs",
+ "ctr",
+ "data-encoding",
+ "data-encoding-macro",
+ "der",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
+ "ghash",
+ "hkdf",
+ "hmac",
+ "p256",
+ "p384",
+ "pkcs8",
+ "rsa",
+ "serde_json",
+ "sha1",
+ "sha1-checked",
+ "sha2",
+ "spki",
+ "subtle",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "polymorph-webcrypto-guest"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "futures-io",
+ "wit-bindgen 0.59.0",
+]
+
+[[package]]
+name = "polymorph-webcrypto-guest-provider"
+version = "0.1.0"
+dependencies = [
+ "polymorph-webcrypto-core",
+ "wit-bindgen 0.59.0",
+]
+
+[[package]]
+name = "polymorph-webcrypto-wasmtime"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "mea",
+ "polymorph-webcrypto-core",
+ "wasmtime",
+]
 
 [[package]]
 name = "polyval"
@@ -2436,7 +2436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2990,7 +2990,7 @@ name = "wasmtime-demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "lann-webcrypto-wasmtime",
+ "polymorph-webcrypto-wasmtime",
  "tokio",
  "wasmtime",
 ]

@@ -18,13 +18,13 @@
 
 use conformance_harness::stream::{sig_sign_ok, sig_verify_ok, sig_verify_op, Schedule};
 use conformance_harness::{describe, expect, expect_bytes, expect_err, ErrKind, FEATURE_RSA_SIGN};
-use lann_webcrypto_guest::bindings::rsa::RsaVariant;
-use lann_webcrypto_guest::bindings::rsa_pss_verify;
-use lann_webcrypto_guest::bindings::rsassa_pkcs1_v15_sign::RsaModulus;
-use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
-use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::wrapping::UnwrapInput;
-use lann_webcrypto_guest::bindings::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
+use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
+use polymorph_webcrypto_guest::bindings::rsa_pss_verify;
+use polymorph_webcrypto_guest::bindings::rsassa_pkcs1_v15_sign::RsaModulus;
+use polymorph_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
+use polymorph_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::wrapping::UnwrapInput;
+use polymorph_webcrypto_guest::bindings::{rsa_pss_sign, rsassa_pkcs1_v15_sign};
 use serde::Deserialize;
 
 /// The RSASSA-PKCS1-v1_5 signature-generation vector files (one per
@@ -651,11 +651,11 @@ pub async fn rsa_sign_declined() -> Result<(), String> {
 /// surface, so the decline probes (this module's and `rsa_oaep`'s) share
 /// it.
 pub(crate) async fn unwrap_input_of(payload: Vec<u8>) -> Result<UnwrapInput, String> {
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::hmac_sha2;
-    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
-    use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
-    use lann_webcrypto_guest::bindings::{aes_gcm, wrapping};
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::mac::MacKeyOptions;
+    use polymorph_webcrypto_guest::bindings::sha2::Sha2Variant;
+    use polymorph_webcrypto_guest::bindings::{aes_gcm, wrapping};
 
     let carrier_options = MacKeyOptions::new();
     carrier_options.can_sign(true);

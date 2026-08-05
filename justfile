@@ -14,10 +14,10 @@ mod conformance-ct "conformance/driver-ct/justfile"
 # The demo guest + drivers (Wasmtime, composed in-guest, jco/Node).
 mod demo 'examples'
 
-# The jco host library (@lann/webcrypto-jco).
+# The jco host library (@polymorph/webcrypto-jco).
 mod jco 'js/jco'
 
-# The componentize-js guest library (@lann/webcrypto-componentize).
+# The componentize-js guest library (@polymorph/webcrypto-componentize).
 mod componentize 'js/componentize'
 
 # The WPT harnesses: the composed WPT gate and the parity gates.
@@ -42,9 +42,9 @@ fmt-check:
 
 # Run clippy across all crates (the wasm crates on their wasm targets).
 clippy:
-    cargo clippy --workspace --exclude crypto-demo --exclude lann-webcrypto-guest-provider --exclude crypto-demo-driver --exclude timing-lab -- -D warnings
+    cargo clippy --workspace --exclude crypto-demo --exclude polymorph-webcrypto-guest-provider --exclude crypto-demo-driver --exclude timing-lab -- -D warnings
     cargo clippy -p crypto-demo --target wasm32-unknown-unknown -- -D warnings
-    cargo clippy -p lann-webcrypto-guest-provider --target wasm32-wasip2 -- -D warnings
+    cargo clippy -p polymorph-webcrypto-guest-provider --target wasm32-wasip2 -- -D warnings
     cargo clippy -p crypto-demo-driver --target wasm32-wasip2 -- -D warnings
     cargo clippy -p timing-lab --target wasm32-wasip2 -- -D warnings
     # The conformance suites build natively too (the census-parity tests),
@@ -52,11 +52,11 @@ clippy:
     # in the configuration the conformance run ships (rkyv corpus).
     cargo clippy -p conformance-guest-ct -p conformance-signing-guest-ct \
         --features conformance-guest-ct/rkyv-corpus --target wasm32-wasip2 -- -D warnings
-    # lann-webcrypto-guest's optional source adaptors are only compiled with their
+    # polymorph-webcrypto-guest's optional source adaptors are only compiled with their
     # features on, and one of them holds the only code path that can produce
     # `Error::Read` — the crate's subtlest behaviour. Nothing in the
     # workspace enables them, so without this they are never checked.
-    cargo clippy -p lann-webcrypto-guest --all-features --target wasm32-wasip2 -- -D warnings
+    cargo clippy -p polymorph-webcrypto-guest --all-features --target wasm32-wasip2 -- -D warnings
 
 # Validate WIT packages.
 validate-wit:
@@ -88,7 +88,7 @@ test:
 # lint-gates there), giving one rustdoc tree with a shared search index in
 # target/doc.
 rust-docs:
-    cargo doc --no-deps -p lann-webcrypto-wasmtime -p lann-webcrypto-guest
+    cargo doc --no-deps -p polymorph-webcrypto-wasmtime -p polymorph-webcrypto-guest
 
 # Run cargo-mutants over the shared crypto core and the Wasmtime host, with
 # the unit tests plus both conformance suites (via the ct driver's
@@ -118,7 +118,7 @@ mutants shard="": conformance-ct::build
     CONFORMANCE_ORACLE_SHARED_GUEST="$(pwd)/target/wasm32-wasip2/release/conformance_guest_ct.wasm" \
     CONFORMANCE_ORACLE_SIGNING_GUEST="$(pwd)/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm" \
         cargo mutants --jobs 2 --profile mutants \
-        -p lann-webcrypto-core -p lann-webcrypto-wasmtime \
+        -p polymorph-webcrypto-core -p polymorph-webcrypto-wasmtime \
         {{ if shard != "" { "--shard " + shard } else { "" } }}
     status=$?
     if [ "$status" -eq 3 ] && [ -f mutants.out/missed.txt ] && ! [ -s mutants.out/missed.txt ]; then

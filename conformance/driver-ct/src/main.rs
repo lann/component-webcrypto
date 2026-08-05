@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Result};
 use component_test_runner::{CtCtx, OutputMode, Runner, RunnerView};
-use lann_webcrypto_wasmtime::{
+use polymorph_webcrypto_wasmtime::{
     add_to_linker_with_options, LinkOptions, WasiWebcryptoCtx, WasiWebcryptoCtxView,
     WasiWebcryptoView,
 };

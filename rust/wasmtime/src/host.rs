@@ -1,4 +1,4 @@
-//! Host trait implementations for the `lann:webcrypto` imports.
+//! Host trait implementations for the `polymorph:webcrypto` imports.
 //!
 //! Following the split the generated bindings produce (and mirroring
 //! `wasmtime_wasi_http::p3`), the store-free traits are implemented for the
@@ -6,14 +6,14 @@
 //! the async `Accessor` are implemented for the [`WasiWebcrypto`] `HasData`
 //! marker.
 //!
-//! The cryptography itself lives in `lann-webcrypto-core`, shared verbatim
+//! The cryptography itself lives in `polymorph-webcrypto-core`, shared verbatim
 //! with the in-guest provider; this module contributes only what is
 //! host-specific — the resource table and the shapes every operation
 //! shares (mint into the table, drain-then-compute, drain-then-stream-out),
 //! over the stream plumbing in [`crate::streams`] and the admission in
 //! [`crate::limits`].
 
-use lann_webcrypto_core::{
+use polymorph_webcrypto_core::{
     served_sha2, AeadKeyMaterial, DecryptionKeyMaterial, DigestKind, EncryptionKeyMaterial,
     KwKeyMaterial, MacKeyMaterial, Sha1Posture, SigPublic, SigningKeyMaterial, WrapFormat,
     WrapInputMaterial, HMAC_NAME,
@@ -73,7 +73,7 @@ use crate::{
 
 // --- bindings glue -------------------------------------------------------------
 
-lann_webcrypto_core::impl_conversions! {
+polymorph_webcrypto_core::impl_conversions! {
     error: Error,
     extension: types::ExtensionError,
     sha2: sha2_iface::Sha2Variant,
@@ -86,7 +86,7 @@ lann_webcrypto_core::impl_conversions! {
 /// Render an entropy failure as the trap-shaped host error for key or nonce
 /// generation: the host treats a failing random source as an operational
 /// host fault, never a guest-visible WIT error.
-fn rng_trap(what: &str) -> impl Fn(lann_webcrypto_core::RngError) -> wasmtime::Error + '_ {
+fn rng_trap(what: &str) -> impl Fn(polymorph_webcrypto_core::RngError) -> wasmtime::Error + '_ {
     move |err| wasmtime::Error::msg(format!("{what} failed: {err}"))
 }
 
@@ -131,7 +131,7 @@ async fn take_options<T: Send, O: Send + 'static>(
 /// verdict, or the exhausted budget — flows to the caller.
 async fn mint<T: Send, R: Minted + Send + 'static>(
     accessor: &Accessor<T, WasiWebcrypto>,
-    minted: std::result::Result<R::Payload, lann_webcrypto_core::Error>,
+    minted: std::result::Result<R::Payload, polymorph_webcrypto_core::Error>,
 ) -> Result<std::result::Result<Resource<R>, Error>> {
     let payload = match minted {
         Ok(payload) => payload,
@@ -185,7 +185,7 @@ async fn to_wrap_input<T: Send, R: 'static>(
     accessor: &Accessor<T, WasiWebcrypto>,
     self_: Resource<R>,
     format: WrapFormat,
-    serialize: impl FnOnce(&R) -> std::result::Result<Vec<u8>, lann_webcrypto_core::Error>,
+    serialize: impl FnOnce(&R) -> std::result::Result<Vec<u8>, polymorph_webcrypto_core::Error>,
 ) -> Result<std::result::Result<Resource<WrapInput>, Error>> {
     let material = with_resource(accessor, self_, |key| {
         serialize(key).map(|bytes| WrapInputMaterial::new(format, bytes))
@@ -745,7 +745,7 @@ macro_rules! cipher_minting {
                     options: Resource<crate::CipherKeyOptions>,
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
-                    let material = lann_webcrypto_core::CipherKeyMaterial::import(
+                    let material = polymorph_webcrypto_core::CipherKeyMaterial::import(
                         $mode,
                         variant.into(),
                         raw,
@@ -761,7 +761,7 @@ macro_rules! cipher_minting {
                     options: Resource<crate::CipherKeyOptions>,
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
-                    let material = lann_webcrypto_core::CipherKeyMaterial::import_jwk(
+                    let material = polymorph_webcrypto_core::CipherKeyMaterial::import_jwk(
                         $mode,
                         variant.into(),
                         &jwk,
@@ -776,7 +776,7 @@ macro_rules! cipher_minting {
                     options: Resource<crate::CipherKeyOptions>,
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
-                    let material = lann_webcrypto_core::CipherKeyMaterial::generate(
+                    let material = polymorph_webcrypto_core::CipherKeyMaterial::generate(
                         $mode,
                         variant.into(),
                         policy,
@@ -793,7 +793,7 @@ macro_rules! cipher_minting {
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
                     let material = with_resource(accessor, input, |input| {
-                        lann_webcrypto_core::derive_cipher_key(
+                        polymorph_webcrypto_core::derive_cipher_key(
                             &input.material,
                             $mode,
                             variant.into(),
@@ -812,7 +812,7 @@ macro_rules! cipher_minting {
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
                     let input = take_options(accessor, input).await?.material;
-                    let material = lann_webcrypto_core::unwrap_cipher_key(
+                    let material = polymorph_webcrypto_core::unwrap_cipher_key(
                         $mode,
                         variant.into(),
                         input,
@@ -829,7 +829,7 @@ macro_rules! cipher_minting {
                 ) -> Result<std::result::Result<Resource<CipherKey>, Error>> {
                     let policy = take_options(accessor, options).await?.policy;
                     let input = take_options(accessor, input).await?.material;
-                    let material = lann_webcrypto_core::unwrap_cipher_key_jwk(
+                    let material = polymorph_webcrypto_core::unwrap_cipher_key_jwk(
                         $mode,
                         variant.into(),
                         input,
@@ -842,8 +842,8 @@ macro_rules! cipher_minting {
     };
 }
 
-cipher_minting!(aes_cbc_iface, lann_webcrypto_core::CipherMode::Cbc);
-cipher_minting!(aes_ctr_iface, lann_webcrypto_core::CipherMode::Ctr);
+cipher_minting!(aes_cbc_iface, polymorph_webcrypto_core::CipherMode::Cbc);
+cipher_minting!(aes_ctr_iface, polymorph_webcrypto_core::CipherMode::Ctr);
 
 // --- wrapping (the provider-held intermediates) -----------------------------------
 
@@ -1034,7 +1034,7 @@ impl<T: Send> aes_kw_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<KwKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = with_resource(accessor, input, |input| {
-            lann_webcrypto_core::derive_kw_key(variant.into(), &input.material, policy)
+            polymorph_webcrypto_core::derive_kw_key(variant.into(), &input.material, policy)
         })
         .await?;
         mint(accessor, material).await
@@ -1048,7 +1048,7 @@ impl<T: Send> aes_kw_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<KwKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_kw_key(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_kw_key(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -1060,7 +1060,7 @@ impl<T: Send> aes_kw_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<KwKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_kw_key_jwk(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_kw_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -1134,7 +1134,7 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::DeriveOptions>,
     ) -> Result<std::result::Result<Resource<Ikm>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::IkmMaterial::import(raw, policy);
+        let material = polymorph_webcrypto_core::IkmMaterial::import(raw, policy);
         mint(accessor, material).await
     }
 
@@ -1145,7 +1145,7 @@ impl<T: Send> hkdf_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<Ikm>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_ikm(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_ikm(input, policy);
         mint(accessor, material).await
     }
 }
@@ -1161,7 +1161,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |ikm| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare(
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare(
                 variant.into(),
                 &ikm.material,
                 &salt,
@@ -1180,7 +1180,7 @@ impl<T: Send> hkdf_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |upstream| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare_from(
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare_from(
                 variant.into(),
                 &upstream.material,
                 &salt,
@@ -1236,7 +1236,7 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = with_resource(accessor, input, |input| {
-            lann_webcrypto_core::derive_mac_key_sha1(&input.material, length, policy)
+            polymorph_webcrypto_core::derive_mac_key_sha1(&input.material, length, policy)
         })
         .await?;
         mint(accessor, material).await
@@ -1249,7 +1249,7 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_mac_key_sha1(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_mac_key_sha1(input, policy);
         mint(accessor, material).await
     }
 
@@ -1260,7 +1260,7 @@ impl<T: Send> hmac_sha1_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_mac_key_jwk_sha1(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_mac_key_jwk_sha1(input, policy);
         mint(accessor, material).await
     }
 }
@@ -1275,7 +1275,7 @@ impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |ikm| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare_sha1(&ikm.material, &salt, info)
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare_sha1(&ikm.material, &salt, info)
         })
         .await?;
         mint(accessor, material).await
@@ -1288,7 +1288,7 @@ impl<T: Send> hkdf_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         info: Vec<u8>,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |upstream| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare_from_sha1(
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare_from_sha1(
                 &upstream.material,
                 &salt,
                 info,
@@ -1309,7 +1309,7 @@ impl<T: Send> pbkdf2_sha1_iface::HostWithStore<T> for WasiWebcrypto {
         iterations: u32,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |password| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2_sha1(
                 &password.material,
                 salt.clone(),
                 iterations,
@@ -1347,7 +1347,7 @@ impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::DeriveOptions>,
     ) -> Result<std::result::Result<Resource<Password>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::PasswordMaterial::import(raw, policy);
+        let material = polymorph_webcrypto_core::PasswordMaterial::import(raw, policy);
         mint(accessor, material).await
     }
 
@@ -1358,7 +1358,7 @@ impl<T: Send> pbkdf2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<Password>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_password(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_password(input, policy);
         mint(accessor, material).await
     }
 }
@@ -1374,7 +1374,7 @@ impl<T: Send> pbkdf2_sha2_iface::HostWithStore<T> for WasiWebcrypto {
         iterations: u32,
     ) -> Result<std::result::Result<Resource<DeriveInput>, Error>> {
         let material = with_resource(accessor, input, |password| {
-            lann_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2(
+            polymorph_webcrypto_core::DeriveInputMaterial::prepare_pbkdf2(
                 variant.into(),
                 &password.material,
                 salt,
@@ -1519,7 +1519,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519(&raw);
         mint(accessor, material).await
     }
 
@@ -1527,7 +1527,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki);
         mint(accessor, material).await
     }
 
@@ -1535,7 +1535,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         accessor: &Accessor<T, Self>,
         jwk: String,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material = lann_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_jwk(&jwk);
         mint(accessor, material).await
     }
 
@@ -1546,7 +1546,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material =
-            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy);
+            polymorph_webcrypto_core::AgreementSecretMaterial::import_x25519_pkcs8(&pkcs8, policy);
         mint(accessor, material).await
     }
 
@@ -1557,7 +1557,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material =
-            lann_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy);
+            polymorph_webcrypto_core::AgreementSecretMaterial::import_x25519_jwk(&jwk, policy);
         mint(accessor, material).await
     }
 
@@ -1568,7 +1568,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
         std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
     > {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy)
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy)
             .map_err(rng_trap("random key generation"))?;
         match material {
             Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
@@ -1583,7 +1583,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_x25519_secret_key_jwk(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_x25519_secret_key_jwk(input, policy);
         mint(accessor, material).await
     }
 
@@ -1594,7 +1594,7 @@ impl<T: Send> x25519_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_x25519_secret_key_pkcs8(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_x25519_secret_key_pkcs8(input, policy);
         mint(accessor, material).await
     }
 }
@@ -1610,7 +1610,7 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         raw: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
         let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw);
+            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh(variant.into(), &raw);
         mint(accessor, material).await
     }
 
@@ -1619,8 +1619,10 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         variant: ecdh_iface::EcdhVariant,
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(
+            variant.into(),
+            &spki,
+        );
         mint(accessor, material).await
     }
 
@@ -1629,8 +1631,10 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         variant: ecdh_iface::EcdhVariant,
         jwk: String,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material =
-            lann_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(
+            variant.into(),
+            &jwk,
+        );
         mint(accessor, material).await
     }
 
@@ -1641,7 +1645,7 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::AgreementKeyOptions>,
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::import_ecdh_jwk(
             variant.into(),
             &jwk,
             policy,
@@ -1656,7 +1660,7 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         options: Resource<crate::AgreementKeyOptions>,
     ) -> Result<std::result::Result<Resource<AgreementSecretKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
-        let material = lann_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::import_ecdh_pkcs8(
             variant.into(),
             &pkcs8,
             policy,
@@ -1672,9 +1676,11 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
     > {
         let policy = take_options(accessor, options).await?.policy;
-        let material =
-            lann_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy)
-                .map_err(rng_trap("random key generation"))?;
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(
+            variant.into(),
+            policy,
+        )
+        .map_err(rng_trap("random key generation"))?;
         match material {
             Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
             Err(err) => Ok(Err(err.into())),
@@ -1690,7 +1696,7 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_ecdh_secret_key_jwk(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_ecdh_secret_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -1703,7 +1709,7 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_ecdh_secret_key_pkcs8(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -1832,7 +1838,12 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = with_resource(accessor, input, |input| {
-            lann_webcrypto_core::derive_mac_key(&input.material, variant.into(), length, policy)
+            polymorph_webcrypto_core::derive_mac_key(
+                &input.material,
+                variant.into(),
+                length,
+                policy,
+            )
         })
         .await?;
         mint(accessor, material).await
@@ -1846,7 +1857,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_mac_key(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_mac_key(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -1858,7 +1869,7 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_mac_key_jwk(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_mac_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -1909,7 +1920,7 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = with_resource(accessor, input, |input| {
-            lann_webcrypto_core::derive_aes_gcm_key(&input.material, variant.into(), policy)
+            polymorph_webcrypto_core::derive_aes_gcm_key(&input.material, variant.into(), policy)
         })
         .await?;
         mint(accessor, material).await
@@ -1923,7 +1934,7 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_aes_gcm_key(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_aes_gcm_key(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -1935,7 +1946,8 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_aes_gcm_key_jwk(variant.into(), input, policy);
+        let material =
+            polymorph_webcrypto_core::unwrap_aes_gcm_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2182,7 +2194,7 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_ed25519_signing_key_pkcs8(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_ed25519_signing_key_pkcs8(input, policy);
         mint(accessor, material).await
     }
 
@@ -2193,7 +2205,7 @@ impl<T: Send> ed25519_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = lann_webcrypto_core::unwrap_ed25519_signing_key_jwk(input, policy);
+        let material = polymorph_webcrypto_core::unwrap_ed25519_signing_key_jwk(input, policy);
         mint(accessor, material).await
     }
 }
@@ -2288,7 +2300,7 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_ecdsa_signing_key_pkcs8(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_ecdsa_signing_key_pkcs8(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -2301,7 +2313,7 @@ impl<T: Send> ecdsa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_ecdsa_signing_key_jwk(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_ecdsa_signing_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2317,7 +2329,7 @@ impl rsa_pss_sign_iface::Host for WasiWebcryptoCtxView<'_> {}
 /// The WIT `rsa.rsa-modulus` cases, converted locally: the type is
 /// deliberately outside the shared core's `impl_conversions!` (see its
 /// doc in the core).
-impl From<rsa_iface::RsaModulus> for lann_webcrypto_core::RsaModulus {
+impl From<rsa_iface::RsaModulus> for polymorph_webcrypto_core::RsaModulus {
     fn from(modulus: rsa_iface::RsaModulus) -> Self {
         match modulus {
             rsa_iface::RsaModulus::M2048 => Self::M2048,
@@ -2418,8 +2430,11 @@ impl<T: Send> rsassa_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material =
-            lann_webcrypto_core::unwrap_rsassa_signing_key_pkcs8(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_rsassa_signing_key_pkcs8(
+            variant.into(),
+            input,
+            policy,
+        );
         mint(accessor, material).await
     }
 
@@ -2432,7 +2447,7 @@ impl<T: Send> rsassa_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_rsassa_signing_key_jwk(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_rsassa_signing_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2486,7 +2501,7 @@ impl<T: Send> rsa_pss_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_pss_signing_key_pkcs8(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_pss_signing_key_pkcs8(variant.into(), input, policy);
         mint(accessor, material).await
     }
 
@@ -2499,7 +2514,7 @@ impl<T: Send> rsa_pss_sign_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_pss_signing_key_jwk(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_pss_signing_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2778,8 +2793,11 @@ impl<T: Send> rsa_oaep_decrypt_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material =
-            lann_webcrypto_core::unwrap_oaep_decryption_key_pkcs8(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_oaep_decryption_key_pkcs8(
+            variant.into(),
+            input,
+            policy,
+        );
         mint(accessor, material).await
     }
 
@@ -2792,7 +2810,7 @@ impl<T: Send> rsa_oaep_decrypt_iface::HostWithStore<T> for WasiWebcrypto {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
         let material =
-            lann_webcrypto_core::unwrap_oaep_decryption_key_jwk(variant.into(), input, policy);
+            polymorph_webcrypto_core::unwrap_oaep_decryption_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2803,7 +2821,7 @@ mod tests {
     use crate::bindings::webcrypto::sha2::{self as sha2_iface, Host as _};
     use crate::bindings::webcrypto::types::Error;
     use crate::{MacKey, Minted as _};
-    use lann_webcrypto_core::{MacKeyMaterial, MacPolicy, Sha2Variant};
+    use polymorph_webcrypto_core::{MacKeyMaterial, MacPolicy, Sha2Variant};
 
     /// Minting charges the retention budget: a spent budget fails a
     /// fallible mint with the WIT's operational error and traps an options

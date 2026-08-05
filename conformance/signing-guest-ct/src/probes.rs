@@ -23,7 +23,7 @@
 //! implementations, and no import ever derives a public half (the
 //! w3c/webcrypto#356 gap). The Rust-side private-import known answers
 //! (the RFC 6979 A.2.5 deterministic signature, out-of-range scalar
-//! rejection) are pinned by `lann-webcrypto-core`'s unit tests. The RSA
+//! rejection) are pinned by `polymorph-webcrypto-core`'s unit tests. The RSA
 //! signing coverage ([`rsa_sign`]) additionally carries vector cases:
 //! RSASSA-PKCS1-v1_5 generation is deterministic, so the Wycheproof
 //! `sig_gen` vectors byte-compare here the way verification vectors do in
@@ -47,10 +47,10 @@ use conformance_harness::{
     b64url, describe, expect, expect_err, probes, ErrKind, FEATURE_RSA_OAEP_DECRYPT,
     FEATURE_RSA_SIGN, P256_A25_X, P256_A25_Y,
 };
-use lann_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
-use lann_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
-use lann_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
-use lann_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::ecdsa_sign::generate_key as raw_generate_key;
+use polymorph_webcrypto_guest::bindings::ecdsa_verify::{import_verifying_key_raw, EcdsaVariant};
+use polymorph_webcrypto_guest::bindings::signature::{SigningKey, SigningKeyOptions, VerifyingKey};
+use polymorph_webcrypto_guest::bindings::types::Error;
 
 /// Generate a signing key with `sign` granted, carrying only the
 /// `extractable` choice (the probes' subject is ECDSA, not usage policy).
@@ -268,7 +268,7 @@ fn a25_point() -> Vec<u8> {
 /// through `ecdsa-verify`; a wrong-curve PKCS#8 and a d-less EC JWK fail
 /// `invalid-key`.
 async fn ecdsa_private_format_imports() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdsa_sign;
+    use polymorph_webcrypto_guest::bindings::ecdsa_sign;
 
     let options = || {
         let options = SigningKeyOptions::new();
@@ -350,7 +350,7 @@ async fn ecdsa_private_format_imports() -> Result<(), String> {
 /// through both formats to a key that still signs under the original
 /// public half, and the gate holds on non-extractable keys.
 async fn ecdsa_signing_key_exports() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::ecdsa_sign;
+    use polymorph_webcrypto_guest::bindings::ecdsa_sign;
 
     let (signing, public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await
@@ -483,8 +483,8 @@ async fn ecdsa_cross_hash_sign_roundtrip() -> Result<(), String> {
 /// verify under the original public half; the minted key carries the
 /// mint's options, not the wrapped material's.
 async fn ecdsa_unwrap_signing_key() -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::{aes_gcm, ecdsa_sign};
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::{aes_gcm, ecdsa_sign};
 
     let (signing, public) = generate_key(EcdsaVariant::P256Sha256, true)
         .await

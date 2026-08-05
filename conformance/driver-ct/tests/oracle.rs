@@ -11,8 +11,8 @@
 //!
 //! The guests are prebuilt and referenced by absolute path: guest wasm is
 //! compiled from unmutated sources once, before the mutation run — the
-//! subject under mutation is the host stack (lann-webcrypto-core +
-//! lann-webcrypto-wasmtime), which the wasm calls into.
+//! subject under mutation is the host stack (polymorph-webcrypto-core +
+//! polymorph-webcrypto-wasmtime), which the wasm calls into.
 
 /// The environment variables naming the prebuilt guest components
 /// (absolute paths), and the suite each one carries.

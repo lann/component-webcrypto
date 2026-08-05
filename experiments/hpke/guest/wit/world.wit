@@ -11,7 +11,7 @@ package experiments:hpke@0.1.0;
 ///
 /// Every function is declared `async` deliberately, even though the
 /// implementation computes synchronously: the implementation bridges its
-/// synchronous HPKE engine onto the async `lann:webcrypto` imports with a
+/// synchronous HPKE engine onto the async `polymorph:webcrypto` imports with a
 /// blocking executor, and the component model permits a task to block —
 /// whether on waitables or in a sync-lowered call to an async callee —
 /// only when its export was lifted `async`. That bridge is part of what

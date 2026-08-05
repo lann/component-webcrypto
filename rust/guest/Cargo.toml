@@ -1,9 +1,9 @@
 [package]
-name = "lann-webcrypto-guest"
+name = "polymorph-webcrypto-guest"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Guest-side bindings and ergonomic helpers for the lann:webcrypto interfaces"
+description = "Guest-side bindings and ergonomic helpers for the polymorph:webcrypto interfaces"
 
 [features]
 # `DataSource::from_buf`: feed an operation from any `bytes::Buf`.

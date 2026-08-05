@@ -1,52 +1,52 @@
-// The `imports` world enumerates the `lann:webcrypto` interfaces this crate
+// The `imports` world enumerates the `polymorph:webcrypto` interfaces this crate
 // implements on the host side, so `bindgen!` can generate the corresponding
 // `Host` traits and per-interface `add_to_linker` helpers.
 //
 // The package itself lives once at the repository root `wit/` and is pulled in
-// through the `deps/lann-webcrypto` symlink, exactly like the demo components
+// through the `deps/polymorph-webcrypto` symlink, exactly like the demo components
 // do.
 package wasmtime:webcrypto-host;
 
-/// The set of `lann:webcrypto` imports satisfied by this crate.
+/// The set of `polymorph:webcrypto` imports satisfied by this crate.
 world imports {
-    import lann:webcrypto/mac@0.1.0;
-    import lann:webcrypto/aead@0.1.0;
-    import lann:webcrypto/cipher@0.1.0;
-    import lann:webcrypto/wrapping@0.1.0;
-    import lann:webcrypto/key-wrap@0.1.0;
-    import lann:webcrypto/aes-kw@0.1.0;
-    import lann:webcrypto/digest@0.1.0;
-    import lann:webcrypto/sha2@0.1.0;
+    import polymorph:webcrypto/mac@0.1.0;
+    import polymorph:webcrypto/aead@0.1.0;
+    import polymorph:webcrypto/cipher@0.1.0;
+    import polymorph:webcrypto/wrapping@0.1.0;
+    import polymorph:webcrypto/key-wrap@0.1.0;
+    import polymorph:webcrypto/aes-kw@0.1.0;
+    import polymorph:webcrypto/digest@0.1.0;
+    import polymorph:webcrypto/sha2@0.1.0;
     @unstable(feature = sha1-checked)
-    import lann:webcrypto/sha1-checked@0.1.0;
-    import lann:webcrypto/hmac-sha2@0.1.0;
-    import lann:webcrypto/hmac-sha1@0.1.0;
-    import lann:webcrypto/aes-gcm@0.1.0;
-    import lann:webcrypto/aes-cbc@0.1.0;
-    import lann:webcrypto/aes-ctr@0.1.0;
-    import lann:webcrypto/derivation@0.1.0;
-    import lann:webcrypto/hkdf@0.1.0;
-    import lann:webcrypto/hkdf-sha2@0.1.0;
-    import lann:webcrypto/hkdf-sha1@0.1.0;
-    import lann:webcrypto/pbkdf2@0.1.0;
-    import lann:webcrypto/pbkdf2-sha2@0.1.0;
-    import lann:webcrypto/pbkdf2-sha1@0.1.0;
-    import lann:webcrypto/key-agreement@0.1.0;
-    import lann:webcrypto/x25519@0.1.0;
-    import lann:webcrypto/ecdh@0.1.0;
-    import lann:webcrypto/signature@0.1.0;
-    import lann:webcrypto/ed25519-verify@0.1.0;
-    import lann:webcrypto/ed25519-sign@0.1.0;
-    import lann:webcrypto/ecdsa-verify@0.1.0;
-    import lann:webcrypto/ecdsa-sign@0.1.0;
-    import lann:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
-    import lann:webcrypto/rsa-pss-verify@0.1.0;
+    import polymorph:webcrypto/sha1-checked@0.1.0;
+    import polymorph:webcrypto/hmac-sha2@0.1.0;
+    import polymorph:webcrypto/hmac-sha1@0.1.0;
+    import polymorph:webcrypto/aes-gcm@0.1.0;
+    import polymorph:webcrypto/aes-cbc@0.1.0;
+    import polymorph:webcrypto/aes-ctr@0.1.0;
+    import polymorph:webcrypto/derivation@0.1.0;
+    import polymorph:webcrypto/hkdf@0.1.0;
+    import polymorph:webcrypto/hkdf-sha2@0.1.0;
+    import polymorph:webcrypto/hkdf-sha1@0.1.0;
+    import polymorph:webcrypto/pbkdf2@0.1.0;
+    import polymorph:webcrypto/pbkdf2-sha2@0.1.0;
+    import polymorph:webcrypto/pbkdf2-sha1@0.1.0;
+    import polymorph:webcrypto/key-agreement@0.1.0;
+    import polymorph:webcrypto/x25519@0.1.0;
+    import polymorph:webcrypto/ecdh@0.1.0;
+    import polymorph:webcrypto/signature@0.1.0;
+    import polymorph:webcrypto/ed25519-verify@0.1.0;
+    import polymorph:webcrypto/ed25519-sign@0.1.0;
+    import polymorph:webcrypto/ecdsa-verify@0.1.0;
+    import polymorph:webcrypto/ecdsa-sign@0.1.0;
+    import polymorph:webcrypto/rsassa-pkcs1-v15-verify@0.1.0;
+    import polymorph:webcrypto/rsa-pss-verify@0.1.0;
     @unstable(feature = rsa-sign)
-    import lann:webcrypto/rsassa-pkcs1-v15-sign@0.1.0;
+    import polymorph:webcrypto/rsassa-pkcs1-v15-sign@0.1.0;
     @unstable(feature = rsa-sign)
-    import lann:webcrypto/rsa-pss-sign@0.1.0;
-    import lann:webcrypto/public-encryption@0.1.0;
-    import lann:webcrypto/rsa-oaep-encrypt@0.1.0;
+    import polymorph:webcrypto/rsa-pss-sign@0.1.0;
+    import polymorph:webcrypto/public-encryption@0.1.0;
+    import polymorph:webcrypto/rsa-oaep-encrypt@0.1.0;
     @unstable(feature = rsa-oaep-decrypt)
-    import lann:webcrypto/rsa-oaep-decrypt@0.1.0;
+    import polymorph:webcrypto/rsa-oaep-decrypt@0.1.0;
 }

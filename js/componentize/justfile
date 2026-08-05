@@ -1,5 +1,5 @@
-# The componentize-js guest library (@lann/webcrypto-componentize): a
-# crypto.subtle subset over the lann:webcrypto imports, for JS guests
+# The componentize-js guest library (@polymorph/webcrypto-componentize): a
+# crypto.subtle subset over the polymorph:webcrypto imports, for JS guests
 # componentized with componentize-js.
 #
 # The componentize-js CLI (dicej's ComponentizeJS reboot) is used to
@@ -34,7 +34,7 @@ build-demo:
         -o examples/componentize-demo/build/componentize-demo.component.wasm
 
 # Compose the fully in-guest JS demo (the `demo::compose` recipe with the JS
-# guest in place of the Rust one): the JS guest's lann:webcrypto imports are
+# guest in place of the Rust one): the JS guest's polymorph:webcrypto imports are
 # satisfied by the in-guest provider, then the CLI driver is plugged on top.
 compose-demo: build-demo (_compose "componentize-demo" "examples/componentize-demo/build/componentize-demo.component.wasm" "crypto-demo-driver")
 

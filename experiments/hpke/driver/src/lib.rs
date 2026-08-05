@@ -2,7 +2,7 @@
 //!
 //! It imports the HPKE guest's exported `experiments:hpke/hpke` interface
 //! and exports an async `wasi:cli/run`, so the composed component — HPKE
-//! guest + `lann-webcrypto-guest-provider` provider + this driver — runs under a plain
+//! guest + `polymorph-webcrypto-guest-provider` provider + this driver — runs under a plain
 //! `wasmtime run -S cli`. It drives a seal/open round trip (with tamper and
 //! wrong-AAD failure checks) per AEAD and reports on stdout/stderr.
 

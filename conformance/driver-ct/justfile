@@ -12,7 +12,7 @@ ct := ct-tools + "/bin/component-test"
 ct-runner := ct-tools + "/bin/ct-runner"
 guest := root + "/target/wasm32-wasip2/release/conformance_guest_ct.wasm"
 signing := root + "/target/wasm32-wasip2/release/conformance_signing_guest_ct.wasm"
-provider := root + "/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm"
+provider := root + "/target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm"
 composed := root + "/target/conformance-composed-ct.wasm"
 
 # CI/opt-in predicate for the optional jco-browser target: non-empty when
@@ -63,14 +63,14 @@ _ct-tools:
         rm -f "{{ct-tools}}/.rev"
         exit 0
     fi
-    rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | grep -oE '[0-9a-f]+$')
+    rev=$(grep -m1 -oE 'github\.com/polymorph-components/polymorph-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | grep -oE '[0-9a-f]+$')
     [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
-    # Cross-pin check: the JS runner core (@lann/component-test-js, a
+    # Cross-pin check: the JS runner core (@polymorph/component-test-js, a
     # git-sourced npm dependency) must pin the SAME component-test rev
     # as the cargo side — a skewed bump runs the JS harness against a
     # Rust runner from a different rev, a subtle contract-mismatch
     # generator. Bump both together: the rev in Cargo.toml + `npm
-    # install --save-exact github:lann/component-test#<rev>` in jco/.
+    # install --save-exact github:polymorph-components/polymorph-test#<rev>` in jco/.
     npm_rev=$(grep -m1 -oE 'component-test#[0-9a-f]{40}' jco/package-lock.json | cut -d'#' -f2)
     if [ "$npm_rev" != "$rev" ]; then
         echo "component-test pin skew: Cargo.lock has $rev but jco/package-lock.json has ${npm_rev:-none}" >&2
@@ -81,9 +81,9 @@ _ct-tools:
         exit 0
     fi
     cargo install -q --locked --root "{{ct-tools}}" \
-        --git https://github.com/lann/component-test --rev "$rev" component-test-cli
+        --git https://github.com/polymorph-components/polymorph-test --rev "$rev" component-test-cli
     cargo install -q --locked --root "{{ct-tools}}" \
-        --git https://github.com/lann/component-test --rev "$rev" component-test-runner
+        --git https://github.com/polymorph-components/polymorph-test --rev "$rev" component-test-runner
     printf '%s' "$rev" > "{{ct-tools}}/.rev"
 
 # Enumerate each suite's full case census (ct-driver instantiates the
@@ -107,14 +107,14 @@ _ct-leaves: build
 _viewer-prepared: _jco-prepared
     #!/usr/bin/env bash
     set -euo pipefail
-    rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
+    rev=$(grep -m1 -oE 'github\.com/polymorph-components/polymorph-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
     [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
     if [ -f jco/viewer/.rev ] && [ "$(cat jco/viewer/.rev)" = "$rev" ]; then
         exit 0
     fi
     src=$(cd "{{root}}" && pwd)/target/ct-src
     if [ ! -d "$src/.git" ]; then
-        git clone -q https://github.com/lann/component-test "$src"
+        git clone -q https://github.com/polymorph-components/polymorph-test "$src"
     fi
     if [ "$(git -C "$src" rev-parse HEAD)" != "$rev" ]; then
         git -C "$src" fetch -q origin "$rev"
@@ -220,12 +220,12 @@ build-provider:
         exit 0
     fi
     cargo build --manifest-path {{root}}/Cargo.toml --release \
-        -p lann-webcrypto-guest-provider --target wasm32-wasip2
+        -p polymorph-webcrypto-guest-provider --target wasm32-wasip2
 
 # The composed target: the shared suite plugged with the in-guest
 # RustCrypto provider, run under the GENERIC component-test host runner
 # (ct-runner provides only wasi + test-context — exactly the composed
-# artifact's imports; the leftover lann:webcrypto/{types,aes,rsa} imports
+# artifact's imports; the leftover polymorph:webcrypto/{types,aes,rsa} imports
 # are type-only and instantiate trivially). --suite-artifact is
 # load-bearing beyond case discovery: it carries the tags section, which
 # keeps the stream *scheduled* — the aggregate holds scheduled streams
@@ -273,7 +273,7 @@ _run-browser-if-enabled:
 
 # Aggregate all targets into the matrix; exits nonzero on any failure
 # or validation error. Binds against the COMMITTED lockfiles: upstream
-# ruled (lann/component-test#44) that artifact hashes are provenance,
+# ruled (polymorph-components/polymorph-test#44) that artifact hashes are provenance,
 # never a cross-environment gate, so the committed inventory — whose
 # diff is the review surface — is what results aggregate against; no
 # fresh-lock indirection. The optional jco-browser results are included
@@ -374,21 +374,21 @@ class-d: build build-provider
     #!/usr/bin/env bash
     set -uo pipefail
     output=$(wac plug {{signing}} \
-        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
+        --plug '{{root}}/target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm' \
         -o '{{root}}/target/class-d-composition.wasm' 2>&1)
     status=$?
     if [ $status -eq 0 ]; then
         echo "class-D gate: composing the signing suite with the in-guest provider SUCCEEDED." >&2
-        echo "The provider must not export lann:webcrypto/ecdsa-sign (rust/guest-provider/wit/world.wit)." >&2
+        echo "The provider must not export polymorph:webcrypto/ecdsa-sign (rust/guest-provider/wit/world.wit)." >&2
         exit 1
     fi
-    if ! printf '%s' "$output" | grep -q 'lann:webcrypto/ecdsa-sign'; then
+    if ! printf '%s' "$output" | grep -q 'polymorph:webcrypto/ecdsa-sign'; then
         echo "class-D gate: the composition failed, but not on ecdsa-sign:" >&2
         printf '%s\n' "$output" >&2
         exit 1
     fi
     echo "class-D gate: the signing suite does not compose with the in-guest provider (ecdsa-sign is not exported)."
-    provider='{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm'
+    provider='{{root}}/target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm'
     probes=(
         'oaep-probe|rsa-oaep-decrypt|--features rsa-oaep-decrypt'
         'rsassa-sign-probe|rsassa-pkcs1-v15-sign|--features rsa-sign'
@@ -410,10 +410,10 @@ class-d: build build-provider
         status=$?
         if [ $status -eq 0 ]; then
             echo "class-D gate: composing the $iface probe with the in-guest provider SUCCEEDED." >&2
-            echo "The provider must not export lann:webcrypto/$iface (rust/guest-provider/wit/world.wit)." >&2
+            echo "The provider must not export polymorph:webcrypto/$iface (rust/guest-provider/wit/world.wit)." >&2
             exit 1
         fi
-        if ! printf '%s' "$output" | grep -q "lann:webcrypto/$iface"; then
+        if ! printf '%s' "$output" | grep -q "polymorph:webcrypto/$iface"; then
             echo "class-D gate: the $iface probe composition failed, but not on $iface:" >&2
             printf '%s\n' "$output" >&2
             exit 1

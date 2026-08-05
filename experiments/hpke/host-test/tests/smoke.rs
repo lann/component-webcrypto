@@ -1,5 +1,5 @@
 //! Smoke tests: build the HPKE guest component and run it under the
-//! Wasmtime host (`lann-webcrypto-wasmtime` serving the `lann:webcrypto`
+//! Wasmtime host (`polymorph-webcrypto-wasmtime` serving the `polymorph:webcrypto`
 //! imports). Round trips plus the RFC 9180 A.1/A.2 base-mode known answers
 //! — deliberately a smoke suite, not a conformance suite.
 

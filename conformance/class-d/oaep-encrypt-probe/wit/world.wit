@@ -12,10 +12,10 @@
 // orphans the import (the mechanism is documented on
 // `../oaep-probe/wit/world.wit` and in the `class-d` recipe).
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/`,
-// pulled in through the `deps/lann-webcrypto` symlink.
+// The `polymorph:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/polymorph-webcrypto` symlink.
 package conformance:class-d-oaep-encrypt-probe;
 
 world oaep-encrypt-probe {
-    import lann:webcrypto/rsa-oaep-encrypt@0.1.0;
+    import polymorph:webcrypto/rsa-oaep-encrypt@0.1.0;
 }

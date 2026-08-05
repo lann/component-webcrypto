@@ -1,5 +1,5 @@
 //! Execution of the normalized vector cases against the imported
-//! `lann:webcrypto` interfaces.
+//! `polymorph:webcrypto` interfaces.
 
 use crate::mint::{
     import_cbc_key, import_ecdh_public_key_jwk, import_ecdh_public_key_raw,
@@ -21,18 +21,18 @@ use conformance_harness::stream::{
     sig_verify, sign_ok, verify_ok, verify_op, Schedule,
 };
 use conformance_harness::{describe, expect_bytes, expect_err, ErrKind};
-use lann_webcrypto_guest::bindings::aead::AeadKey;
-use lann_webcrypto_guest::bindings::aes_gcm::AesVariant;
-use lann_webcrypto_guest::bindings::ecdh::EcdhVariant;
-use lann_webcrypto_guest::bindings::ecdsa_verify::{
+use polymorph_webcrypto_guest::bindings::aead::AeadKey;
+use polymorph_webcrypto_guest::bindings::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::bindings::ecdh::EcdhVariant;
+use polymorph_webcrypto_guest::bindings::ecdsa_verify::{
     import_verifying_key_raw as import_ecdsa_verifying_key, EcdsaVariant,
 };
-use lann_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
-use lann_webcrypto_guest::bindings::hkdf_sha2;
-use lann_webcrypto_guest::bindings::pbkdf2_sha2;
-use lann_webcrypto_guest::bindings::rsa::RsaVariant;
-use lann_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
-use lann_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::ed25519_verify::import_verifying_key_raw as import_ed25519_verifying_key;
+use polymorph_webcrypto_guest::bindings::hkdf_sha2;
+use polymorph_webcrypto_guest::bindings::pbkdf2_sha2;
+use polymorph_webcrypto_guest::bindings::rsa::RsaVariant;
+use polymorph_webcrypto_guest::bindings::sha2::{make_digest, Sha2Variant};
+use polymorph_webcrypto_guest::bindings::types::Error;
 
 /// The `aes-variant` for a vector's key size (the sizes the translation
 /// emits; AES-192 never reaches execution).
@@ -106,7 +106,7 @@ pub async fn run_hkdf_case(case: &HkdfCase) -> Result<(), String> {
         .map_err(|e| describe("import-ikm", &e))?;
     let input = match case.alg {
         HkdfAlg::Sha1 => {
-            lann_webcrypto_guest::bindings::hkdf_sha1::prepare(
+            polymorph_webcrypto_guest::bindings::hkdf_sha1::prepare(
                 &ikm,
                 case.salt.clone(),
                 case.info.clone(),
@@ -305,7 +305,7 @@ pub async fn run_pbkdf2_case(case: &Pbkdf2Case) -> Result<(), String> {
         .map_err(|e| describe("import-password", &e))?;
     let input = match case.alg {
         Pbkdf2Alg::Sha1 => {
-            lann_webcrypto_guest::bindings::pbkdf2_sha1::prepare(
+            polymorph_webcrypto_guest::bindings::pbkdf2_sha1::prepare(
                 &password,
                 case.salt.clone(),
                 case.iterations,
@@ -561,7 +561,7 @@ pub async fn run_rsa_case(case: &RsaCase) -> Result<(), String> {
 /// by design. The unwrap direction mints the recovered data back out
 /// through `hmac-sha2.unwrap-key-raw` and compares the export.
 pub async fn run_kw_case(case: &KwCase) -> Result<(), String> {
-    use lann_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
 
     let kek = import_kw_key(aes_variant(case.key_bits)?, case.key.clone(), false)
         .await

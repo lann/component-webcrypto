@@ -15,7 +15,7 @@ members = [
 ]
 resolver = "2"
 
-# The lann:component-test stack, pinned by git rev (bump deliberately:
+# The polymorph:component-test stack, pinned by git rev (bump deliberately:
 # update the rev here, `cargo update -p component-test-sdk -p
 # component-test-runner`, and commit the Cargo.lock diff; the CI tools
 # cache and the ct/ct-runner binaries key off the locked rev). To
@@ -23,8 +23,8 @@ resolver = "2"
 # AGENTS.md "Build & run". Publishing component-test to a registry
 # retires this arrangement.
 [workspace.dependencies]
-component-test-sdk = { git = "https://github.com/lann/component-test", rev = "e4dd2d50ffd14a0da680cc2569a137724c0ccc78" }
-component-test-runner = { git = "https://github.com/lann/component-test", rev = "e4dd2d50ffd14a0da680cc2569a137724c0ccc78" }
+component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "289a8fdcac71b31589d359cd6e715ef81f232220" }
+component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "289a8fdcac71b31589d359cd6e715ef81f232220" }
 
 # The mutation run's profile (`just mutants`): dependencies optimized —
 # wasmtime and the RustCrypto cores are compiled once, at baseline, and make

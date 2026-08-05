@@ -4,14 +4,14 @@
 
 import '../justfile.shared.just'
 
-# Compose the timing lab with the in-guest provider: the lab's lann:webcrypto
+# Compose the timing lab with the in-guest provider: the lab's polymorph:webcrypto
 # imports are satisfied by the provider under measurement, yielding one
 # self-contained component in target/timing-lab-composed.wasm.
 compose: build-guest-provider
     cargo build --release -p timing-lab --target wasm32-wasip2 \
         --manifest-path '{{root}}/Cargo.toml'
     wac plug '{{root}}/target/wasm32-wasip2/release/timing_lab.wasm' \
-        --plug '{{root}}/target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm' \
+        --plug '{{root}}/target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm' \
         -o '{{root}}/target/timing-lab-composed.wasm'
 
 # Run the dudect-style timing lab against the composed in-guest provider.

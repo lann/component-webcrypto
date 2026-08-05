@@ -1,13 +1,13 @@
-//! Wasmtime host implementation of the `lann:webcrypto` interfaces, backed by
+//! Wasmtime host implementation of the `polymorph:webcrypto` interfaces, backed by
 //! the pure-Rust [RustCrypto](https://github.com/RustCrypto) crates.
 //!
 //! This crate factors the host-agnostic part of the Wasmtime WebCrypto host
-//! out of the demo binaries so any host can satisfy the `lann:webcrypto`
+//! out of the demo binaries so any host can satisfy the `polymorph:webcrypto`
 //! imports with one call to [`add_to_linker`]. It is an async (component-model
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host
 //! embeds a [`WasiWebcryptoCtx`] in its store state, implements
 //! [`WasiWebcryptoView`] to expose it alongside the store's [`ResourceTable`],
-//! and calls [`add_to_linker`] to satisfy the full `lann:webcrypto`
+//! and calls [`add_to_linker`] to satisfy the full `polymorph:webcrypto`
 //! package surface with RustCrypto implementations.
 //!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
@@ -85,7 +85,7 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 /// component model provides to a component callee (`backpressure.{inc,dec}`)
 /// and does not expose to a host import. (The in-guest provider, which could
 /// use it, deliberately does not: it has essentially one caller, so its
-/// instance memory limit is its bound — see lann-webcrypto-guest-provider's `buffer` module.)
+/// instance memory limit is its bound — see polymorph-webcrypto-guest-provider's `buffer` module.)
 /// Also outside the pools: each operation's transient working set — in
 /// `seal`/`open` the buffered input and the constructed output coexist
 /// until the input drops, so peak use briefly reaches about twice the
@@ -235,13 +235,13 @@ pub struct WasiWebcryptoCtxView<'a> {
 /// A trait that provides access to the [`WasiWebcryptoCtx`] host state.
 ///
 /// Implement this for your store's data type so [`add_to_linker`] can wire the
-/// `lann:webcrypto` imports onto your linker.
+/// `polymorph:webcrypto` imports onto your linker.
 pub trait WasiWebcryptoView: Send {
     /// Return a [`WasiWebcryptoCtxView`] from a mutable reference to `self`.
     fn webcrypto(&mut self) -> WasiWebcryptoCtxView<'_>;
 }
 
-/// The type for which this crate implements the `lann:webcrypto` interfaces.
+/// The type for which this crate implements the `polymorph:webcrypto` interfaces.
 /// Used as the [`HasData`] marker for the generated bindings.
 pub struct WasiWebcrypto;
 
@@ -317,42 +317,42 @@ minted_resources! {
     #[derive(Debug)]
     pub struct MacKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::MacPolicy,
+        policy: polymorph_webcrypto_core::MacPolicy,
     }
 
     /// An `aead-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct AeadKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::AeadPolicy,
+        policy: polymorph_webcrypto_core::AeadPolicy,
     }
 
     /// A `cipher-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct CipherKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::CipherPolicy,
+        policy: polymorph_webcrypto_core::CipherPolicy,
     }
 
     /// A `signing-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct SigningKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::SigningPolicy,
+        policy: polymorph_webcrypto_core::SigningPolicy,
     }
 
     /// A `kw-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct KwKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::KwPolicy,
+        policy: polymorph_webcrypto_core::KwPolicy,
     }
 
     /// A `decryption-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct DecryptionKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::TransportPolicy,
+        policy: polymorph_webcrypto_core::TransportPolicy,
     }
 
     /// Backing type for the `public-encryption.encryption-key` resource.
@@ -362,7 +362,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct EncryptionKey {
         #[payload]
-        material: lann_webcrypto_core::EncryptionKeyMaterial,
+        material: polymorph_webcrypto_core::EncryptionKeyMaterial,
     }
 
     /// Backing type for the `public-encryption.decryption-key` resource.
@@ -373,7 +373,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct DecryptionKey {
         #[payload]
-        material: lann_webcrypto_core::DecryptionKeyMaterial,
+        material: polymorph_webcrypto_core::DecryptionKeyMaterial,
     }
 
     /// Backing type for the `key-wrap.kw-key` resource: the AES-KW
@@ -381,7 +381,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct KwKey {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::KwKeyMaterial,
+        material: polymorph_webcrypto_core::KwKeyMaterial,
     }
 
     /// Backing type for the `wrapping.wrap-input` resource: one key's
@@ -390,7 +390,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct WrapInput {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::WrapInputMaterial,
+        material: polymorph_webcrypto_core::WrapInputMaterial,
     }
 
     /// Backing type for the `wrapping.unwrap-input` resource: decrypted
@@ -398,21 +398,21 @@ minted_resources! {
     #[derive(Debug)]
     pub struct UnwrapInput {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::UnwrapInputMaterial,
+        material: polymorph_webcrypto_core::UnwrapInputMaterial,
     }
 
     /// A `derive-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct DeriveOptions {
         #[payload]
-        policy: lann_webcrypto_core::DerivePolicy,
+        policy: polymorph_webcrypto_core::DerivePolicy,
     }
 
     /// An `agreement-key-options` resource. See [`MacKeyOptions`].
     #[derive(Debug)]
     pub struct AgreementKeyOptions {
         #[payload]
-        policy: lann_webcrypto_core::AgreementPolicy,
+        policy: polymorph_webcrypto_core::AgreementPolicy,
     }
 
     /// Backing type for the `key-agreement.public-key` resource: public
@@ -420,7 +420,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct AgreementPublicKey {
         #[payload]
-        material: lann_webcrypto_core::AgreementPublicMaterial,
+        material: polymorph_webcrypto_core::AgreementPublicMaterial,
     }
 
     /// Backing type for the `key-agreement.secret-key` resource. `agree` is
@@ -429,7 +429,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct AgreementSecretKey {
         #[payload]
-        material: lann_webcrypto_core::AgreementSecretMaterial,
+        material: polymorph_webcrypto_core::AgreementSecretMaterial,
     }
 
     /// Backing type for the `hkdf.ikm` resource: input keying material, never
@@ -437,7 +437,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct Ikm {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::IkmMaterial,
+        material: polymorph_webcrypto_core::IkmMaterial,
     }
 
     /// Backing type for the `pbkdf2.password` resource: a password, never
@@ -445,7 +445,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct Password {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::PasswordMaterial,
+        material: polymorph_webcrypto_core::PasswordMaterial,
     }
 
     /// Backing type for the `derivation.derive-input` resource: a
@@ -454,7 +454,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct DeriveInput {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::DeriveInputMaterial,
+        material: polymorph_webcrypto_core::DeriveInputMaterial,
     }
 
     /// Backing type for the `mac.mac-key` resource.
@@ -467,7 +467,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct MacKey {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::MacKeyMaterial,
+        material: polymorph_webcrypto_core::MacKeyMaterial,
     }
 
     /// Backing type for the `aead.aead-key` resource.
@@ -479,14 +479,14 @@ minted_resources! {
     #[derive(Debug)]
     pub struct AeadKey {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::AeadKeyMaterial,
+        material: polymorph_webcrypto_core::AeadKeyMaterial,
     }
 
     /// Backing type for the `cipher.cipher-key` resource: the unauthenticated
     /// AES modes' key material.
     pub struct CipherKey {
         #[payload(retains = byte_len)]
-        material: lann_webcrypto_core::CipherKeyMaterial,
+        material: polymorph_webcrypto_core::CipherKeyMaterial,
     }
 
     /// Backing type for the `digest.digest` resource.
@@ -499,7 +499,7 @@ minted_resources! {
     pub struct Digest {
         #[payload]
         /// The digest algorithm this resource is bound to.
-        variant: lann_webcrypto_core::DigestKind,
+        variant: polymorph_webcrypto_core::DigestKind,
     }
 
     /// Backing type for the `signature.verifying-key` resource.
@@ -511,7 +511,7 @@ minted_resources! {
         #[payload]
         /// The public key, bound to its algorithm (and, for ECDSA, its
         /// curve/digest variant) at minting.
-        public: lann_webcrypto_core::SigPublic,
+        public: polymorph_webcrypto_core::SigPublic,
     }
 
     /// Backing type for the `signature.signing-key` resource.
@@ -521,7 +521,7 @@ minted_resources! {
     #[derive(Debug)]
     pub struct SigningKey {
         #[payload]
-        material: lann_webcrypto_core::SigningKeyMaterial,
+        material: polymorph_webcrypto_core::SigningKeyMaterial,
     }
 }
 
@@ -530,7 +530,7 @@ minted_resources! {
 // material — a key reaching a log line cannot leak (asserted by the
 // `debug_redacts_key_material` tests here and in the core).
 
-/// Add the `lann:webcrypto` interfaces implemented by this crate — `types`,
+/// Add the `polymorph:webcrypto` interfaces implemented by this crate — `types`,
 /// the primitive kinds (`mac`, `aead`, `digest`, `signature`), and
 /// the algorithm minting interfaces — to the provided [`Linker`].
 ///
@@ -544,7 +544,7 @@ minted_resources! {
 /// ```no_run
 /// use wasmtime::component::{Linker, ResourceTable};
 /// use wasmtime::{Engine, Result};
-/// use lann_webcrypto_wasmtime::{
+/// use polymorph_webcrypto_wasmtime::{
 ///     add_to_linker, WasiWebcryptoCtx, WasiWebcryptoCtxView, WasiWebcryptoView,
 /// };
 ///
@@ -591,20 +591,20 @@ pub struct LinkOptions {
 }
 
 impl LinkOptions {
-    /// Serve `lann:webcrypto/sha1-checked`.
+    /// Serve `polymorph:webcrypto/sha1-checked`.
     pub fn sha1_checked(&mut self, enabled: bool) -> &mut Self {
         self.sha1_checked = enabled;
         self
     }
 
-    /// Serve `lann:webcrypto/rsassa-pkcs1-v15-sign` and
-    /// `lann:webcrypto/rsa-pss-sign`.
+    /// Serve `polymorph:webcrypto/rsassa-pkcs1-v15-sign` and
+    /// `polymorph:webcrypto/rsa-pss-sign`.
     pub fn rsa_sign(&mut self, enabled: bool) -> &mut Self {
         self.rsa_sign = enabled;
         self
     }
 
-    /// Serve `lann:webcrypto/rsa-oaep-decrypt`.
+    /// Serve `polymorph:webcrypto/rsa-oaep-decrypt`.
     pub fn rsa_oaep_decrypt(&mut self, enabled: bool) -> &mut Self {
         self.rsa_oaep_decrypt = enabled;
         self

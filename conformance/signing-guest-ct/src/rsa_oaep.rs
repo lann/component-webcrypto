@@ -37,11 +37,11 @@ use conformance_harness::stream::{open_ok, seal_ok, Schedule};
 use conformance_harness::{
     b64url, describe, expect, expect_bytes, expect_err, ErrKind, FEATURE_RSA_OAEP_DECRYPT,
 };
-use lann_webcrypto_guest::bindings::public_encryption::DecryptionKeyOptions;
-use lann_webcrypto_guest::bindings::rsa_oaep_decrypt::RsaModulus;
-use lann_webcrypto_guest::bindings::rsa_oaep_encrypt::RsaVariant;
-use lann_webcrypto_guest::bindings::types::Error;
-use lann_webcrypto_guest::bindings::{rsa_oaep_decrypt, rsa_oaep_encrypt};
+use polymorph_webcrypto_guest::bindings::public_encryption::DecryptionKeyOptions;
+use polymorph_webcrypto_guest::bindings::rsa_oaep_decrypt::RsaModulus;
+use polymorph_webcrypto_guest::bindings::rsa_oaep_encrypt::RsaVariant;
+use polymorph_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::{rsa_oaep_decrypt, rsa_oaep_encrypt};
 use serde::Deserialize;
 
 /// The dedicated RSA-OAEP vector files (one modulus length + digest pair
@@ -441,18 +441,18 @@ const OAEP_2048_SPKI: &str = "30820122300d06092a864886f70d01010105000382010f0030
      a45d12569a62807d3b9a02e5a530e773066f453d1f5b4c2e9cf7820283f742b9\
      d50203010001";
 
-/// Assert an operation failed with the `("lann:webcrypto",
+/// Assert an operation failed with the `("polymorph:webcrypto",
 /// "message-too-long")` extension condition (the exact pair the WIT
 /// names for a plaintext above the key's bound).
 fn expect_too_long<T>(what: &str, result: Result<T, Error>) -> Result<(), String> {
     match result {
         Err(Error::Extension(ext))
-            if ext.origin == "lann:webcrypto" && ext.name == "message-too-long" =>
+            if ext.origin == "polymorph:webcrypto" && ext.name == "message-too-long" =>
         {
             Ok(())
         }
         Err(other) => Err(describe(
-            &format!("{what}: expected extension(lann:webcrypto, message-too-long), got"),
+            &format!("{what}: expected extension(polymorph:webcrypto, message-too-long), got"),
             &other,
         )),
         Ok(_) => Err(format!("{what}: an over-bound payload was accepted")),
@@ -698,8 +698,8 @@ pub async fn rsa_oaep_round_trip() -> Result<(), String> {
     // Key transport: an AES-256-GCM key seals a message, travels
     // `wrap` → `unwrap` → `aes-gcm.unwrap-key-raw`, and the minted key
     // opens the sealed message.
-    use lann_webcrypto_guest::bindings::aead::AeadKeyOptions;
-    use lann_webcrypto_guest::bindings::aes_gcm;
+    use polymorph_webcrypto_guest::bindings::aead::AeadKeyOptions;
+    use polymorph_webcrypto_guest::bindings::aes_gcm;
 
     let options = DecryptionKeyOptions::new();
     options.can_unwrap(true);
@@ -873,10 +873,10 @@ pub async fn rsa_oaep_declined() -> Result<(), String> {
 /// the OAEP `wrap` operation is itself the subject).
 async fn wrap_input_of(
     payload: Vec<u8>,
-) -> Result<lann_webcrypto_guest::bindings::wrapping::WrapInput, String> {
-    use lann_webcrypto_guest::bindings::hmac_sha2;
-    use lann_webcrypto_guest::bindings::mac::MacKeyOptions;
-    use lann_webcrypto_guest::bindings::sha2::Sha2Variant;
+) -> Result<polymorph_webcrypto_guest::bindings::wrapping::WrapInput, String> {
+    use polymorph_webcrypto_guest::bindings::hmac_sha2;
+    use polymorph_webcrypto_guest::bindings::mac::MacKeyOptions;
+    use polymorph_webcrypto_guest::bindings::sha2::Sha2Variant;
 
     let carrier_options = MacKeyOptions::new();
     carrier_options.can_sign(true);

@@ -14,11 +14,11 @@
 // the provider's exports and orphans the `rsa-oaep-decrypt` import that
 // still names the imported ones.
 //
-// The `lann:webcrypto` package lives once at the repository root `wit/`,
-// pulled in through the `deps/lann-webcrypto` symlink.
+// The `polymorph:webcrypto` package lives once at the repository root `wit/`,
+// pulled in through the `deps/polymorph-webcrypto` symlink.
 package conformance:class-d-oaep-probe;
 
 world oaep-probe {
     @unstable(feature = rsa-oaep-decrypt)
-    import lann:webcrypto/rsa-oaep-decrypt@0.1.0;
+    import polymorph:webcrypto/rsa-oaep-decrypt@0.1.0;
 }

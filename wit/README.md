@@ -1,4 +1,4 @@
-# The `lann:webcrypto` package
+# The `polymorph:webcrypto` package
 
 This document holds the package-wide contracts and the terminology that the
 WIT doc comments reference. A doc comment states what is specific to its
@@ -208,7 +208,7 @@ set.** The closed cases are the conditions the *generic kinds'* contracts
 name — universal across operation families; `extension` carries algorithm-
 and feature-specific conditions, identified by the (`origin`, `name`) pair
 and defined by the interface that produces them (the first is
-`sha1-checked`'s `("lann:webcrypto", "collision-detected")`). The record's
+`sha1-checked`'s `("polymorph:webcrypto", "collision-detected")`). The record's
 fields have two fixed roles:
 
 - the (`origin`, `name`) **pair** is the condition's only branchable
@@ -229,7 +229,7 @@ A consumer MUST handle a pair it does not recognize exactly as it handles
 in kind — and it means the closed set never has to grow again. `origin` is
 an opaque namespace owned by the defining party (by convention its package
 name; this package defines all of its conditions under
-`"lann:webcrypto"`). Third-party providers mint conditions under their own
+`"polymorph:webcrypto"`). Third-party providers mint conditions under their own
 `origin`. SDKs expose constants for known pairs, and the conformance
 suites pin exact pairs cross-implementation.
 

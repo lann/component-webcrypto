@@ -1,4 +1,4 @@
-//! Translation of the vendored test vectors into the `lann:webcrypto`
+//! Translation of the vendored test vectors into the `polymorph:webcrypto`
 //! contract.
 //!
 //! This module is the authoritative encoding of the translation policy;
@@ -126,7 +126,7 @@ impl VectorCase for HmacCase {
     }
 }
 
-/// What the `lann:webcrypto` contract requires of an AEAD vector.
+/// What the `polymorph:webcrypto` contract requires of an AEAD vector.
 #[derive(
     Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
@@ -1760,7 +1760,7 @@ pub enum RsaImport {
     Jwk(String),
 }
 
-/// What the `lann:webcrypto` contract requires of an RSA vector.
+/// What the `polymorph:webcrypto` contract requires of an RSA vector.
 #[derive(
     Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]

@@ -1,6 +1,6 @@
 // The componentize-demo guest: exercises the WebCrypto-subset library in
 // `js/componentize/webcrypto.js` (HMAC-SHA-256 + AES-256-GCM over the
-// `lann:webcrypto` imports) end to end, and exports the same
+// `polymorph:webcrypto` imports) end to end, and exports the same
 // `demo:webcrypto-demo/demo@0.1.0` entry point as the Rust `crypto-demo`
 // guest so the existing `crypto-demo-driver` component can drive it.
 //
@@ -405,7 +405,7 @@ async function getRandomValuesCheck() {
  * attack yields the deterministic sha1dc safe hash under the default
  * mitigating posture, and under `setSha1CollisionPolicy("reject")` throws
  * `OperationError` (the shim's mapping of the package's
- * `("lann:webcrypto", "collision-detected")` extension condition; the
+ * `("polymorph:webcrypto", "collision-detected")` extension condition; the
  * `bindings-transport` check asserts the condition's delivery).
  */
 async function sha1CollisionPolicy() {
@@ -477,7 +477,7 @@ async function bindingsTransport() {
     "message,name,origin",
     "extension-error field census",
   );
-  expectEq(ext?.origin, "lann:webcrypto", "extension-error origin");
+  expectEq(ext?.origin, "polymorph:webcrypto", "extension-error origin");
   expectEq(ext?.name, "collision-detected", "extension-error name");
   expectEq(
     ext?.message,

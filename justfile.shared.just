@@ -33,11 +33,11 @@ build-component:
         examples/crypto-demo/build/crypto-demo.component.wasm
 
 # Build the in-guest provider component (RustCrypto entirely in-guest; it
-# exports the lann:webcrypto surface) into
-# target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm.
+# exports the polymorph:webcrypto surface) into
+# target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm.
 [private]
 build-guest-provider:
-    cargo build --release -p lann-webcrypto-guest-provider --target wasm32-wasip2 \
+    cargo build --release -p polymorph-webcrypto-guest-provider --target wasm32-wasip2 \
         --manifest-path '{{root}}/Cargo.toml'
 
 # Compose `guest` with the in-guest provider and plug `driver` (a
@@ -53,7 +53,7 @@ _compose stem guest driver: build-guest-provider
     cargo build --release -p {{driver}} --target wasm32-wasip2
     driver_wasm="target/wasm32-wasip2/release/$(echo '{{driver}}' | tr - _).wasm"
     wac plug {{guest}} \
-        --plug target/wasm32-wasip2/release/lann_webcrypto_guest_provider.wasm \
+        --plug target/wasm32-wasip2/release/polymorph_webcrypto_guest_provider.wasm \
         -o target/{{stem}}-with-crypto.wasm
     wac plug "$driver_wasm" \
         --plug target/{{stem}}-with-crypto.wasm \

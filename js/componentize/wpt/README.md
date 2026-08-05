@@ -2,7 +2,7 @@
 
 Runs the [web-platform-tests] WebCryptoAPI suites covering this library's
 surface against `js/componentize/webcrypto.js` inside a componentize-js
-guest, composed with the in-guest `lann-webcrypto-guest-provider` provider — the same
+guest, composed with the in-guest `polymorph-webcrypto-guest-provider` provider — the same
 pipeline as `examples/componentize-demo`. Run it from the repository root
 with:
 
@@ -19,7 +19,7 @@ artifacts involved have very different costs, and are handled accordingly:
   every run. There is no published runner and no input lock: the check
   always exercises the tree under test, and a stale artifact is not
   representable. The in-guest provider and driver it is composed with are
-  likewise built fresh, so `lann-webcrypto-core`/`lann-webcrypto-guest-provider` changes are always
+  likewise built fresh, so `polymorph-webcrypto-core`/`polymorph-webcrypto-guest-provider` changes are always
   exercised.
 - The **toolchain** takes about twenty minutes, and depends on nothing but
   the revision in [`../componentize-js.rev`](../componentize-js.rev). The
@@ -46,7 +46,7 @@ the toolchain is available and pinned. To test against a
 componentize-js you built yourself, point `COMPONENTIZE_JS` at it (see
 [../README.md](../README.md)).
 
-[`toolchains` release]: https://github.com/lann/component-webcrypto/releases/tag/toolchains
+[`toolchains` release]: https://github.com/polymorph-components/polymorph-webcrypto/releases/tag/toolchains
 
 ## What the gate asserts
 

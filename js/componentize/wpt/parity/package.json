@@ -1,12 +1,12 @@
 {
-  "name": "@lann/wpt-parity-webcrypto",
+  "name": "@polymorph/wpt-parity-webcrypto",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "WPT parity gate: the vendored WebCryptoAPI suites run directly against the platform's crypto.subtle (baseline) and through the componentized shim transpiled by jco against webcrypto-jco (round trip); compare.mjs holds the round trip to the baseline's pass set.",
   "scripts": {
-    "transpile": "node ../../../../scripts/jco-transpile.mjs transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../../js/jco/webcrypto.js#*' --map 'wpt:parity/reporter@0.1.0=../../reporter.js#reporter' -o generated",
-    "transpile:web": "node ../../../../scripts/jco-transpile.mjs transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'lann:webcrypto/*@0.1.0=../../../../../js/jco/webcrypto.js#*' --map 'wpt:parity/reporter@0.1.0=../../reporter.js#reporter' --map 'wasi:cli/*=../../web/preview2-shim/cli.js#*' --map 'wasi:clocks/*=../../web/preview2-shim/clocks.js#*' --map 'wasi:filesystem/*=../../web/preview2-shim/filesystem.js#*' --map 'wasi:io/*=../../web/preview2-shim/io.js#*' --map 'wasi:random/*=../../web/preview2-shim/random.js#*' --map 'wasi:sockets/*=../../web/sockets-stub.js#*' -o generated-web",
+    "transpile": "node ../../../../scripts/jco-transpile.mjs transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'polymorph:webcrypto/*@0.1.0=../../../../../js/jco/webcrypto.js#*' --map 'wpt:parity/reporter@0.1.0=../../reporter.js#reporter' -o generated",
+    "transpile:web": "node ../../../../scripts/jco-transpile.mjs transpile ../build/parity-runner.component.wasm --name parity-runner --async-mode jspi --map 'polymorph:webcrypto/*@0.1.0=../../../../../js/jco/webcrypto.js#*' --map 'wpt:parity/reporter@0.1.0=../../reporter.js#reporter' --map 'wasi:cli/*=../../web/preview2-shim/cli.js#*' --map 'wasi:clocks/*=../../web/preview2-shim/clocks.js#*' --map 'wasi:filesystem/*=../../web/preview2-shim/filesystem.js#*' --map 'wasi:io/*=../../web/preview2-shim/io.js#*' --map 'wasi:random/*=../../web/preview2-shim/random.js#*' --map 'wasi:sockets/*=../../web/sockets-stub.js#*' -o generated-web",
     "baseline": "node baseline.mjs",
     "roundtrip": "node --experimental-wasm-jspi roundtrip.mjs",
     "run:firefox": "node run-browser.mjs --engine firefox",

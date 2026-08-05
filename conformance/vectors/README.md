@@ -199,7 +199,7 @@ every rejecting path family.
 
 ## Translation policy
 
-Wycheproof describes the *algorithms*; the `lann:webcrypto` WIT is
+Wycheproof describes the *algorithms*; the `polymorph:webcrypto` WIT is
 deliberately stricter in places, so vector expectations are translated into
 the package's contract before execution. This mapping is versioned
 conformance policy; change it deliberately and in review. The authoritative

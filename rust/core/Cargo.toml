@@ -1,15 +1,15 @@
 [package]
-name = "lann-webcrypto-core"
+name = "polymorph-webcrypto-core"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Shared RustCrypto core for the Rust implementations of the lann:webcrypto interfaces (lann-webcrypto-wasmtime and lann-webcrypto-guest-provider)."
+description = "Shared RustCrypto core for the Rust implementations of the polymorph:webcrypto interfaces (polymorph-webcrypto-wasmtime and polymorph-webcrypto-guest-provider)."
 
 [dependencies]
 # RustCrypto backing implementations, declared exactly once for both Rust
 # implementations so their algorithm versions and features cannot drift.
 # On wasm targets `aes-gcm` selects the soft (fixsliced, table-free) AES
-# backend — what makes AES-GCM acceptable in-guest; see lann-webcrypto-guest-provider's README
+# backend — what makes AES-GCM acceptable in-guest; see polymorph-webcrypto-guest-provider's README
 # timing-channel classification.
 # `oid` gives the digests' AssociatedOid, which names the DigestInfo in
 # RSASSA-PKCS1-v1_5 verification.
@@ -50,7 +50,7 @@ serde_json = "1"
 data-encoding = "2"
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
-# lann-webcrypto-guest-provider's README timing-channel classification).
+# polymorph-webcrypto-guest-provider's README timing-channel classification).
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
 # X25519 agreement; static_secrets because imported/held secret keys are the
 # point of the key-agreement kind (dalek gates non-ephemeral use behind it).

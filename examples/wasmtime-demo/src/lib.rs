@@ -1,16 +1,16 @@
 //! Wasmtime host for the `crypto-demo` component, backed by
-//! [`lann_webcrypto_wasmtime`]'s RustCrypto implementation of `lann:webcrypto`.
+//! [`polymorph_webcrypto_wasmtime`]'s RustCrypto implementation of `polymorph:webcrypto`.
 //!
 //! It is the non-browser counterpart to the jco (browser WebCrypto) host: it
 //! loads the same `crypto-demo` component and invokes the component's
 //! exported async `run`. The component drives every check itself through the
-//! standard `lann:webcrypto` interfaces, so this host provisions nothing
-//! beyond [`lann_webcrypto_wasmtime::standalone`]'s canned embedding.
+//! standard `polymorph:webcrypto` interfaces, so this host provisions nothing
+//! beyond [`polymorph_webcrypto_wasmtime::standalone`]'s canned embedding.
 
 use std::path::Path;
 
-use lann_webcrypto_wasmtime::standalone::{self, Ctx};
-use lann_webcrypto_wasmtime::WasiWebcryptoCtx;
+use polymorph_webcrypto_wasmtime::standalone::{self, Ctx};
+use polymorph_webcrypto_wasmtime::WasiWebcryptoCtx;
 use wasmtime::component::Accessor;
 
 mod bindings {
@@ -27,7 +27,7 @@ mod bindings {
 }
 
 /// Instantiate the `crypto-demo` component at `component_path` with the
-/// `lann:webcrypto` imports satisfied by [`lann_webcrypto_wasmtime`], call its
+/// `polymorph:webcrypto` imports satisfied by [`polymorph_webcrypto_wasmtime`], call its
 /// exported async `run`, and return the summary string it produces.
 ///
 /// A check failure reported by the guest (its `result<string, string>` `err`

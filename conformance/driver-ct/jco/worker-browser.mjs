@@ -4,7 +4,7 @@
 // is why the transpile maps the wasi shim to relative paths), streaming
 // each results-JSONL event back with its suite-order index, then the
 // shard's counts. The browser counterpart of worker-node.mjs.
-import { inventoryLookup, runCases } from "./node_modules/@lann/component-test-js/js/viewer/harness.mjs";
+import { inventoryLookup, runCases } from "./node_modules/@polymorph/component-test-js/js/viewer/harness.mjs";
 import { Context } from "../context.js";
 
 // A rejection escaping the awaited chain (e.g. a platform quirk

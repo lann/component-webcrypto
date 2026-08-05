@@ -9,7 +9,7 @@ description = "The parts of the conformance guests that are not specific to a wo
 # The WIT `error` type that `describe` renders and the key resources the
 # stream helpers drive. Both guests obtain them from here, so they render
 # failures and deliver inputs identically.
-lann-webcrypto-guest = { path = "../../rust/guest" }
+polymorph-webcrypto-guest = { path = "../../rust/guest" }
 # `join!` runs an operation and its stream feeder concurrently within a
 # single cooperative task — the core of the stream helpers.
 futures = { version = "0.3", default-features = false, features = ["async-await"] }

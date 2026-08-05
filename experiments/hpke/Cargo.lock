@@ -1162,7 +1162,7 @@ version = "0.1.0"
 dependencies = [
  "hpke-rs",
  "hpke-rs-crypto",
- "lann-webcrypto-guest",
+ "polymorph-webcrypto-guest",
  "rand 0.10.2",
  "wit-bindgen 0.59.0",
  "zeroize",
@@ -1174,7 +1174,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "data-encoding-macro",
- "lann-webcrypto-wasmtime",
+ "polymorph-webcrypto-wasmtime",
  "tokio",
  "wasmtime",
 ]
@@ -1356,7 +1356,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lann-webcrypto-core"
+name = "polymorph-webcrypto-core"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -1386,7 +1386,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lann-webcrypto-guest"
+name = "polymorph-webcrypto-guest"
 version = "0.1.0"
 dependencies = [
  "futures",
@@ -1394,11 +1394,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "lann-webcrypto-wasmtime"
+name = "polymorph-webcrypto-wasmtime"
 version = "0.1.0"
 dependencies = [
  "futures",
- "lann-webcrypto-core",
+ "polymorph-webcrypto-core",
  "mea",
  "wasmtime",
 ]

@@ -1,6 +1,6 @@
 //! `hpke-guest`: an experimental WebAssembly component exporting RFC 9180
 //! HPKE (base mode, DHKEM(X25519, HKDF-SHA-256), HKDF-SHA-256) whose
-//! cryptography is entirely `lann:webcrypto` imports.
+//! cryptography is entirely `polymorph:webcrypto` imports.
 //!
 //! The HPKE state machine is [`hpke_rs`], driven through its pluggable
 //! [`hpke_rs_crypto::HpkeCrypto`] provider trait; [`provider`] implements

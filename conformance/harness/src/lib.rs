@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 
 use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 
-use lann_webcrypto_guest::bindings::types::Error;
+use polymorph_webcrypto_guest::bindings::types::Error;
 
 /// The `ecdsa-sign` feature: the `ecdsa-sign` minting interface itself.
 /// No case in the shared suite is tagged with it — the signing suite's

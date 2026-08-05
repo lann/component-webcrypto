@@ -1,4 +1,4 @@
-package lann:webcrypto@0.1.0;
+package polymorph:webcrypto@0.1.0;
 
 /// Shared structural types for the WebCrypto-style interfaces.
 ///
@@ -22,7 +22,7 @@ interface types {
     record extension-error {
         /// The namespace the condition is defined under: an opaque string
         /// owned by the defining party, by convention its package name,
-        /// e.g. `"lann:webcrypto"`. Ownership means names cannot collide:
+        /// e.g. `"polymorph:webcrypto"`. Ownership means names cannot collide:
         /// third-party providers mint conditions under their own
         /// namespace, never under another party's.
         origin: string,

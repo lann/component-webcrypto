@@ -1,6 +1,6 @@
 //! `crypto-demo`: an example WebAssembly component that exercises the
-//! `lann:webcrypto` primitive kinds end to end through the
-//! `lann-webcrypto-guest` library.
+//! `polymorph:webcrypto` primitive kinds end to end through the
+//! `polymorph-webcrypto-guest` library.
 //!
 //! The component is host-agnostic: the same binary runs unchanged under the
 //! Wasmtime (RustCrypto) host and the jco (browser WebCrypto) host, which is
@@ -23,9 +23,9 @@ wit_bindgen::generate!({
 use anyhow::{ensure, Context, Result};
 use data_encoding_macro::hexlower;
 use exports::demo::webcrypto_demo::demo::Guest;
-use lann_webcrypto_guest::aes_gcm::AesVariant;
-use lann_webcrypto_guest::sha2::Sha2Variant;
-use lann_webcrypto_guest::{wit_stream, Error};
+use polymorph_webcrypto_guest::aes_gcm::AesVariant;
+use polymorph_webcrypto_guest::sha2::Sha2Variant;
+use polymorph_webcrypto_guest::{wit_stream, Error};
 
 /// Assert that `result` failed with an error matching `pattern` (e.g.
 /// `Error::InvalidKey(_)`). `accepted` says what its wrongly succeeding
@@ -202,8 +202,8 @@ impl Guest for Component {
 /// block size of material (WebCrypto's `generateKey` default: 64 bytes for
 /// SHA-256).
 async fn hmac_key_export() -> Result<()> {
-    use lann_webcrypto_guest::hmac_sha2;
-    let full_grant = lann_webcrypto_guest::MacKeyOptions {
+    use polymorph_webcrypto_guest::hmac_sha2;
+    let full_grant = polymorph_webcrypto_guest::MacKeyOptions {
         sign: true,
         verify: true,
         extractable: true,
@@ -267,7 +267,7 @@ const SHA256_ABC: [u8; 32] =
 /// The digest tour: the `Digest` wrapper computes the FIPS 180-2 "abc"
 /// example digest, and the resource is reusable — a second compute agrees.
 async fn digest_wrapper() -> Result<()> {
-    let digest = lann_webcrypto_guest::sha2::make_digest(Sha2Variant::Sha256)?;
+    let digest = polymorph_webcrypto_guest::sha2::make_digest(Sha2Variant::Sha256)?;
     ensure!(
         digest.algorithm_name() == "SHA-256",
         "algorithm-name: got {}",
@@ -290,7 +290,7 @@ async fn digest_wrapper() -> Result<()> {
 /// or declines them `unsupported`, the fail-closed posture of
 /// browser-backed hosts (both constructors must agree).
 async fn sha1_checked_or_declined() -> Result<()> {
-    use lann_webcrypto_guest::{sha1_checked, Error};
+    use polymorph_webcrypto_guest::{sha1_checked, Error};
     let minted = (
         sha1_checked::make_rejecting_digest(),
         sha1_checked::make_mitigating_digest(),
@@ -325,9 +325,9 @@ async fn sha1_checked_or_declined() -> Result<()> {
 /// rule asks for, and the reason `Seal` is a `Future` rather than an
 /// `async fn`'s anonymous one.
 async fn aead_wrapper_seal() -> Result<()> {
-    use lann_webcrypto_guest::aes_gcm;
+    use polymorph_webcrypto_guest::aes_gcm;
 
-    let seal_open = lann_webcrypto_guest::AeadKeyOptions {
+    let seal_open = polymorph_webcrypto_guest::AeadKeyOptions {
         seal: true,
         open: true,
         ..Default::default()
@@ -379,11 +379,11 @@ async fn aead_wrapper_seal() -> Result<()> {
 /// its output is drained. On other hosts the pool is ample and this is a
 /// plain concurrency check.
 async fn concurrent_seal_open() -> Result<()> {
-    use lann_webcrypto_guest::aes_gcm;
+    use polymorph_webcrypto_guest::aes_gcm;
 
     let key = aes_gcm::generate_key(
         AesVariant::Aes256,
-        lann_webcrypto_guest::AeadKeyOptions {
+        polymorph_webcrypto_guest::AeadKeyOptions {
             seal: true,
             open: true,
             ..Default::default()
@@ -392,7 +392,7 @@ async fn concurrent_seal_open() -> Result<()> {
     .await
     .context("generate-key")?;
 
-    async fn round_trip(key: &lann_webcrypto_guest::Aead, lane: u8) -> Result<()> {
+    async fn round_trip(key: &polymorph_webcrypto_guest::Aead, lane: u8) -> Result<()> {
         let mut nonce = [0u8; 12];
         nonce[0] = lane;
         let payload: Vec<u8> = (0..2048u32).map(|i| (i as u8).wrapping_add(lane)).collect();
@@ -428,10 +428,10 @@ async fn concurrent_seal_open() -> Result<()> {
 /// imported key signs "Hi There" to the published tag, verifies it, and
 /// rejects a corrupted one.
 async fn hmac_sha1_known_answer() -> Result<()> {
-    use lann_webcrypto_guest::hmac_sha1;
+    use polymorph_webcrypto_guest::hmac_sha1;
     let key = hmac_sha1::import_key_raw(
         vec![0x0b; 20],
-        lann_webcrypto_guest::MacKeyOptions {
+        polymorph_webcrypto_guest::MacKeyOptions {
             sign: true,
             verify: true,
             extractable: false,
@@ -458,10 +458,10 @@ async fn hmac_sha1_known_answer() -> Result<()> {
 // --- cipher ----------------------------------------------------------------
 
 /// The cipher tour: the `CipherKey` wrapper end to end — generate through
-/// `aes_ctr`, encrypt (a lazy [`Seal`](lann_webcrypto_guest::Seal)),
+/// `aes_ctr`, encrypt (a lazy [`Seal`](polymorph_webcrypto_guest::Seal)),
 /// decrypt, and compare.
 async fn aes_ctr_wrapper_roundtrip() -> Result<()> {
-    use lann_webcrypto_guest::{aes_ctr, CipherKeyOptions};
+    use polymorph_webcrypto_guest::{aes_ctr, CipherKeyOptions};
     let key = aes_ctr::generate_key(
         aes_ctr::AesVariant::Aes256,
         CipherKeyOptions {
@@ -491,7 +491,7 @@ async fn aes_ctr_wrapper_roundtrip() -> Result<()> {
 /// ciphertext (followed by one full PKCS#7 padding block), and the
 /// ciphertext decrypts back to the block.
 async fn aes_cbc_known_answer() -> Result<()> {
-    use lann_webcrypto_guest::{aes_cbc, CipherKeyOptions};
+    use polymorph_webcrypto_guest::{aes_cbc, CipherKeyOptions};
     let key = aes_cbc::import_key_raw(
         aes_cbc::AesVariant::Aes128,
         hexlower!("2b7e151628aed2a6abf7158809cf4f3c"),
@@ -528,7 +528,7 @@ async fn aes_cbc_known_answer() -> Result<()> {
 /// verifies the RFC 8032 signature, and rejects a corrupted one with
 /// `authentication-failed`.
 async fn ed25519_verify_check() -> Result<()> {
-    use lann_webcrypto_guest::ed25519;
+    use polymorph_webcrypto_guest::ed25519;
     let key = ed25519::import_verifying_key_raw(ED25519_PUBLIC)
         .await
         .context("import-verifying-key-raw")?;
@@ -555,7 +555,7 @@ async fn ed25519_verify_check() -> Result<()> {
 /// through `SigningKey`, verify through `VerifyingKey`, and fail closed on
 /// a tampered signature.
 async fn ed25519_wrapper_roundtrip() -> Result<()> {
-    use lann_webcrypto_guest::{ed25519, SigningKeyOptions};
+    use polymorph_webcrypto_guest::{ed25519, SigningKeyOptions};
     let (signing, verifying) = ed25519::generate_key(SigningKeyOptions {
         sign: true,
         extractable: false,
@@ -588,7 +588,7 @@ async fn ed25519_wrapper_roundtrip() -> Result<()> {
 /// variant through the getters, verifies the deterministic signature over
 /// "sample", and rejects a corrupted one.
 async fn ecdsa_verify_known_answer() -> Result<()> {
-    use lann_webcrypto_guest::ecdsa::{self, EcdsaVariant};
+    use polymorph_webcrypto_guest::ecdsa::{self, EcdsaVariant};
     let mut point = vec![0x04];
     point.extend(ECDSA_PUBLIC_X);
     point.extend(ECDSA_PUBLIC_Y);
@@ -630,8 +630,8 @@ async fn ecdsa_verify_known_answer() -> Result<()> {
 /// parameterization through the getters — the modulus length included —
 /// verifies the vector's valid signature, and rejects a corrupted one.
 async fn rsa_verify_known_answer() -> Result<()> {
-    use lann_webcrypto_guest::rsa_pss;
-    use lann_webcrypto_guest::rsassa_pkcs1_v15::{self, RsaVariant};
+    use polymorph_webcrypto_guest::rsa_pss;
+    use polymorph_webcrypto_guest::rsassa_pkcs1_v15::{self, RsaVariant};
 
     // rsa_signature_2048_sha256_test.json tcId 1.
     let key = rsassa_pkcs1_v15::import_verifying_key_spki(RsaVariant::Sha256, RSA_SPKI)
@@ -702,7 +702,7 @@ async fn rsa_verify_known_answer() -> Result<()> {
 /// output length); the same input then mints an HMAC key that round-trips
 /// sign/verify.
 async fn hkdf_derive() -> Result<()> {
-    use lann_webcrypto_guest::{hkdf, hkdf_sha2, DeriveOptions, MacKeyOptions};
+    use polymorph_webcrypto_guest::{hkdf, hkdf_sha2, DeriveOptions, MacKeyOptions};
     let options = DeriveOptions {
         derive_bits: true,
         derive_key: true,
@@ -728,7 +728,7 @@ async fn hkdf_derive() -> Result<()> {
         "null-length derive on a KDF source succeeded"
     );
 
-    let mac = lann_webcrypto_guest::hmac_sha2::derive_key(
+    let mac = polymorph_webcrypto_guest::hmac_sha2::derive_key(
         Sha2Variant::Sha256,
         &input,
         None,
@@ -749,7 +749,7 @@ async fn hkdf_derive() -> Result<()> {
 /// PBKDF2-HMAC-SHA-256 against RFC 7914 §11's first PBKDF2 vector
 /// (P="passwd", S="salt", c=1, dkLen=64), through the SDK wrappers.
 async fn pbkdf2_derive() -> Result<()> {
-    use lann_webcrypto_guest::{pbkdf2, pbkdf2_sha2, DeriveOptions};
+    use polymorph_webcrypto_guest::{pbkdf2, pbkdf2_sha2, DeriveOptions};
     let options = DeriveOptions {
         derive_bits: true,
         derive_key: false,
@@ -771,7 +771,7 @@ async fn pbkdf2_derive() -> Result<()> {
 /// HKDF-SHA-1 through its SDK wrappers against RFC 5869 A.4 (test case
 /// 4): the imported IKM derives the published 42-byte OKM.
 async fn hkdf_sha1_derive() -> Result<()> {
-    use lann_webcrypto_guest::{hkdf, hkdf_sha1, DeriveOptions};
+    use polymorph_webcrypto_guest::{hkdf, hkdf_sha1, DeriveOptions};
     let options = DeriveOptions {
         derive_bits: true,
         derive_key: false,
@@ -797,7 +797,7 @@ async fn hkdf_sha1_derive() -> Result<()> {
 /// PBKDF2-HMAC-SHA-1 through its SDK wrappers against RFC 6070's c=2
 /// vector (P="password", S="salt", dkLen=20).
 async fn pbkdf2_sha1_derive() -> Result<()> {
-    use lann_webcrypto_guest::{pbkdf2, pbkdf2_sha1, DeriveOptions};
+    use polymorph_webcrypto_guest::{pbkdf2, pbkdf2_sha1, DeriveOptions};
     let options = DeriveOptions {
         derive_bits: true,
         derive_key: false,
@@ -818,7 +818,7 @@ async fn pbkdf2_sha1_derive() -> Result<()> {
 /// inputs chain into HKDF (WebCrypto's `deriveKey(ECDH -> HKDF)` shape)
 /// to the same bits.
 async fn x25519_agreement() -> Result<()> {
-    use lann_webcrypto_guest::{hkdf_sha2, x25519, AgreementKeyOptions};
+    use polymorph_webcrypto_guest::{hkdf_sha2, x25519, AgreementKeyOptions};
     let options = AgreementKeyOptions {
         derive_bits: true,
         derive_key: true,
@@ -852,8 +852,8 @@ async fn x25519_agreement() -> Result<()> {
 /// P-384), and on P-256 both agreed inputs chain into HKDF to the same
 /// bits.
 async fn ecdh_agreement() -> Result<()> {
-    use lann_webcrypto_guest::ecdh::{self, EcdhVariant};
-    use lann_webcrypto_guest::{hkdf_sha2, AgreementKeyOptions};
+    use polymorph_webcrypto_guest::ecdh::{self, EcdhVariant};
+    use polymorph_webcrypto_guest::{hkdf_sha2, AgreementKeyOptions};
     let options = AgreementKeyOptions {
         derive_bits: true,
         derive_key: true,
@@ -898,7 +898,7 @@ async fn ecdh_agreement() -> Result<()> {
 /// reader (feature `futures-io`), and a passed-through stream. The
 /// feature-gated feed loops execute only here.
 async fn mac_datasource_equivalence() -> Result<()> {
-    use lann_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
+    use polymorph_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
     let key = hmac_sha2::import_key_raw(
         Sha2Variant::Sha256,
         HMAC_KEY,
@@ -952,7 +952,7 @@ async fn mac_datasource_equivalence() -> Result<()> {
 /// precedence over the operation's own outcome: the operation only saw a
 /// truncated input.
 async fn read_error_precedence() -> Result<()> {
-    use lann_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
+    use polymorph_webcrypto_guest::{hmac_sha2, DataSource, MacKeyOptions};
     let key = hmac_sha2::import_key_raw(
         Sha2Variant::Sha256,
         HMAC_KEY,
@@ -1029,7 +1029,7 @@ impl futures_io::AsyncRead for FailingReader {
 /// bytes). The rejection surface and domains are the conformance suites'
 /// job.
 async fn key_wrap_tour() -> Result<()> {
-    use lann_webcrypto_guest::{aes_gcm, aes_kw, hmac_sha2, KwKeyOptions, MacKeyOptions};
+    use polymorph_webcrypto_guest::{aes_gcm, aes_kw, hmac_sha2, KwKeyOptions, MacKeyOptions};
 
     let kek = aes_kw::import_key_raw(
         AesVariant::Aes128,
@@ -1095,7 +1095,7 @@ async fn key_wrap_tour() -> Result<()> {
     let aead_kek = aes_gcm::import_key_raw(
         AesVariant::Aes256,
         GCM_KEY,
-        lann_webcrypto_guest::AeadKeyOptions {
+        polymorph_webcrypto_guest::AeadKeyOptions {
             seal: true,
             wrap: true,
             ..Default::default()
