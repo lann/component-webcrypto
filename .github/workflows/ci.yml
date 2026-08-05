@@ -161,6 +161,20 @@ jobs:
         env:
           CONFORMANCE_PREBUILT: ${{ steps.ct-artifacts.outputs.cache-hit == 'true' && '1' || '' }}
 
+      - name: Upload the conformance results
+        # Feeds the Pages viewer (the latest main run's results pane)
+        # and the no-Chrome matrix-regeneration path (#306).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: |
+            conformance/driver-ct/results/*.jsonl
+            conformance/driver-ct/results/matrix.md
+            conformance/driver-ct/results/matrix-signing.md
+          retention-days: 30
+          if-no-files-found: ignore
+
   # The webcrypto-componentize JS guest library's gates: the composed demo
   # (the JS guest's checks against the in-guest provider, including the
   # extension-error transport the WPT suites cannot observe) and the WPT

@@ -137,6 +137,15 @@ lockfile and the target manifest and renders
 [`matrix-signing.md`](driver-ct/matrix-signing.md), exiting nonzero on any
 failure or transport problem.
 
+`just conformance-ct::web` serves the results viewer — component-test's
+`js/viewer`, staged at the pinned rev by `_viewer-prepared` with this
+repository's data wiring (`driver-ct/jco/stage-viewer.mjs`) — over the
+repository root: the matrix pane aggregates the last run's
+`driver-ct/results/` with the gate's own aggregation code compiled to
+wasm, and the live pane runs the transpiled suites in the browser. The
+Pages site publishes the same viewer with the latest main CI run's
+results staged from the `conformance-results` artifact.
+
 ## Vector provenance
 
 What review cannot establish on its own is whether a vendored vector is
