@@ -4,7 +4,8 @@
 // is why the transpile maps the wasi shim to relative paths), streaming
 // each results-JSONL event back with its suite-order index, then the
 // shard's counts. The browser counterpart of worker-node.mjs.
-import { inventoryLookup, runCases } from "./harness.mjs";
+import { inventoryLookup, runCases } from "./node_modules/@lann/component-test-js/js/viewer/harness.mjs";
+import { Context } from "../context.js";
 
 // A rejection escaping the awaited chain (e.g. a platform quirk
 // surfacing through the transpiled guest's async plumbing) would
@@ -28,12 +29,12 @@ self.onmessage = async ({ data }) => {
     const { tests } = await import(`./generated/${suite}.js`);
     const counts = await runCases({
       cases: await tests.all(),
+      Context,
       tagsOf,
       missing,
       shard,
       emit: (event, index) => self.postMessage({ kind: "event", index, event }),
     });
-    delete counts.failures; // page-side detail; the rows carry it all
     self.postMessage({ kind: "counts", counts });
   } catch (err) {
     self.postMessage({ kind: "error", error: String(err?.stack ?? err) });

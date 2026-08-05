@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { runPageHarness } from "../../../scripts/browser-page-driver.mjs";
-import { envelope } from "./harness.mjs";
+import { envelope } from "@lann/component-test-js/harness";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const RESULTS_DIR = fileURLToPath(new URL("../results/", import.meta.url));
@@ -79,7 +79,7 @@ const harness = (suites) => `<!doctype html>
 <link rel="icon" href="data:,">
 <title>lann:webcrypto conformance (component-test stack)</title>
 <script type="module">
-import { mergeCounts, workerCount } from "${BASE}/harness.mjs";
+import { mergeCounts, workerCount } from "${BASE}/node_modules/@lann/component-test-js/js/viewer/harness.mjs";
 
 const suites = ${JSON.stringify(suites)};
 const jobs = workerCount(navigator.hardwareConcurrency ?? 4);
@@ -131,7 +131,6 @@ const runShard = (suite, missing, cores, shard) =>
         events: events.map((e) => e.event),
         counts: mergeCounts(shards.map((s) => s.counts)),
       };
-      delete out[suite].counts.failures;
     }
     window.__report(out);
   } catch (err) {
@@ -200,7 +199,7 @@ async function main() {
     const run = outcome[suite];
     if (!run) throw new Error(`the page reported no run for suite ${suite}`);
     const lines = [
-      JSON.stringify(envelope(values.target, suite)),
+      JSON.stringify(envelope(values.target, suite.replaceAll("-", "_"))), // lockfile identity: wasm file stem
       ...run.events.map((event) => JSON.stringify(event)),
       '{"segment-end":true}',
     ];
