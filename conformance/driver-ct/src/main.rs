@@ -3,6 +3,7 @@
 //!
 //! Usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...]
 //! [--jobs N] [--cases-per-instance N] [--target key] [--only substring]
+//! [--enumerate]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,6 +66,7 @@ fn run() -> Result<ExitCode> {
     let mut jobs: usize = 1;
     let mut target: String = "wasmtime-rustcrypto".into();
     let mut only: Option<String> = None;
+    let mut enumerate = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -98,6 +100,7 @@ fn run() -> Result<ExitCode> {
                 );
             }
             "--jsonl" => mode = OutputMode::Jsonl,
+            "--enumerate" => enumerate = true,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             other => bail!("unexpected argument `{other}`"),
         }
@@ -105,7 +108,8 @@ fn run() -> Result<ExitCode> {
     let suite = suite.ok_or_else(|| {
         anyhow::anyhow!(
             "usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...] \
-             [--jobs N] [--cases-per-instance N] [--target key] [--only substring]"
+             [--jobs N] [--cases-per-instance N] [--target key] [--only substring] \
+             [--enumerate]"
         )
     })?;
     let suite_name = suite
@@ -133,6 +137,17 @@ fn run() -> Result<ExitCode> {
         },
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+
+    // The suite's full case enumeration (one name per line): the
+    // `lock --leaves` input that pins the generated rows' leaves.
+    if enumerate {
+        let names = wasmtime_wasi::runtime::in_tokio(runner.enumerate())
+            .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+        for name in names {
+            println!("{name}");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let summary = wasmtime_wasi::runtime::in_tokio(runner.run_suite_opts(
         &suite_name,
