@@ -99,8 +99,8 @@ fn run() -> Result<ExitCode> {
                         .ok_or_else(|| anyhow::anyhow!("--only needs a substring"))?,
                 );
             }
-            "--enumerate" => enumerate = true,
             "--jsonl" => mode = OutputMode::Jsonl,
+            "--enumerate" => enumerate = true,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             other => bail!("unexpected argument `{other}`"),
         }
@@ -108,7 +108,8 @@ fn run() -> Result<ExitCode> {
     let suite = suite.ok_or_else(|| {
         anyhow::anyhow!(
             "usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...] \
-             [--jobs N] [--cases-per-instance N] [--target key] [--only substring]"
+             [--jobs N] [--cases-per-instance N] [--target key] [--only substring] \
+             [--enumerate]"
         )
     })?;
     let suite_name = suite
@@ -137,10 +138,8 @@ fn run() -> Result<ExitCode> {
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
-    // Census enumeration (`component-test lock --leaves` input): the
-    // suite imports the SUT, so the generic ct-runner cannot
-    // instantiate it — enumeration lives here, like everything else
-    // that needs the linker.
+    // The suite's full case enumeration (one name per line): the
+    // `lock --leaves` input that pins the generated rows' leaves.
     if enumerate {
         let names = wasmtime_wasi::runtime::in_tokio(runner.enumerate())
             .map_err(|e| anyhow::anyhow!("{e:#}"))?;
