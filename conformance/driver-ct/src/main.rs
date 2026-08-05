@@ -142,13 +142,7 @@ fn run() -> Result<ExitCode> {
         cases_per_instance,
         jobs,
         only.as_deref(),
-        // The corpus has honestly-slow cases (high-iteration PBKDF2
-        // vectors), and worker contention on small CI runners stretches
-        // them further: the upstream 10s default budget trips on real
-        // work (observed: pbkdf2-sha1/wycheproof/tc4 under a 2-core
-        // constraint). Budget = the timeout: wedge protection stays,
-        // honest work fits.
-        component_test_runner::DEFAULT_CASE_TIMEOUT_SECS,
+        component_test_runner::DEFAULT_CASE_EXECUTION_BUDGET_SECS,
         component_test_runner::DEFAULT_CASE_TIMEOUT_SECS,
     ))
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
