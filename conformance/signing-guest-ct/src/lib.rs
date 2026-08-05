@@ -1,5 +1,5 @@
 //! `conformance-signing-guest-ct`: the host-only signing conformance
-//! suite ported onto the `polymorph:component-test` guest SDK, exactly as
+//! suite ported onto the `polymorph:test` guest SDK, exactly as
 //! `conformance-guest-ct` ports `conformance-guest`.
 //!
 //! The corpus is the incumbent's (`conformance-signing-guest`), inherited

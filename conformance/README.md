@@ -3,13 +3,13 @@
 Two test **suites** — the shared suite ([`guest-ct/`](guest-ct)) and the
 host-only signing suite ([`signing-guest-ct/`](signing-guest-ct)), each a
 guest component carrying its cases — run against every implementation of
-`polymorph:webcrypto` on the [`polymorph:component-test`] stack: the suites are built
+`polymorph:webcrypto` on the [`polymorph:test`] stack: the suites are built
 on its guest SDK and export its frozen `tests` contract, and the drivers,
 lockfiles, and aggregation are its tooling. Run everything with
 `just conformance-ct::all` (see [`driver-ct/justfile`](driver-ct/justfile)
 for the individual recipes and the currently enabled targets).
 
-[`polymorph:component-test`]: https://github.com/polymorph-components/polymorph-test
+[`polymorph:test`]: https://github.com/polymorph-components/polymorph-test
 
 ## Layout
 

@@ -123,7 +123,7 @@ examples/
                         #   same demo interface and composed pipeline
 conformance/            # cross-implementation conformance tests: vendored
                         #   Wycheproof vectors + translation policy, suite
-                        #   components on the polymorph:component-test guest SDK
+                        #   components on the polymorph:test guest SDK
                         #   (vectors under chunking schedules, plus
                         #   API-contract probes), and its driver/aggregation
                         #   stack rendering driver-ct/matrix.md

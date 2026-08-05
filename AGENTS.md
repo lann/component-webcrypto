@@ -106,7 +106,7 @@ examples/
                         #   interface as crypto-demo, composed and run via
                         #   `just componentize::test` (gates in CI)
 conformance/            # cross-implementation conformance tests, on the
-                        #   polymorph:component-test stack (a git dependency
+                        #   polymorph:test stack (a git dependency
                         #   pinned by rev in the root Cargo.toml) — see
                         #   conformance/README.md for the architecture
   vectors/              #   vendored Wycheproof JSON + the translation
@@ -350,7 +350,7 @@ absent an exceptional recorded ruling.
 Prerequisites: Rust via rustup (toolchain + wasm target pinned in
 `rust-toolchain.toml`), `wasm-tools`, `just`, Node 24+ with npm for the
 jco path. Run `./scripts/setup.sh` once (idempotent; `SKIP_NODE=1` to
-skip the npm install). The polymorph:component-test stack is a git dependency
+skip the npm install). The polymorph:test stack is a git dependency
 pinned by rev in the root `Cargo.toml` and enforced by `Cargo.lock`;
 cargo fetches it, and `conformance-ct::_ct-tools` cargo-installs the
 `component-test`/`ct-runner` binaries at the same locked rev. To bump

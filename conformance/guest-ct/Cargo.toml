@@ -3,7 +3,7 @@ name = "conformance-guest-ct"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "The conformance suite ported onto the polymorph:component-test guest SDK (M1.5): same corpus and case ids as conformance-guest, exported through the frozen tests contract, with the decline branch restructured into explicit !feature decline cases."
+description = "The conformance suite ported onto the polymorph:test guest SDK (M1.5): same corpus and case ids as conformance-guest, exported through the frozen tests contract, with the decline branch restructured into explicit !feature decline cases."
 build = "build.rs"
 
 [features]
