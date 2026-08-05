@@ -1619,8 +1619,10 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         variant: ecdh_iface::EcdhVariant,
         spki: Vec<u8>,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material =
-            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(
+            variant.into(),
+            &spki,
+        );
         mint(accessor, material).await
     }
 
@@ -1629,8 +1631,10 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         variant: ecdh_iface::EcdhVariant,
         jwk: String,
     ) -> Result<std::result::Result<Resource<AgreementPublicKey>, Error>> {
-        let material =
-            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk);
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(
+            variant.into(),
+            &jwk,
+        );
         mint(accessor, material).await
     }
 
@@ -1672,9 +1676,11 @@ impl<T: Send> ecdh_iface::HostWithStore<T> for WasiWebcrypto {
         std::result::Result<(Resource<AgreementSecretKey>, Resource<AgreementPublicKey>), Error>,
     > {
         let policy = take_options(accessor, options).await?.policy;
-        let material =
-            polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy)
-                .map_err(rng_trap("random key generation"))?;
+        let material = polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(
+            variant.into(),
+            policy,
+        )
+        .map_err(rng_trap("random key generation"))?;
         match material {
             Ok((secret, public)) => mint_key_pair(accessor, secret, public).await,
             Err(err) => Ok(Err(err.into())),
@@ -1832,7 +1838,12 @@ impl<T: Send> hmac_sha2_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<MacKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let material = with_resource(accessor, input, |input| {
-            polymorph_webcrypto_core::derive_mac_key(&input.material, variant.into(), length, policy)
+            polymorph_webcrypto_core::derive_mac_key(
+                &input.material,
+                variant.into(),
+                length,
+                policy,
+            )
         })
         .await?;
         mint(accessor, material).await
@@ -1935,7 +1946,8 @@ impl<T: Send> aes_gcm_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<AeadKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material = polymorph_webcrypto_core::unwrap_aes_gcm_key_jwk(variant.into(), input, policy);
+        let material =
+            polymorph_webcrypto_core::unwrap_aes_gcm_key_jwk(variant.into(), input, policy);
         mint(accessor, material).await
     }
 }
@@ -2418,8 +2430,11 @@ impl<T: Send> rsassa_sign_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<SigningKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material =
-            polymorph_webcrypto_core::unwrap_rsassa_signing_key_pkcs8(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_rsassa_signing_key_pkcs8(
+            variant.into(),
+            input,
+            policy,
+        );
         mint(accessor, material).await
     }
 
@@ -2778,8 +2793,11 @@ impl<T: Send> rsa_oaep_decrypt_iface::HostWithStore<T> for WasiWebcrypto {
     ) -> Result<std::result::Result<Resource<DecryptionKey>, Error>> {
         let policy = take_options(accessor, options).await?.policy;
         let input = take_options(accessor, input).await?.material;
-        let material =
-            polymorph_webcrypto_core::unwrap_oaep_decryption_key_pkcs8(variant.into(), input, policy);
+        let material = polymorph_webcrypto_core::unwrap_oaep_decryption_key_pkcs8(
+            variant.into(),
+            input,
+            policy,
+        );
         mint(accessor, material).await
     }
 

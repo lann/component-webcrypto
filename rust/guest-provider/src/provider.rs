@@ -34,12 +34,16 @@ use crate::exports::polymorph::webcrypto::cipher::{
 use crate::exports::polymorph::webcrypto::derivation::{
     self, Guest as DerivationGuest, GuestDeriveInput, GuestDeriveOptions,
 };
-use crate::exports::polymorph::webcrypto::digest::{self as digest, Guest as DigestGuest, GuestDigest};
+use crate::exports::polymorph::webcrypto::digest::{
+    self as digest, Guest as DigestGuest, GuestDigest,
+};
 use crate::exports::polymorph::webcrypto::ecdh::{EcdhVariant, Guest as EcdhGuest};
 use crate::exports::polymorph::webcrypto::ecdsa_verify::{EcdsaVariant, Guest as EcdsaVerifyGuest};
 use crate::exports::polymorph::webcrypto::ed25519_sign::Guest as Ed25519SignGuest;
 use crate::exports::polymorph::webcrypto::ed25519_verify::Guest as Ed25519VerifyGuest;
-use crate::exports::polymorph::webcrypto::hkdf::{self as hkdf_iface, Guest as HkdfGuest, GuestIkm};
+use crate::exports::polymorph::webcrypto::hkdf::{
+    self as hkdf_iface, Guest as HkdfGuest, GuestIkm,
+};
 use crate::exports::polymorph::webcrypto::hkdf_sha1::Guest as HkdfSha1Guest;
 use crate::exports::polymorph::webcrypto::hkdf_sha2::Guest as HkdfSha2Guest;
 use crate::exports::polymorph::webcrypto::hmac_sha1::Guest as HmacSha1Guest;
@@ -357,8 +361,11 @@ impl AesKwGuest for Component {
         options: key_wrap_iface::KwKeyOptions,
     ) -> Result<key_wrap_iface::KwKey, Error> {
         let policy = options.get::<KwKeyOptions>().policy.get();
-        let material =
-            polymorph_webcrypto_core::unwrap_kw_key(variant.into(), UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_kw_key(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(key_wrap_iface::KwKey::new(KwKey { material }))
     }
 
@@ -744,8 +751,11 @@ impl HmacSha2Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material =
-            polymorph_webcrypto_core::unwrap_mac_key(variant.into(), UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_mac_key(
+            variant.into(),
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
@@ -811,7 +821,8 @@ impl HmacSha1Guest for Component {
         options: mac::MacKeyOptions,
     ) -> Result<mac::MacKey, Error> {
         let policy = options.get::<MacKeyOptions>().policy.get();
-        let material = polymorph_webcrypto_core::unwrap_mac_key_sha1(UnwrapInput::take(input), policy)?;
+        let material =
+            polymorph_webcrypto_core::unwrap_mac_key_sha1(UnwrapInput::take(input), policy)?;
         Ok(mac::MacKey::new(MacKey { material }))
     }
 
@@ -1137,7 +1148,8 @@ impl X25519Guest for Component {
     async fn import_public_key_spki(
         spki: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki)?;
+        let material =
+            polymorph_webcrypto_core::AgreementPublicMaterial::import_x25519_spki(&spki)?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1184,8 +1196,9 @@ impl X25519Guest for Component {
         Error,
     > {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let (secret, public) =
-            rng_infallible(polymorph_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy))?;
+        let (secret, public) = rng_infallible(
+            polymorph_webcrypto_core::AgreementSecretMaterial::generate_x25519(policy),
+        )?;
         Ok((
             key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
             key_agreement_iface::PublicKey::new(AgreementPublicKey { material: public }),
@@ -1197,8 +1210,10 @@ impl X25519Guest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material =
-            polymorph_webcrypto_core::unwrap_x25519_secret_key_jwk(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_x25519_secret_key_jwk(
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1209,8 +1224,10 @@ impl X25519Guest for Component {
         options: key_agreement_iface::AgreementKeyOptions,
     ) -> Result<key_agreement_iface::SecretKey, Error> {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
-        let material =
-            polymorph_webcrypto_core::unwrap_x25519_secret_key_pkcs8(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_x25519_secret_key_pkcs8(
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(key_agreement_iface::SecretKey::new(AgreementSecretKey {
             material,
         }))
@@ -1233,8 +1250,10 @@ impl EcdhGuest for Component {
         variant: EcdhVariant,
         spki: Vec<u8>,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material =
-            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(variant.into(), &spki)?;
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_spki(
+            variant.into(),
+            &spki,
+        )?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1244,8 +1263,10 @@ impl EcdhGuest for Component {
         variant: EcdhVariant,
         jwk: String,
     ) -> Result<key_agreement_iface::PublicKey, Error> {
-        let material =
-            polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(variant.into(), &jwk)?;
+        let material = polymorph_webcrypto_core::AgreementPublicMaterial::import_ecdh_jwk(
+            variant.into(),
+            &jwk,
+        )?;
         Ok(key_agreement_iface::PublicKey::new(AgreementPublicKey {
             material,
         }))
@@ -1295,7 +1316,10 @@ impl EcdhGuest for Component {
     > {
         let policy = options.get::<AgreementKeyOptions>().policy.get();
         let (secret, public) = rng_infallible(
-            polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(variant.into(), policy),
+            polymorph_webcrypto_core::AgreementSecretMaterial::generate_ecdh(
+                variant.into(),
+                policy,
+            ),
         )?;
         Ok((
             key_agreement_iface::SecretKey::new(AgreementSecretKey { material: secret }),
@@ -1835,8 +1859,10 @@ impl Ed25519SignGuest for Component {
         options: signature_iface::SigningKeyOptions,
     ) -> Result<signature_iface::SigningKey, Error> {
         let policy = options.get::<SigningKeyOptions>().policy.get();
-        let material =
-            polymorph_webcrypto_core::unwrap_ed25519_signing_key_jwk(UnwrapInput::take(input), policy)?;
+        let material = polymorph_webcrypto_core::unwrap_ed25519_signing_key_jwk(
+            UnwrapInput::take(input),
+            policy,
+        )?;
         Ok(signature_iface::SigningKey::new(SigningKey { material }))
     }
 }
