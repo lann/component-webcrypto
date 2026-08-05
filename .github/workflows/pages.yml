@@ -56,6 +56,30 @@ jobs:
       - name: Build the WPT parity page artifacts
         run: just wpt::web-artifacts
 
+      - name: Build the conformance viewer artifacts
+        # component-test's results viewer staged at the pin, plus the
+        # transpiled suites its live pane runs (conformance-ct's
+        # _jco-prepared dependency builds them).
+        run: just conformance-ct::_viewer-prepared
+
+      - name: Fetch the latest conformance results (best effort)
+        # The viewer's results pane data: the conformance-results
+        # artifact of the newest successful CI run on main. Absent
+        # (expired retention, API hiccup), the page still serves — the
+        # file inputs and the live run are self-contained.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&status=success&per_page=1" -q '.workflow_runs[0].id' || true)
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n conformance-results \
+              -D conformance/driver-ct/results/ \
+              && echo "staged results from CI run $run_id" \
+              || echo "no conformance-results artifact on run $run_id; publishing without results"
+          else
+            echo "no successful CI run found; publishing without results"
+          fi
+
       - name: Assemble the static site
         run: just gha::pages-site
 

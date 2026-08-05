@@ -97,6 +97,55 @@ _ct-leaves: build
     {{root}}/target/release/ct-driver {{signing}} --enumerate \
         > {{root}}/target/conformance-signing-guest-ct.leaves
 
+# Stage component-test's results viewer for this repository: the page
+# files from a checkout at the Cargo.lock-pinned rev (the npm facade
+# deliberately packs only the harness core, and the viewer-aggregate
+# component must be BUILT — it is a cdylib, not installable), the
+# aggregate transpiled against this repo's preview2-shim, and the data
+# wiring applied by jco/stage-viewer.mjs (anchored transforms that fail
+# loudly when a pin bump changes the page's shape). Output:
+# jco/viewer/ (gitignored), stamped with the rev.
+_viewer-prepared: _jco-prepared
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
+    [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
+    if [ -f jco/viewer/.rev ] && [ "$(cat jco/viewer/.rev)" = "$rev" ]; then
+        exit 0
+    fi
+    src=$(cd "{{root}}" && pwd)/target/ct-src
+    if [ ! -d "$src/.git" ]; then
+        git clone -q https://github.com/lann/component-test "$src"
+    fi
+    if [ "$(git -C "$src" rev-parse HEAD)" != "$rev" ]; then
+        git -C "$src" fetch -q origin "$rev"
+        git -C "$src" checkout -q --detach "$rev"
+    fi
+    cargo build -q --manifest-path "$src/Cargo.toml" \
+        --target wasm32-wasip2 --release -p viewer-aggregate
+    cd jco
+    node stage-viewer.mjs "$src"
+    node ../../../scripts/jco-transpile.mjs transpile \
+        "$src/target/wasm32-wasip2/release/viewer_aggregate.wasm" \
+        --name viewer-aggregate \
+        --map 'wasi:cli/*=../../node_modules/@bytecodealliance/preview2-shim/lib/browser/cli.js#*' \
+        --map 'wasi:clocks/*=../../node_modules/@bytecodealliance/preview2-shim/lib/browser/clocks.js#*' \
+        --map 'wasi:io/*=../../node_modules/@bytecodealliance/preview2-shim/lib/browser/io.js#*' \
+        --map 'wasi:random/*=../../node_modules/@bytecodealliance/preview2-shim/lib/browser/random.js#*' \
+        --map 'wasi:filesystem/*=../../node_modules/@bytecodealliance/preview2-shim/lib/browser/filesystem.js#*' \
+        -o viewer/generated
+    printf '%s' "$rev" > viewer/.rev
+
+# Serve the results viewer + live browser run: component-test's
+# js/viewer staged at the pin, over the repository root (the
+# transpiles' relative imports mirror the repo layout). The results
+# pane loads whatever conformance/driver-ct/results/ holds — run
+# `just conformance-ct::all` first for fresh data; the live pane runs
+# the transpiled suites in this browser. PORT overrides 8787.
+web: _viewer-prepared
+    @echo "viewer: http://localhost:${PORT:-8787}/conformance/driver-ct/jco/viewer/"
+    node {{root}}/scripts/serve-repo-root.mjs
+
 # Drift-check the committed lockfiles, leaves included: a generated
 # case appearing, vanishing, or being substituted fails here by name.
 lock-check: build _ct-tools _ct-leaves
