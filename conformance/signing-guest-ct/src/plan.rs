@@ -4,10 +4,13 @@
 //! `conformance-signing-guest`) onto the `#[suite]` generator rows,
 //! exactly as `conformance-guest-ct`'s `plan` does for the shared suite.
 //!
-//! Every `#[case_row]` in `lib.rs` delegates here ([`register`]), and the
-//! native census-parity test (`census_test`) expands the same [`ROWS`]
-//! table, so the inventory the suite registers and the inventory the test
-//! asserts cannot drift from each other. Case *bodies* are the incumbent
+//! Every `#[case_row]` in `lib.rs` delegates here ([`register`]). [`ROWS`]
+//! holds the cutover-frozen incumbent rows: the native census-parity test
+//! (`census_test`) expands exactly that table against the frozen fixture,
+//! so the frozen share of the inventory cannot drift. Rows added after
+//! the cutover register in `lib.rs` only — the census test deliberately
+//! does not see them; their per-leaf pin is `tests.lock`
+//! (`just conformance-ct::lock-update`). Case *bodies* are the incumbent
 //! runners, untouched; only naming/tagging/registration is new.
 
 use std::cell::OnceCell;

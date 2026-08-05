@@ -168,3 +168,35 @@ update-webkit-losses-from-ci run_id="":
         "$tmp/parity-roundtrip-webkit.json" \
         --losses losses-webkit.js --update
     git --no-pager diff --stat -- js/componentize/wpt/parity/losses-webkit.js
+
+# Refresh the committed conformance matrices without Chrome: pull the
+# branch's CI conformance-results artifact (uploaded pass or fail; its
+# run always includes the jco-browser leg) and copy its matrix.md +
+# matrix-signing.md over conformance/driver-ct/'s committed pair —
+# the no-Chrome counterpart of `CONFORMANCE_BROWSER=1 just
+# conformance-ct::all` + `just conformance-ct::matrix-update`.
+# Defaults to the current branch's most recent completed CI run; pass a
+# run id to pick a specific one. Needs `gh` authenticated to the repo.
+update-matrices-from-ci run_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    run="{{run_id}}"
+    if [ -z "$run" ]; then
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        run=$(gh run list --workflow ci.yml --branch "$branch" --limit 20 \
+            --json databaseId,status \
+            --jq '[.[] | select(.status == "completed")][0].databaseId // empty')
+        if [ -z "$run" ]; then
+            echo "no completed CI run found for branch $branch" >&2
+            exit 1
+        fi
+    fi
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    gh run download "$run" --name conformance-results --dir "$tmp"
+    for f in matrix.md matrix-signing.md; do
+        src=$(find "$tmp" -name "$f" | head -1)
+        [ -n "$src" ] || { echo "no $f in the conformance-results artifact of run $run" >&2; exit 1; }
+        cp "$src" "conformance/driver-ct/$f"
+    done
+    git --no-pager diff --stat -- conformance/driver-ct/matrix.md conformance/driver-ct/matrix-signing.md

@@ -8,10 +8,6 @@ node_modules/
 build/
 js/jco/generated/
 examples/jco-demo/generated/
-conformance/adapters/jco/generated/
-conformance/adapters/jco/generated-signing/
-conformance/results/
-conformance/matrix.md
 /mutants.out*
 conformance/driver-ct/results/
 conformance/driver-ct/jco/generated*/

@@ -20,10 +20,10 @@
 ///   [`FEATURE_SETS`] (rows are uniformly tagged — asserted by build.rs
 ///   here and by the census-parity test natively).
 ///
-/// One blob per row (55 census rows → 46 vector-row blobs; contract
-/// rows are table-driven, not corpus-backed) means shared corpora
-/// (aead, hmac, ...) are split natively at build time instead of being
-/// rebuilt and filtered once per row at registry build.
+/// One blob per vector-backed row (contract rows are table-driven, not
+/// corpus-backed) means shared corpora (aead, hmac, ...) are split
+/// natively at build time instead of being rebuilt and filtered once
+/// per row at registry build.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct RowCorpus<T> {
     pub prefixes_blob: String,
