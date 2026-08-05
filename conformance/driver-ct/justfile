@@ -76,6 +76,38 @@ _ct-tools:
         --git https://github.com/lann/component-test --rev "$rev" component-test-runner
     printf '%s' "$rev" > "{{ct-tools}}/.rev"
 
+# Stage component-test's shared JS case loop (js/viewer/harness.mjs —
+# the one-harness rule: gating jco adapters consume it rather than
+# carrying their own) into jco/ct-harness.mjs, from the cargo git
+# checkout of the same Cargo.lock-pinned rev the crates build against.
+# Stamp-guarded like _ct-tools; CONFORMANCE_CT_HARNESS overrides with a
+# file path (local iteration, alongside CONFORMANCE_CT_TOOLS and the
+# Cargo [patch]).
+_ct-harness:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${CONFORMANCE_CT_HARNESS:-}" ]; then
+        if [ ! -f "$CONFORMANCE_CT_HARNESS" ]; then
+            echo "CONFORMANCE_CT_HARNESS is set but $CONFORMANCE_CT_HARNESS is not a file" >&2
+            exit 1
+        fi
+        cp "$CONFORMANCE_CT_HARNESS" jco/ct-harness.mjs
+        rm -f jco/.ct-harness.rev
+        exit 0
+    fi
+    rev=$(grep -m1 -oE 'github\.com/lann/component-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
+    [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
+    if [ -f jco/ct-harness.mjs ] && [ "$(cat jco/.ct-harness.rev 2>/dev/null)" = "$rev" ]; then
+        exit 0
+    fi
+    # The checkout cargo fetched for the pinned rev, located through the
+    # SDK package's manifest path — the staged file is the same tree the
+    # crates compile from, no second download channel.
+    manifest=$(cargo metadata --format-version 1 --manifest-path "{{root}}/Cargo.toml" \
+        | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).packages.find(p=>p.name==="component-test-sdk");if(!p)process.exit(1);console.log(p.manifest_path)})')
+    cp "$(dirname "$manifest")/../../js/viewer/harness.mjs" jco/ct-harness.mjs
+    printf '%s' "$rev" > jco/.ct-harness.rev
+
 # Drift-check the committed lockfiles.
 lock-check: build _ct-tools
     {{ct}} lock {{guest}} --check ../guest-ct/tests.lock
@@ -126,7 +158,7 @@ _jco-prepared: build
 # Node's WebCrypto serves the gated RSA private-key mints by default (the
 # fail-closed policy is a browser posture), so the signing suite declares
 # nothing missing here.
-run-jco: build _jco-prepared
+run-jco: build _jco-prepared _ct-harness
     mkdir -p results
     cd jco && node --experimental-wasm-jspi runner.mjs \
         --missing sha1-checked --jsonl --target jco-node \
@@ -172,7 +204,7 @@ run-composed: build build-provider _ct-tools
 # jco-browser entries, which the aggregate cross-checks: the browser
 # cannot serve sha1-checked, and the host fails the gated RSA
 # private-key mints closed outside Node (targets-signing.toml).
-run-browser: build _jco-prepared
+run-browser: build _jco-prepared _ct-harness
     mkdir -p results
     cd jco && node run-browser.mjs \
         --missing sha1-checked \
@@ -246,7 +278,7 @@ matrix-check:
 # independent by the parallel-recipes.sh contract; each also names its
 # deps for standalone use, where the guards make the re-runs no-ops.
 # Aggregates run after: they read every target's results.
-all: build build-provider _ct-tools _jco-prepared
+all: build build-provider _ct-tools _jco-prepared _ct-harness
     cd {{root}} && scripts/parallel-recipes.sh target/conformance-ct-logs \
         conformance-ct::lock-check conformance-ct::class-d \
         conformance-ct::run-wasmtime conformance-ct::run-composed \

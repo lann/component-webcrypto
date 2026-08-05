@@ -23,8 +23,8 @@ resolver = "2"
 # AGENTS.md "Build & run". Publishing component-test to a registry
 # retires this arrangement.
 [workspace.dependencies]
-component-test-sdk = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
-component-test-runner = { git = "https://github.com/lann/component-test", rev = "c90b2f07c005aae7548038849723f1e943e3eed8" }
+component-test-sdk = { git = "https://github.com/lann/component-test", rev = "d85d396f243b32741b31e69491dcf848c2ab50ca" }
+component-test-runner = { git = "https://github.com/lann/component-test", rev = "d85d396f243b32741b31e69491dcf848c2ab50ca" }
 
 # The mutation run's profile (`just mutants`): dependencies optimized —
 # wasmtime and the RustCrypto cores are compiled once, at baseline, and make

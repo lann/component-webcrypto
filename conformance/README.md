@@ -104,7 +104,8 @@ the lockfiles, runs the targets, and aggregates:
   from Node 24+ against `webcrypto-jco`; missing `sha1-checked` (platform
   SHA-1 carries no sha1dc collision detection).
 - **jco-browser** (`run-browser`): the same transpiles and host module with
-  the case loop running in headless Chromium (`driver-ct/jco/harness.mjs`
+  the case loop running in headless Chromium (component-test's shared
+  harness, staged as `driver-ct/jco/ct-harness.mjs` at the pinned rev,
   in-page, driven by `run-browser.mjs` over
   `scripts/browser-page-driver.mjs`); missing `sha1-checked` and, for
   the signing suite, the fail-closed RSA private-key mints

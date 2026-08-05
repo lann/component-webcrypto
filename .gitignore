@@ -15,5 +15,9 @@ conformance/matrix.md
 /mutants.out*
 conformance/driver-ct/results/
 conformance/driver-ct/jco/generated*/
+# Staged from the component-test git checkout at the Cargo.lock rev
+# (conformance-ct::_ct-harness); the one-harness rule's shared case loop.
+conformance/driver-ct/jco/ct-harness.mjs
+conformance/driver-ct/jco/.ct-harness.rev
 conformance/driver-ct/jco/node_modules/
 conformance/driver-ct/jco/.prepare.lock

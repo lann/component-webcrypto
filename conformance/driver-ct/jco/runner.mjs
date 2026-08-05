@@ -7,11 +7,13 @@
 // and the Node counterpart of the browser driver's Web Worker pool
 // (run-browser.mjs). Workers interleave, so the rows are re-sorted
 // into suite order before emission. The inventory parsing and per-case
-// loop live in harness.mjs, shared with the browser driver.
+// loop are component-test's shared harness (ct-harness.mjs, staged
+// from the pinned checkout by `conformance-ct::_ct-harness` — the
+// one-harness rule), shared with the browser driver.
 import { availableParallelism } from "node:os";
 import { parseArgs } from "node:util";
 import { Worker } from "node:worker_threads";
-import { envelope, mergeCounts, workerCount } from "./harness.mjs";
+import { envelope, mergeCounts, workerCount } from "./ct-harness.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -57,13 +59,22 @@ const parts = await Promise.all(
 
 rows.sort((a, b) => a.index - b.index);
 if (jsonl) {
-  const lines = [JSON.stringify(envelope(values.target, suite))];
+  // The envelope names the suite as its lockfile does — the suite
+  // wasm's file stem (underscores), not the transpiled module's
+  // hyphenated name — so the aggregate's identity cross-check stays
+  // quiet.
+  const lines = [JSON.stringify(envelope(values.target, suite.replaceAll("-", "_")))];
   for (const { event } of rows) lines.push(JSON.stringify(event));
   lines.push('{"segment-end":true}');
   console.log(lines.join("\n"));
 }
 
-const { passed, failed, skipped, na, total, failures } = mergeCounts(parts);
+const { passed, failed, skipped, na, total } = mergeCounts(parts);
+// Failure detail for the human report comes off the event rows (the
+// shared harness returns counts only).
+const failures = rows
+  .filter(({ event }) => event.status === "fail")
+  .map(({ event }) => ({ name: event.case, detail: event.detail, diags: event.diagnostics ?? [] }));
 if (!jsonl) for (const f of failures.slice(0, 20)) {
   console.log(`FAIL: ${f.name}: ${f.detail}`);
   for (const d of f.diags) console.log(`    diag: ${d}`);

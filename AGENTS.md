@@ -376,7 +376,9 @@ component-test-runner = { path = "../component-test/crates/component-test-runner
 ```
 
 and point `CONFORMANCE_CT_TOOLS` at a directory with your own
-`component-test` and `ct-runner` builds for the driver-ct recipes.
+`component-test` and `ct-runner` builds for the driver-ct recipes
+(`CONFORMANCE_CT_HARNESS` likewise overrides the staged shared JS case
+loop, `driver-ct/jco/ct-harness.mjs`).
 
 The [`justfile`](justfile) is the single entry point; run `just` to list
 recipes. Component-scoped recipes live in module justfiles colocated with

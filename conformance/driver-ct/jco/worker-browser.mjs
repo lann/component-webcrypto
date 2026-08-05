@@ -1,10 +1,12 @@
 // The Web Worker half of the jco-browser driver (run-browser.mjs): its
 // own instance of the transpiled suite runs one shard of the case loop
-// (harness.mjs — module workers cannot see the page's import map, which
-// is why the transpile maps the wasi shim to relative paths), streaming
-// each results-JSONL event back with its suite-order index, then the
-// shard's counts. The browser counterpart of worker-node.mjs.
-import { inventoryLookup, runCases } from "./harness.mjs";
+// (ct-harness.mjs, component-test's shared loop — module workers cannot
+// see the page's import map, which is why the transpile maps the wasi
+// shim to relative paths), streaming each results-JSONL event back with
+// its suite-order index, then the shard's counts. The browser
+// counterpart of worker-node.mjs.
+import { Context } from "../context.js";
+import { inventoryLookup, runCases } from "./ct-harness.mjs";
 
 // A rejection escaping the awaited chain (e.g. a platform quirk
 // surfacing through the transpiled guest's async plumbing) would
@@ -28,12 +30,12 @@ self.onmessage = async ({ data }) => {
     const { tests } = await import(`./generated/${suite}.js`);
     const counts = await runCases({
       cases: await tests.all(),
+      Context,
       tagsOf,
       missing,
       shard,
       emit: (event, index) => self.postMessage({ kind: "event", index, event }),
     });
-    delete counts.failures; // page-side detail; the rows carry it all
     self.postMessage({ kind: "counts", counts });
   } catch (err) {
     self.postMessage({ kind: "error", error: String(err?.stack ?? err) });

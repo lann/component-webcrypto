@@ -3,12 +3,16 @@
 //!
 //! Usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...]
 //! [--jobs N] [--cases-per-instance N] [--target key] [--only substring]
+//! [--case-execution-budget secs] [--case-timeout secs]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Result};
-use component_test_runner::{CtCtx, OutputMode, Runner, RunnerView};
+use component_test_runner::{
+    CtCtx, OutputMode, Runner, RunnerView, DEFAULT_CASE_EXECUTION_BUDGET_SECS,
+    DEFAULT_CASE_TIMEOUT_SECS,
+};
 use lann_webcrypto_wasmtime::{
     add_to_linker_with_options, LinkOptions, WasiWebcryptoCtx, WasiWebcryptoCtxView,
     WasiWebcryptoView,
@@ -65,6 +69,8 @@ fn run() -> Result<ExitCode> {
     let mut jobs: usize = 1;
     let mut target: String = "wasmtime-rustcrypto".into();
     let mut only: Option<String> = None;
+    let mut case_execution_budget: u64 = DEFAULT_CASE_EXECUTION_BUDGET_SECS;
+    let mut case_timeout: u64 = DEFAULT_CASE_TIMEOUT_SECS;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -97,6 +103,18 @@ fn run() -> Result<ExitCode> {
                         .ok_or_else(|| anyhow::anyhow!("--only needs a substring"))?,
                 );
             }
+            "--case-execution-budget" => {
+                let v = args.next().ok_or_else(|| {
+                    anyhow::anyhow!("--case-execution-budget needs seconds (0 disables)")
+                })?;
+                case_execution_budget = v.parse()?;
+            }
+            "--case-timeout" => {
+                let v = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--case-timeout needs seconds (0 disables)"))?;
+                case_timeout = v.parse()?;
+            }
             "--jsonl" => mode = OutputMode::Jsonl,
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             other => bail!("unexpected argument `{other}`"),
@@ -105,7 +123,8 @@ fn run() -> Result<ExitCode> {
     let suite = suite.ok_or_else(|| {
         anyhow::anyhow!(
             "usage: ct-driver <suite.wasm> [--jsonl] [--missing f1,f2,...] \
-             [--jobs N] [--cases-per-instance N] [--target key] [--only substring]"
+             [--jobs N] [--cases-per-instance N] [--target key] [--only substring] \
+             [--case-execution-budget secs] [--case-timeout secs]"
         )
     })?;
     let suite_name = suite
@@ -142,6 +161,8 @@ fn run() -> Result<ExitCode> {
         cases_per_instance,
         jobs,
         only.as_deref(),
+        case_execution_budget,
+        case_timeout,
     ))
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
