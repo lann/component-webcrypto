@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_signing_guest_ct"
-artifact_sha256 = "ff88d6ebf86ce2090020438cc5e59bd6ff36189ff6e8e8145e520080f3916c24"
+artifact_sha256 = "50cd116cc3a711a8b31a9e9e9eaa43250928716e83aeb9a4e1784fcc847779ab"
 
 [[case]]
 name = "probe/ecdsa-cross-hash-sign-roundtrip"
@@ -71,123 +71,939 @@ tags = ["!rsa-sign"]
 [[generated]]
 prefix = "rsa-oaep-sha256-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+    "tc34-pkcs8",
+    "tc34-jwk",
+    "tc35-pkcs8",
+    "tc35-jwk",
+    "tc36-pkcs8",
+    "tc36-jwk",
+    "tc37-pkcs8",
+    "tc37-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc157-pkcs8",
+    "tc157-jwk",
+    "tc158-pkcs8",
+    "tc158-jwk",
+    "tc159-pkcs8",
+    "tc159-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-2688/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc377-pkcs8",
+    "tc377-jwk",
+    "tc378-pkcs8",
+    "tc378-jwk",
+    "tc379-pkcs8",
+    "tc379-jwk",
+    "tc380-pkcs8",
+    "tc380-jwk",
+    "tc381-pkcs8",
+    "tc381-jwk",
+    "tc382-pkcs8",
+    "tc382-jwk",
+    "tc383-pkcs8",
+    "tc383-jwk",
+    "tc384-pkcs8",
+    "tc384-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-3072/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+    "tc34-pkcs8",
+    "tc34-jwk",
+    "tc35-pkcs8",
+    "tc35-jwk",
+    "tc36-pkcs8",
+    "tc36-jwk",
+    "tc37-pkcs8",
+    "tc37-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc217-pkcs8",
+    "tc217-jwk",
+    "tc218-pkcs8",
+    "tc218-jwk",
+    "tc219-pkcs8",
+    "tc219-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-4032/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc386-pkcs8",
+    "tc386-jwk",
+    "tc387-pkcs8",
+    "tc387-jwk",
+    "tc388-pkcs8",
+    "tc388-jwk",
+    "tc389-pkcs8",
+    "tc389-jwk",
+    "tc390-pkcs8",
+    "tc390-jwk",
+    "tc391-pkcs8",
+    "tc391-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-4096/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+    "tc34-pkcs8",
+    "tc34-jwk",
+    "tc35-pkcs8",
+    "tc35-jwk",
+    "tc36-pkcs8",
+    "tc36-jwk",
+    "tc37-pkcs8",
+    "tc37-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc277-pkcs8",
+    "tc277-jwk",
+    "tc278-pkcs8",
+    "tc278-jwk",
+    "tc279-pkcs8",
+    "tc279-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha256-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc337-pkcs8",
+    "tc337-jwk",
+    "tc338-pkcs8",
+    "tc338-jwk",
+    "tc339-pkcs8",
+    "tc339-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+    "tc34-pkcs8",
+    "tc34-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc175-pkcs8",
+    "tc175-jwk",
+    "tc176-pkcs8",
+    "tc176-jwk",
+    "tc177-pkcs8",
+    "tc177-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc235-pkcs8",
+    "tc235-jwk",
+    "tc236-pkcs8",
+    "tc236-jwk",
+    "tc237-pkcs8",
+    "tc237-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-3104/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc393-pkcs8",
+    "tc393-jwk",
+    "tc394-pkcs8",
+    "tc394-jwk",
+    "tc395-pkcs8",
+    "tc395-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc295-pkcs8",
+    "tc295-jwk",
+    "tc296-pkcs8",
+    "tc296-jwk",
+    "tc297-pkcs8",
+    "tc297-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha384-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc355-pkcs8",
+    "tc355-jwk",
+    "tc356-pkcs8",
+    "tc356-jwk",
+    "tc357-pkcs8",
+    "tc357-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-2048/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-2048/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc193-pkcs8",
+    "tc193-jwk",
+    "tc194-pkcs8",
+    "tc194-jwk",
+    "tc195-pkcs8",
+    "tc195-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-3072/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-3072/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc253-pkcs8",
+    "tc253-jwk",
+    "tc254-pkcs8",
+    "tc254-jwk",
+    "tc255-pkcs8",
+    "tc255-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-4096/wycheproof"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc1-pkcs8",
+    "tc1-jwk",
+    "tc2-pkcs8",
+    "tc2-jwk",
+    "tc3-pkcs8",
+    "tc3-jwk",
+    "tc4-pkcs8",
+    "tc4-jwk",
+    "tc5-pkcs8",
+    "tc5-jwk",
+    "tc6-pkcs8",
+    "tc6-jwk",
+    "tc7-pkcs8",
+    "tc7-jwk",
+    "tc8-pkcs8",
+    "tc8-jwk",
+    "tc9-pkcs8",
+    "tc9-jwk",
+    "tc10-pkcs8",
+    "tc10-jwk",
+    "tc11-pkcs8",
+    "tc11-jwk",
+    "tc12-pkcs8",
+    "tc12-jwk",
+    "tc13-pkcs8",
+    "tc13-jwk",
+    "tc14-pkcs8",
+    "tc14-jwk",
+    "tc15-pkcs8",
+    "tc15-jwk",
+    "tc16-pkcs8",
+    "tc16-jwk",
+    "tc17-pkcs8",
+    "tc17-jwk",
+    "tc18-pkcs8",
+    "tc18-jwk",
+    "tc19-pkcs8",
+    "tc19-jwk",
+    "tc20-pkcs8",
+    "tc20-jwk",
+    "tc21-pkcs8",
+    "tc21-jwk",
+    "tc22-pkcs8",
+    "tc22-jwk",
+    "tc23-pkcs8",
+    "tc23-jwk",
+    "tc24-pkcs8",
+    "tc24-jwk",
+    "tc25-pkcs8",
+    "tc25-jwk",
+    "tc26-pkcs8",
+    "tc26-jwk",
+    "tc27-pkcs8",
+    "tc27-jwk",
+    "tc28-pkcs8",
+    "tc28-jwk",
+    "tc29-pkcs8",
+    "tc29-jwk",
+    "tc30-pkcs8",
+    "tc30-jwk",
+    "tc31-pkcs8",
+    "tc31-jwk",
+    "tc32-pkcs8",
+    "tc32-jwk",
+    "tc33-pkcs8",
+    "tc33-jwk",
+    "tc34-pkcs8",
+    "tc34-jwk",
+    "tc35-pkcs8",
+    "tc35-jwk",
+    "tc36-pkcs8",
+    "tc36-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-4096/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc313-pkcs8",
+    "tc313-jwk",
+    "tc314-pkcs8",
+    "tc314-jwk",
+    "tc315-pkcs8",
+    "tc315-jwk",
+]
 
 [[generated]]
 prefix = "rsa-oaep-sha512-8192/wycheproof-misc"
 tags = ["rsa-oaep-decrypt"]
+cases = [
+    "tc373-pkcs8",
+    "tc373-jwk",
+    "tc374-pkcs8",
+    "tc374-jwk",
+    "tc375-pkcs8",
+    "tc375-jwk",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha256-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc81-pkcs8/whole",
+    "tc81-jwk/bytes",
+    "tc82-pkcs8/whole",
+    "tc82-jwk/bytes",
+    "tc83-pkcs8/whole",
+    "tc83-jwk/bytes",
+    "tc84-pkcs8/whole",
+    "tc84-jwk/bytes",
+    "tc85-pkcs8/whole",
+    "tc85-jwk/bytes",
+    "tc86-pkcs8/whole",
+    "tc86-jwk/bytes",
+    "tc87-pkcs8/whole",
+    "tc87-jwk/bytes",
+    "tc88-pkcs8/whole",
+    "tc88-jwk/bytes",
+    "tc154-pkcs8/whole",
+    "tc154-jwk/bytes",
+    "tc158-pkcs8/whole",
+    "tc158-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha256-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc105-pkcs8/whole",
+    "tc105-jwk/bytes",
+    "tc106-pkcs8/whole",
+    "tc106-jwk/bytes",
+    "tc107-pkcs8/whole",
+    "tc107-jwk/bytes",
+    "tc108-pkcs8/whole",
+    "tc108-jwk/bytes",
+    "tc109-pkcs8/whole",
+    "tc109-jwk/bytes",
+    "tc110-pkcs8/whole",
+    "tc110-jwk/bytes",
+    "tc111-pkcs8/whole",
+    "tc111-jwk/bytes",
+    "tc112-pkcs8/whole",
+    "tc112-jwk/bytes",
+    "tc156-pkcs8/whole",
+    "tc156-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha256-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc129-pkcs8/whole",
+    "tc129-jwk/bytes",
+    "tc130-pkcs8/whole",
+    "tc130-jwk/bytes",
+    "tc131-pkcs8/whole",
+    "tc131-jwk/bytes",
+    "tc132-pkcs8/whole",
+    "tc132-jwk/bytes",
+    "tc133-pkcs8/whole",
+    "tc133-jwk/bytes",
+    "tc134-pkcs8/whole",
+    "tc134-jwk/bytes",
+    "tc135-pkcs8/whole",
+    "tc135-jwk/bytes",
+    "tc136-pkcs8/whole",
+    "tc136-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha384-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc89-pkcs8/whole",
+    "tc89-jwk/bytes",
+    "tc90-pkcs8/whole",
+    "tc90-jwk/bytes",
+    "tc91-pkcs8/whole",
+    "tc91-jwk/bytes",
+    "tc92-pkcs8/whole",
+    "tc92-jwk/bytes",
+    "tc93-pkcs8/whole",
+    "tc93-jwk/bytes",
+    "tc94-pkcs8/whole",
+    "tc94-jwk/bytes",
+    "tc95-pkcs8/whole",
+    "tc95-jwk/bytes",
+    "tc96-pkcs8/whole",
+    "tc96-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha384-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc113-pkcs8/whole",
+    "tc113-jwk/bytes",
+    "tc114-pkcs8/whole",
+    "tc114-jwk/bytes",
+    "tc115-pkcs8/whole",
+    "tc115-jwk/bytes",
+    "tc116-pkcs8/whole",
+    "tc116-jwk/bytes",
+    "tc117-pkcs8/whole",
+    "tc117-jwk/bytes",
+    "tc118-pkcs8/whole",
+    "tc118-jwk/bytes",
+    "tc119-pkcs8/whole",
+    "tc119-jwk/bytes",
+    "tc120-pkcs8/whole",
+    "tc120-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha384-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc137-pkcs8/whole",
+    "tc137-jwk/bytes",
+    "tc138-pkcs8/whole",
+    "tc138-jwk/bytes",
+    "tc139-pkcs8/whole",
+    "tc139-jwk/bytes",
+    "tc140-pkcs8/whole",
+    "tc140-jwk/bytes",
+    "tc141-pkcs8/whole",
+    "tc141-jwk/bytes",
+    "tc142-pkcs8/whole",
+    "tc142-jwk/bytes",
+    "tc143-pkcs8/whole",
+    "tc143-jwk/bytes",
+    "tc144-pkcs8/whole",
+    "tc144-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha512-2048/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc97-pkcs8/whole",
+    "tc97-jwk/bytes",
+    "tc98-pkcs8/whole",
+    "tc98-jwk/bytes",
+    "tc99-pkcs8/whole",
+    "tc99-jwk/bytes",
+    "tc100-pkcs8/whole",
+    "tc100-jwk/bytes",
+    "tc101-pkcs8/whole",
+    "tc101-jwk/bytes",
+    "tc102-pkcs8/whole",
+    "tc102-jwk/bytes",
+    "tc103-pkcs8/whole",
+    "tc103-jwk/bytes",
+    "tc104-pkcs8/whole",
+    "tc104-jwk/bytes",
+    "tc155-pkcs8/whole",
+    "tc155-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha512-3072/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc121-pkcs8/whole",
+    "tc121-jwk/bytes",
+    "tc122-pkcs8/whole",
+    "tc122-jwk/bytes",
+    "tc123-pkcs8/whole",
+    "tc123-jwk/bytes",
+    "tc124-pkcs8/whole",
+    "tc124-jwk/bytes",
+    "tc125-pkcs8/whole",
+    "tc125-jwk/bytes",
+    "tc126-pkcs8/whole",
+    "tc126-jwk/bytes",
+    "tc127-pkcs8/whole",
+    "tc127-jwk/bytes",
+    "tc128-pkcs8/whole",
+    "tc128-jwk/bytes",
+    "tc157-pkcs8/whole",
+    "tc157-jwk/bytes",
+]
 
 [[generated]]
 prefix = "rsassa-pkcs1-v15-sha512-4096/wycheproof-sig-gen"
 tags = ["rsa-sign"]
+cases = [
+    "tc145-pkcs8/whole",
+    "tc145-jwk/bytes",
+    "tc146-pkcs8/whole",
+    "tc146-jwk/bytes",
+    "tc147-pkcs8/whole",
+    "tc147-jwk/bytes",
+    "tc148-pkcs8/whole",
+    "tc148-jwk/bytes",
+    "tc149-pkcs8/whole",
+    "tc149-jwk/bytes",
+    "tc150-pkcs8/whole",
+    "tc150-jwk/bytes",
+    "tc151-pkcs8/whole",
+    "tc151-jwk/bytes",
+    "tc152-pkcs8/whole",
+    "tc152-jwk/bytes",
+]

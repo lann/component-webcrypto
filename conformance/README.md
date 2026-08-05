@@ -62,6 +62,11 @@ Each suite's case inventory is pinned by a component-test lockfile
 (`guest-ct/tests.lock`, `signing-guest-ct/tests.lock`); the inventory is
 the binding — the recorded sha256 is build provenance only, since wasm
 builds are not reproducible across checkouts (lann/component-test#44).
+The lockfiles enumerate every case: exact `[[case]]` entries for probes
+and declines, and per-leaf `cases` enumerations for the `[[generated]]`
+rows (`lock --leaves`, fed from `ct-driver --enumerate` — a vector case
+appearing, vanishing, or being substituted lands as a named diff line,
+and the aggregate's coverage check holds every target to the same set).
 `just conformance-ct::lock-check` gates drift and
 `just conformance-ct::lock-update` regenerates after intentional case
 changes, landing them as a reviewable diff. The aggregates bind against
@@ -148,9 +153,10 @@ the algorithm's `#[case_row]` registration in `guest-ct/src/lib.rs`, its
 row in `guest-ct/src/plan.rs` — post-cutover rows go in
 `plan::POST_CUTOVER_ROWS`, whose per-case population is pinned by the
 growing `census-postcutover.lock` fixture (regenerate with the
-`regen_post_cutover_census` test and commit the diff; the lockfile's
-`[[generated]]` entries pin prefixes only, lann/component-test#49, and
-the census tests fail a registered prefix with no fixture home) — tag
+`regen_post_cutover_census` test and commit the diff; the census tests
+fail a registered prefix with no fixture home, natively, next to the
+translation code — the lockfiles pin the same populations from the
+built artifact's enumeration) — tag
 the new cases with a feature name if any target legitimately cannot serve
 them (declaring it missing in `driver-ct/targets.toml` for those targets,
 and adding the feature's `!feature` decline case), and run
@@ -162,32 +168,23 @@ behavior specific to the algorithm needs a hand-written probe. An algorithm
 the in-guest provider deliberately does not export lives in the signing
 suite — that is absence, not failure.
 
-## Results-schema tolerance (ratification pending #302)
+## Results-schema tolerance
 
 The component-test *schema* tolerates unknown result statuses on the
 wire (its additive-evolution policy: a future component-test status
 arrives without a format break) and the aggregate reports them as
 warnings; the incumbent runner treated unknown outcomes as hard
-failures. What actually gates an unknown status here depends on which
-kind of lockfile entry the case falls under:
-
-- **Exact `[[case]]` entries** (the ~59 probe/decline cases): the fold
-  diverts an unknown-status row out of the parsed results, the case is
-  then missing from coverage, and the aggregate fails the run. Cannot
-  pass silently.
-- **`[[generated]]` rows** (~99.7% of the corpus): the coverage check
-  imposes no lower bound on generated leaves, so the diversion leaves
-  only a warning naming the case and status — the aggregate exits 0.
-  Detection falls to the committed matrix's per-row *counts*
-  (`matrix-check`, CI-only), which a same-count substitution would not
-  catch.
-
-An earlier revision of this section ratified the tolerance on the
-first mechanism alone, wrongly generalized to the whole corpus; #303
-records the correction. Practical exposure today is low — every
-status this harness aggregates comes from pinned code paths (ct-driver,
-ct-runner, the committed jco harness) — but the tolerance must not be
-relied on if a foreign runner's stream is ever aggregated. Ratification
-is deferred until #302 restores a real per-case bound for generated
-rows, at which point the first mechanism's guarantee extends to the
-full census.
+failures. This looked like a tolerance change, and for one revision of
+this harness it was one for generated rows (#303 records the
+correction). It is not one in effect: the fold diverts an
+unknown-status row out of the parsed results, so the case is then
+*missing* from coverage, and the aggregate's coverage check fails the
+run — for the whole census. Exact `[[case]]` entries are set-checked
+directly, and the `[[generated]]` rows' leaves are enumerated in the
+lockfiles (`lock --leaves`, fed from `ct-driver --enumerate` by
+`conformance-ct::lock-update`; lann/component-test#49), so an
+unenumerated or missing leaf is an error by name, not a warning. An
+unknown status therefore surfaces as a warning naming the case and
+status plus a coverage error, and cannot pass silently. Gating parity
+with the incumbent holds; ratified on that basis (upstream's
+fold/coverage tests pin the diversion and the leaf set-equality).

@@ -12,7 +12,7 @@
   "dependencies": {
     "@bytecodealliance/jco-transpile": "^0.5.2",
     "@bytecodealliance/preview2-shim": "^0.17.4",
-    "@lann/component-test-js": "github:lann/component-test#6cb88ada9ec0cc78bb2530cdf416f6858fb8e964",
+    "@lann/component-test-js": "github:lann/component-test#e4dd2d50ffd14a0da680cc2569a137724c0ccc78",
     "playwright-core": "^1.61.1"
   }
 }

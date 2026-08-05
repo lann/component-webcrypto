@@ -87,15 +87,31 @@ _ct-tools:
         --git https://github.com/lann/component-test --rev "$rev" component-test-runner
     printf '%s' "$rev" > "{{ct-tools}}/.rev"
 
-# Drift-check the committed lockfiles.
-lock-check: build _ct-tools
-    {{ct}} lock {{guest}} --check ../guest-ct/tests.lock
-    {{ct}} lock {{signing}} --check ../signing-guest-ct/tests.lock
+# Enumerate each suite's full case census (ct-driver instantiates the
+# suite against the wasmtime host) into the `lock --leaves` inputs: the
+# enumeration is what lets the lockfiles pin every generated leaf by
+# name, not just the row prefixes.
+_ct-leaves: build
+    {{root}}/target/release/ct-driver {{guest}} --enumerate \
+        > {{root}}/target/conformance-guest-ct.leaves
+    {{root}}/target/release/ct-driver {{signing}} --enumerate \
+        > {{root}}/target/conformance-signing-guest-ct.leaves
 
-# Regenerate lockfiles after case changes (commit the diff).
-lock-update: build _ct-tools
-    {{ct}} lock {{guest}} -o ../guest-ct/tests.lock
-    {{ct}} lock {{signing}} -o ../signing-guest-ct/tests.lock
+# Drift-check the committed lockfiles, leaves included: a generated
+# case appearing, vanishing, or being substituted fails here by name.
+lock-check: build _ct-tools _ct-leaves
+    {{ct}} lock {{guest}} --leaves {{root}}/target/conformance-guest-ct.leaves \
+        --check ../guest-ct/tests.lock
+    {{ct}} lock {{signing}} --leaves {{root}}/target/conformance-signing-guest-ct.leaves \
+        --check ../signing-guest-ct/tests.lock
+
+# Regenerate lockfiles after case changes (commit the diff — the leaf
+# enumeration makes it the named review surface for generated cases).
+lock-update: build _ct-tools _ct-leaves
+    {{ct}} lock {{guest}} --leaves {{root}}/target/conformance-guest-ct.leaves \
+        -o ../guest-ct/tests.lock
+    {{ct}} lock {{signing}} --leaves {{root}}/target/conformance-signing-guest-ct.leaves \
+        -o ../signing-guest-ct/tests.lock
 
 # The wasmtime (RustCrypto) target: full support.
 run-wasmtime: build
