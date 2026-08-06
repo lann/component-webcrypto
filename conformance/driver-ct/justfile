@@ -106,14 +106,16 @@ _ct-leaves: build
 _viewer-prepared: _jco-prepared
     #!/usr/bin/env bash
     set -euo pipefail
-    rev=$(grep -m1 -oE 'github\.com/polymorph-components/polymorph-test\?rev=[0-9a-f]+' "{{root}}/Cargo.lock" | cut -d= -f2)
-    [ -n "$rev" ] || { echo "no component-test git rev in Cargo.lock" >&2; exit 1; }
+    block=$(grep -m1 -A2 '^name = "component-test-sdk"' "{{root}}/Cargo.lock")
+    rev=$(grep -oE '[0-9a-f]{40}' <<< "$block" | head -1)
+    url=$(grep -oE 'git\+[^?"]+' <<< "$block" | head -1 | cut -c5-)
+    { [ -n "$rev" ] && [ -n "$url" ]; } || { echo "no component-test git source in Cargo.lock" >&2; exit 1; }
     if [ -f jco/viewer/.rev ] && [ "$(cat jco/viewer/.rev)" = "$rev" ]; then
         exit 0
     fi
     src=$(cd "{{root}}" && pwd)/target/ct-src
     if [ ! -d "$src/.git" ]; then
-        git clone -q https://github.com/polymorph-components/polymorph-test "$src"
+        git clone -q "$url" "$src"
     fi
     if [ "$(git -C "$src" rev-parse HEAD)" != "$rev" ]; then
         git -C "$src" fetch -q origin "$rev"
