@@ -34,6 +34,11 @@ aes = { version = "0.8", features = ["zeroize"] }
 # AES-KW (RFC 3394) over the same fixsliced `aes` block cipher, for the
 # `key-wrap` kind.
 aes-kw = "0.2"
+# AES-CBC (the `aes-cbc` interface) over the same fixsliced `aes` block
+# cipher, PKCS#7 via its `block-padding` feature. AES-CTR stays local:
+# the per-call 1–128-bit wrapping counter width is not expressible in the
+# `ctr` crate's fixed flavors.
+cbc = { version = "0.1", features = ["alloc"] }
 # The general GCM path (nonces other than 96 bits, truncated tags), which
 # `aes-gcm`'s type-level parameterization cannot express at runtime: GCM is
 # assembled from the same primitives the crate composes — `ghash` is the
@@ -44,10 +49,11 @@ ctr = "0.9"
 # The JWK carrier (import-key-jwk / export-key-jwk): JSON via `serde_json`'s
 # Value (duplicate members resolve last-wins, matching the engines'
 # JSON.parse semantics the WIT contract pins) and strict unpadded base64url
-# via `data-encoding` (rejects padding, non-alphabet bytes, and non-zero
-# trailing bits, per RFC 7515).
+# via `base64ct` (rejects padding, non-alphabet bytes, and non-zero
+# trailing bits, per RFC 7515) — the constant-time codec, since the members
+# it carries include secret material (`k`, `d`, the RSA CRT set).
 serde_json = "1"
-data-encoding = "2"
+base64ct = { version = "1", features = ["alloc"] }
 # Signature algorithms. The ECDSA crates back verification on every target;
 # ECDSA *signing* is compiled only on non-wasm targets (class D — see
 # polymorph-webcrypto-guest-provider's README timing-channel classification).
@@ -86,6 +92,6 @@ aws-lc-rs = "1"
 
 [dev-dependencies]
 # Hex constants in the known-answer tests, decoded at compile time; the
-# vectors whose hex arrives as a `&str` go through `data-encoding` itself,
-# which the JWK carrier already pulls in.
+# vectors whose hex arrives as a `&str` go through `data-encoding`.
+data-encoding = "2"
 data-encoding-macro = "0.1"

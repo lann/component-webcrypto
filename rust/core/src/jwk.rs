@@ -11,13 +11,15 @@
 //!   hosts.
 //! - `k` decodes as strict unpadded base64url: padding, non-alphabet
 //!   bytes, and non-zero trailing bits are all `invalid-key` (OKP's `x`
-//!   and `d` likewise).
+//!   and `d` likewise). The codec is `base64ct`, whose encode and decode
+//!   are free of secret-dependent branches and table lookups — the
+//!   members carried here include secret material.
 //! - `use` and `key_ops` are ignored on the import path (the package has
 //!   no usage model; the caller holds the JWK); the unwrap path validates
 //!   them in the caller's stead ([`check_unwrap_members`]). `ext` is
 //!   validated against the requested extractability everywhere.
 
-use data_encoding::BASE64URL_NOPAD;
+use base64ct::{Base64UrlUnpadded, Encoding as _};
 use serde_json::Value;
 
 use crate::Error;
@@ -280,8 +282,8 @@ pub fn build_ec_public(crv: &str, x: &[u8], y: &[u8]) -> String {
     serde_json::json!({
         "kty": "EC",
         "crv": crv,
-        "x": BASE64URL_NOPAD.encode(x),
-        "y": BASE64URL_NOPAD.encode(y),
+        "x": Base64UrlUnpadded::encode_string(x),
+        "y": Base64UrlUnpadded::encode_string(y),
     })
     .to_string()
 }
@@ -294,9 +296,9 @@ pub fn build_ec_private(crv: &str, x: &[u8], y: &[u8], d: &[u8]) -> String {
     serde_json::json!({
         "kty": "EC",
         "crv": crv,
-        "x": BASE64URL_NOPAD.encode(x),
-        "y": BASE64URL_NOPAD.encode(y),
-        "d": BASE64URL_NOPAD.encode(d),
+        "x": Base64UrlUnpadded::encode_string(x),
+        "y": Base64UrlUnpadded::encode_string(y),
+        "d": Base64UrlUnpadded::encode_string(d),
     })
     .to_string()
 }
@@ -350,8 +352,8 @@ pub fn parse_rsa_public(jwk: &str, allowed_algs: Option<&[&str]>) -> Result<RsaP
 pub fn build_rsa_public(n: &[u8], e: &[u8]) -> String {
     serde_json::json!({
         "kty": "RSA",
-        "n": BASE64URL_NOPAD.encode(strip_leading_zeros(n)),
-        "e": BASE64URL_NOPAD.encode(strip_leading_zeros(e)),
+        "n": Base64UrlUnpadded::encode_string(strip_leading_zeros(n)),
+        "e": Base64UrlUnpadded::encode_string(strip_leading_zeros(e)),
     })
     .to_string()
 }
@@ -457,21 +459,27 @@ pub fn build_rsa_private(
 ) -> String {
     serde_json::json!({
         "kty": "RSA",
-        "n": BASE64URL_NOPAD.encode(strip_leading_zeros(n)),
-        "e": BASE64URL_NOPAD.encode(strip_leading_zeros(e)),
-        "d": BASE64URL_NOPAD.encode(strip_leading_zeros(d)),
-        "p": BASE64URL_NOPAD.encode(strip_leading_zeros(p)),
-        "q": BASE64URL_NOPAD.encode(strip_leading_zeros(q)),
-        "dp": BASE64URL_NOPAD.encode(strip_leading_zeros(dp)),
-        "dq": BASE64URL_NOPAD.encode(strip_leading_zeros(dq)),
-        "qi": BASE64URL_NOPAD.encode(strip_leading_zeros(qi)),
+        "n": Base64UrlUnpadded::encode_string(strip_leading_zeros(n)),
+        "e": Base64UrlUnpadded::encode_string(strip_leading_zeros(e)),
+        "d": Base64UrlUnpadded::encode_string(strip_leading_zeros(d)),
+        "p": Base64UrlUnpadded::encode_string(strip_leading_zeros(p)),
+        "q": Base64UrlUnpadded::encode_string(strip_leading_zeros(q)),
+        "dp": Base64UrlUnpadded::encode_string(strip_leading_zeros(dp)),
+        "dq": Base64UrlUnpadded::encode_string(strip_leading_zeros(dq)),
+        "qi": Base64UrlUnpadded::encode_string(strip_leading_zeros(qi)),
     })
     .to_string()
 }
 
-/// `bytes` without its leading zero octets.
+/// `bytes` without its leading zero octets. The whole slice is scanned,
+/// the index selected arithmetically — no data-dependent branch or early
+/// exit: the members passing through here include RSA private components.
 fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-    let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    let mut first = bytes.len();
+    for (index, &byte) in bytes.iter().enumerate().rev() {
+        let nonzero = usize::from(byte != 0);
+        first = nonzero * index + (1 - nonzero) * first;
+    }
     &bytes[first..]
 }
 
@@ -540,8 +548,7 @@ fn check_ext(jwk: &serde_json::Map<String, Value>, extractable: bool) -> Result<
 
 /// Decode a material-bearing member as strict unpadded base64url.
 fn decode_member(name: &str, value: &str) -> Result<Vec<u8>, Error> {
-    BASE64URL_NOPAD
-        .decode(value.as_bytes())
+    Base64UrlUnpadded::decode_vec(value)
         .map_err(|err| Error::InvalidKey(format!("JWK `{name}` is not unpadded base64url: {err}")))
 }
 
@@ -550,7 +557,7 @@ fn decode_member(name: &str, value: &str) -> Result<Vec<u8>, Error> {
 pub fn build_oct(raw: &[u8], alg: &str) -> String {
     serde_json::json!({
         "kty": "oct",
-        "k": BASE64URL_NOPAD.encode(raw),
+        "k": Base64UrlUnpadded::encode_string(raw),
         "alg": alg,
     })
     .to_string()
@@ -562,7 +569,7 @@ pub fn build_okp_public(crv: &str, x: &[u8]) -> String {
     serde_json::json!({
         "kty": "OKP",
         "crv": crv,
-        "x": BASE64URL_NOPAD.encode(x),
+        "x": Base64UrlUnpadded::encode_string(x),
     })
     .to_string()
 }
@@ -572,8 +579,8 @@ pub fn build_okp_private(crv: &str, x: &[u8], d: &[u8]) -> String {
     serde_json::json!({
         "kty": "OKP",
         "crv": crv,
-        "x": BASE64URL_NOPAD.encode(x),
-        "d": BASE64URL_NOPAD.encode(d),
+        "x": Base64UrlUnpadded::encode_string(x),
+        "d": Base64UrlUnpadded::encode_string(d),
     })
     .to_string()
 }
