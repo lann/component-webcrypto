@@ -163,6 +163,48 @@ jobs:
         env:
           CONFORMANCE_PREBUILT: ${{ steps.ct-artifacts.outputs.cache-hit == 'true' && '1' || '' }}
 
+      # Presentation, not verdict: the just gate above already ran and
+      # gated the same aggregates; these re-run them through
+      # component-test's composite action for the job summary and
+      # finding annotations, with the prebuilt CLI so aggregation
+      # semantics cannot skew from the pin. `uses:` cannot interpolate,
+      # so the refs are literal revs; the guard keeps them on the
+      # Cargo.lock pin.
+      - name: Check the aggregate action refs match the pin
+        if: always()
+        run: |
+          if grep -E 'polymorph-test/actions/aggregate@[0-9a-f]{40}' .github/workflows/ci.yml | grep -qv "@${{ steps.ct-rev.outputs.rev }}"; then
+            echo "aggregate action ref skew: not at the Cargo.lock rev ${{ steps.ct-rev.outputs.rev }}" >&2
+            exit 1
+          fi
+
+      - name: Publish the conformance matrix
+        if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
+        uses: polymorph-components/polymorph-test/actions/aggregate@824d100349dc7804c9bf1723d9b1ba0ed40fa940
+        with:
+          lock: conformance/guest-ct/tests.lock
+          manifest: conformance/driver-ct/targets.toml
+          results: |
+            wasmtime-rustcrypto=conformance/driver-ct/results/wasmtime-rustcrypto.jsonl
+            composed=conformance/driver-ct/results/composed.jsonl
+            jco-node=conformance/driver-ct/results/jco-node.jsonl
+            jco-browser=conformance/driver-ct/results/jco-browser.jsonl
+          summary-title: Conformance matrix
+          cli: target/ct-tools/bin/component-test
+
+      - name: Publish the signing conformance matrix
+        if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
+        uses: polymorph-components/polymorph-test/actions/aggregate@824d100349dc7804c9bf1723d9b1ba0ed40fa940
+        with:
+          lock: conformance/signing-guest-ct/tests.lock
+          manifest: conformance/driver-ct/targets-signing.toml
+          results: |
+            wasmtime-rustcrypto=conformance/driver-ct/results/wasmtime-signing.jsonl
+            jco-node=conformance/driver-ct/results/jco-node-signing.jsonl
+            jco-browser=conformance/driver-ct/results/jco-browser-signing.jsonl
+          summary-title: Signing conformance matrix
+          cli: target/ct-tools/bin/component-test
+
       - name: Upload the conformance results
         # Feeds the Pages viewer (the latest main run's results pane)
         # and the no-Chrome matrix-regeneration path (#306).
