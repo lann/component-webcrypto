@@ -3734,12 +3734,47 @@ function jwkKeyBytes(k) {
   return typeof k === "string" ? Math.floor((k.length * 3) / 4) : 0;
 }
 
-const B64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+/**
+ * The base64url value (0–63) of a UTF-16 code unit, or -1 outside the
+ * alphabet (`A-Z`, `a-z`, `0-9`, `-`, `_`) — computed with sign-bit
+ * arithmetic over range predicates: no alphabet string scan, no table
+ * lookup, no branch on the character's value, so per-character work is
+ * uniform. Secret JWK members (`k`, `d`, the RSA private set) pass
+ * through here; uniformity is what licenses that (JS offers no
+ * constant-time guarantee, but a value-independent instruction stream
+ * removes the value-dependent component this can control).
+ * @param {number} code
+ */
+function b64urlValue(code) {
+  /**
+   * 1 when `lo <= code <= hi`, else 0 (sign-bit arithmetic, branchless).
+   * @param {number} lo
+   * @param {number} hi
+   */
+  const inRange = (lo, hi) => ((lo - 1 - code) & (code - hi - 1)) >>> 31;
+  const upper = inRange(0x41, 0x5a); // A-Z -> 0-25
+  const lower = inRange(0x61, 0x7a); // a-z -> 26-51
+  const digit = inRange(0x30, 0x39); // 0-9 -> 52-61
+  const minus = inRange(0x2d, 0x2d); // '-' -> 62
+  const under = inRange(0x5f, 0x5f); // '_' -> 63
+  const valid = upper | lower | digit | minus | under;
+  return (
+    upper * (code - 0x41) +
+    lower * (code - 0x61 + 26) +
+    digit * (code - 0x30 + 52) +
+    minus * 62 +
+    under * 63 -
+    (1 - valid)
+  );
+}
 
 /**
  * Decode strict unpadded base64url (validated by
- * `requireStrictBase64url` first), for the JWK members whose bytes this
- * host's own predicates need (the Ed25519 strict point check).
+ * `requireStrictBase64url` first; an unvalidated string decodes to
+ * garbage rather than throwing), for the JWK members whose bytes this
+ * host's own predicates need (the Ed25519 strict point check). Per-char
+ * work is uniform (see `b64urlValue`), so a future secret-member caller
+ * inherits that.
  * @param {string} text
  * @returns {Uint8Array}
  */
@@ -3748,8 +3783,8 @@ function b64urlDecode(text) {
   let buffer = 0;
   let bits = 0;
   let at = 0;
-  for (const ch of text) {
-    buffer = (buffer << 6) | B64URL_ALPHABET.indexOf(ch);
+  for (let i = 0; i < text.length; i++) {
+    buffer = (buffer << 6) | b64urlValue(text.charCodeAt(i));
     bits += 6;
     if (bits >= 8) {
       bits -= 8;
@@ -3792,14 +3827,22 @@ function requireStrictBase64url(k) {
   if (k.length % 4 === 1) {
     throw errInvalidKey("JWK `k` has an impossible base64url length");
   }
-  for (const ch of k) {
-    if (!B64URL_ALPHABET.includes(ch)) {
-      throw errInvalidKey("JWK `k` is not unpadded base64url");
-    }
+  // Fold the verdict across every character with no early exit, and take
+  // the final character's value from the same pass: the members checked
+  // here include secret material, so per-character work stays uniform
+  // (see `b64urlValue`).
+  let invalid = 0;
+  let last = 0;
+  for (let i = 0; i < k.length; i++) {
+    const value = b64urlValue(k.charCodeAt(i));
+    invalid |= value >> 31; // -1 spreads its sign bit; 0-63 contribute 0
+    last = value;
+  }
+  if (invalid !== 0) {
+    throw errInvalidKey("JWK `k` is not unpadded base64url");
   }
   const rem = k.length % 4;
   if (rem !== 0) {
-    const last = B64URL_ALPHABET.indexOf(k[k.length - 1]);
     const mask = rem === 2 ? 0b1111 : 0b11;
     if ((last & mask) !== 0) {
       throw errInvalidKey("JWK `k` has non-zero trailing bits");
