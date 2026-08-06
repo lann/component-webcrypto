@@ -330,12 +330,18 @@ jobs:
           node-version: 24
 
       - name: Install just
-        # The same pin as scripts/setup.sh (this job skips the Rust
-        # toolchain, so it cannot use setup.sh's cargo-binstall path).
+        # The same pin as scripts/setup.sh, installed by the same
+        # digest-pinned cargo-binstall bootstrap (its prebuilt path needs
+        # no Rust toolchain; the compile fallback is disabled rather than
+        # assumed absent).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
+          ./scripts/install-binstall.sh
+          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p "$HOME/.local/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
-            | bash -s -- --tag 1.54.0 --to "$HOME/.local/bin"
+          cargo-binstall --no-confirm --disable-strategies compile \
+            --install-path "$HOME/.local/bin" just@1.54.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install the parity package's dependencies
@@ -368,12 +374,18 @@ jobs:
           node-version: 24
 
       - name: Install just
-        # The same pin as scripts/setup.sh (this job skips the Rust
-        # toolchain, so it cannot use setup.sh's cargo-binstall path).
+        # The same pin as scripts/setup.sh, installed by the same
+        # digest-pinned cargo-binstall bootstrap (its prebuilt path needs
+        # no Rust toolchain; the compile fallback is disabled rather than
+        # assumed absent).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
+          ./scripts/install-binstall.sh
+          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p "$HOME/.local/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
-            | bash -s -- --tag 1.54.0 --to "$HOME/.local/bin"
+          cargo-binstall --no-confirm --disable-strategies compile \
+            --install-path "$HOME/.local/bin" just@1.54.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Download the parity page artifacts
