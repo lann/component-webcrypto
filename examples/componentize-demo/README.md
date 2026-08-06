@@ -7,7 +7,7 @@ end to end: HMAC-SHA-256 known answers (RFC 4231), AES-256-GCM known answers
 (NIST GCM test case 16), round trips including the empty plaintext, and the
 key-capability surface (usages, extractability, malformed-input rejection).
 
-[componentize-js]: https://github.com/dicej/componentize-js
+[componentize-js]: https://github.com/lann/componentize-js
 
 The guest exports the same `demo:webcrypto-demo/demo@0.1.0` entry point as
 the Rust `crypto-demo` guest, so the existing `crypto-demo-driver` drives it

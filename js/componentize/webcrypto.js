@@ -1,6 +1,6 @@
 // @ts-check
 // A WebCrypto-subset library for JS guests componentized with
-// componentize-js (https://github.com/dicej/componentize-js, the wit-dylib
+// componentize-js (https://github.com/lann/componentize-js, the wit-dylib
 // reboot of ComponentizeJS), backed by the `polymorph:webcrypto` interfaces.
 //
 // The surface mirrors `crypto.subtle` for the supported algorithms:
