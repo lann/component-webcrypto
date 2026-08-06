@@ -104,8 +104,10 @@ cargo install --path .
 export COMPONENTIZE_JS="$(command -v componentize-js)"
 ```
 
-One further upstream quirk needs no action: an async import that completes
-*without* suspending resolves with the raw canonical `result` wrapper
-(`{ tag, val }`) instead of the unwrapped value. The library normalizes both
-settlement shapes internally (see `callImport` in `webcrypto.js`), so it
-works unchanged whether or not that is fixed upstream.
+The pin also includes the eager-settlement fix,
+[lann/componentize-js#1](https://github.com/lann/componentize-js/pull/1):
+revisions before it resolve an async import that completes *without*
+suspending with the raw canonical `result` wrapper (`{ tag, val }`) instead
+of the unwrapped value. The library normalizes both settlement shapes
+internally (see `callImport` in `webcrypto.js`), so it runs unchanged on
+revisions either side of that fix.
