@@ -1,5 +1,5 @@
-//! `conformance-guest-ct`: the webcrypto conformance suite ported onto
-//! the `polymorph:test` guest SDK (M1.5 skeleton).
+//! `conformance-guest-ct`: the webcrypto conformance suite on the
+//! `polymorph:test` guest SDK.
 //!
 //! The corpus is the incumbent's (`conformance-guest`), inherited
 //! wholesale at the M1.6 cutover: translation, minting, runners,
@@ -15,8 +15,7 @@
 //! scheduling against a target's capability manifest is the runner's job.
 //!
 //! The static inventory (names + tags) is pinned to the incumbent census
-//! by a native test (`census_test`); execution against a SUT is out of
-//! scope for this stage.
+//! by a native test (`census_test`).
 
 // The corpus, inherited wholesale from the incumbent `conformance-guest`
 // at the M1.6 cutover (these files moved here verbatim; the incumbent is
