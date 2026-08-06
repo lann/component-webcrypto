@@ -99,10 +99,12 @@ jobs:
 
       - name: Compute the component-test rev
         # The single source of truth for the pin is Cargo.lock (the git
-        # dependency's rev); the tools cache below keys on it.
+        # dependency's rev); the tools cache below keys on it. Anchored
+        # on the crate name, not the repository URL, like the
+        # conformance-ct::_ct-tools extraction.
         id: ct-rev
         run: |
-          rev=$(grep -m1 -oE 'github\.com/polymorph-components/polymorph-test\?rev=[0-9a-f]+' Cargo.lock | grep -oE '[0-9a-f]+$')
+          rev=$(grep -m1 -A2 '^name = "component-test-sdk"' Cargo.lock | grep -oE '[0-9a-f]{40}' | head -1)
           test -n "$rev"
           echo "rev=$rev" >> "$GITHUB_OUTPUT"
 
