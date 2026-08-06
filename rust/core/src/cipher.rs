@@ -11,7 +11,11 @@
 //! padding verdict from any other malformation (a distinguishable verdict
 //! is a padding-oracle amplifier).
 
-use aes::cipher::{BlockDecrypt as _, BlockEncrypt as _, KeyInit as _};
+use aes::cipher::block_padding::Pkcs7;
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{
+    BlockDecryptMut as _, BlockEncrypt as _, BlockEncryptMut as _, InnerIvInit as _, KeyInit as _,
+};
 use aes::{Aes128, Aes256};
 use zeroize::Zeroizing;
 
@@ -69,13 +73,6 @@ impl Block {
         match self {
             Self::Aes128(c) => c.encrypt_block(block.into()),
             Self::Aes256(c) => c.encrypt_block(block.into()),
-        }
-    }
-
-    fn decrypt_block(&self, block: &mut [u8; BLOCK]) {
-        match self {
-            Self::Aes128(c) => c.decrypt_block(block.into()),
-            Self::Aes256(c) => c.decrypt_block(block.into()),
         }
     }
 }
@@ -333,60 +330,39 @@ impl CipherKeyMaterial {
         })
     }
 
-    /// CBC-encrypt with PKCS#7 padding: output is always a non-zero
-    /// multiple of the block size.
+    /// CBC-encrypt with PKCS#7 padding (the `cbc` crate over the keyed
+    /// block cipher): output is always a non-zero multiple of the block
+    /// size.
     fn cbc_encrypt(&self, iv: [u8; BLOCK], plaintext: &[u8]) -> Vec<u8> {
-        let pad = BLOCK - plaintext.len() % BLOCK; // 1..=BLOCK: full block when aligned
-        let mut out = Vec::with_capacity(plaintext.len() + pad);
-        out.extend_from_slice(plaintext);
-        out.extend(std::iter::repeat_n(pad as u8, pad));
-        let mut chain = iv;
-        for block in out.chunks_exact_mut(BLOCK) {
-            for (byte, prev) in block.iter_mut().zip(chain) {
-                *byte ^= prev;
-            }
-            let block: &mut [u8; BLOCK] = block.try_into().expect("chunks_exact");
-            self.block.encrypt_block(block);
-            chain = *block;
+        let iv = GenericArray::from(iv);
+        match &self.block {
+            Block::Aes128(c) => cbc::Encryptor::<&Aes128>::inner_iv_init(c, &iv)
+                .encrypt_padded_vec_mut::<Pkcs7>(plaintext),
+            Block::Aes256(c) => cbc::Encryptor::<&Aes256>::inner_iv_init(c, &iv)
+                .encrypt_padded_vec_mut::<Pkcs7>(plaintext),
         }
-        out
     }
 
-    /// CBC-decrypt and unpad. Uniform failure: wrong-shape ciphertext and
-    /// bad padding are indistinguishable.
+    /// CBC-decrypt and unpad (the `cbc` crate over the keyed block
+    /// cipher). Uniform failure: wrong-shape ciphertext and bad padding
+    /// are indistinguishable — every failure, including the crate's
+    /// `UnpadError`, renders as the mode's one fixed message.
+    /// `block-padding`'s unpad reads the final block with data-dependent
+    /// branches; what that timing can distinguish is bounded by the
+    /// uniform error and recorded in the in-guest provider's
+    /// timing-channel classification.
     fn cbc_decrypt(&self, iv: [u8; BLOCK], ciphertext: &[u8]) -> Result<Vec<u8>, Error> {
         if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(BLOCK) {
             return Err(self.mode.decrypt_failed());
         }
-        let mut out = ciphertext.to_vec();
-        let mut chain = iv;
-        for block in out.chunks_exact_mut(BLOCK) {
-            let cipher_block: [u8; BLOCK] = (&*block).try_into().expect("chunks_exact");
-            let block: &mut [u8; BLOCK] = block.try_into().expect("chunks_exact");
-            self.block.decrypt_block(block);
-            for (byte, prev) in block.iter_mut().zip(chain) {
-                *byte ^= prev;
-            }
-            chain = cipher_block;
+        let iv = GenericArray::from(iv);
+        match &self.block {
+            Block::Aes128(c) => cbc::Decryptor::<&Aes128>::inner_iv_init(c, &iv)
+                .decrypt_padded_vec_mut::<Pkcs7>(ciphertext),
+            Block::Aes256(c) => cbc::Decryptor::<&Aes256>::inner_iv_init(c, &iv)
+                .decrypt_padded_vec_mut::<Pkcs7>(ciphertext),
         }
-        // PKCS#7 unpad, branch-free over the final block: accumulate the
-        // verdict without early exits, so the check's timing does not
-        // depend on which byte disagrees.
-        let pad = out[out.len() - 1];
-        let mut bad = u8::from(pad == 0) | u8::from(pad as usize > BLOCK);
-        let clamped = if pad as usize > BLOCK || pad == 0 {
-            1
-        } else {
-            pad as usize
-        };
-        for &byte in &out[out.len() - clamped..] {
-            bad |= byte ^ pad;
-        }
-        if bad != 0 {
-            return Err(self.mode.decrypt_failed());
-        }
-        out.truncate(out.len() - clamped);
-        Ok(out)
+        .map_err(|_| self.mode.decrypt_failed())
     }
 
     /// The CTR keystream XOR (encrypt and decrypt are the same

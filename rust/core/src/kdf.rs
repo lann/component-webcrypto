@@ -505,6 +505,13 @@ pub fn derive_cipher_key(
 /// `T_i = U_1 ^ … ^ U_c`, `U_1 = PRF(P, S ‖ INT(i))`, `U_j = PRF(P, U_{j-1})`,
 /// using the already-keyed PRF (cloning it per invocation reuses the key
 /// schedule; the password itself is not retained).
+///
+/// Local by design, not the `pbkdf2` crate: that crate's API keys the PRF
+/// from the raw password at call time, while the `pbkdf2.password`
+/// resource drops the password at `prepare` and retains only the keyed
+/// HMAC state (see the module doc) — delegating would re-introduce
+/// password retention. The PRF is the vetted `hmac` crate, and every loop
+/// bound here is public (salt length, iteration count, output length).
 fn pbkdf2_blocks<M: Mac + Clone>(prf: &M, salt: &[u8], iterations: u32, out: &mut [u8]) {
     let hash_len = M::output_size();
     for (index, chunk) in out.chunks_mut(hash_len).enumerate() {
