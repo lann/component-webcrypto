@@ -7,7 +7,7 @@ the `polymorph:webcrypto` interfaces. This is the JS-guest counterpart of the Ru
 ergonomic Rust newtypes, `webcrypto.js` wraps them in the API JS code already
 knows — `crypto.subtle`.
 
-[componentize-js]: https://github.com/dicej/componentize-js
+[componentize-js]: https://github.com/lann/componentize-js
 
 ## Surface
 
@@ -96,7 +96,7 @@ To use a build of your own instead — a platform with no published asset, or
 a revision you are evaluating — put it on `COMPONENTIZE_JS`:
 
 ```sh
-git clone https://github.com/dicej/componentize-js
+git clone https://github.com/lann/componentize-js
 cd componentize-js
 git checkout "$(cat path/to/js/componentize/componentize-js.rev)"
 # Needs WASI-SDK 30 on WASI_SDK_PATH; see that repository's README.
@@ -104,8 +104,10 @@ cargo install --path .
 export COMPONENTIZE_JS="$(command -v componentize-js)"
 ```
 
-One further upstream quirk needs no action: an async import that completes
-*without* suspending resolves with the raw canonical `result` wrapper
-(`{ tag, val }`) instead of the unwrapped value. The library normalizes both
-settlement shapes internally (see `callImport` in `webcrypto.js`), so it
-works unchanged whether or not that is fixed upstream.
+The pin also includes the eager-settlement fix,
+[lann/componentize-js#1](https://github.com/lann/componentize-js/pull/1):
+revisions before it resolve an async import that completes *without*
+suspending with the raw canonical `result` wrapper (`{ tag, val }`) instead
+of the unwrapped value. The library normalizes both settlement shapes
+internally (see `callImport` in `webcrypto.js`), so it runs unchanged on
+revisions either side of that fix.

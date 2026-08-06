@@ -1,6 +1,6 @@
 // @ts-check
 // A WebCrypto-subset library for JS guests componentized with
-// componentize-js (https://github.com/dicej/componentize-js, the wit-dylib
+// componentize-js (https://github.com/lann/componentize-js, the wit-dylib
 // reboot of ComponentizeJS), backed by the `polymorph:webcrypto` interfaces.
 //
 // The surface mirrors `crypto.subtle` for the supported algorithms:
@@ -326,13 +326,15 @@ async function verdict(operation) {
 /**
  * Await an async `polymorph:webcrypto` import and normalize its settlement.
  *
- * componentize-js (as of the revision pinned in componentize-js.rev)
- * settles async imports through two paths: an import that suspends resolves
- * with the `ok` value unwrapped and rejects an `err` as a `ComponentError`,
- * but an import that completes without blocking resolves with the raw
- * canonical `result` wrapper (`{ tag: "ok" | "err", val }`). Detecting the
- * wrapper is unambiguous for this surface: every `ok` payload is a
- * resource, typed array, or `undefined` — never a plain `{ tag }` object.
+ * componentize-js settles a suspending import with the `ok` value unwrapped
+ * and rejects an `err` as a `ComponentError`; revisions before the
+ * eager-settlement fix (lann/componentize-js#1, included in the pinned
+ * revision) settle an import that completes without blocking with the raw
+ * canonical `result` wrapper (`{ tag: "ok" | "err", val }`) instead. Both
+ * shapes are normalized here, so the library runs on revisions either side
+ * of that fix. Detecting the wrapper is unambiguous for this surface: every
+ * `ok` payload is a resource, typed array, or `undefined` — never a plain
+ * `{ tag }` object.
  * @param {unknown} promise
  * @returns {Promise<any>}
  */
