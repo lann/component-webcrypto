@@ -97,27 +97,14 @@ jobs:
           shared-key: conformance
           cache-all-crates: true
 
-      - name: Compute the component-test rev
-        # The single source of truth for the pin is Cargo.lock (the git
-        # dependency's rev); the tools cache below keys on it. Anchored
-        # on the crate name, not the repository URL, like the
-        # conformance-ct::_ct-tools extraction.
-        id: ct-rev
-        run: |
-          rev=$(grep -m1 -A2 '^name = "component-test-sdk"' Cargo.lock | grep -oE '[0-9a-f]{40}' | head -1)
-          test -n "$rev"
-          echo "rev=$rev" >> "$GITHUB_OUTPUT"
-
-      - name: Cache component-test tools
-        # The cargo-installed component-test CLI + generic runner
-        # binaries (conformance-ct::_ct-tools installs them at exactly
-        # the Cargo.lock-pinned rev and reuses on a stamp match). The
-        # binaries are a pure function of that rev and the toolchain, so
-        # the key never needs invalidating beyond those.
-        uses: actions/cache@v4
+      - name: Install the component-test tools at the pinned revision
+        # Owns the rev derivation, the rev-keyed tools cache, the
+        # install, and the pins gate; conformance-ct::_ct-tools
+        # recognizes the stamped install and does not repeat it.
+        uses: polymorph-components/polymorph-test/actions/setup@76c094576076284c1a7d0ea1b7bb724e9e7384a5
         with:
-          path: target/ct-tools
-          key: component-test-tools-${{ runner.os }}-${{ steps.ct-rev.outputs.rev }}-${{ hashFiles('rust-toolchain.toml') }}
+          js-locks: |
+            conformance/driver-ct/jco/package-lock.json
 
       - name: Install Node 24
         uses: actions/setup-node@v4
@@ -167,20 +154,11 @@ jobs:
       # gated the same aggregates; these re-run them through
       # component-test's composite action for the job summary and
       # finding annotations, with the prebuilt CLI so aggregation
-      # semantics cannot skew from the pin. `uses:` cannot interpolate,
-      # so the refs are literal revs; the guard keeps them on the
-      # Cargo.lock pin.
-      - name: Check the aggregate action refs match the pin
-        if: always()
-        run: |
-          if grep -E 'polymorph-test/actions/aggregate@[0-9a-f]{40}' .github/workflows/ci.yml | grep -qv "@${{ steps.ct-rev.outputs.rev }}"; then
-            echo "aggregate action ref skew: not at the Cargo.lock rev ${{ steps.ct-rev.outputs.rev }}" >&2
-            exit 1
-          fi
-
+      # semantics cannot skew from the pin. The action's cargo-lock
+      # input polices the `uses:` refs against the pin.
       - name: Publish the conformance matrix
         if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
-        uses: polymorph-components/polymorph-test/actions/aggregate@824d100349dc7804c9bf1723d9b1ba0ed40fa940
+        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
         with:
           lock: conformance/guest-ct/tests.lock
           manifest: conformance/driver-ct/targets.toml
@@ -191,10 +169,11 @@ jobs:
             jco-browser=conformance/driver-ct/results/jco-browser.jsonl
           summary-title: Conformance matrix
           cli: target/ct-tools/bin/component-test
+          cargo-lock: Cargo.lock
 
       - name: Publish the signing conformance matrix
         if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
-        uses: polymorph-components/polymorph-test/actions/aggregate@824d100349dc7804c9bf1723d9b1ba0ed40fa940
+        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
         with:
           lock: conformance/signing-guest-ct/tests.lock
           manifest: conformance/driver-ct/targets-signing.toml
@@ -204,6 +183,7 @@ jobs:
             jco-browser=conformance/driver-ct/results/jco-browser-signing.jsonl
           summary-title: Signing conformance matrix
           cli: target/ct-tools/bin/component-test
+          cargo-lock: Cargo.lock
 
       - name: Upload the conformance results
         # Feeds the Pages viewer (the latest main run's results pane)

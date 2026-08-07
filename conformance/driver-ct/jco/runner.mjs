@@ -60,7 +60,7 @@ if (jsonl) {
   // The lockfile names the suite by its wasm file stem (underscores);
   // the transpile name is hyphenated. Envelope with the lockfile identity
   // so the aggregate's cross-check stays quiet.
-  const lines = [JSON.stringify(envelope(values.target, suite.replaceAll("-", "_")))];
+  const lines = [JSON.stringify(envelope(values.target, suite))];
   for (const { event } of rows) lines.push(JSON.stringify(event));
   lines.push('{"segment-end":true}');
   console.log(lines.join("\n"));

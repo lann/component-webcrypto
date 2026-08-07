@@ -199,7 +199,7 @@ async function main() {
     const run = outcome[suite];
     if (!run) throw new Error(`the page reported no run for suite ${suite}`);
     const lines = [
-      JSON.stringify(envelope(values.target, suite.replaceAll("-", "_"))), // lockfile identity: wasm file stem
+      JSON.stringify(envelope(values.target, suite)), // lockfile identity: wasm file stem
       ...run.events.map((event) => JSON.stringify(event)),
       '{"segment-end":true}',
     ];
