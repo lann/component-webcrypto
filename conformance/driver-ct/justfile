@@ -83,7 +83,11 @@ _ct-tools:
     # generator. Bump both together: the rev in Cargo.toml + `npm
     # install --save-exact github:polymorph-components/polymorph-test#<rev>` in jco/.
     "{{ct-tools}}/bin/component-test" pins --cargo-lock "{{root}}/Cargo.lock" \
-        --js-lock jco/package-lock.json --expect "$rev" > /dev/null
+        --js-lock jco/package-lock.json \
+        --js-lock ../../examples/jco-demo/package-lock.json \
+        --js-lock ../../js/jco/package-lock.json \
+        --js-lock ../../js/componentize/wpt/parity/package-lock.json \
+        --expect "$rev" > /dev/null
 
 # Enumerate each suite's full case census (ct-driver instantiates the
 # suite against the wasmtime host) into the `lock --leaves` inputs: the
@@ -184,8 +188,10 @@ _jco-prepared: build
     # cwd but not from jco/ — and not always relative: module-from-root
     # invocation resolves `root` absolute (justfile.shared.just), while
     # in-directory invocation leaves it `../..`. Never re-anchor these
-    # variables with a textual prefix.
-    stamp=$(cat "{{guest}}" "{{signing}}" | sha256sum | cut -d' ' -f1)
+    # variables with a textual prefix. The package.json rides in the
+    # stamp: the transpile flags and the pinned transpiler both live
+    # there, and either changing must invalidate the generated tree.
+    stamp=$(cat "{{guest}}" "{{signing}}" jco/package.json | sha256sum | cut -d' ' -f1)
     cd jco
     exec 9> .prepare.lock
     flock 9

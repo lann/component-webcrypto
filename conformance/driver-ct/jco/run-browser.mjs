@@ -47,27 +47,24 @@ const SUITES = [
 ];
 
 // Resolve each suite's core-module list Node-side (the transpile emits
-// one or two cores), so the page never fetches a missing file — a 404
-// would be tolerated but pollutes the console the driver mirrors.
+// however many cores the composition needs), so the page never fetches
+// a missing file — a 404 would be tolerated but pollutes the console
+// the driver mirrors.
+import { readdir } from "node:fs/promises";
 for (const entry of SUITES) {
-  entry.cores = [];
-  for (const core of [`${entry.suite}.core.wasm`, `${entry.suite}.core2.wasm`]) {
-    try {
-      await access(new URL(`./generated/${core}`, import.meta.url));
-      entry.cores.push(core);
-    } catch {
-      // Not emitted by this transpile.
-    }
-  }
+  const names = await readdir(new URL("./generated/", import.meta.url));
+  entry.cores = names
+    .filter((n) => n.startsWith(`${entry.suite}.core`) && n.endsWith(".wasm"))
+    .sort();
 }
 
 // The in-page harness: spawns a pool of module Web Workers
 // (worker-browser.mjs), each running one shard of a suite's case loop
-// with its own instance of the transpiled suite (whose polymorph:webcrypto
-// imports resolve to js/jco/webcrypto.js — the browser-first host,
-// feature-detecting per call — and whose wasi imports resolve to
-// relative paths into the preview2-shim browser build, mapped at
-// transpile time: module workers cannot see a page's import map).
+// with its own instance of the transpiled suite, instantiated with
+// imports bound at run time (host-imports.mjs: js/jco/webcrypto.js —
+// the browser-first host, feature-detecting per call — the driver's
+// test-context, and the preview2-shim browser build, all by relative
+// path: module workers cannot see a page's import map).
 // Rows come back tagged with their suite-order index and are re-sorted
 // before reporting.
 //

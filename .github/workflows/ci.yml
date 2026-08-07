@@ -105,6 +105,9 @@ jobs:
         with:
           js-locks: |
             conformance/driver-ct/jco/package-lock.json
+            examples/jco-demo/package-lock.json
+            js/jco/package-lock.json
+            js/componentize/wpt/parity/package-lock.json
 
       - name: Install Node 24
         uses: actions/setup-node@v4
