@@ -254,7 +254,7 @@ run-composed: build build-provider _ct-tools
 
 # The jco-browser target: the same transpiles and the same host module,
 # with the case loop running inside headless Chromium (browser WebCrypto)
-# via the shared page driver (scripts/browser-page-driver.mjs). The
+# via the upstream page driver (@polymorph/component-test-js). The
 # --missing declarations mirror targets.toml / targets-signing.toml's
 # jco-browser entries, which the aggregate cross-checks: the browser
 # cannot serve sha1-checked, and the host fails the gated RSA
