@@ -354,11 +354,11 @@ skip the npm install). The polymorph:test stack is a git dependency
 pinned by rev in the root `Cargo.toml` and enforced by `Cargo.lock`;
 cargo fetches it, and `conformance-ct::_ct-tools` cargo-installs the
 `component-test`/`ct-runner` binaries at the same locked rev. To bump
-the pin: edit the rev in `Cargo.toml`, run `cargo update -p
-component-test-sdk -p component-test-runner`, and commit the lock diff;
-the npm pin in `conformance/driver-ct/jco` and the `actions/aggregate`
-refs in `.github/workflows/ci.yml` move with it (the `_ct-tools` pins
-gate and the CI ref guard fail on skew).
+the pin: `component-test pins bump <rev> --cargo-toml Cargo.toml
+--package-json conformance/driver-ct/jco/package.json --workflow
+.github/workflows/ci.yml`, then the follow-ups it prints (`cargo
+update`, `npm install`); the `_ct-tools` pins gate and the actions'
+own ref checks fail on skew.
 To develop against a local component-test checkout, add a temporary
 override to the root `Cargo.toml` (do not commit it):
 
