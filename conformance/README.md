@@ -111,7 +111,7 @@ the lockfiles, runs the targets, and aggregates:
 - **jco-browser** (`run-browser`): the same transpiles and host module with
   the case loop running in headless Chromium (`driver-ct/jco/harness.mjs`
   in-page, driven by `run-browser.mjs` over
-  `scripts/browser-page-driver.mjs`); missing `sha1-checked` and, for
+  the upstream browser driver); missing `sha1-checked` and, for
   the signing suite, the fail-closed RSA private-key mints
   (`rsa-sign`, `rsa-oaep-decrypt`). Optional: it gates in CI (the runner
   image ships Chrome) and runs locally only with `CONFORMANCE_BROWSER=1`;

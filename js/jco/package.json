@@ -13,6 +13,6 @@
   "devDependencies": {
     "@bytecodealliance/jco-transpile": "0.5.2",
     "typescript": "^5.9.3",
-    "@polymorph/component-test-js": "github:polymorph-components/polymorph-test#eabd159de34e38a6f2f32204ceb52392555f32d8"
+    "@polymorph/component-test-js": "github:polymorph-components/polymorph-test#aca1008344f754db1c2b88da05cb5999333f8d6a"
   }
 }
